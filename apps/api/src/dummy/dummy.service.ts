@@ -2,12 +2,18 @@ import { NotFoundException } from "@nestjs/common";
 import { Injectable } from "@nestjs/common";
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
+import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
 import type { DummyRecordView } from "@boostfactor/shared-types";
 
 const OBJECT_KEY = "dummy_record";
 const VIEW_PERMISSION = "dummy_record.view";
 const SENSITIVE_FIELDS = ["testField", "secretField"] as const;
+// Plan doc Section 4's enforcement order starts with "is the module even
+// licensed" — 'dummy' is this object's own entry in module_catalog
+// (0006_module_entitlement.sql), gating these endpoints the same way a
+// real module will gate Employee Core once Phase 7 exists.
+const MODULE_KEY = "dummy";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function rowToDummy(row: any): Record<string, unknown> {
@@ -25,21 +31,31 @@ function rowToDummy(row: any): Record<string, unknown> {
 
 /**
  * The proof-of-concept object for Phase 4's engine — see
- * 0004_rbac.sql's header comment. `list`/`get` are the only interesting
- * methods here: they show the real shape every future tenant-object
- * service should follow — RLS narrows to the tenant first, then every row
- * is passed through RbacService.filterRecordFields before it ever reaches
- * a response. `create` exists only so fixtures for manual/automated
- * testing go through the real API rather than a raw SQL insert.
+ * 0004_rbac.sql's header comment. `list`/`get` now show the FULL enforcement
+ * order from plan doc Section 4: is the module licensed
+ * (EntitlementsService, Phase 5) -> can the role touch this object/which
+ * fields (RbacService, Phase 4). RLS narrows to the tenant underneath both.
+ * `create` exists only so fixtures for manual/automated testing go through
+ * the real API rather than a raw SQL insert.
  */
 @Injectable()
 export class DummyService {
   constructor(
     private readonly db: DatabaseService,
-    private readonly rbac: RbacService
+    private readonly rbac: RbacService,
+    private readonly entitlements: EntitlementsService
   ) {}
 
   async list(claims: RequestClaims): Promise<DummyRecordView[]> {
+    // Module-licensing gate first, per Section 4's order. Section 4 is
+    // explicit that a disabled module "returns 404, never 403 — it should
+    // look like the feature doesn't exist" — an empty array here would be
+    // genuinely ambiguous with "this tenant just has no records yet," so
+    // this 404s exactly like get() does below, rather than degrading
+    // silently to an empty list.
+    if (!(await this.entitlements.isModuleEnabled(claims, MODULE_KEY))) {
+      throw new NotFoundException();
+    }
     return this.db.withClaims(claims, async (client) => {
       const result = await client.query("SELECT * FROM dummy_records ORDER BY created_at ASC");
       const out: DummyRecordView[] = [];
@@ -60,6 +76,12 @@ export class DummyService {
   }
 
   async get(claims: RequestClaims, id: string): Promise<DummyRecordView> {
+    // Module-licensing gate first, per Section 4's order — same 404 as a
+    // record that doesn't exist or one RBAC won't show; a disabled module
+    // must be indistinguishable from those, not a distinct error shape.
+    if (!(await this.entitlements.isModuleEnabled(claims, MODULE_KEY))) {
+      throw new NotFoundException("Dummy record not found");
+    }
     return this.db.withClaims(claims, async (client) => {
       const result = await client.query("SELECT * FROM dummy_records WHERE id = $1", [id]);
       if (result.rowCount === 0) {

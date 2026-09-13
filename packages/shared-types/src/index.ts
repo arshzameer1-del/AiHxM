@@ -16,10 +16,14 @@ export type HealthStatus = {
 };
 
 // --- Module catalog -----------------------------------------------------
-// The nine modules from the prototype. Real per-tenant licensing tables
-// (module_catalog / package_tier / tenant_module_entitlement) land in
-// Phase 5; until then, CompanyConfig.enabledModules is just an array of
-// these keys, set directly from the Platform Admin panel.
+// The nine real modules from the prototype, plus `dummy` — Phase 5's
+// scaffolding module (see apps/api/migrations/0006_module_entitlement.sql
+// header), included here so the existing Company Config "Modules" screen
+// can toggle it through the real UI with no separate mechanism. Real
+// per-tenant licensing now exists (module_catalog / package_tier /
+// package_tier_modules / tenant_module_entitlement, migration 0006) —
+// CompanyConfig.enabledModules below is a live view over
+// tenant_module_entitlement, not a value anyone sets directly anymore.
 export const MODULE_KEYS = [
   "employee",
   "leave",
@@ -30,6 +34,7 @@ export const MODULE_KEYS = [
   "learning",
   "exit",
   "bi",
+  "dummy",
 ] as const;
 
 export type ModuleKey = (typeof MODULE_KEYS)[number];
@@ -76,6 +81,12 @@ export type CompanyDashboardRow = Company & {
 export type CompanyConfig = {
   companyId: string;
   branding: CompanyBranding;
+  /**
+   * Always read fresh from `tenant_module_entitlement` (Phase 5) — the
+   * real licensing source of truth `EntitlementsService.isModuleEnabled()`
+   * gates on. Setting this via `updateCompanyConfig` writes real
+   * entitlement rows, not just a display value.
+   */
   enabledModules: ModuleKey[];
   employeeNumberFormat: EmployeeNumberFormat;
   updatedAt: string;

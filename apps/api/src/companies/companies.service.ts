@@ -4,6 +4,7 @@ import * as jwt from "jsonwebtoken";
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
 import { AuditService } from "../audit/audit.service";
+import { EntitlementsService } from "../entitlements/entitlements.service";
 import { hashPassword } from "../auth/password";
 import type {
   Company,
@@ -73,7 +74,8 @@ function rowToAdmin(row: any): CompanyAdmin {
 export class CompaniesService {
   constructor(
     private readonly db: DatabaseService,
-    private readonly audit: AuditService
+    private readonly audit: AuditService,
+    private readonly entitlements: EntitlementsService
   ) {}
 
   async create(claims: RequestClaims, input: CreateCompanyRequest): Promise<CompanyDetail> {
@@ -83,9 +85,10 @@ export class CompaniesService {
         throw new ConflictException(`slug "${input.slug}" is already in use`);
       }
 
+      const packageTier = input.packageTier ?? "starter";
       const companyResult = await client.query(
         `INSERT INTO companies (name, slug, package_tier) VALUES ($1, $2, $3) RETURNING *`,
-        [input.name, input.slug, input.packageTier ?? "starter"]
+        [input.name, input.slug, packageTier]
       );
       const company = rowToCompany(companyResult.rows[0]);
 
@@ -96,10 +99,21 @@ export class CompaniesService {
         preserveImportedNumbers: input.employeeNumberFormat?.preserveImportedNumbers ?? true,
       };
 
+      // Phase 5: seed real tenant_module_entitlement rows — the package
+      // tier's defaults, unless the caller explicitly listed modules (this
+      // request field predates Phase 5; it now backs real entitlement
+      // rows instead of only the cached jsonb column below).
+      const enabledModules = await this.entitlements.seedForNewCompany(
+        client,
+        company.id,
+        packageTier,
+        input.enabledModules
+      );
+
       const configResult = await client.query(
         `INSERT INTO company_config (company_id, enabled_modules, employee_number_format)
          VALUES ($1, $2::jsonb, $3::jsonb) RETURNING *`,
-        [company.id, JSON.stringify(input.enabledModules ?? []), JSON.stringify(employeeNumberFormat)]
+        [company.id, JSON.stringify(enabledModules), JSON.stringify(employeeNumberFormat)]
       );
       const config = rowToConfig(configResult.rows[0]);
 
@@ -116,7 +130,7 @@ export class CompaniesService {
         companyId: company.id,
         action: "company.created",
         target: company.slug,
-        metadata: { packageTier: company.packageTier, enabledModules: input.enabledModules ?? [] },
+        metadata: { packageTier: company.packageTier, enabledModules },
       });
 
       return { company, config, admins };
@@ -156,9 +170,16 @@ export class CompaniesService {
         [companyId]
       );
 
+      const config = rowToConfig(configResult.rows[0]);
+      // enabled_modules on company_config is a cache (0006's header
+      // comment) — tenant_module_entitlement is the real licensing source
+      // of truth EntitlementsService.isModuleEnabled() gates on, so always
+      // answer from there, never from the cache alone.
+      config.enabledModules = await this.entitlements.getEnabledModuleKeys(client, companyId);
+
       return {
         company: rowToCompany(companyResult.rows[0]),
-        config: rowToConfig(configResult.rows[0]),
+        config,
         admins: adminsResult.rows.map(rowToAdmin),
       };
     });
@@ -214,11 +235,19 @@ export class CompaniesService {
       const existing = rowToConfig(current.rows[0]);
 
       const nextBranding = { ...existing.branding, ...(patch.branding ?? {}) };
-      const nextModules = patch.enabledModules ?? existing.enabledModules;
       const nextFormat: EmployeeNumberFormat = {
         ...existing.employeeNumberFormat,
         ...(patch.employeeNumberFormat ?? {}),
       };
+
+      // Phase 5: a module toggle here writes real tenant_module_entitlement
+      // rows — the actual gate EntitlementsService.isModuleEnabled() reads
+      // — not just this cached jsonb column. If the caller didn't touch
+      // modules this request, re-read the canonical set anyway rather than
+      // trust a possibly-stale cache.
+      const nextModules = patch.enabledModules
+        ? await this.entitlements.setEnabledModules(client, companyId, patch.enabledModules)
+        : await this.entitlements.getEnabledModuleKeys(client, companyId);
 
       const result = await client.query(
         `UPDATE company_config SET

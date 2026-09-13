@@ -495,5 +495,134 @@ real HR object instead of `dummy_records`.
 
 ---
 
-*Next decision goes here as Decision #5, appended below this line — never
+## Decision #5 — Real module licensing (`tenant_module_entitlement`) as the enforcement order's first gate, ahead of RBAC
+
+**Date:** Phase 5, Module Provisioning & Licensing
+**Status:** Accepted
+
+### Context
+
+Plan doc Section 4's enforcement order has always read "is the module even
+licensed → can the role touch this object → which fields can they see →
+does a sibling field's value hide this one" — but until this phase, the
+first step didn't exist. `company_config.enabled_modules` (migration
+0001) was seeded from day one with a comment admitting exactly this: "a
+cached read view only... written directly by the Platform Admin panel
+until [Phase 5] exists." Phase 4 built the second and third steps
+(`can()`/`resolveFieldAccess()`) with no licensing gate in front of them
+at all — a Platform Admin could uncheck every box on the Modules tab and
+nothing downstream would notice.
+
+### Decision
+
+Three tables, named to match the plan doc's own Section 7 phase row
+exactly (`apps/api/migrations/0006_module_entitlement.sql`):
+
+- **`module_catalog`** — every module BoostFactor can license, including
+  `dummy` (see "What this reuses," below).
+- **`package_tier`** — the four sellable tiers, promoted from a bare
+  CHECK-constrained string on `companies.package_tier` to a real catalog
+  table (same column, same values, same tenant-facing behavior — only how
+  "is this a real tier" gets enforced changes, from a CHECK to a foreign
+  key). `package_tier_modules` hangs each tier's default module set off
+  it.
+- **`tenant_module_entitlement`** — the actual source of truth. This is
+  the only table `EntitlementsService.isModuleEnabled()` ever reads.
+  `package_tier`/`package_tier_modules` are a template, consulted exactly
+  once, when a company is created — never on the request path. A Platform
+  Admin can override a tenant's entitlement at any time independent of
+  its tier (extra module without moving the whole plan, or the reverse);
+  the tier is a starting point, not a ceiling.
+
+`EntitlementsService.isModuleEnabled(claims, moduleKey)` is the gate
+itself, and it runs *before* `RbacService.can()` in every module-owning
+service — enforcement-order Section 4 spelled out from the start, now
+actually built in that order rather than assumed. A missing entitlement
+row (never seeded, or a catalog module retired after a tenant's row was
+last touched) resolves to disabled — safe-deny, the same posture
+`RbacService.resolveFieldAccess` already takes for an unmatched field.
+
+**No Platform Admin bypass here either**, for the identical reason as
+Decision #4: a Platform Admin session has no `company_id`, so
+`isModuleEnabled` returns `false` immediately rather than checking
+anything — Section 3's "never touches a tenant's HR data" includes never
+getting to skip past its own licensing gate.
+
+**A disabled module 404s, it does not 403 or silently degrade.** Section
+4 states this outright ("it should look like the feature doesn't exist,
+not like it exists and you're blocked"), and it's a real design choice
+with a real alternative that was rejected: `DummyService.list()` throws
+`NotFoundException` rather than returning an empty array when the module
+is off, specifically because an empty array is genuinely ambiguous with
+"this tenant just has no records yet" — the one response shape Section
+4's own goal can't tolerate being confused with.
+
+### What this reuses, and what it's honest about not building yet
+
+`module_catalog` includes a `dummy` entry alongside the nine real
+modules, gating Phase 4's `rbac-demo/dummy-records` endpoints — the exact
+same reasoning as Phase 4's `dummy_records` table: Employee Core (the
+first real module) doesn't exist until Phase 7, so this phase needs
+something concrete and *running* to prove "disabled → 404" against,
+rather than a table nothing ever queries. It was added to
+`packages/shared-types`' `MODULE_KEYS` so the Company Config "Modules"
+screen Phase 2 already built could toggle it with zero new UI — a
+Platform Admin can watch the real API 404 by unchecking a box in the same
+screen this exit criterion's automated tests exercise programmatically.
+
+The exit criterion's other half — "makes it vanish from their app
+switcher" — is honestly not fully provable yet: there is no tenant
+workspace UI with an app switcher, because that starts at Phase 7
+(Employee Core), the same gap Phase 2's "Login As" impersonation
+disclosed for the same reason. What Phase 5 actually delivers and proves
+is the API-side half in full: the endpoint a disabled module owns is
+gone, not merely hidden behind a client-side check that a direct request
+could route around.
+
+### Why this doesn't weaken anything from Decisions #1–#4
+
+`tenant_module_entitlement` is RLS'd exactly like every other tenant
+table since Decision #1 (tenant-scoped read, Platform-Admin/service-only
+write). Nothing here touches `RequestClaims`, `RbacService`, or the
+Supabase portability story — this is a new, independent gate that runs
+*before* Decision #4's engine, not a replacement for any part of it, and
+a module being enabled says nothing about which records or fields within
+it a given role can see.
+
+### Alternatives considered
+
+- **Keep `company_config.enabled_modules` as the only structure, skip a
+  separate entitlement table.** Rejected — this is exactly the
+  "cached read view... until Phase 5 exists" gap the schema already
+  flagged; a JSONB array on a config row has no natural place to hang a
+  module catalog, per-tier defaults, or `updated_at` history off of, and
+  nothing enforces that its values are even real module keys.
+- **Enforce module licensing only in RLS, no NestJS-side check.** Rejected
+  for the same reason Decision #1 didn't put RBAC in RLS: "is this
+  endpoint even licensed" is Section 4's most business-facing rule (a
+  bank might contractually be entitled to nine modules exactly, no more)
+  and belongs where it can be unit-tested and reasoned about in
+  application code, with RLS as backstop, not as the only place it lives.
+- **`if (claims.is_platform_admin) return true` shortcut in
+  `isModuleEnabled`.** Rejected outright, same reasoning as Decision #4's
+  identical rejection for `RbacService`.
+
+### What this unblocks
+
+Phase 5's exit criterion is verified two ways: an automated suite (31
+tests total now — `entitlements.service.spec.ts`'s 9 new tests plus 2 new
+`dummy.e2e.spec.ts` cases proving the live HTTP 404/200 flip) wired into
+the same CI test step Phase 4 added, and a manual run against a live
+`npm run dev` server driving the actual Platform Admin HTTP API end to
+end (create a starter-tier company, confirm its seeded entitlement,
+assign a role, create a record, disable `dummy` via the real Company
+Config PATCH endpoint, watch `GET /rbac-demo/dummy-records` flip from 200
+to 404 for the exact same caller and record, then re-enable and watch it
+flip back). Phase 6 (WRICEF Framework Skeleton) and every product phase
+from Phase 7 onward now has a real gate to register new modules against
+instead of an unenforced placeholder.
+
+---
+
+*Next decision goes here as Decision #6, appended below this line — never
 inserted above it.*

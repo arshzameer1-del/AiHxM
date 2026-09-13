@@ -204,9 +204,11 @@ function ModulesTab({
         Enabled modules
       </h2>
       <p className="text-xs text-label-tertiary">
-        Placeholder licensing — real module_catalog / tenant_module_entitlement tables land in
-        Phase 5. Disabling a module here is meant to make it 404, not 403, for this tenant once
-        modules actually exist client-side.
+        Real per-tenant licensing (Phase 5) — unchecking a module here disables it for real in
+        tenant_module_entitlement: any endpoint that module owns 404s immediately for this tenant,
+        it doesn't just hide in a menu. "dummy" is Phase 4's scaffolding module (proves this gate
+        against a running API before Employee Core exists in Phase 7) — the nine real modules
+        above it don't have endpoints to gate yet.
       </p>
       <div className="grid grid-cols-3 gap-2">
         {MODULE_KEYS.map((key) => (

@@ -56,6 +56,17 @@ describe("GET /rbac-demo/dummy-records (e2e)", () => {
       );
       companyId = company.rows[0].id;
 
+      // Phase 5: DummyService now gates on the 'dummy' module's
+      // entitlement before RBAC ever runs (see dummy.service.ts). This
+      // fixture bypasses CompaniesService.create (which would seed this
+      // automatically via EntitlementsService.seedForNewCompany), so it's
+      // seeded directly here — without it, every test below would 404
+      // before RBAC gets a chance to run at all.
+      await client.query(
+        `INSERT INTO tenant_module_entitlement (company_id, module_key, enabled) VALUES ($1, 'dummy', true)`,
+        [companyId]
+      );
+
       async function makeUser(email: string): Promise<string> {
         const account = await client.query(
           "INSERT INTO user_accounts (email, password_hash) VALUES ($1, 'x') RETURNING id",
@@ -139,5 +150,68 @@ describe("GET /rbac-demo/dummy-records (e2e)", () => {
       .get(`/rbac-demo/dummy-records/${recordId}`)
       .set("Authorization", `Bearer ${token}`)
       .expect(404);
+  });
+
+  /**
+   * Phase 5's own exit criterion, proved at the exact same HTTP layer as
+   * Phase 4's: "disabling a module for a test tenant... 404s on direct
+   * API access." Same full-access role, same record, only the module's
+   * entitlement changes — a 403 here would mean the licensing gate leaked
+   * "this exists but you're blocked" instead of "this doesn't exist,"
+   * which plan doc Section 4 is explicit is the wrong shape.
+   */
+  describe("module licensing gate (Phase 5)", () => {
+    const disable = () =>
+      db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query(
+          `UPDATE tenant_module_entitlement SET enabled = false WHERE company_id = $1 AND module_key = 'dummy'`,
+          [companyId]
+        )
+      );
+    const enable = () =>
+      db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query(
+          `UPDATE tenant_module_entitlement SET enabled = true WHERE company_id = $1 AND module_key = 'dummy'`,
+          [companyId]
+        )
+      );
+
+    afterEach(enable); // leave the fixture company in its normal state for any later test
+
+    it("404s the list endpoint once the module is disabled, and recovers once it's re-enabled", async () => {
+      const token = signSession({ sub: fullAccessUserId, is_platform_admin: false, company_id: companyId });
+
+      await request(app.getHttpServer())
+        .get("/rbac-demo/dummy-records")
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      await disable();
+      await request(app.getHttpServer())
+        .get("/rbac-demo/dummy-records")
+        .set("Authorization", `Bearer ${token}`)
+        .expect(404);
+
+      await enable();
+      await request(app.getHttpServer())
+        .get("/rbac-demo/dummy-records")
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+    });
+
+    it("404s GET /:id for the same full-access role that could see it a moment ago", async () => {
+      const token = signSession({ sub: fullAccessUserId, is_platform_admin: false, company_id: companyId });
+
+      await request(app.getHttpServer())
+        .get(`/rbac-demo/dummy-records/${recordId}`)
+        .set("Authorization", `Bearer ${token}`)
+        .expect(200);
+
+      await disable();
+      await request(app.getHttpServer())
+        .get(`/rbac-demo/dummy-records/${recordId}`)
+        .set("Authorization", `Bearer ${token}`)
+        .expect(404);
+    });
   });
 });
