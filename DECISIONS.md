@@ -730,5 +730,188 @@ things bespoke per module.
 
 ---
 
-*Next decision goes here as Decision #7, appended below this line — never
+## Decision #7 — Phase 7 (Employee Core): a dedicated employee-number-sequence table, a swappable file-storage interface, and a `.team` RBAC scope
+
+**Date:** Phase 7, Employee Core
+**Status:** Accepted
+
+### Context
+
+Employee Core is the first real HR object, and it needed three genuine
+architectural calls the plan doc's Section 5/6/2 anticipated in prose but
+none of Phases 1–6 had to actually build: an atomic, tenant-configurable
+Employee Number sequence (Section 5); somewhere to put uploaded documents
+before a real Supabase project exists (Section 6's Forms/document vault,
+and the README's long-standing "File storage: Supabase Storage — wired
+when a module needs it" note); and a Manager's "see your team, not the
+whole company" visibility, which Section 2 names by example
+("`salary.view.team`") but Phase 4's RBAC engine only ever built `.self`
+and `.all`.
+
+### Decision — 1: `employee_number_sequences` as its own table, not a `company_config` column
+
+The natural design was a `next_employee_sequence` column on
+`company_config`, incremented atomically via `SELECT ... FOR UPDATE`
+inside the same transaction as the INSERT. Building it that way and
+running it against a real tenant-scoped HR Admin session immediately
+failed with "Company config not found" — not a permissions bug in the
+usual sense, but a genuine Postgres RLS behavior worth recording: **`FOR
+UPDATE`/`FOR SHARE` under row-level security is checked against the
+table's UPDATE policy, not its SELECT policy**, because Postgres treats a
+row lock as "like performing a trivial update." `company_config`'s UPDATE
+policy (`0001_platform_admin_core.sql`) is deliberately Platform-Admin-
+only — branding and the employee-number format itself are real settings,
+not something every tenant session should be able to rewrite — so a
+tenant-scoped `SELECT ... FOR UPDATE` against that table returns zero rows
+even though the identical query without `FOR UPDATE` returns the row
+fine. This was caught by the real Jest suite against live Postgres, not
+inferred — every one of Phase 7's list/get/create tests failed identically
+until this was traced down to the locking clause specifically (confirmed
+by isolating `FOR UPDATE` in a throwaway script against the same fixture
+data).
+
+The fix: `employee_number_sequences (company_id PK, next_sequence)` is a
+new, dedicated table holding nothing but an operational counter. Its own
+RLS write policy is tenant-scoped (`company_id = app.current_company_id()`),
+which is safe precisely because a counter carries none of the risk that
+motivated locking down `company_config`'s own UPDATE policy — a tenant
+incrementing their own sequence value can't touch branding, module
+entitlement caches, or the number *format* itself, only how many numbers
+have been handed out so far. `EmployeesService.assignEmployeeNumber`
+lazily creates a company's counter row (`INSERT ... ON CONFLICT DO
+NOTHING`, seeded from that company's own `employee_number_format.startingSequence`)
+the first time it's needed, rather than requiring `CompaniesService.create`
+to know this table exists.
+
+### Decision — 2: `FileStorageService` — a local-filesystem stand-in behind an interface, not a raw multer disk write
+
+The document vault needs *somewhere* to put file bytes today, and
+Supabase Storage needs a real Supabase project that doesn't exist yet
+(same "waiting on the account owner's own credentials" situation as
+Decision #1's Supabase Auth/RLS split, and Decision #3's real-auth-now
+call). Rather than writing directly to disk from `EmployeesService`
+(coupling the document vault to "local filesystem" the same way a naive
+implementation would couple it to "Supabase Storage" once that exists),
+`apps/api/src/file-storage/file-storage.interface.ts` defines a three-
+method `FileStorageService` interface (`save`/`read`/`delete`), and
+`LocalFileStorageService` is its only implementation — writing under a
+gitignored, company/employee-namespaced directory
+(`FILE_STORAGE_LOCAL_DIR`, default `./storage-data`), with every path
+segment either a caller-supplied UUID or a sanitized filename, so a
+crafted filename can't traverse outside the configured base directory.
+Swapping in a Supabase-Storage- or S3-backed implementation later is a new
+class behind the same interface and a one-line change to
+`file-storage.module.ts`'s provider — `EmployeesService` never changes.
+This is Section 9's "no module depends on a Supabase-only convenience as
+its only path" discipline applied *before* Supabase Storage is even wired
+up once, rather than after the fact.
+
+**A real, honest gap this leaves, not silently:** deleting a company (or
+an employee) cascades the `employee_documents` *rows* via the database's
+own `ON DELETE CASCADE`, but nothing calls `FileStorageService.delete()`
+as part of that cascade — the underlying files are orphaned on disk.
+Manually verified while testing this phase (a deleted fixture company's
+uploaded file was still sitting under `storage-data/` afterward). Harmless
+at dev/test scale and cheap to clean up by hand for now; genuinely wrong
+once real client data and real deletion/GDPR-style purge requests exist.
+**Revisit when:** building any real "delete a company" or "delete an
+employee" product flow — that flow needs to enumerate and delete the
+associated files through `FileStorageService` *before* (or alongside) the
+DB-level delete, not rely on the database cascade alone.
+
+### Decision — 3: RBAC's third scope, `.team` — direct reports only, resolved by the caller, not by RbacService
+
+Section 2 names the exact permission (`salary.view.team`) a Manager needs,
+but Phase 4's `can()`/`filterRecordFields()` only ever compared a record's
+`ownerId` against `claims.sub` (the `.self` case). Rather than teaching
+`RbacService` what an "employee" or a "manager" is, `.team` is resolved
+the same generic way `.self` already is: the CALLER (here,
+`EmployeesService`) resolves a `teamOwnerId` per record — the record's own
+manager's `user_account_id`, via a self-join
+(`LEFT JOIN employees mgr ON mgr.id = e.manager_id`) — and hands it to
+`RbacService.can()`/`filterRecordFieldsWithScope()` exactly like an
+`ownerId`. `RbacService` still knows nothing about employees, managers, or
+org charts; it only ever compares an opaque id to `claims.sub`. This keeps
+the engine as generic as Decision #4 originally built it, and means a
+future object with its own notion of "team" (a project, a cost center)
+reuses `.team` the same way, by resolving its own `teamOwnerId` the same
+way — no changes to `RbacService` itself.
+
+**Deliberately shallow, not recursive:** `.team` matches DIRECT reports
+only — a Manager's manager doesn't see the whole reporting chain through
+this scope, only their own direct reports do. A recursive "see your entire
+subtree" scope is a real, plausible future need (a VP wanting their whole
+department's view) but nothing in Phase 7's actual BPD needs it yet —
+Section 10's guardrail against over-building ahead of an actual
+requirement. **Revisit when:** an actual role in an actual BPD needs
+multi-level visibility — the fix is a recursive CTE resolving every
+manager in a caller's reporting chain into a set, compared the same way,
+not a change to `can()`'s branching logic itself.
+
+### A second N+1 fix, riding along with this phase as promised
+
+The Phase 5 security audit's "Record-level N+1 still exists" entry
+(`KNOWN_ISSUES.md`) explicitly said: "Revisit when Phase 7 (Employee Core)
+is built — design its list-endpoint permission checks to fetch the
+caller's granted scope once per request up front, and have this fix ride
+along rather than being bolted onto `dummy`." `EmployeesService.list()`
+does exactly that: `RbacService.resolveViewScope()` and
+`loadFieldPermissionRules()` are each called ONCE per request (not once
+per row), and `filterRecordFieldsWithScope()` evaluates every row's
+visibility and field access from those two already-fetched results
+in memory — zero further permission-holding queries per row, and the
+field-rule evaluation itself (`evaluateFieldAccess()`) is now a pure,
+no-DB-access function. `dummy_records`' own `filterRecordFields()` is left
+exactly as it was (still one query per row) — this was never meant to be
+retrofitted onto the scaffolding object, only built correctly for the
+first real one, per the audit's own wording.
+
+### Alternatives considered
+
+- **Loosen `company_config`'s UPDATE RLS policy to also allow tenant-scoped
+  writes**, instead of a new table. Rejected: RLS is coarse (whole-row),
+  so this would let any tenant session rewrite branding and the employee-
+  number *format* itself, not just advance a counter — a real regression
+  against Section 4/5's "module licensing lives only in the entitlement
+  layer" discipline extended to company settings generally.
+- **A Postgres `SEQUENCE` object per company** for the employee number
+  counter instead of a table row. Rejected for now: Postgres sequences
+  aren't transactional (a rolled-back INSERT doesn't give its number
+  back), which is fine for surrogate keys but wrong for a number a client
+  may audit gaps in; a plain locked table row rolls back cleanly with the
+  rest of the transaction, matching how `next_employee_sequence`'s
+  "preserve imported numbers" advance-the-counter logic already needs
+  transactional correctness anyway.
+- **Write straight to Supabase Storage now**, provisioning a project just
+  for file storage ahead of the rest of Supabase. Rejected: no Supabase
+  project exists yet for any purpose (Decision #1/#3's standing
+  situation), and doing it just for storage would create exactly the kind
+  of Supabase-specific coupling Section 9 warns against — better to build
+  the swappable interface once and wire the real backend when the rest of
+  the Supabase migration happens, not piecemeal.
+
+### What this unblocks
+
+Phase 7's exit criterion is verified the same way every prior phase's was:
+`employees.service.spec.ts`'s 12 tests against real Postgres (sequential
+number assignment, the preserve-imported-numbers collision-avoidance
+path, immutability under `update()`, HR Admin/Line Manager/Employee
+field-visibility scopes including the Termination Reason conditional rule
+from Section 2, the module-licensing 404 flip, org-chart construction
+including the "invisible manager becomes a root" case, a real document
+round-tripped through `LocalFileStorageService` byte-for-byte, and
+auto-recorded job history on hire/transfer/termination alongside a manual
+HR-logged entry) — plus a live `npm run dev` server driven with real
+`curl` requests, including a real multipart file upload verified
+byte-exact on download, the module-disable-to-404 flip over live HTTP,
+and a token-less request confirmed as a real 401. Phase 8 (Employee
+Groups & Leave Policy Config) and everything after it now has a real
+employee object, a real org chart, and a real sensitive-field model to
+build against — the workflow/custom-field/document-template engines from
+Phase 6 can now route, extend, and template a real record instead of only
+`dummy_records`.
+
+---
+
+*Next decision goes here as Decision #8, appended below this line — never
 inserted above it.*

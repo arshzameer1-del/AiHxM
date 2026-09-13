@@ -483,3 +483,117 @@ export type CsvImportResult<T> = {
   rows: T[];
   errors: CsvImportRowError[];
 };
+
+// --- Phase 7: Employee Core -------------------------------------------
+// The first real HR object — plan doc Section 5 (the Employee Number
+// rules) and Section 7's Phase 7 row. `EmployeeView` is what the API
+// actually returns: a sensitive field the caller's role can't see is
+// OMITTED from the object entirely (see RbacService.filterRecordFields
+// and its Phase 7 sibling filterRecordFieldsWithScope), so every
+// sensitive field below is typed optional, not nullable — `"cnic" in
+// employee` is the real presence check, not `employee.cnic != null`.
+
+export type EmploymentStatus = "active" | "on_leave" | "terminated";
+
+export type EmployeeView = {
+  id: string;
+  companyId: string;
+  userAccountId: string | null;
+  employeeNumber: string;
+  firstName: string;
+  lastName: string;
+  email: string | null;
+  phone: string | null;
+  gender: string | null;
+  maritalStatus: string | null;
+  department: string | null;
+  designation: string | null;
+  managerId: string | null;
+  employmentStatus: EmploymentStatus;
+  dateOfJoining: string;
+  terminationDate: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /** Sensitive — present only when the caller's field-level access resolves to non-"hidden". */
+  cnic?: string | null;
+  dateOfBirth?: string | null;
+  salaryBand?: string | null;
+  bankAccountNumber?: string | null;
+  terminationReason?: string | null;
+};
+
+export type CreateEmployeeRequest = {
+  firstName: string;
+  lastName: string;
+  email?: string;
+  phone?: string;
+  cnic?: string;
+  dateOfBirth?: string;
+  gender?: string;
+  maritalStatus?: string;
+  department?: string;
+  designation?: string;
+  managerId?: string;
+  dateOfJoining?: string;
+  salaryBand?: string;
+  bankAccountNumber?: string;
+  userAccountId?: string;
+  /**
+   * Set only when preserving a client's pre-existing legacy staff number
+   * during migration (plan doc Section 5's "bulk import must support
+   * preserving... not only auto-generating fresh ones"). Omitted (the
+   * normal case): EmployeesService assigns the next number from the
+   * company's own configured format/sequence automatically.
+   */
+  employeeNumber?: string;
+};
+
+export type UpdateEmployeeRequest = Partial<
+  Omit<CreateEmployeeRequest, "employeeNumber" | "userAccountId">
+> & {
+  employmentStatus?: EmploymentStatus;
+  terminationDate?: string;
+  terminationReason?: string;
+};
+
+export type OrgChartNode = {
+  id: string;
+  employeeNumber: string;
+  fullName: string;
+  designation: string | null;
+  department: string | null;
+  directReports: OrgChartNode[];
+};
+
+export type EmployeeDocumentView = {
+  id: string;
+  employeeId: string;
+  documentType: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  createdAt: string;
+};
+
+export type JobHistoryEventType = "hire" | "promotion" | "transfer" | "salary_change" | "termination" | "rehire" | "other";
+
+export type JobHistoryEntryView = {
+  id: string;
+  employeeId: string;
+  eventType: JobHistoryEventType;
+  effectiveDate: string;
+  department: string | null;
+  designation: string | null;
+  salaryBand?: string | null;
+  notes: string | null;
+  createdAt: string;
+};
+
+export type RecordJobHistoryRequest = {
+  eventType: JobHistoryEventType;
+  effectiveDate: string;
+  department?: string;
+  designation?: string;
+  salaryBand?: string;
+  notes?: string;
+};

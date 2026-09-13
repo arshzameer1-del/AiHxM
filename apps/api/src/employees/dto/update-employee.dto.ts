@@ -1,0 +1,72 @@
+import { IsDateString, IsIn, IsOptional, IsString, IsUUID } from "class-validator";
+import type { EmploymentStatus } from "@boostfactor/shared-types";
+
+export class UpdateEmployeeDto {
+  @IsOptional()
+  @IsString()
+  firstName?: string;
+
+  @IsOptional()
+  @IsString()
+  lastName?: string;
+
+  @IsOptional()
+  @IsString()
+  email?: string;
+
+  @IsOptional()
+  @IsString()
+  phone?: string;
+
+  @IsOptional()
+  @IsString()
+  cnic?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateOfBirth?: string;
+
+  @IsOptional()
+  @IsString()
+  gender?: string;
+
+  @IsOptional()
+  @IsString()
+  maritalStatus?: string;
+
+  @IsOptional()
+  @IsString()
+  department?: string;
+
+  @IsOptional()
+  @IsString()
+  designation?: string;
+
+  @IsOptional()
+  @IsUUID()
+  managerId?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateOfJoining?: string;
+
+  @IsOptional()
+  @IsString()
+  salaryBand?: string;
+
+  @IsOptional()
+  @IsString()
+  bankAccountNumber?: string;
+
+  @IsOptional()
+  @IsIn(["active", "on_leave", "terminated"])
+  employmentStatus?: EmploymentStatus;
+
+  @IsOptional()
+  @IsDateString()
+  terminationDate?: string;
+
+  @IsOptional()
+  @IsString()
+  terminationReason?: string;
+}

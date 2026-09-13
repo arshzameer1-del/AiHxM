@@ -40,7 +40,7 @@ export class RbacService {
   async can(
     claims: RequestClaims,
     permissionKey: string,
-    target?: { ownerId?: string | null }
+    target?: { ownerId?: string | null; teamOwnerId?: string | null }
   ): Promise<boolean> {
     if (!claims.company_id) {
       // No tenant context at all (e.g. a Platform Admin session) — there
@@ -53,6 +53,18 @@ export class RbacService {
 
     if (permissionKey.endsWith(".self")) {
       return Boolean(target?.ownerId) && target?.ownerId === claims.sub;
+    }
+    if (permissionKey.endsWith(".team")) {
+      // Phase 7 addition (Decision #7): "a Manager sees their team's
+      // salary only if the tenant specifically grants salary.view.team"
+      // (plan doc Section 2's own example). `teamOwnerId` is the record's
+      // direct manager's OWN user_account_id, resolved by the caller
+      // (EmployeesService) via a join — this method stays exactly as
+      // generic as the `.self` branch above, with no knowledge of
+      // employees/managers baked in. Direct reports only; a recursive
+      // "your whole reporting chain" scope is a documented future
+      // refinement, not built now.
+      return Boolean(target?.teamOwnerId) && target?.teamOwnerId === claims.sub;
     }
     return true;
   }
@@ -206,6 +218,125 @@ export class RbacService {
       }
     }
     return access;
+  }
+
+  /**
+   * Resolves which object-level scopes a caller holds for a given
+   * view-permission base, ONCE per request — the fix for the N+1 the
+   * Phase 5 audit flagged and explicitly deferred to "whenever Phase 7
+   * (Employee Core) is built" (KNOWN_ISSUES.md's "Record-level N+1 still
+   * exists" entry). `filterRecordFields()` above re-checks `.self`/`.all`
+   * via `can()` for every single row even though whether the caller HOLDS
+   * a scope at all never varies per record — only the ownership match
+   * does. Call this once per request, then pass its result into
+   * `filterRecordFieldsWithScope()` below for every row: the per-row cost
+   * drops to in-memory comparisons plus one batched field-rule fetch,
+   * with zero further permission-holding queries.
+   */
+  async resolveViewScope(
+    claims: RequestClaims,
+    viewPermissionKey: string
+  ): Promise<{ hasAll: boolean; hasSelf: boolean; hasTeam: boolean }> {
+    if (!claims.company_id) return { hasAll: false, hasSelf: false, hasTeam: false };
+    const [hasAll, hasSelf, hasTeam] = await Promise.all([
+      this.hasPermission(claims, `${viewPermissionKey}.all`),
+      this.hasPermission(claims, `${viewPermissionKey}.self`),
+      this.hasPermission(claims, `${viewPermissionKey}.team`),
+    ]);
+    return { hasAll, hasSelf, hasTeam };
+  }
+
+  /**
+   * Loads every field_permission_rules row that could apply to ANY of
+   * `fieldKeys` for the caller's roles, ONCE per request — same idea as
+   * `resolveViewScope()`, but for field-level rules instead of object-
+   * level scope. The rows themselves don't depend on any one record (only
+   * evaluating a row's `condition` does), so fetching them once and
+   * evaluating conditions in memory per row (via `evaluateFieldAccess()`)
+   * turns what would be N queries (one per visible row) into exactly one,
+   * regardless of how many rows a list endpoint returns.
+   */
+  async loadFieldPermissionRules(
+    claims: RequestClaims,
+    objectKey: string,
+    fieldKeys: readonly string[]
+  ): Promise<Array<{ field_key: string; access: FieldAccess; condition: FieldCondition | null }>> {
+    if (!claims.company_id || fieldKeys.length === 0) return [];
+    return this.db.withClaims(claims, async (client) => {
+      const result = await client.query<{ field_key: string; access: FieldAccess; condition: FieldCondition | null }>(
+        `SELECT fpr.field_key, fpr.access, fpr.condition
+         FROM user_role_assignments ura
+         JOIN field_permission_rules fpr ON fpr.role_id = ura.role_id
+         WHERE ura.user_account_id = $1
+           AND ura.company_id = $2
+           AND fpr.object_key = $3
+           AND fpr.field_key = ANY($4::text[])`,
+        [claims.sub, claims.company_id, objectKey, fieldKeys]
+      );
+      return result.rows;
+    });
+  }
+
+  /**
+   * Pure, in-memory evaluation of a set of rules (from
+   * `loadFieldPermissionRules()`) against one record — no DB access, so
+   * it's cheap to call once per row in a list endpoint's loop.
+   */
+  evaluateFieldAccess(
+    rules: Array<{ field_key: string; access: FieldAccess; condition: FieldCondition | null }>,
+    fieldKeys: readonly string[],
+    record: Record<string, unknown>
+  ): Map<string, FieldAccess> {
+    const access = new Map<string, FieldAccess>(fieldKeys.map((key) => [key, "hidden" as FieldAccess]));
+    for (const row of rules) {
+      if (!fieldKeys.includes(row.field_key)) continue;
+      if (row.condition && !conditionMatches(row.condition, record)) continue;
+      const current = access.get(row.field_key) ?? "hidden";
+      if (ACCESS_RANK[row.access] > ACCESS_RANK[current]) {
+        access.set(row.field_key, row.access);
+      }
+    }
+    return access;
+  }
+
+  /**
+   * The per-row counterpart to `resolveViewScope()`/`loadFieldPermissionRules()`
+   * — takes their already-fetched results instead of querying anything
+   * itself. `ownerId` is the record's own owning user_account_id (the
+   * `.self` match, same as `filterRecordFields()`); `teamOwnerId` is the
+   * record's direct manager's user_account_id (the `.team` match, Phase 7
+   * addition). Returns the same shape `filterRecordFields()` does: the
+   * filtered record, or `null` if the caller can't see this row at all.
+   */
+  filterRecordFieldsWithScope<T extends Record<string, unknown>>(
+    scope: { hasAll: boolean; hasSelf: boolean; hasTeam: boolean },
+    fieldRules: Array<{ field_key: string; access: FieldAccess; condition: FieldCondition | null }>,
+    record: T,
+    sensitiveFields: readonly string[],
+    ownerId: string | null,
+    teamOwnerId: string | null,
+    callerSub: string
+  ): Record<string, unknown> | null {
+    const visible =
+      scope.hasAll ||
+      (scope.hasSelf && Boolean(ownerId) && ownerId === callerSub) ||
+      (scope.hasTeam && Boolean(teamOwnerId) && teamOwnerId === callerSub);
+    if (!visible) return null;
+
+    const applicableFields = sensitiveFields.filter((key) => key in record);
+    const accessByField = this.evaluateFieldAccess(fieldRules, applicableFields, record);
+
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(record)) {
+      if (!sensitiveFields.includes(key)) {
+        result[key] = value;
+        continue;
+      }
+      if (accessByField.get(key) !== "hidden") {
+        result[key] = value;
+      }
+    }
+    return result;
   }
 
   private async hasPermission(claims: RequestClaims, permissionKey: string): Promise<boolean> {

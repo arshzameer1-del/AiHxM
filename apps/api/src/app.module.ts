@@ -17,6 +17,8 @@ import { CustomFieldsModule } from "./custom-fields/custom-fields.module";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { DocumentTemplatesModule } from "./document-templates/document-templates.module";
 import { ImportExportModule } from "./import-export/import-export.module";
+import { FileStorageModule } from "./file-storage/file-storage.module";
+import { EmployeesModule } from "./employees/employees.module";
 
 /**
  * Phase 2/3/4/5 root module: health check, the Platform Provisioning Panel
@@ -49,6 +51,8 @@ import { ImportExportModule } from "./import-export/import-export.module";
     NotificationsModule,
     DocumentTemplatesModule,
     ImportExportModule,
+    FileStorageModule,
+    EmployeesModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],

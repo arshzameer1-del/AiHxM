@@ -91,18 +91,23 @@ has. All 31 existing tests (`entitlements.service.spec.ts`,
 
 ### Deferred (documented, not fixed)
 
-**Record-level N+1 still exists.** `DummyService.list()` calls
-`filterRecordFields()` once per row, so the `.self`/`.all` object-level
-`can()` checks still run once per record even though the caller's
-granted scope doesn't actually vary per record — only the ownership
-match (in-memory) does. Fully collapsing this means hoisting those
-`can()` checks out of the per-record loop and changing
-`filterRecordFields()`'s call sites, which is a larger, riskier change
-than this audit's scope justified for a proof-of-concept object with a
-handful of test rows. **Revisit when:** Phase 7 (Employee Core) is built
-— design its list-endpoint permission checks to fetch the caller's
-granted scope once per request up front, and have this fix ride along
-rather than being bolted onto `dummy`.
+**Record-level N+1 still exists in `DummyService.list()` — deliberately left as-is.**
+`DummyService.list()` still calls `filterRecordFields()` once per row, so
+the `.self`/`.all` object-level `can()` checks still run once per record
+even though the caller's granted scope doesn't actually vary per record.
+**Resolved for the object that actually matters, not for `dummy`:** per
+this entry's own "revisit when Phase 7 is built" trigger, Phase 7's
+`EmployeesService.list()` fetches the caller's scope and field-permission
+rules exactly ONCE per request (`RbacService.resolveViewScope()` /
+`loadFieldPermissionRules()`) and evaluates every row's visibility/field
+access from those in memory (`filterRecordFieldsWithScope()` /
+`evaluateFieldAccess()`, both added this phase) — zero further
+permission-holding queries per row. `dummy_records` itself was
+intentionally left untouched: it's scaffolding with a handful of test
+rows, not a real object, and retrofitting the fix there was never the
+point (see Decision #7 in `DECISIONS.md` for the full writeup, including
+why this doesn't change `RbacService`'s existing `.self`/`.all` behavior
+for any other caller).
 
 **`npm audit` reports 24 vulnerabilities (7 high, 13 moderate, 4 low,
 0 critical) that all require a forced major-version bump to fix** (a
@@ -203,10 +208,78 @@ not reflexively force-upgraded:
 
 Nothing else was in scope for this pass. The obvious next candidates for
 a future audit, once Phase 6/7 land more surface area: request/response
-payload size limits (helmet doesn't set these), structured audit logging
-of authz denials (currently only the Platform Provisioning actions in
-`AuditModule` are logged — RBAC/entitlement denials are not), and
-dependency audit automation (this was done by hand; a CI job running
-`npm audit --audit-level=high` on a schedule, rather than only during
-manual audit passes like this one, would catch new advisories on
-existing pins without waiting for the next manual pass).
+payload size limits (helmet doesn't set these — Phase 7's own document
+upload endpoint is the first place this got a real, explicit limit; see
+below), structured audit logging of authz denials (currently only the
+Platform Provisioning actions in `AuditModule` are logged — RBAC/
+entitlement denials are not), and dependency audit automation (this was
+done by hand; a CI job running `npm audit --audit-level=high` on a
+schedule, rather than only during manual audit passes like this one,
+would catch new advisories on existing pins without waiting for the next
+manual pass).
+
+## 2026-09 — Phase 7 (Employee Core): first file-upload endpoint, and what came with it
+
+### Fixed: `multer`'s DoS advisories, ahead of the "revisit when" trigger arriving
+
+The Phase 5 audit's multer entry above said, explicitly: "**Revisit when:**
+the first file-upload endpoint is built." Phase 7's document vault
+(`POST /employees/:id/documents`) is that endpoint, so this got fixed now
+rather than deferred again. `@nestjs/platform-express@10.4.22` pins an
+exact `multer@2.0.2`, vulnerable to several real DoS advisories (crafted
+multipart field names/array indices causing uncontrolled resource
+consumption — GHSA-wc9g-mqfw-jrwm, GHSA-535w-7cp7-47q4, and others, all
+fixed in `multer@2.3.0`). Rather than the full `@nestjs/*` v12 major
+upgrade `npm audit`'s own `fixAvailable` suggests (the same major-upgrade
+question already deferred for the unrelated `qs`/react-router/file-type
+advisories below), a root `package.json` `overrides` entry
+(`"multer": "^2.3.0"`) forces just that one transitive dependency to a
+patched version while leaving `@nestjs/platform-express@^10.4.4` alone —
+multer 2.0→2.3 is a minor-version range, and `@nestjs/platform-express`'s
+`FileInterceptor` only uses multer's stable public API.
+
+**Not just trusted — verified the same way every dependency change in
+this log has been:** `npm ls multer` confirms `2.3.0 overridden` is what's
+actually installed; the full 62-test suite passes unchanged; and the new
+upload endpoint was driven with a real multipart `curl` request against a
+live `npm run dev` server, with the downloaded file's bytes diffed
+byte-for-byte against the original — proof the override didn't change
+`FileInterceptor`'s actual behavior, not just proof `npm install` didn't
+error. `npm audit`'s count for `apps/api` dropped from 26 (Phase 6's
+count) to 21 findings — multer's high-severity findings are gone entirely,
+not just reclassified.
+
+### Deferred (documented, not fixed): a low-severity `body-parser` advisory, same bucket as the others
+
+`body-parser` (transitively via `@nestjs/platform-express`, low severity —
+GHSA-v422-hmwv-36x6, a DoS possible only if an invalid `limit` value is
+passed to it, which this codebase never does) joins the existing
+`@nestjs/core`/`@nestjs/platform-express`/`@nestjs/common`/`@nestjs/testing`
+bucket from the Phase 5 audit above — same forced-major-upgrade-to-`@nestjs/*`-v12
+fix path, same "not worth it as a side effect of a routine change" reasoning,
+same revisit trigger (a deliberate, planned `@nestjs/*` v12 upgrade).
+
+### New, real gap surfaced while building the document vault: orphaned files on cascade delete
+
+Deleting a company cascades `employee_documents` rows via the database's
+own `ON DELETE CASCADE`, but nothing calls the new
+`FileStorageService.delete()` as part of that cascade — the uploaded file
+itself is left behind on disk. Caught by direct observation while manually
+testing this phase (a deleted fixture company's uploaded file was still
+sitting under `storage-data/` afterward), not by inspection alone. Full
+reasoning and the fix's shape are in `DECISIONS.md`'s Decision #7.
+Harmless at current scale (dev/test fixtures, cheap to clean up by hand);
+becomes a real problem once real client data and real deletion/GDPR-style
+purge requests exist. **Revisit when:** building any real "delete a
+company" or "delete an employee" flow.
+
+### Addressed proactively, not deferred: the document upload's own size limit
+
+The "Not yet investigated" note above (from the Phase 5 audit) flagged
+request/response payload size limits as unaddressed generally — this
+wasn't fixed globally, but Phase 7's own upload endpoint didn't get to
+inherit that gap silently: `FileInterceptor("file", { limits: { fileSize:
+10 * 1024 * 1024 } })` caps a single document at 10MB, and
+`EmployeesService.addDocument` independently re-checks the size on the
+buffer it actually receives. The broader "no payload size limits anywhere
+else" gap remains open and tracked above.

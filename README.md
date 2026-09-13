@@ -11,29 +11,40 @@ technical call lives in [`DECISIONS.md`](./DECISIONS.md); operational
 concerns — security hardening, dependency vulnerabilities, deferred
 performance work — are tracked in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
 
-**Current phase: Phase 6 — WRICEF Framework Skeleton (complete).**
-Exit criterion: Phase 4/5's own `dummy_records` scaffolding can be routed
-through a tenant-defined 2-step approval chain, including a
-forced-timeout escalation — proven by an automated test the same way
-Phases 4 and 5 were (see Decision #6).
+**Current phase: Phase 7 — Employee Core (complete).**
+Exit criterion: an Employee record gets a correctly tenant-scoped,
+immutable Employee Number assigned automatically, appears on an org
+chart, has its sensitive fields (CNIC, date of birth, salary band, bank
+account, Termination Reason) visible or hidden per role exactly the way
+Phase 4's engine already proved for `dummy_records`, can have a document
+attached to it, and has its job history recorded — all verified end to
+end, including over real HTTP against a live server, not just at the
+service layer (see Decision #7).
 
-All six WRICEF pillars from the plan doc's Section 6 now exist:
-Workflows (a generic approval-routing engine with SLA escalation),
-Enhancements (tenant-defined custom fields, JSONB-backed), Interfaces
-(notification dispatch — logged/stubbed, not yet wired to a real
-provider), Conversions (CSV import/export, validated row-by-row with a
-real per-row error report), and Forms (`{{field}}`-substitution document
-templates). Reports (the field-permission-aware report builder) is
-deferred until Phase 14 (BI & Analytics) actually needs it — nothing yet
-generates reports to build a builder for.
+The first real HR module — everything in Phases 1–6 was infrastructure
+this phase now actually uses. `employees`/`employee_documents`/
+`employee_job_history` are real, RLS-protected tenant tables; three real
+RBAC roles (HR Admin, Line Manager, Employee self-service) replace the
+Phase 4 demo roles for this object, exercising a new `.team` scope
+(direct reports only) alongside the existing `.self`/`.all`; a dedicated
+`employee_number_sequences` table assigns Employee Numbers atomically per
+the plan doc's Section 5 rules, including preserving a legacy number on
+import and advancing the sequence past it; and a new swappable
+`FileStorageService` (local-filesystem today, Supabase Storage/S3 later
+behind the same interface) backs the document vault.
 
-Before this, a security & quality audit pass (post-Phase 5) closed a
+Before this, Phase 6 built all five buildable WRICEF pillars (Workflows,
+Enhancements, Interfaces, Conversions, Forms — Reports waits for Phase 14
+per Section 6), and a post-Phase-5 security & quality audit closed a
 stale wide-open CORS default, added security headers (helmet) and rate
 limiting (global + a stricter per-route limit on every auth endpoint,
 specifically closing an MFA brute-force gap), and fixed an N+1 query
-pattern in the field-permission engine. Full writeup for both — including
-dependency vulnerabilities deliberately deferred with reasoning and
-revisit triggers — in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
+pattern in the field-permission engine — now fully resolved for a real
+object by this phase's own list-endpoint design (Decision #7). Full
+writeup for all of it — including dependency vulnerabilities deliberately
+deferred with reasoning and revisit triggers, and the one deliberately
+fixed this phase (multer's DoS advisories, once a real upload endpoint
+existed to trigger that fix) — in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
 
 ## Stack
 
@@ -41,8 +52,8 @@ revisit triggers — in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
 |---|---|
 | Database | Postgres (Supabase-managed in staging/prod; local Postgres for dev) — raw SQL migrations, no ORM (Decision #2) |
 | Auth | Real self-hosted auth now — bcrypt passwords, mandatory TOTP MFA, account lockout, password reset (see `apps/api/src/auth`, Decision #3). Swappable for Supabase Auth later without touching RLS or claims |
-| File storage | Supabase Storage — wired when a module needs it |
-| Business-logic API | NestJS (TypeScript) — owns module licensing (`apps/api/src/entitlements`, Decision #5), RBAC (`apps/api/src/rbac`, Decision #4), field permissions, and the WRICEF framework (`apps/api/src/workflow`, `custom-fields`, `notifications`, `document-templates`, `import-export`, Decision #6) |
+| File storage | `FileStorageService` interface (`apps/api/src/file-storage`) — a local-filesystem implementation for now, Supabase Storage/S3 swappable in behind it later without touching callers (Decision #7) |
+| Business-logic API | NestJS (TypeScript) — owns module licensing (`apps/api/src/entitlements`, Decision #5), RBAC (`apps/api/src/rbac`, Decision #4, extended with a `.team` scope in Decision #7), field permissions, the WRICEF framework (`apps/api/src/workflow`, `custom-fields`, `notifications`, `document-templates`, `import-export`, Decision #6), and Employee Core (`apps/api/src/employees`, Decision #7) |
 | Background jobs / SLA timers | `@nestjs/schedule` cron sweep for now, not Redis + BullMQ — see Decision #6 for why, and when that changes |
 | Frontend | React + Vite + Tailwind + React Router, Apple HIG design tokens |
 | Monorepo | Turborepo (npm workspaces) |
@@ -57,10 +68,16 @@ permission engine's design — most-permissive combination across roles,
 safe-deny by default, and why Platform Admin has no bypass — and Decision
 #5 for the module-licensing gate that now runs in front of it: a disabled
 module 404s rather than 403ing or degrading, and `tenant_module_entitlement`
-is the only table it ever reads from — and Decision #6 for the WRICEF
+is the only table it ever reads from — Decision #6 for the WRICEF
 Workflow engine's design (a plain DB sweep instead of BullMQ/Redis for SLA
 escalation, and why `manager_of_submitter` approval routing waits for
-Phase 7's employee hierarchy).
+Phase 7's employee hierarchy) — and Decision #7 for Phase 7's three real
+calls: a dedicated `employee_number_sequences` table instead of a
+`company_config` column (a real Postgres RLS-plus-`FOR UPDATE` gotcha
+this phase ran into and fixed), the swappable `FileStorageService`
+interface behind the document vault, and RBAC's new `.team` scope
+(direct reports only, resolved generically by the caller rather than
+`RbacService` knowing what an employee or a manager is).
 
 ## Repo layout
 
@@ -81,7 +98,9 @@ apps/
       notifications/  Notification dispatch log — logged/stubbed, no real provider wired yet (WRICEF Interfaces)
       document-templates/ {{field}}-substitution document generation (WRICEF Forms)
       import-export/  Generic CSV parse/validate/generate utility (WRICEF Conversions)
-      dummy/          Proof-of-concept object every engine above (RBAC, licensing, workflow, import/export) is proven against, pending Employee Core (Phase 7)
+      file-storage/   Swappable FileStorageService interface + local-filesystem implementation (Decision #7)
+      employees/      Employee Core: org chart, master data, document vault, job history, Employee Number assignment (Decision #7, plan doc Section 5)
+      dummy/          Proof-of-concept object the RBAC/licensing/workflow/import-export engines were originally proven against, before Employee Core existed
   web/
     src/
       pages/          Login (multi-step: password/MFA/reset), Dashboard, Create Company, Company Config, Audit Log, Platform Admins
@@ -157,7 +176,6 @@ provisioning it hasn't happened yet.
 
 ## What's next
 
-Phase 7 — Employee Core: org chart, employee master data, document
-vault, job history, and employee-number assignment per plan doc Section
-5. The first real HR module — everything before this was infrastructure.
-See `claude/development-plan.md` Section 7 for the full phase plan.
+Phase 8 — Employee Groups & Leave Policy Config: per-group policy
+resolution, reusing Phase 4's field-permission resolver pattern. See
+`claude/development-plan.md` Section 7 for the full phase plan.
