@@ -11,18 +11,29 @@ technical call lives in [`DECISIONS.md`](./DECISIONS.md); operational
 concerns — security hardening, dependency vulnerabilities, deferred
 performance work — are tracked in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
 
-**Current phase: Phase 5 — Module Provisioning & Licensing (complete),
-followed by a security & quality audit pass before starting Phase 6.**
-Exit criterion: disabling a module for a test tenant makes it vanish
-from their app switcher and 404 on direct API access.
+**Current phase: Phase 6 — WRICEF Framework Skeleton (complete).**
+Exit criterion: Phase 4/5's own `dummy_records` scaffolding can be routed
+through a tenant-defined 2-step approval chain, including a
+forced-timeout escalation — proven by an automated test the same way
+Phases 4 and 5 were (see Decision #6).
 
-The audit closed a stale wide-open CORS default, added security headers
-(helmet) and rate limiting (global + a stricter per-route limit on every
-auth endpoint, specifically closing an MFA brute-force gap), and fixed an
-N+1 query pattern in the field-permission engine. Full writeup —
-including dependency vulnerabilities deliberately deferred with
-reasoning and revisit triggers — in
-[`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
+All six WRICEF pillars from the plan doc's Section 6 now exist:
+Workflows (a generic approval-routing engine with SLA escalation),
+Enhancements (tenant-defined custom fields, JSONB-backed), Interfaces
+(notification dispatch — logged/stubbed, not yet wired to a real
+provider), Conversions (CSV import/export, validated row-by-row with a
+real per-row error report), and Forms (`{{field}}`-substitution document
+templates). Reports (the field-permission-aware report builder) is
+deferred until Phase 14 (BI & Analytics) actually needs it — nothing yet
+generates reports to build a builder for.
+
+Before this, a security & quality audit pass (post-Phase 5) closed a
+stale wide-open CORS default, added security headers (helmet) and rate
+limiting (global + a stricter per-route limit on every auth endpoint,
+specifically closing an MFA brute-force gap), and fixed an N+1 query
+pattern in the field-permission engine. Full writeup for both — including
+dependency vulnerabilities deliberately deferred with reasoning and
+revisit triggers — in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
 
 ## Stack
 
@@ -31,8 +42,8 @@ reasoning and revisit triggers — in
 | Database | Postgres (Supabase-managed in staging/prod; local Postgres for dev) — raw SQL migrations, no ORM (Decision #2) |
 | Auth | Real self-hosted auth now — bcrypt passwords, mandatory TOTP MFA, account lockout, password reset (see `apps/api/src/auth`, Decision #3). Swappable for Supabase Auth later without touching RLS or claims |
 | File storage | Supabase Storage — wired when a module needs it |
-| Business-logic API | NestJS (TypeScript) — owns module licensing (`apps/api/src/entitlements`, Decision #5), RBAC (`apps/api/src/rbac`, Decision #4), field permissions, workflow engine, WRICEF framework |
-| Background jobs | Redis + BullMQ |
+| Business-logic API | NestJS (TypeScript) — owns module licensing (`apps/api/src/entitlements`, Decision #5), RBAC (`apps/api/src/rbac`, Decision #4), field permissions, and the WRICEF framework (`apps/api/src/workflow`, `custom-fields`, `notifications`, `document-templates`, `import-export`, Decision #6) |
+| Background jobs / SLA timers | `@nestjs/schedule` cron sweep for now, not Redis + BullMQ — see Decision #6 for why, and when that changes |
 | Frontend | React + Vite + Tailwind + React Router, Apple HIG design tokens |
 | Monorepo | Turborepo (npm workspaces) |
 
@@ -46,7 +57,10 @@ permission engine's design — most-permissive combination across roles,
 safe-deny by default, and why Platform Admin has no bypass — and Decision
 #5 for the module-licensing gate that now runs in front of it: a disabled
 module 404s rather than 403ing or degrading, and `tenant_module_entitlement`
-is the only table it ever reads from.
+is the only table it ever reads from — and Decision #6 for the WRICEF
+Workflow engine's design (a plain DB sweep instead of BullMQ/Redis for SLA
+escalation, and why `manager_of_submitter` approval routing waits for
+Phase 7's employee hierarchy).
 
 ## Repo layout
 
@@ -62,7 +76,12 @@ apps/
       audit/          Append-only audit log service + endpoint
       rbac/           can()/resolveFieldAccess()/filterRecordFields() engine, roles + role-assignment API (Decision #4)
       entitlements/   isModuleEnabled() licensing gate, checked before RBAC everywhere (Decision #5)
-      dummy/          Proof-of-concept object the RBAC/licensing engines are proven against, pending Employee Core (Phase 7)
+      workflow/       Generic tenant-configurable approval-routing engine + SLA escalation (Decision #6)
+      custom-fields/  Tenant-defined custom fields on any object (WRICEF Enhancements)
+      notifications/  Notification dispatch log — logged/stubbed, no real provider wired yet (WRICEF Interfaces)
+      document-templates/ {{field}}-substitution document generation (WRICEF Forms)
+      import-export/  Generic CSV parse/validate/generate utility (WRICEF Conversions)
+      dummy/          Proof-of-concept object every engine above (RBAC, licensing, workflow, import/export) is proven against, pending Employee Core (Phase 7)
   web/
     src/
       pages/          Login (multi-step: password/MFA/reset), Dashboard, Create Company, Company Config, Audit Log, Platform Admins
@@ -138,11 +157,7 @@ provisioning it hasn't happened yet.
 
 ## What's next
 
-Phase 6 — WRICEF Framework Skeleton: a generic workflow/approval engine
-(sequential/parallel/conditional steps, SLA escalation, delegate-on-leave),
-a custom-field engine, notification dispatch, and basic import/export and
-template-based document generation — the last foundation phase before any
-real HR module exists. Exit criterion: Phase 4/5's own `dummy_records`
-scaffolding can be routed through a tenant-defined 2-step approval chain,
-including a forced-timeout escalation. See `claude/development-plan.md`
-Section 7 for the full phase plan.
+Phase 7 — Employee Core: org chart, employee master data, document
+vault, job history, and employee-number assignment per plan doc Section
+5. The first real HR module — everything before this was infrastructure.
+See `claude/development-plan.md` Section 7 for the full phase plan.

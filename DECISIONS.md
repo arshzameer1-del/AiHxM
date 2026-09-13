@@ -624,5 +624,111 @@ instead of an unenforced placeholder.
 
 ---
 
-*Next decision goes here as Decision #6, appended below this line — never
+## Decision #6: Phase 6's Workflow engine — a plain DB sweep instead of BullMQ/Redis, and what "skeleton" deliberately leaves out
+
+**Context.** Plan doc Section 6 calls for a generic, tenant-configurable
+approval-routing engine with SLA escalation ("sequential/parallel/
+conditional steps, SLA escalation, delegate-on-leave"), and Section 8's
+stack table names Redis + BullMQ for "Background jobs / SLA timers." This
+phase builds the engine (`apps/api/src/workflow`,
+`0007_wricef_workflow.sql`/`0008_workflow_seed.sql`) and has to decide
+what actually drives the timeout.
+
+**The call: `@nestjs/schedule`'s cron decorator plus a plain SQL sweep,
+not BullMQ/Redis.** `WorkflowService.escalateOverdue()` is one query —
+"every `workflow_step_approvals` row still `pending` past its `due_at`"
+— run every 5 minutes by `WorkflowEscalationScheduler`
+(`workflow.module.ts`). No queue, no Redis dependency, no job-retry
+semantics to reason about. This is a real deviation from Section 8's
+stack table, made the same way Decision #2 deviated from Prisma: because
+the simpler tool is actually correct for what this phase needs, not
+because the harder path was skipped.
+
+**Why this is the right call, not a shortcut.** A single idempotent
+sweep query has nothing a job queue adds value for: no retry-with-backoff
+is needed (the query naturally reruns on the next tick and finds the same
+row if it wasn't escalated), no distributed workers are coordinating
+(one API instance, one Postgres), and the "job" itself is instantaneous
+(a `date < now()` comparison, not a slow task worth queuing off the
+request path). Introducing Redis and BullMQ now would mean a second piece
+of infrastructure to run, monitor, and explain in the README's "Getting
+started," for a capability a five-line cron handler already provides
+correctly. `escalateOverdue()` is also directly callable — exactly how
+`workflow.service.spec.ts`'s forced-timeout test proves it, by backdating
+one row's `due_at` and calling the method once, rather than waiting on a
+real timer or standing up a test Redis instance.
+
+**What this doesn't close off.** Redis + BullMQ are still the right
+tool the moment a real job needs retry semantics, backoff, or meaningful
+work per job (sending an actual email through a rate-limited provider,
+generating a real payslip PDF) — Phase 12's payroll runs or a real
+notification-provider integration are the likely trigger for actually
+standing up that infrastructure. Nothing in `WorkflowService`'s public
+shape (`escalateOverdue(): Promise<number>`) would need to change if the
+*caller* of that method later became a BullMQ repeatable job instead of
+an `@nestjs/schedule` cron — the swap is at the scheduling layer, not the
+engine.
+
+**Dependency note.** `@nestjs/schedule@3.0.4` is the newest major
+compatible with this project's pinned `@nestjs/core@^10.4.x` (v4+
+requires Nest v11/v12). Its own `peerDependencies` ask for
+`reflect-metadata@^0.1.12`; this project is on `0.2.2` (a transitive
+`@nestjs/core` dependency, not something this project pins directly).
+Installed with `--legacy-peer-deps` after confirming `reflect-metadata`'s
+public API hasn't changed in a way `@nestjs/schedule` depends on (it
+doesn't call anything version-sensitive — `Reflect.getMetadata`/
+`defineMetadata`, stable since 0.1) and verifying the app actually boots
+and the cron actually registers (`[InstanceLoader] ScheduleModule
+dependencies initialized` in a live run), not just that npm's static
+peer-version check would have blocked it. Same judgment call as
+`@nestjs/throttler` in the Phase 5 audit pass.
+
+**Two scope decisions the schema/engine make, stated here rather than
+left implicit:**
+
+- **`manager_of_submitter` is not a supported approver type yet.**
+  `workflow_template_step_approvers.approver_type` only allows `role` and
+  `specific_user` (`0007_wricef_workflow.sql`'s header comment has the
+  full reasoning). Resolving "the submitter's manager" needs an
+  employee/manager reporting hierarchy, and that hierarchy doesn't exist
+  until Employee Core (Phase 7) defines it. Building it against no real
+  hierarchy now would mean inventing a throwaway one and then replacing
+  it — worse than waiting. **Revisit when:** Phase 7 ships the
+  employee→manager relationship; adding a third `approver_type` value and
+  a resolver that walks it is additive, not a breaking change to anything
+  built now.
+- **A step rejection fails the whole workflow instance immediately**,
+  rather than only failing that one step and letting other in-flight
+  parallel lines finish. This matches how a real rejected leave/expense
+  request behaves (nobody expects the remaining approvers to still get a
+  vote once one line has said no) and keeps the state machine's "what
+  does 'rejected' mean" question answerable in one sentence. A workflow
+  needing softer semantics (a rejection that only blocks *one branch* of
+  a larger approval tree) is a real future requirement, not a
+  hypothetical one, but nothing in Phase 4-6's actual BPDs needs it yet —
+  per Section 10's own guardrail against over-building this engine.
+
+**What this unblocks.** Phase 6's exit criterion is verified the same
+way Phases 4/5 verified theirs: `workflow.service.spec.ts`'s 8 tests
+against real Postgres (permission gate, the full 2-step sequential
+chain, immediate-fail-on-rejection, the forced-timeout escalation
+reassigning to a configured target who can then decide, and a
+conditional step being skipped), plus a live-server boot confirming the
+cron actually registers and the routes actually reject unauthenticated
+callers. `custom-fields.service.spec.ts` (4 tests) and
+`import-export.service.spec.ts`/`dummy-import-export.spec.ts` (7 tests)
+cover this phase's three remaining WRICEF pillars with real database
+round trips the same way. Notifications and Forms (document templates)
+are simple enough — a straight INSERT, and a regex substitution — that
+their own service methods are the whole implementation; they're
+exercised through the same build/lint/test pass rather than needing
+dedicated specs of their own. Phase 7 (Employee Core) and every phase
+after it can now route a real object through a real tenant-configured
+approval chain, attach tenant-defined custom fields to it, and generate a
+templated document from it, instead of building each of those three
+things bespoke per module.
+
+---
+
+*Next decision goes here as Decision #7, appended below this line — never
 inserted above it.*

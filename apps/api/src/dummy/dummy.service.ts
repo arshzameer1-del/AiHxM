@@ -4,7 +4,8 @@ import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
 import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
-import type { DummyRecordView } from "@boostfactor/shared-types";
+import { ImportExportService } from "../import-export/import-export.service";
+import type { CsvImportResult, DummyRecordView } from "@boostfactor/shared-types";
 
 const OBJECT_KEY = "dummy_record";
 const VIEW_PERMISSION = "dummy_record.view";
@@ -43,7 +44,8 @@ export class DummyService {
   constructor(
     private readonly db: DatabaseService,
     private readonly rbac: RbacService,
-    private readonly entitlements: EntitlementsService
+    private readonly entitlements: EntitlementsService,
+    private readonly importExport: ImportExportService
   ) {}
 
   async list(claims: RequestClaims): Promise<DummyRecordView[]> {
@@ -135,6 +137,51 @@ export class DummyService {
       // Created via a Platform Admin session, unfiltered — this is fixture
       // creation, not a real end-user read path.
       return rowToDummy(result.rows[0]) as DummyRecordView;
+    });
+  }
+
+  /**
+   * The Phase 6 "Conversions" WRICEF pillar proven against this same
+   * scaffolding object every other engine has been proven against —
+   * validated row-by-row, a bad row never blocks the good ones (plan doc
+   * Section 6's own wording). `companyId` is fixed for the whole import
+   * rather than a per-row column: a Platform Admin importing fixtures
+   * always does so for one company at a time, matching create()'s own
+   * shape above.
+   */
+  async importCsv(claims: RequestClaims, companyId: string, csvText: string): Promise<CsvImportResult<DummyRecordView>> {
+    const { rows: parsedRows, errors } = this.importExport.parseAndValidate(
+      csvText,
+      ["title"] as const,
+      (record) => ({
+        title: record.title,
+        status: record.status === "unlocked" ? ("unlocked" as const) : ("locked" as const),
+        testField: record.testField || undefined,
+      })
+    );
+
+    const imported: DummyRecordView[] = [];
+    for (const row of parsedRows) {
+      imported.push(await this.create(claims, { companyId, ...row }));
+    }
+    return { imported: imported.length, rows: imported, errors };
+  }
+
+  /**
+   * Takes an explicit `companyId` rather than relying on RLS to scope the
+   * rows, the same way create()/importCsv() above already do — a
+   * Platform-Admin-shaped claims object has no `company_id` of its own
+   * and RLS's `is_platform_admin()` branch would otherwise return every
+   * tenant's records mixed together, which is exactly wrong for a
+   * per-company export.
+   */
+  async exportCsv(claims: RequestClaims, companyId: string): Promise<string> {
+    return this.db.withClaims(claims, async (client) => {
+      const result = await client.query("SELECT * FROM dummy_records WHERE company_id = $1 ORDER BY created_at ASC", [
+        companyId,
+      ]);
+      const rows = result.rows.map((row) => rowToDummy(row));
+      return this.importExport.toCsv(["id", "title", "status", "testField", "createdAt"], rows);
     });
   }
 }

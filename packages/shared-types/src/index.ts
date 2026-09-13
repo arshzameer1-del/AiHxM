@@ -275,3 +275,211 @@ export type DummyRecordView = {
   testField?: string | null;
   secretField?: string | null;
 };
+
+// --- Phase 6: WRICEF Framework Skeleton — Workflow engine -----------------
+// See apps/api/migrations/0007_wricef_workflow.sql and
+// apps/api/src/workflow/workflow.service.ts. "manager_of_submitter" is
+// deliberately not a supported ApproverType yet — it needs the
+// employee/manager hierarchy Phase 7 (Employee Core) introduces; see
+// KNOWN_ISSUES.md.
+
+export type ApproverType = "role" | "specific_user";
+
+export type WorkflowApproverConfig = {
+  approverType: ApproverType;
+  roleId?: string;
+  userAccountId?: string;
+  escalationApproverType?: ApproverType;
+  escalationRoleId?: string;
+  escalationUserAccountId?: string;
+};
+
+export type WorkflowFieldCondition = { field: string; equals: unknown };
+
+export type WorkflowStepConfig = {
+  stepOrder: number;
+  name: string;
+  condition?: WorkflowFieldCondition | null;
+  /** Hours until a pending approval on this step is escalated. Omit for no SLA. */
+  slaHours?: number;
+  /** One entry per required approval line — more than one means every line must approve ("parallel"). */
+  approvers: WorkflowApproverConfig[];
+};
+
+export type WorkflowTemplate = {
+  id: string;
+  companyId: string;
+  key: string;
+  name: string;
+  objectKey: string;
+  isActive: boolean;
+  steps: WorkflowStepConfig[];
+  createdAt: string;
+};
+
+export type CreateWorkflowTemplateRequest = {
+  key: string;
+  name: string;
+  objectKey: string;
+  steps: WorkflowStepConfig[];
+};
+
+export type WorkflowInstanceStatus = "in_progress" | "approved" | "rejected" | "cancelled";
+export type WorkflowStepStatus = "pending" | "skipped" | "approved" | "rejected";
+export type WorkflowApprovalStatus = "pending" | "escalated" | "approved" | "rejected";
+
+export type WorkflowStepApprovalView = {
+  id: string;
+  approverType: ApproverType;
+  roleId: string | null;
+  userAccountId: string | null;
+  status: WorkflowApprovalStatus;
+  dueAt: string | null;
+  escalatedAt: string | null;
+  escalatedToUserAccountId: string | null;
+  decidedByUserAccountId: string | null;
+  decision: "approved" | "rejected" | null;
+  comment: string | null;
+};
+
+export type WorkflowStepInstanceView = {
+  id: string;
+  stepOrder: number;
+  name: string;
+  status: WorkflowStepStatus;
+  approvals: WorkflowStepApprovalView[];
+};
+
+export type WorkflowInstanceView = {
+  id: string;
+  companyId: string;
+  templateId: string;
+  templateKey: string;
+  objectKey: string;
+  recordId: string;
+  submittedByUserAccountId: string;
+  status: WorkflowInstanceStatus;
+  steps: WorkflowStepInstanceView[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SubmitForApprovalRequest = {
+  templateKey: string;
+  objectKey: string;
+  recordId: string;
+  /**
+   * A snapshot of the record's fields at submission time, used only to
+   * evaluate conditional steps (WorkflowStepConfig.condition). The engine
+   * never queries the object's own table itself — see
+   * 0007_wricef_workflow.sql's header comment.
+   */
+  record: Record<string, unknown>;
+};
+
+export type ApprovalDecisionRequest = {
+  decision: "approved" | "rejected";
+  comment?: string;
+};
+
+// --- Phase 6: WRICEF Framework Skeleton — Enhancements (custom fields) ---
+
+export type CustomFieldType = "text" | "number" | "boolean" | "date" | "select";
+
+export type CustomFieldDefinition = {
+  id: string;
+  companyId: string;
+  objectKey: string;
+  fieldKey: string;
+  label: string;
+  fieldType: CustomFieldType;
+  options?: string[];
+  isRequired: boolean;
+  createdAt: string;
+};
+
+export type DefineCustomFieldRequest = {
+  objectKey: string;
+  fieldKey: string;
+  label: string;
+  fieldType: CustomFieldType;
+  options?: string[];
+  isRequired?: boolean;
+};
+
+export type SetCustomFieldValueRequest = {
+  objectKey: string;
+  recordId: string;
+  fieldKey: string;
+  value: unknown;
+};
+
+// --- Phase 6: WRICEF Framework Skeleton — Interfaces (notifications) -----
+// Logged/stubbed only, per the plan doc's own wording — see
+// 0009_wricef_fields_notifications_forms.sql's header comment and
+// KNOWN_ISSUES.md for what "real provider" means when it's built.
+
+export type NotificationChannel = "email" | "whatsapp" | "push" | "in_app";
+
+export type DispatchNotificationRequest = {
+  channel: NotificationChannel;
+  recipient: string;
+  templateKey: string;
+  payload?: Record<string, unknown>;
+};
+
+export type NotificationLogEntry = {
+  id: string;
+  companyId: string;
+  channel: NotificationChannel;
+  recipient: string;
+  templateKey: string;
+  payload: Record<string, unknown>;
+  status: "logged" | "sent" | "failed";
+  createdAt: string;
+};
+
+// --- Phase 6: WRICEF Framework Skeleton — Forms (document templates) -----
+
+export type DocumentTemplate = {
+  id: string;
+  companyId: string;
+  key: string;
+  name: string;
+  objectKey: string;
+  templateBody: string;
+  createdAt: string;
+};
+
+export type CreateDocumentTemplateRequest = {
+  key: string;
+  name: string;
+  objectKey: string;
+  templateBody: string;
+};
+
+export type RenderDocumentRequest = {
+  templateKey: string;
+  record: Record<string, unknown>;
+};
+
+export type RenderedDocument = {
+  templateKey: string;
+  content: string;
+};
+
+// --- Phase 6: WRICEF Framework Skeleton — Conversions (import/export) ----
+// No dedicated types beyond this — ImportExportService works generically
+// against whatever column/DTO shape a caller hands it (see
+// apps/api/src/import-export/import-export.service.ts).
+
+export type CsvImportRowError = {
+  row: number;
+  message: string;
+};
+
+export type CsvImportResult<T> = {
+  imported: number;
+  rows: T[];
+  errors: CsvImportRowError[];
+};

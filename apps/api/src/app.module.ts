@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { APP_GUARD } from "@nestjs/core";
 import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
+import { ScheduleModule } from "@nestjs/schedule";
 import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
 import { DatabaseModule } from "./database/database.module";
@@ -11,6 +12,11 @@ import { PlatformAdminsModule } from "./platform-admins/platform-admins.module";
 import { RbacModule } from "./rbac/rbac.module";
 import { EntitlementsModule } from "./entitlements/entitlements.module";
 import { DummyModule } from "./dummy/dummy.module";
+import { WorkflowModule } from "./workflow/workflow.module";
+import { CustomFieldsModule } from "./custom-fields/custom-fields.module";
+import { NotificationsModule } from "./notifications/notifications.module";
+import { DocumentTemplatesModule } from "./document-templates/document-templates.module";
+import { ImportExportModule } from "./import-export/import-export.module";
 
 /**
  * Phase 2/3/4/5 root module: health check, the Platform Provisioning Panel
@@ -29,6 +35,7 @@ import { DummyModule } from "./dummy/dummy.module";
 @Module({
   imports: [
     ThrottlerModule.forRoot([{ name: "default", ttl: 60_000, limit: 100 }]),
+    ScheduleModule.forRoot(),
     DatabaseModule,
     AuthModule,
     CompaniesModule,
@@ -37,6 +44,11 @@ import { DummyModule } from "./dummy/dummy.module";
     RbacModule,
     EntitlementsModule,
     DummyModule,
+    WorkflowModule,
+    CustomFieldsModule,
+    NotificationsModule,
+    DocumentTemplatesModule,
+    ImportExportModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],

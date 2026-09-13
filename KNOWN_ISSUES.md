@@ -172,6 +172,33 @@ reset token outside `NODE_ENV === "production"`
 : rawToken;`) — confirmed by reading the code, not assumed. Listed here
 only so it's clear this was checked during the audit, not missed.
 
+## 2026-09 — Phase 6 dependency addition
+
+Adding `@nestjs/schedule@3.0.4` (Decision #6 in `DECISIONS.md` has the
+full reasoning for why this package exists at all) moved `npm audit`'s
+count from 24 to 26 findings, both newly-introduced and both checked the
+same way as every other entry in this file — for actual reachability,
+not reflexively force-upgraded:
+
+- **`@nestjs/schedule` (moderate)** — the advisory here is `@nestjs/core`'s
+  already-documented "improperly neutralizes special elements" finding
+  (see the September audit above) resurfacing through a second dependency
+  path now that `@nestjs/schedule` also depends on `@nestjs/core`. Same
+  root cause, same dormant/unused-feature reasoning, same revisit
+  trigger — not a second distinct problem.
+- **`uuid` (moderate, transitive via `@nestjs/schedule`)** —
+  "Missing buffer bounds check in v3/v5/v6 when `buf` is provided"
+  (GHSA-w5hq-g745-h8pq), affecting `uuid@<11.1.1`; this project pulls in
+  `uuid@9.0.1`. Checked via `grep` in `node_modules/@nestjs/schedule`:
+  the only call site is `uuid_1.v4()`, called with zero arguments, to
+  generate cron-job names. The vulnerable code path only triggers when a
+  caller supplies their own output buffer to `v3`/`v5`/`v6` — `v4` isn't
+  in the affected function list at all, and even it is never called with
+  a buffer here. Dormant. **Revisit when:** upgrading `@nestjs/schedule`
+  to a major version that changes its `uuid` usage (unlikely — job naming
+  is not a moving part of that library), or as part of the same eventual
+  `@nestjs/*` v12 upgrade already tracked above.
+
 ### Not yet investigated
 
 Nothing else was in scope for this pass. The obvious next candidates for
