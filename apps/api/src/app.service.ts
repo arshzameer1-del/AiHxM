@@ -1,0 +1,14 @@
+import { Injectable } from "@nestjs/common";
+import type { HealthStatus } from "@boostfactor/shared-types";
+
+@Injectable()
+export class AppService {
+  getHealth(): HealthStatus {
+    return {
+      status: "ok",
+      service: "boostfactor-api",
+      phase: "Phase 1 — Infrastructure Setup",
+      timestamp: new Date().toISOString(),
+    };
+  }
+}

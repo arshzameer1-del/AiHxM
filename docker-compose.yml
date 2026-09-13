@@ -1,0 +1,36 @@
+version: "3.9"
+
+# Local Phase 1 infrastructure. This stands in for Supabase's managed
+# Postgres during local development — the same schema and RLS policies
+# will later be applied to the real Supabase project (see .env.example).
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: boostfactor_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: boostfactor
+      POSTGRES_PASSWORD: boostfactor_dev
+      POSTGRES_DB: boostfactor
+    ports:
+      - "5432:5432"
+    volumes:
+      - boostfactor_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U boostfactor"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: boostfactor_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - boostfactor_redis_data:/data
+
+volumes:
+  boostfactor_postgres_data:
+  boostfactor_redis_data:
