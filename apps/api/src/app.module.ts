@@ -1,17 +1,19 @@
 import { Module } from "@nestjs/common";
 import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
+import { DatabaseModule } from "./database/database.module";
+import { AuthModule } from "./auth/auth.module";
+import { CompaniesModule } from "./companies/companies.module";
+import { AuditModule } from "./audit/audit.module";
 
 /**
- * Phase 1 root module: just the health check.
- *
- * Phase 2 adds PlatformAdminModule (companies, company_config,
- * company_admins, platform_admins, audit_log). Phase 4 adds the RBAC /
- * field-permission engine as a global module every subsequent feature
- * module depends on.
+ * Phase 2 root module: health check plus the Platform Provisioning Panel
+ * (companies, config, admins, audit log, auth). Phase 4 adds the RBAC /
+ * field-permission engine as a module every subsequent tenant-facing
+ * feature module depends on.
  */
 @Module({
-  imports: [],
+  imports: [DatabaseModule, AuthModule, CompaniesModule, AuditModule],
   controllers: [AppController],
   providers: [AppService],
 })

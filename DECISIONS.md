@@ -105,5 +105,90 @@ it.
 
 ---
 
-*Next decision goes here as Decision #2, appended below this line — never
+## Decision #2 — Raw SQL migrations + `pg`, not Prisma, for the database layer
+
+**Date:** Phase 2, Platform Provisioning Panel
+**Status:** Accepted
+
+### Context
+
+Phase 1's schema was scaffolded through Prisma, on the assumption it would
+carry the whole project as a type-safe ORM. Two things surfaced once Phase
+2 needed to actually write tenant-scoped tables and Row Level Security
+policies:
+
+1. **Prisma's schema language cannot express RLS policies at all.** RLS
+   lives entirely outside `schema.prisma` — every real Prisma+RLS project
+   ends up hand-writing the policy SQL anyway, usually as a raw-SQL
+   migration step bolted on beside Prisma's generated migrations. Section
+   2 of the plan makes RLS a load-bearing part of the architecture (a
+   second, database-level line of defense), not a nice-to-have, so the
+   tool that owns "what the schema looks like" needs to own the policies
+   too, not treat them as an afterthought in a different file.
+2. **Prisma's CLI needs to download a native schema-engine binary from
+   `binaries.prisma.sh`** to run `generate` or `migrate`. In this build
+   environment that host is blocked by network policy, and `prisma
+   generate` fails outright. That is an environment-specific trigger, but
+   it generalizes: enterprise and regulated clients — banks, in
+   particular, already flagged as a live sales target in Pakistan — run
+   locked-down networks and CI runners themselves. A tool whose core
+   workflow silently depends on reaching one specific external binary
+   host is a fragile thing to build a client-facing product's schema
+   pipeline on.
+
+### Decision
+
+Drop Prisma. The database layer is now:
+
+- **Hand-written SQL migration files** (`apps/api/migrations/NNNN_*.sql`),
+  applied in order by a small, dependency-free runner
+  (`apps/api/src/database/migrate.ts`) that tracks what's already applied
+  in a `_migrations` table. Each migration owns its tables, indexes, *and*
+  its RLS policies together, in one file, so the isolation rule for a
+  table is never separated from the table's own definition.
+- **`pg` (node-postgres) as the query layer**, used directly from NestJS
+  services. No ORM abstraction between the API and the SQL — every query
+  the API sends is visible in the codebase as SQL, which for a
+  permission-and-isolation-critical system is a feature, not a gap: it
+  means a reviewer checking "does this query filter by `company_id`" is
+  reading the actual query, not trusting a query builder to have done it
+  correctly underneath.
+
+### Why this doesn't weaken anything from Decision #1
+
+Decision #1 already committed to RLS as the database-level backstop and
+the NestJS API as the sole owner of business logic on top of it. Nothing
+here changes that split — it just removes a middle layer (the ORM) that
+added a native-binary dependency without adding anything the RLS-heavy
+schema in this project actually needed. Type safety across the API and
+web app still comes from `packages/shared-types`, hand-written per
+domain object as those objects are designed (starting with the Company /
+CompanyConfig / AuditLog shapes in this phase) — slightly more manual
+than generating types from a schema, but exact, and it costs nothing at
+migration time.
+
+### Alternatives considered
+
+- **Keep Prisma, work around the download.** Rejected — there's no
+  reachable mirror for the engine binary from this network, and even
+  where it is reachable, Prisma still can't express RLS policies, so the
+  raw-SQL escape hatch would be needed either way.
+- **Drizzle ORM** (SQL-like query builder, no native binary, decent RLS
+  ergonomics via raw policy blocks). A reasonable alternative; not chosen
+  only because plain `pg` is simpler still for a schema this size right
+  now and adds one fewer dependency. Worth revisiting once the number of
+  tables and query call-sites grows enough that hand-written SQL starts
+  costing real time — that's an ergonomics trade, not an architecture one,
+  so revisiting it later is cheap.
+
+### What this unblocks
+
+Phase 2's `companies` / `company_config` / `company_admins` /
+`platform_admins` / `audit_log` tables and their RLS policies ship as one
+migration, verified against local Postgres in this same environment that
+couldn't run Prisma's CLI at all.
+
+---
+
+*Next decision goes here as Decision #3, appended below this line — never
 inserted above it.*
