@@ -313,5 +313,187 @@ standard Phase 2 set.
 
 ---
 
-*Next decision goes here as Decision #4, appended below this line — never
+## Decision #4 — Two-tier RBAC (`can()` + `resolveFieldAccess()`), most-permissive combination, and no Platform Admin bypass
+
+**Date:** Phase 4, RBAC + Field-Level Permission Engine
+**Status:** Accepted
+
+### Context
+
+The plan doc's Section 2 enforcement order and Section 7 Phase 4 row call
+for two distinct checks, not one: whether a user can touch an object at
+all (`can(user, permission, target)`), and — separately — which of that
+object's *fields* they can see or edit
+(`resolveFieldAccess(user, field, record)`), including fields whose
+visibility depends on another field's value (e.g. "show Termination
+Reason only when Status = Terminated"). Section 3 also states plainly that
+Platform Admin "never touches a tenant's HR data" — a real security
+property, not a UI convenience, since Platform Admin accounts are Our
+Company's own ops staff, not the client's.
+
+Phase 4 has no real HR object yet (Employee Core doesn't exist until Phase
+7), so this phase builds the engine and proves it against a purpose-built
+`dummy_records` table rather than deferring the engine's own design and
+test suite to whichever phase happens to need it first.
+
+### Decision
+
+- **`RbacService.can(claims, permissionKey, target?)`** — object/record
+  level. Permission keys carry a `.self`/`.all` scope suffix
+  (`dummy_record.view.self` vs `dummy_record.view.all`); `.self` also
+  compares `target.ownerId` against the caller. Backed by
+  `user_role_assignments` (which role(s) a user holds in a company) joined
+  through `role_permissions` to the `permissions` catalog — both seeded by
+  migration `0004_rbac.sql`, both Platform-Admin/service-write-only like
+  every other catalog table in this schema.
+- **`RbacService.resolveFieldAccess(claims, objectKey, fieldKey, record)`**
+  — field level, independent of object-level access. Rules live in
+  `field_permission_rules`, each scoped to a role + object + field, with
+  an access level (`hidden` / `view` / `edit`) and an optional JSONB
+  `condition` (e.g. `{"field": "status", "equals": "unlocked"}`) evaluated
+  in application code, not SQL — Decision #1 already put conditional,
+  hard-to-test business logic in the API layer rather than in policy
+  expressions, and this is the same call.
+- **Most-permissive combination across roles**: if a user holds multiple
+  roles that each produce a result for the same field, the highest-ranked
+  result wins (`hidden` < `view` < `edit`) — additive, never subtractive.
+  Absent any matching rule, the default is `hidden` (safe-deny). Resolving
+  two *conditional* rules on the *same* role that both match the same
+  record ("most-specific-match-wins", the plan doc's own phrase) is an
+  intentionally out-of-scope gap for this phase — none of the seeded demo
+  roles produce that scenario, and it's flagged here rather than guessed
+  at so it isn't rediscovered as a surprise later.
+- **`RbacService.filterRecordFields(...)`** is the actual enforcement
+  point services call before returning a record: it builds the response
+  object key-by-key, only ever setting a sensitive field's key when its
+  resolved access is not `hidden`. A hidden field's key is genuinely
+  **absent** from `Object.keys()`/`JSON.stringify()` — never set to
+  `null` — matching the exit criterion's literal wording ("absent from
+  the raw API response," not "nulled out").
+- **No Platform Admin bypass, structurally, not by convention.** A
+  Platform Admin session's `RequestClaims.company_id` is always `null`
+  (true since Decision #3). `user_role_assignments` rows always carry a
+  real `company_id`, and SQL's `= NULL` is never true — so a Platform
+  Admin session cannot match any role assignment in any tenant, in any
+  query, ever. This was deliberately *not* built as
+  `if (claims.is_platform_admin) return true` in `RbacService` — that
+  would be one accidental line away from silently giving Our Company's
+  ops staff god-mode over every client's HR data. The structural version
+  can't be "fixed" into a bypass by someone who doesn't understand why it
+  looks incomplete; a `describe("...no bypass")` test in
+  `rbac.service.spec.ts` pins this down as intentional, not a gap someone
+  should close.
+- **`SessionGuard`** (`apps/api/src/auth/session.guard.ts`), new
+  alongside `PlatformAdminGuard`: accepts any valid session JWT regardless
+  of tier. RBAC governs ordinary end-user roles (Company Super Admin now;
+  Employee/Manager once Phase 7 exists) — gating the demo endpoints behind
+  `PlatformAdminGuard` would make it impossible to ever prove the "should
+  allow" half of the test suite. Both guards keep the same discipline:
+  `req.claims` is built field-by-field from the verified JWT
+  (`sub`, `is_platform_admin`, `company_id ?? null`), never a spread of
+  the decoded payload, so `is_service` can never be smuggled in through a
+  client-supplied token.
+- **`field_key` is the API-facing camelCase name, not the DB column
+  name** (`testField`, not `test_field`). `RbacService` never sees a
+  database column — only the keys of the already-mapped JS record object
+  a service hands it — so the catalog has to speak that language too.
+
+### A bug this surfaced, and the fix
+
+The seed data in migration `0004_rbac.sql` was first written with
+snake_case `field_key` values (`'test_field'`, `'secret_field'`),
+matching the DB column names out of habit from writing the SQL right
+above them. `resolveFieldAccess` calls always passed the camelCase names
+services actually use, so no rule ever matched and every field silently
+resolved to `hidden` — the safe-deny default masked the bug instead of
+surfacing it as an error. Caught by the test suite itself (three
+"should allow view" cases failed, expecting `"view"` and getting
+`"hidden"`), fixed by editing migration 0004's seed `INSERT`s directly
+(not a new migration — 0004 was still uncommitted/in-draft in this same
+session, unlike migration 0003's fix-via-new-file for the already-shipped
+migration 0002 in Decision #3) plus a one-time `UPDATE` against the
+already-migrated dev database to match. The lesson generalizes: any table
+whose rows describe *application-layer* keys (as opposed to columns of
+some other table) needs its seed data reviewed against the application's
+naming convention, not the schema's.
+
+### A second bug this surfaced, unrelated to RBAC itself
+
+Writing this phase's real Jest suite (`npm run test`, not just
+`ts-jest --check`) surfaced two infrastructure gaps, both fixed as part
+of this phase rather than worked around:
+
+- **No DELETE grant/policy on `user_accounts` at all.** Migration 0002
+  granted SELECT/INSERT/UPDATE only. Test-fixture cleanup needing to
+  delete a user account hit "permission denied for table user_accounts" —
+  a genuine product gap (no way to remove a compromised or
+  mistakenly-created account, even at the DB layer), not just a test
+  inconvenience. Closed by migration `0005_user_accounts_delete.sql`,
+  Platform-Admin-or-service only, matching every other write surface in
+  this schema.
+- **Jest couldn't parse `otplib`'s dependency chain** (`@scure/base`,
+  `@noble/hashes` ship ES modules) in any test that transitively imports
+  `AuthModule` — which any full-app e2e test does. `ts-jest` only
+  transforms this package's own `.ts` sources; `babel-jest` was added for
+  matching `node_modules` packages, per Jest's documented escape hatch.
+  That alone still failed with the exact same "Unexpected token export,"
+  because this is a Turborepo monorepo: `@scure/base` resolves from the
+  **hoisted root** `node_modules`, one directory above `apps/api`, and
+  Babel's default config-file search is root-relative to the API
+  package's own directory — it silently finds no config for a file
+  outside that tree and "transforms" it with zero presets applied. Fixed
+  by pointing `babel-jest` at `apps/api/babel.config.js` explicitly
+  (`["babel-jest", { configFile: require.resolve("./babel.config.js") }]`
+  in `jest.config.js`) instead of relying on Babel's own search. Any
+  future package with the same shape (ships ESM, lives in the hoisted
+  root, gets pulled in by a test) will hit this identically — the fix
+  generalizes, the underlying cause (monorepo hoisting vs. package-local
+  config search) does not go away.
+
+### Why this doesn't weaken anything from Decisions #1–#3
+
+RLS still backs every one of the new tables
+(`roles`/`permissions`/`role_permissions`/`field_permission_rules`/
+`user_role_assignments`/`dummy_records`) the same way every tenant-owned
+table in this schema has since Decision #1 — RBAC is a second,
+independent gate on top of RLS, not a replacement for it. Nothing here
+touches `RequestClaims`, `runInTenantContext`, or the Supabase
+portability story from Decision #1; the engine reads claims the same way
+every other service does.
+
+### Alternatives considered
+
+- **A single `can()` check, with field visibility just another
+  permission key** (e.g. `dummy_record.testField.view`). Rejected —
+  doesn't model *conditional* field visibility (the Termination Reason
+  case) without smuggling condition logic into the permission-key string
+  itself, and conflates "can you see this record" with "can you see this
+  specific field on it," which the exit criterion treats as genuinely
+  separate questions.
+- **`if (claims.is_platform_admin) return true` short-circuit in
+  `can()`/`resolveFieldAccess()`.** Rejected outright — see "No Platform
+  Admin bypass" above. The plan doc's Section 3 boundary is a promise to
+  every client, not an implementation detail.
+
+### What this unblocks
+
+Phase 4's exit criterion — "a dummy record's test field is visible to one
+role and absent from the raw API response for another, proven by an
+automated test, not manual clicking" — is verified three ways: an
+integration test suite against real Postgres
+(`rbac.service.spec.ts`, 18 tests), a full-HTTP-stack e2e test through
+actual guards/controllers (`dummy.e2e.spec.ts`, 4 tests), and a manual
+run against a live `npm run dev` server with real `curl` calls (not just
+supertest's in-process request) confirming the same four outcomes: 401
+with no token, `testField`/`secretField` present in the full-access
+role's raw JSON, both keys entirely absent (not null) in the view-only
+role's raw JSON, and 404 (not 403) for a Platform-Admin-shaped token
+probing a record it holds no role in. All 22 tests are wired into CI
+(`.github/workflows/ci.yml`), which previously had no test step at all.
+Phase 7 (Employee Core) is the first phase that points this engine at a
+real HR object instead of `dummy_records`.
+
+---
+
+*Next decision goes here as Decision #5, appended below this line — never
 inserted above it.*

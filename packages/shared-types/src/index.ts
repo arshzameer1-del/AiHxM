@@ -208,3 +208,59 @@ export type CreatePlatformAdminRequest = {
   email: string;
   initialPassword: string;
 };
+
+// --- Phase 4: RBAC + Field-Level Permission Engine -----------------------
+// See apps/api/migrations/0004_rbac.sql and apps/api/src/rbac/rbac.service.ts.
+// `can()` (object/record-level) and `resolveFieldAccess()` (field-level,
+// including conditional sibling-field rules) are the two engines the plan
+// doc's enforcement order calls for; these types describe the catalog and
+// assignment data they read, plus the dummy_records proof-of-concept
+// object used to test them until Employee Core (Phase 7) provides a real one.
+
+export type FieldAccess = "view" | "edit" | "hidden";
+
+export type Role = {
+  id: string;
+  key: string;
+  name: string;
+  description: string | null;
+};
+
+export type Permission = {
+  id: string;
+  key: string;
+  description: string | null;
+};
+
+export type UserRoleAssignment = {
+  id: string;
+  userAccountId: string;
+  companyId: string;
+  roleId: string;
+  roleKey: string;
+  createdAt: string;
+};
+
+export type AssignRoleRequest = {
+  userAccountId: string;
+  companyId: string;
+  roleKey: string;
+};
+
+/**
+ * dummy_records, filtered through RbacService.filterRecordFields before it
+ * ever reaches the client — `testField`/`secretField` are simply absent
+ * from the object (not present-but-null) when the caller's role doesn't
+ * grant them. Never a real product object; exists only to prove the
+ * engine (see this phase's own exit criterion).
+ */
+export type DummyRecordView = {
+  id: string;
+  companyId: string;
+  ownerUserAccountId: string | null;
+  title: string;
+  status: "locked" | "unlocked";
+  createdAt: string;
+  testField?: string | null;
+  secretField?: string | null;
+};

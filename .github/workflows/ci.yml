@@ -62,3 +62,6 @@ jobs:
 
       - name: Seed the first Platform Admin (idempotent)
         run: npm run seed --workspace=@boostfactor/api
+
+      - name: Run tests (real Postgres — RLS is the point, not mocked)
+        run: npm run test --workspace=@boostfactor/api

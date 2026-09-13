@@ -9,9 +9,10 @@ full architecture and phase plan live in the `BoostFactor` Claude Project
 as `claude/development-plan.md`; the reasoning behind every irreversible
 technical call lives in [`DECISIONS.md`](./DECISIONS.md).
 
-**Current phase: Phase 3 — Auth & Identity.**
-Exit criterion: a locked/disabled account cannot authenticate; a password
-reset never exposes the old credential.
+**Current phase: Phase 4 — RBAC + Field-Level Permission Engine.**
+Exit criterion: a dummy record's test field is visible to one role and
+absent from the raw API response for another, proven by an automated
+test, not manual clicking.
 
 ## Stack
 
@@ -20,7 +21,7 @@ reset never exposes the old credential.
 | Database | Postgres (Supabase-managed in staging/prod; local Postgres for dev) — raw SQL migrations, no ORM (Decision #2) |
 | Auth | Real self-hosted auth now — bcrypt passwords, mandatory TOTP MFA, account lockout, password reset (see `apps/api/src/auth`, Decision #3). Swappable for Supabase Auth later without touching RLS or claims |
 | File storage | Supabase Storage — wired when a module needs it |
-| Business-logic API | NestJS (TypeScript) — owns RBAC, field permissions, workflow engine, WRICEF framework |
+| Business-logic API | NestJS (TypeScript) — owns RBAC (`apps/api/src/rbac`, Decision #4), field permissions, workflow engine, WRICEF framework |
 | Background jobs | Redis + BullMQ |
 | Frontend | React + Vite + Tailwind + React Router, Apple HIG design tokens |
 | Monorepo | Turborepo (npm workspaces) |
@@ -28,9 +29,11 @@ reset never exposes the old credential.
 See `DECISIONS.md` Decision #1 for why the backend splits between Supabase
 infrastructure and a NestJS business-logic layer with RLS as
 defense-in-depth, Decision #2 for why the database layer is raw SQL
-migrations + `pg` rather than an ORM, and Decision #3 for why Phase 3
-builds genuine self-hosted authentication now instead of waiting on a
-Supabase project that doesn't exist yet.
+migrations + `pg` rather than an ORM, Decision #3 for why Phase 3 builds
+genuine self-hosted authentication now instead of waiting on a Supabase
+project that doesn't exist yet, and Decision #4 for the RBAC/field-level
+permission engine's design — most-permissive combination across roles,
+safe-deny by default, and why Platform Admin has no bypass.
 
 ## Repo layout
 
@@ -44,6 +47,8 @@ apps/
       companies/      Platform Admin API: create/list/config/admins/impersonate/admin-login-creation
       platform-admins/ Our own ops team's accounts: list/create/lock
       audit/          Append-only audit log service + endpoint
+      rbac/           can()/resolveFieldAccess()/filterRecordFields() engine, roles + role-assignment API (Decision #4)
+      dummy/          Proof-of-concept object the RBAC engine is proven against, pending Employee Core (Phase 7)
   web/
     src/
       pages/          Login (multi-step: password/MFA/reset), Dashboard, Create Company, Company Config, Audit Log, Platform Admins
@@ -119,9 +124,11 @@ provisioning it hasn't happened yet.
 
 ## What's next
 
-Phase 4 — RBAC + Field-Level Permission Engine: `can(user, permission,
-target)` and `resolveFieldAccess(user, field, record)` in the API layer, a
-seeded Permission/Role/AssignmentRule catalog, and a full "should allow /
-should deny" test suite per permission — built against the real identities
-Phase 3 now provides instead of one hardcoded claims object. See
+Phase 5 — Module Provisioning & Licensing: `module_catalog`/`package_tier`/
+`tenant_module_entitlement` tables, an `is_module_enabled()` check that
+runs before Phase 4's `can()` everywhere the RBAC engine is consulted, and
+wiring entitlement into the Company Config screen from Phase 2 so a
+Platform Admin can turn modules on and off per tenant through the real UI.
+Exit criterion: disabling a module for a test tenant makes it vanish from
+their app switcher and 404 — not 403 — on direct API access. See
 `claude/development-plan.md` Section 7 for the full phase plan.
