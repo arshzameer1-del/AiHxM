@@ -24,6 +24,9 @@ export function Layout() {
           <NavLink to="/audit-log" className={navLinkClass}>
             Audit Log
           </NavLink>
+          <NavLink to="/platform-admins" className={navLinkClass}>
+            Platform Admins
+          </NavLink>
         </nav>
 
         <div className="mt-auto px-3">

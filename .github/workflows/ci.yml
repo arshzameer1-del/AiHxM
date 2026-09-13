@@ -35,7 +35,10 @@ jobs:
       # migration below creates the app_role login (Decision #2 / RLS).
       APP_DATABASE_URL: postgresql://app_role:app_role_dev_password@localhost:5432/boostfactor?schema=public
       JWT_SECRET: ci-only-jwt-secret
-      PLATFORM_ADMIN_DEV_PASSWORD: ci-only-password
+      MFA_ENCRYPTION_KEY: ci-only-mfa-encryption-key-32chars-min
+      PLATFORM_ADMIN_BOOTSTRAP_EMAIL: ci-admin@boostfactor.dev
+      PLATFORM_ADMIN_BOOTSTRAP_PASSWORD: ci-only-bootstrap-password
+      PLATFORM_ADMIN_BOOTSTRAP_NAME: CI Platform Admin
 
     steps:
       - uses: actions/checkout@v4
@@ -56,3 +59,6 @@ jobs:
 
       - name: Apply database migrations
         run: npm run migrate --workspace=@boostfactor/api
+
+      - name: Seed the first Platform Admin (idempotent)
+        run: npm run seed --workspace=@boostfactor/api

@@ -190,5 +190,128 @@ couldn't run Prisma's CLI at all.
 
 ---
 
-*Next decision goes here as Decision #3, appended below this line — never
+## Decision #3 — Real self-hosted authentication now, not a placeholder waiting for Supabase
+
+**Date:** Phase 3, Auth & Identity
+**Status:** Accepted
+
+### Context
+
+The plan doc's Phase 3 row calls for wiring Supabase Auth: password/MFA,
+JWTs carrying a `company_id` claim, and mandatory MFA for the Platform
+Admin and Company Super Admin tiers. Provisioning an actual Supabase
+project needs the account owner's own Supabase account and credentials,
+which still doesn't exist (same blocker Decision #1 and the plan doc's
+progress log already flagged for Phase 1). Phase 2 shipped with a single
+shared dev-only platform-admin password specifically as a stand-in for
+this, explicitly documented as temporary in code and in the plan doc.
+
+Phase 3 cannot simply wait for that Supabase project to exist: the plan
+doc's own exit criterion for this phase — "a locked/disabled account
+cannot authenticate; a password reset never exposes the old credential" —
+describes real per-account authentication behavior, not infrastructure
+wiring. A shared dev password has no concept of "an account" to lock, and
+nothing to reset.
+
+### Decision
+
+Build genuine, non-throwaway authentication against local/self-hosted
+Postgres now, designed from the start to be swappable for Supabase Auth
+later without touching `RequestClaims`, RLS policies, or
+`runInTenantContext` (the portability discipline Decision #1 already
+committed to):
+
+- **`user_accounts`** table — the login identity, deliberately a separate
+  object from the `platform_admins`/`company_admins` profile rows it
+  links to via a new `user_account_id` column (migration
+  `0002_auth_identity.sql`). This is also the first half of the
+  User-vs-Employee identity split (plan doc Section 3): Employee (Phase 7)
+  links to this same table rather than inventing its own identity concept.
+- **Passwords**: bcrypt, 12 rounds (`apps/api/src/auth/password.ts`).
+- **MFA is mandatory for both admin tiers**, no opt-out: TOTP via
+  `otplib`, with the secret AES-256-GCM-encrypted at rest (scrypt-derived
+  key from `MFA_ENCRYPTION_KEY` — `apps/api/src/auth/mfa-secret-crypto.ts`).
+  A fresh account's very first successful password check always returns
+  `mfa_setup_required`, never a bare session token.
+- **Account lockout**, both manual (`status = 'locked'`, a Platform Admin
+  action) and automatic (`locked_until` after 5 failed attempts, a
+  15-minute cooldown) — either one blocks login outright, satisfying the
+  "locked/disabled account cannot authenticate" half of the exit criterion.
+- **Password reset**: single-use, SHA-256-hashed tokens (the raw token is
+  never stored), 30-minute TTL, and requesting a new one invalidates any
+  still-outstanding one. The old password hash is overwritten, never read
+  back, logged, or returned anywhere — satisfying the "never exposes the
+  old credential" half.
+- **A two-step login flow** (`apps/api/src/auth/tickets.ts`): short-lived
+  (5 min) JWTs carrying a `typ: "mfa_ticket"` discriminator hand state
+  from password verification to MFA verification/enrollment, avoiding a
+  server-side session table for what is otherwise a stateless API.
+- **The `is_service` claim** (migration 0002's header comment,
+  `tenant-context.ts`): login has a chicken-and-egg problem — verifying a
+  password requires reading `user_accounts` before the caller has any
+  valid session JWT to carry claims at all. `is_service` is how the API's
+  own pre-authentication code (never a request handler acting on a
+  client-supplied token) reaches those tables during that window. Every
+  guard in this codebase builds `RequestClaims` field-by-field from a
+  verified JWT's payload rather than spreading the decoded token
+  (`PlatformAdminGuard`), so this claim can never be smuggled in through a
+  client-supplied JWT — it only ever originates from a literal
+  `{ is_service: true, ... }` object written in `auth.service.ts` or the
+  bootstrap seed script.
+
+### A bug this surfaced, and the fix
+
+Running the real login flow end to end (not a hypothetical) crashed with
+`invalid input syntax for type uuid: "auth-service"`. `user_accounts`'s
+RLS policies (migration 0002) checked
+`app.is_platform_admin() OR app.is_service() OR id = ...::uuid` — but
+Postgres does not guarantee `OR` short-circuits its operands, so the
+`::uuid` cast on the third operand still ran (and threw) even though
+`is_service()` was already `true`, because `SERVICE_CLAIMS.sub` is the
+literal string `"auth-service"`, not a UUID. Fixed in migration
+`0003_fix_user_accounts_sub_cast.sql` by rewriting those two policies
+around `CASE WHEN ... THEN true ELSE <cast> END`, which Postgres's own
+docs recommend precisely for this "only evaluate this if that other thing
+is false" shape (the same idiom as guarding a division by zero). This is
+a database-level fix, not a call-site workaround — any future
+`is_service`/`is_platform_admin` caller with a non-UUID `sub` hits the
+same safety net, not the same crash.
+
+### Why this doesn't weaken anything from Decision #1
+
+Nothing here is Supabase-specific. `user_accounts`, the RLS policies, and
+`runInTenantContext` all speak the same `request.jwt.claims` convention
+Decision #1 already established. When a real Supabase project exists, the
+standard move is to let Supabase Auth's `auth.users` become the identity
+source of truth (`user_accounts.id` pointing at the same id, or folding
+this table into the app-side profile pattern Supabase projects already
+use) — a swap at the edge, not a rewrite of anything that reads claims.
+
+### Alternatives considered
+
+- **Keep the Phase 2 shared password until Supabase is provisioned.**
+  Rejected — the exit criterion itself requires per-account lock/reset
+  behavior that a shared password structurally cannot express.
+- **A minimal fake "sessions" table instead of stateless MFA tickets.**
+  Rejected as unnecessary complexity — a signed, short-lived JWT with a
+  `typ` discriminator carries exactly as much state (which account, which
+  step) with no additional table, no cleanup job, and no additional
+  RLS surface to reason about.
+
+### What this unblocks
+
+Phase 3's exit criterion is verified end to end (see the plan doc's
+progress log): the full password → MFA-enrollment → session flow, the
+same flow on a second login (now MFA-required, not setup), automatic
+lockout after 5 failed attempts, manual lock via the Platform Admin API,
+password reset (old credential rejected, new one works, the token is
+single-use), and RLS-level tenant isolation across the new
+`user_accounts`/`password_reset_tokens` tables — verified both through
+the real UI's own HTTP path and by calling `DatabaseService.withClaims()`
+directly with a scoped claims object, the same two-level verification
+standard Phase 2 set.
+
+---
+
+*Next decision goes here as Decision #4, appended below this line — never
 inserted above it.*

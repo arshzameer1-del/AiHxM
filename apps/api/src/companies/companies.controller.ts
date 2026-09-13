@@ -8,6 +8,7 @@ import { UpdateCompanyDto } from "./dto/update-company.dto";
 import { UpdateCompanyConfigDto } from "./dto/update-company-config.dto";
 import { CreateCompanyAdminDto } from "./dto/create-company-admin.dto";
 import { UpdateCompanyAdminDto } from "./dto/update-company-admin.dto";
+import { CreateLoginDto } from "../auth/dto/create-login.dto";
 
 @Controller("platform/companies")
 @UseGuards(PlatformAdminGuard)
@@ -64,6 +65,16 @@ export class CompaniesController {
     @Body() dto: UpdateCompanyAdminDto
   ) {
     return this.companies.setAdminStatus(claims, id, adminId, dto.status);
+  }
+
+  @Post(":id/admins/:adminId/account")
+  createAdminLogin(
+    @CurrentClaims() claims: RequestClaims,
+    @Param("id") id: string,
+    @Param("adminId") adminId: string,
+    @Body() dto: CreateLoginDto
+  ) {
+    return this.companies.createAdminLogin(claims, id, adminId, dto.initialPassword);
   }
 
   @Post(":id/impersonate")

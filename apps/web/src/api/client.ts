@@ -6,9 +6,14 @@ import type {
   CompanyDashboardRow,
   CompanyDetail,
   CreateCompanyRequest,
+  CreatePlatformAdminRequest,
   EmployeeNumberFormat,
   ImpersonateResponse,
+  LoginResult,
   ModuleKey,
+  PasswordResetRequestResult,
+  PlatformAdmin,
+  SessionResult,
 } from "@boostfactor/shared-types";
 
 const TOKEN_KEY = "boostfactor.platformAdminToken";
@@ -63,10 +68,47 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
-  login: (password: string) => request<{ token: string }>("/platform/auth/login", {
-    method: "POST",
-    body: JSON.stringify({ password }),
-  }),
+  // --- Auth (Phase 3 — password + mandatory MFA) --------------------------
+  // Each of these three deliberately does NOT send the stored bearer token
+  // — they're the pre-authentication flow itself, carrying state via the
+  // short-lived mfaTicket/reset token instead. See AuthContext for how the
+  // multi-step result (mfa_setup_required / mfa_required / ok) drives the
+  // login UI.
+  login: (email: string, password: string) =>
+    request<LoginResult>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
+
+  confirmMfaEnrollment: (mfaTicket: string, code: string) =>
+    request<SessionResult>("/auth/mfa/enroll/confirm", {
+      method: "POST",
+      body: JSON.stringify({ mfaTicket, code }),
+    }),
+
+  verifyMfa: (mfaTicket: string, code: string) =>
+    request<SessionResult>("/auth/mfa/verify", {
+      method: "POST",
+      body: JSON.stringify({ mfaTicket, code }),
+    }),
+
+  requestPasswordReset: (email: string) =>
+    request<PasswordResetRequestResult>("/auth/password-reset/request", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
+  confirmPasswordReset: (token: string, newPassword: string) =>
+    request<{ message: string }>("/auth/password-reset/confirm", {
+      method: "POST",
+      body: JSON.stringify({ token, newPassword }),
+    }),
+
+  // --- Platform Admins ------------------------------------------------------
+  listPlatformAdmins: () => request<PlatformAdmin[]>("/platform/admins"),
+
+  createPlatformAdmin: (input: CreatePlatformAdminRequest) =>
+    request<PlatformAdmin>("/platform/admins", { method: "POST", body: JSON.stringify(input) }),
+
+  setPlatformAdminStatus: (id: string, status: PlatformAdmin["status"]) =>
+    request<PlatformAdmin>(`/platform/admins/${id}`, { method: "PATCH", body: JSON.stringify({ status }) }),
 
   listCompanies: () => request<CompanyDashboardRow[]>("/platform/companies"),
 
@@ -107,6 +149,12 @@ export const api = {
     request<CompanyAdmin>(`/platform/companies/${id}/admins/${adminId}`, {
       method: "PATCH",
       body: JSON.stringify({ status }),
+    }),
+
+  createAdminLogin: (id: string, adminId: string, initialPassword: string) =>
+    request<CompanyAdmin>(`/platform/companies/${id}/admins/${adminId}/account`, {
+      method: "POST",
+      body: JSON.stringify({ initialPassword }),
     }),
 
   impersonate: (id: string) =>

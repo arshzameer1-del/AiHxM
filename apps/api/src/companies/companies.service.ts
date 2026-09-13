@@ -4,6 +4,7 @@ import * as jwt from "jsonwebtoken";
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
 import { AuditService } from "../audit/audit.service";
+import { hashPassword } from "../auth/password";
 import type {
   Company,
   CompanyAdmin,
@@ -64,6 +65,7 @@ function rowToAdmin(row: any): CompanyAdmin {
     email: row.email,
     status: row.status,
     createdAt: row.created_at?.toISOString ? row.created_at.toISOString() : row.created_at,
+    hasLogin: Boolean(row.user_account_id),
   };
 }
 
@@ -298,6 +300,53 @@ export class CompaniesService {
       });
 
       return rowToAdmin(result.rows[0]);
+    });
+  }
+
+  /**
+   * Gives an existing Company Super Admin their first real login (Phase
+   * 3). Runs entirely under the calling Platform Admin's own claims — the
+   * INSERT into user_accounts, the UPDATE linking it, and the audit entry
+   * all commit in one transaction, the same pattern as every other admin
+   * mutation in this service.
+   */
+  async createAdminLogin(
+    claims: RequestClaims,
+    companyId: string,
+    adminId: string,
+    initialPassword: string
+  ): Promise<CompanyAdmin> {
+    return this.db.withClaims(claims, async (client) => {
+      const existing = await client.query(
+        "SELECT * FROM company_admins WHERE id = $1 AND company_id = $2",
+        [adminId, companyId]
+      );
+      if (existing.rowCount === 0) {
+        throw new NotFoundException("Admin not found for this company");
+      }
+      if (existing.rows[0].user_account_id) {
+        throw new ConflictException("This admin already has a login");
+      }
+
+      const passwordHash = await hashPassword(initialPassword);
+      const account = await client.query(
+        "INSERT INTO user_accounts (email, password_hash) VALUES ($1, $2) RETURNING id",
+        [existing.rows[0].email, passwordHash]
+      );
+
+      const updated = await client.query(
+        "UPDATE company_admins SET user_account_id = $1 WHERE id = $2 RETURNING *",
+        [account.rows[0].id, adminId]
+      );
+
+      await this.audit.record(client, claims, {
+        companyId,
+        action: "company.admin.login_created",
+        target: existing.rows[0].email,
+        metadata: {},
+      });
+
+      return rowToAdmin(updated.rows[0]);
     });
   }
 

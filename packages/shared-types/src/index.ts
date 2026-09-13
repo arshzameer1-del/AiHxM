@@ -90,6 +90,8 @@ export type CompanyAdmin = {
   email: string;
   status: CompanyAdminStatus;
   createdAt: string;
+  /** Whether a real login (Phase 3 user_accounts row) exists for this admin yet. */
+  hasLogin: boolean;
 };
 
 export type CompanyDetail = {
@@ -126,4 +128,83 @@ export type ImpersonateResponse = {
   expiresIn: string;
   companyId: string;
   note: string;
+};
+
+// --- Phase 3: Auth & Identity --------------------------------------------
+// Real per-account authentication (password + mandatory TOTP MFA),
+// replacing Phase 2's single shared platform-admin credential. See
+// apps/api/migrations/0002_auth_identity.sql and DECISIONS.md Decision #3.
+
+export type LoginRequest = {
+  email: string;
+  password: string;
+};
+
+/**
+ * Discriminated on `status`. MFA is mandatory for both admin tiers, so a
+ * fresh account always gets `mfa_setup_required` on its very first
+ * successful password check, never a bare `ok`.
+ */
+export type LoginResult =
+  | { status: "ok"; token: string }
+  | { status: "mfa_setup_required"; mfaTicket: string; otpauthUrl: string; secretForManualEntry: string }
+  | { status: "mfa_required"; mfaTicket: string };
+
+export type MfaEnrollConfirmRequest = {
+  mfaTicket: string;
+  code: string;
+};
+
+export type MfaVerifyRequest = {
+  mfaTicket: string;
+  code: string;
+};
+
+export type SessionResult = {
+  status: "ok";
+  token: string;
+};
+
+export type PasswordResetRequestBody = {
+  email: string;
+};
+
+/**
+ * Phase 3 has no email/notification system yet (that's Phase 6's WRICEF
+ * Interfaces work) — the reset token comes back directly in this
+ * response, clearly labeled, rather than being silently unusable.
+ */
+export type PasswordResetRequestResult = {
+  message: string;
+  devModeToken?: string;
+};
+
+export type PasswordResetConfirmRequest = {
+  token: string;
+  newPassword: string;
+};
+
+export type CreateLoginRequest = {
+  initialPassword: string;
+};
+
+/**
+ * Platform Admin profile row (platform_admins table). Distinct from
+ * CompanyAdmin — no companyId, and creation always bundles a login in one
+ * step (see PlatformAdminsService) rather than a separate "add profile,
+ * then create login" flow, since a Platform Admin with no login is never
+ * a useful intermediate state the way a freshly-imported CompanyAdmin is.
+ */
+export type PlatformAdmin = {
+  id: string;
+  fullName: string;
+  email: string;
+  status: CompanyAdminStatus;
+  createdAt: string;
+};
+
+export type CreatePlatformAdminRequest = {
+  fullName: string;
+  email: string;
+  initialPassword: string;
 };

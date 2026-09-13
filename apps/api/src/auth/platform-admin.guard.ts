@@ -10,15 +10,23 @@ import type { RequestClaims } from "../database/tenant-context";
 
 export type AuthedRequest = Request & { claims: RequestClaims };
 
+type SessionTokenPayload = {
+  sub: string;
+  is_platform_admin: boolean;
+  company_id?: string | null;
+};
+
 /**
- * Phase 2 stand-in for real auth. There is exactly one identity this
- * guard can ever produce — the shared platform-admin dev credential from
- * PlatformAuthController — because Phase 2's whole scope is the internal
- * Platform Admin panel, not tenant end-user login. Phase 3 (Auth &
- * Identity) replaces this guard's verify step with real Supabase Auth JWT
- * verification and starts producing company-scoped, non-platform-admin
- * claims too; RequestClaims and runInTenantContext() do not need to
- * change when that happens, only what populates them.
+ * Verifies a real session JWT issued by AuthService (Phase 3 — password +
+ * mandatory MFA; see auth.service.ts) and requires is_platform_admin.
+ *
+ * Deliberately reads exactly three fields off the decoded payload rather
+ * than assigning it wholesale to req.claims: RequestClaims also has an
+ * `is_service` field that must never originate from a client-supplied
+ * token (see tenant-context.ts and migration 0002's header comment) —
+ * whitelisting fields here is what makes that true by construction, not
+ * just by the fact that forging a JWT without JWT_SECRET is already
+ * impossible.
  */
 @Injectable()
 export class PlatformAdminGuard implements CanActivate {
@@ -35,9 +43,9 @@ export class PlatformAdminGuard implements CanActivate {
       throw new Error("JWT_SECRET is not set");
     }
 
-    let payload: RequestClaims;
+    let payload: SessionTokenPayload;
     try {
-      payload = jwt.verify(token, secret) as RequestClaims;
+      payload = jwt.verify(token, secret) as SessionTokenPayload;
     } catch {
       throw new UnauthorizedException("Invalid or expired token");
     }
@@ -46,7 +54,11 @@ export class PlatformAdminGuard implements CanActivate {
       throw new UnauthorizedException("Platform admin access required");
     }
 
-    req.claims = payload;
+    req.claims = {
+      sub: payload.sub,
+      is_platform_admin: payload.is_platform_admin,
+      company_id: payload.company_id ?? null,
+    };
     return true;
   }
 }

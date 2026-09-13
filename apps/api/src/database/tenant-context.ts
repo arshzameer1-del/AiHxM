@@ -1,17 +1,22 @@
 import type { Pool, PoolClient } from "pg";
 
 /**
- * The claims shape every request-scoped query runs under. Phase 2 only
- * ever produces `{ is_platform_admin: true, sub: "platform-admin-dev" }`
- * (see src/auth) since there is no tenant-side login yet — `company_id`
- * is here now because the RLS policies in migration 0001 already support
- * a scoped, non-platform-admin caller, ready for Phase 3 to start issuing
- * real ones from Supabase Auth without another migration.
+ * The claims shape every request-scoped query runs under.
+ *
+ * `is_service` is the odd one out: it is never present in a real user's
+ * session JWT, and no guard in this codebase ever derives it from a
+ * client-supplied token (see PlatformAdminGuard — it whitelists fields
+ * explicitly rather than spreading a decoded payload). It exists only for
+ * auth.service.ts's own pre-authentication database access (looking up
+ * user_accounts by email before anyone has a session yet) and the seed
+ * script bootstrapping the first platform admin. See migration
+ * 0002_auth_identity.sql's header comment for the full reasoning.
  */
 export type RequestClaims = {
   is_platform_admin: boolean;
   company_id?: string | null;
   sub: string;
+  is_service?: boolean;
 };
 
 /**

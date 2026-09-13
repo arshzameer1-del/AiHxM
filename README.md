@@ -9,18 +9,16 @@ full architecture and phase plan live in the `BoostFactor` Claude Project
 as `claude/development-plan.md`; the reasoning behind every irreversible
 technical call lives in [`DECISIONS.md`](./DECISIONS.md).
 
-**Current phase: Phase 2 — Platform Provisioning Panel.**
-Exit criterion: a Platform Admin can create a new company end-to-end
-through the real UI and it appears correctly isolated from every other
-company — enforced by Postgres Row Level Security, not just application
-code.
+**Current phase: Phase 3 — Auth & Identity.**
+Exit criterion: a locked/disabled account cannot authenticate; a password
+reset never exposes the old credential.
 
 ## Stack
 
 | Layer | Choice |
 |---|---|
 | Database | Postgres (Supabase-managed in staging/prod; local Postgres for dev) — raw SQL migrations, no ORM (Decision #2) |
-| Auth | Phase 2: one shared dev-only platform-admin credential (see `apps/api/src/auth`). Supabase Auth (JWT, MFA, OTP) replaces this in Phase 3 |
+| Auth | Real self-hosted auth now — bcrypt passwords, mandatory TOTP MFA, account lockout, password reset (see `apps/api/src/auth`, Decision #3). Swappable for Supabase Auth later without touching RLS or claims |
 | File storage | Supabase Storage — wired when a module needs it |
 | Business-logic API | NestJS (TypeScript) — owns RBAC, field permissions, workflow engine, WRICEF framework |
 | Background jobs | Redis + BullMQ |
@@ -29,27 +27,30 @@ code.
 
 See `DECISIONS.md` Decision #1 for why the backend splits between Supabase
 infrastructure and a NestJS business-logic layer with RLS as
-defense-in-depth, and Decision #2 for why the database layer is raw SQL
-migrations + `pg` rather than an ORM.
+defense-in-depth, Decision #2 for why the database layer is raw SQL
+migrations + `pg` rather than an ORM, and Decision #3 for why Phase 3
+builds genuine self-hosted authentication now instead of waiting on a
+Supabase project that doesn't exist yet.
 
 ## Repo layout
 
 ```
 apps/
   api/
-    migrations/   Hand-written SQL migrations (tables + RLS policies together)
+    migrations/       Hand-written SQL migrations (tables + RLS policies together)
     src/
-      auth/       Phase 2 stand-in platform-admin login (JWT issue + guard)
-      database/   pg Pool, per-request tenant-context (RLS claims), migration runner
-      companies/  Platform Admin API: create/list/config/admins/impersonate
-      audit/      Append-only audit log service + endpoint
+      auth/           Real auth: password + mandatory TOTP MFA, lockout, password reset (Decision #3)
+      database/       pg Pool, per-request tenant-context (RLS claims), migration runner, bootstrap seed script
+      companies/      Platform Admin API: create/list/config/admins/impersonate/admin-login-creation
+      platform-admins/ Our own ops team's accounts: list/create/lock
+      audit/          Append-only audit log service + endpoint
   web/
     src/
-      pages/      Login, Dashboard, Create Company, Company Config, Audit Log
-      auth/       Token storage + auth context
-      api/        Typed fetch client against the API
+      pages/          Login (multi-step: password/MFA/reset), Dashboard, Create Company, Company Config, Audit Log, Platform Admins
+      auth/           Token storage + auth context
+      api/            Typed fetch client against the API
 packages/
-  shared-types/   TypeScript types shared between api and web
+  shared-types/       TypeScript types shared between api and web
 ```
 
 ## Getting started
@@ -68,40 +69,59 @@ docker compose up -d
 # 3. Copy env defaults (matches docker-compose.yml)
 cp .env.example .env
 cp .env.example apps/api/.env
-# Then change PLATFORM_ADMIN_DEV_PASSWORD and JWT_SECRET to real values —
-# the checked-in defaults are dev-only placeholders, not secrets.
+# Then change JWT_SECRET, MFA_ENCRYPTION_KEY, and the PLATFORM_ADMIN_BOOTSTRAP_*
+# values to real values — the checked-in defaults are dev-only placeholders,
+# not secrets.
 
 # 4. Apply database migrations (creates tables, the app_role login, and
 #    every RLS policy in one step)
 npm run migrate --workspace=@boostfactor/api
 
-# 5. Run everything (API on :4000, web on :5173)
+# 5. Bootstrap the very first Platform Admin account (idempotent — safe to
+#    re-run; does nothing once PLATFORM_ADMIN_BOOTSTRAP_EMAIL already exists)
+npm run seed --workspace=@boostfactor/api
+
+# 6. Run everything (API on :4000, web on :5173)
 npm run dev
 ```
 
-Open http://localhost:5173, sign in with `PLATFORM_ADMIN_DEV_PASSWORD`,
-and create a company. Create a second one and you'll see the Dashboard
-list both — that's the UI half of the exit criterion. The isolation half
-is enforced two rows down in Postgres, not just by this screen: see
-`apps/api/migrations/0001_platform_admin_core.sql`'s RLS policies, and
-`DECISIONS.md` Decision #1 for why that matters.
+Open http://localhost:5173 and sign in with `PLATFORM_ADMIN_BOOTSTRAP_EMAIL`
+/ `PLATFORM_ADMIN_BOOTSTRAP_PASSWORD`. The first sign-in walks through
+mandatory MFA enrollment (scan the QR code with any authenticator app, or
+enter the secret manually) before issuing a session — MFA is not optional
+for either admin tier. From there: create a company, add a Company Super
+Admin, give them a login from the Admins tab, and add more Platform Admins
+from the Platform Admins page. Create a second company and you'll see the
+Dashboard list both — the isolation between them is enforced two rows down
+in Postgres via Row Level Security, not just by the screen: see
+`apps/api/migrations/0001_platform_admin_core.sql` and
+`0002_auth_identity.sql`'s policies, and `DECISIONS.md` Decision #1 for why
+that matters.
+
+Forgot your password? Use "Forgot your password?" on the login screen.
+Phase 3 has no email/SMS dispatch yet (that's Phase 6's WRICEF Interfaces
+work), so outside production the reset token is handed back directly in
+the response and pre-filled in the form — clearly labeled as dev-mode
+only, never done in production (see `AuthService.requestPasswordReset`).
 
 ## Connecting a real Supabase project
 
 Local Postgres is a stand-in. To point this at a real Supabase project
 once one exists: create the project, copy its connection strings into
 `DATABASE_URL` and `APP_DATABASE_URL` in `apps/api/.env` (Settings →
-Database → Connection string — the owner/service-role string for
-`DATABASE_URL`, and a scoped connection for `APP_DATABASE_URL` once
-Phase 3 wires Supabase Auth roles in), then run the migration again. The
-SQL itself doesn't change — see Decision #1's portability note. This
-needs the project owner's own Supabase account — provisioning it hasn't
-happened yet.
+Database → Connection string), then run the migrations and seed script
+again. The SQL itself doesn't change — see Decision #1's portability note.
+Swapping the `user_accounts` table this repo builds today for Supabase
+Auth's `auth.users` as the identity source of truth is a Decision #3-scoped
+follow-up once the project exists; nothing about RLS or `RequestClaims`
+changes either way. This needs the project owner's own Supabase account —
+provisioning it hasn't happened yet.
 
 ## What's next
 
-Phase 3 — Auth & Identity: replace the Phase 2 shared dev password with
-real Supabase Auth, wire JWT `company_id` claims from actual sessions
-instead of a hand-signed token, add the User-vs-Employee identity split,
-and enforce MFA for Platform Admin and Company Super Admin tiers. See
+Phase 4 — RBAC + Field-Level Permission Engine: `can(user, permission,
+target)` and `resolveFieldAccess(user, field, record)` in the API layer, a
+seeded Permission/Role/AssignmentRule catalog, and a full "should allow /
+should deny" test suite per permission — built against the real identities
+Phase 3 now provides instead of one hardcoded claims object. See
 `claude/development-plan.md` Section 7 for the full phase plan.

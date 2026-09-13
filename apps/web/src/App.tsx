@@ -7,6 +7,7 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { CreateCompanyPage } from "./pages/CreateCompanyPage";
 import { CompanyDetailPage } from "./pages/CompanyDetailPage";
 import { AuditLogPage } from "./pages/AuditLogPage";
+import { PlatformAdminsPage } from "./pages/PlatformAdminsPage";
 
 /**
  * Phase 2: the Platform Provisioning Panel. Phase 1's /health hello-world
@@ -26,6 +27,7 @@ export default function App() {
               <Route path="/companies/new" element={<CreateCompanyPage />} />
               <Route path="/companies/:id" element={<CompanyDetailPage />} />
               <Route path="/audit-log" element={<AuditLogPage />} />
+              <Route path="/platform-admins" element={<PlatformAdminsPage />} />
             </Route>
           </Route>
 
