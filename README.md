@@ -7,11 +7,22 @@ SuccessFactors.
 This repo is the real product codebase (not the clickable prototype). The
 full architecture and phase plan live in the `BoostFactor` Claude Project
 as `claude/development-plan.md`; the reasoning behind every irreversible
-technical call lives in [`DECISIONS.md`](./DECISIONS.md).
+technical call lives in [`DECISIONS.md`](./DECISIONS.md); operational
+concerns — security hardening, dependency vulnerabilities, deferred
+performance work — are tracked in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
 
-**Current phase: Phase 5 — Module Provisioning & Licensing.**
+**Current phase: Phase 5 — Module Provisioning & Licensing (complete),
+followed by a security & quality audit pass before starting Phase 6.**
 Exit criterion: disabling a module for a test tenant makes it vanish
 from their app switcher and 404 on direct API access.
+
+The audit closed a stale wide-open CORS default, added security headers
+(helmet) and rate limiting (global + a stricter per-route limit on every
+auth endpoint, specifically closing an MFA brute-force gap), and fixed an
+N+1 query pattern in the field-permission engine. Full writeup —
+including dependency vulnerabilities deliberately deferred with
+reasoning and revisit triggers — in
+[`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
 
 ## Stack
 

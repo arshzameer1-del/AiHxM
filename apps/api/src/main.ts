@@ -8,14 +8,26 @@ loadEnvFile(join(__dirname, "..", ".env"));
 
 import { NestFactory } from "@nestjs/core";
 import { ValidationPipe } from "@nestjs/common";
+import helmet from "helmet";
 import { AppModule } from "./app.module";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // Phase 1: permissive CORS for local dev only. Locked down to known
-  // tenant/admin origins once real auth (Phase 3) exists.
-  app.enableCors();
+  // Standard security headers (HSTS, no-sniff, frame-deny, etc.) — cheap,
+  // framework-agnostic, and there was previously nothing here at all.
+  app.use(helmet());
+
+  // Phase 1 shipped this as `app.enableCors()` (wide open, every origin)
+  // with a comment promising it would be "locked down... once real auth
+  // exists" — Phase 3 built real auth and this was never revisited until
+  // now. CORS_ORIGIN is a comma-separated allowlist; unset defaults to
+  // the local Vite dev server only, never to "allow everything."
+  const corsOrigins = (process.env.CORS_ORIGIN ?? "http://localhost:5173")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  app.enableCors({ origin: corsOrigins });
 
   // Strip unknown fields and reject bad ones at the edge, before any
   // handler runs. DTOs (CreateCompanyDto etc.) are the single source of

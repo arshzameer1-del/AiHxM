@@ -132,19 +132,80 @@ export class RbacService {
     ]);
     if (!canSelf && !canAll) return null;
 
+    const applicableFields = sensitiveFields.filter((key) => key in record);
+    const accessByField = await this.resolveFieldAccessBatch(claims, objectKey, applicableFields, record);
+
     const result: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(record)) {
       if (!sensitiveFields.includes(key)) {
         result[key] = value;
         continue;
       }
-      const access = await this.resolveFieldAccess(claims, objectKey, key, record);
-      if (access !== "hidden") {
+      if (accessByField.get(key) !== "hidden") {
         result[key] = value;
       }
       // else: key intentionally left unset — see the doc comment above.
     }
     return result;
+  }
+
+  /**
+   * Batched sibling of resolveFieldAccess(), used only by
+   * filterRecordFields(): ONE query for every field_permission_rules row
+   * that could apply to any of `fieldKeys` on this object, instead of one
+   * round trip per field. This is the fix for the N+1 flagged in the
+   * Phase 5 security/quality audit — DummyService.list() was issuing up
+   * to `N records x M sensitive fields` separate queries, harmless at
+   * Phase 5's tiny dummy_records volumes but a real scaling concern once
+   * Phase 7 (Employee Core) introduces real row counts. resolveFieldAccess
+   * itself is intentionally left untouched (still the public single-field
+   * API, still tested standalone in rbac.service.spec.ts) — this is an
+   * additive, low-risk change, not a rewrite of it.
+   *
+   * Note this still leaves one N+1 shape in place: DummyService.list()
+   * calls filterRecordFields() once per row, so `can()`'s two permission
+   * checks still run once per record even though the caller's granted
+   * scope (self/all) doesn't actually vary per record. Collapsing that
+   * would mean hoisting the can() checks out of the per-record loop and
+   * changing filterRecordFields()'s signature/call sites — a larger,
+   * riskier change than this audit's scope. Tracked in KNOWN_ISSUES.md as
+   * a documented, deferred concern to revisit alongside Phase 7.
+   */
+  private async resolveFieldAccessBatch(
+    claims: RequestClaims,
+    objectKey: string,
+    fieldKeys: readonly string[],
+    record: Record<string, unknown>
+  ): Promise<Map<string, FieldAccess>> {
+    const access = new Map<string, FieldAccess>(fieldKeys.map((key) => [key, "hidden" as FieldAccess]));
+    if (!claims.company_id || fieldKeys.length === 0) return access;
+
+    const rows = await this.db.withClaims(claims, async (client) => {
+      const result = await client.query<{
+        field_key: string;
+        access: FieldAccess;
+        condition: FieldCondition | null;
+      }>(
+        `SELECT fpr.field_key, fpr.access, fpr.condition
+         FROM user_role_assignments ura
+         JOIN field_permission_rules fpr ON fpr.role_id = ura.role_id
+         WHERE ura.user_account_id = $1
+           AND ura.company_id = $2
+           AND fpr.object_key = $3
+           AND fpr.field_key = ANY($4::text[])`,
+        [claims.sub, claims.company_id, objectKey, fieldKeys]
+      );
+      return result.rows;
+    });
+
+    for (const row of rows) {
+      if (row.condition && !conditionMatches(row.condition, record)) continue;
+      const current = access.get(row.field_key) ?? "hidden";
+      if (ACCESS_RANK[row.access] > ACCESS_RANK[current]) {
+        access.set(row.field_key, row.access);
+      }
+    }
+    return access;
   }
 
   private async hasPermission(claims: RequestClaims, permissionKey: string): Promise<boolean> {
