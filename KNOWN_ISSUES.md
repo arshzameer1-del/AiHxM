@@ -502,3 +502,58 @@ was deferred rather than guessed at. **Revisit when:** a real pilot
 client hits this friction in practice — the semantics of "what does a
 backward move do to an existing offer on that application" need a real
 answer, not a guessed one.
+
+## 2026-09 — Phase 11 (Performance & Goals)
+
+### A review that never reached "completed" is silently skipped when its cycle closes
+
+`closeCycle()` releases only `performance_reviews` rows that reached
+`completed`/`calibrated` — a review still stuck at `pending`/
+`in_progress` because one or both assessments were simply never
+submitted is left exactly where it is, forever, with `final_rating`
+staying `null`. There is no reminder, escalation, or report surfacing
+"these N employees never got a final rating for this cycle" — an HR
+Admin has to notice by cross-referencing `listReviews()`'s statuses
+themselves. See Decision #11's "Alternatives considered" for why
+fabricating a rating instead was rejected. **Revisit when:** a real
+pilot client's first closed cycle actually has stragglers — a "cycle
+close report" (or a reminder before closing) is the obvious answer, not
+built ahead of a real cycle proving it's needed.
+
+### A launched cycle's participant population is frozen at launch time
+
+`launchCycle()` resolves the configured employee group (or "all active
+employees") ONCE, at launch, and creates one `performance_reviews` row
+per match. An employee hired, transferred into the matching department,
+or reactivated after the cycle is already `active` never gets a review
+row for that cycle — there is no re-sync. The inverse (an employee who
+leaves or transfers out mid-cycle) is also not handled: their review
+simply sits there, assessable or not, with no automatic removal.
+**Revisit when:** a real pilot client's headcount actually changes
+mid-cycle in a way that matters to them — the correct behavior (silently
+add them? flag for HR review? leave it manual?) is a real product
+question, not a guessed default.
+
+### No workflow routing anywhere in this object graph — a deliberate scope call, not an oversight
+
+Unlike Phase 9 (which added a genuine new workflow-engine capability) and
+Phase 10 (which reused the engine's existing `role` approver type
+as-is), Phase 11 routes nothing — launching a cycle, submitting either
+assessment, calibrating, and closing are all single-actor actions gated
+by ordinary RBAC permissions, never a multi-step approval chain. See
+Decision #11's "part one." **Revisit when:** a real tenant asks for a
+formal calibration-committee sign-off step before HR's adjustments take
+effect — a genuinely different shape (approving a change to a rating,
+not approving the review object itself) that deserves its own design
+pass against that real request.
+
+### The rating scale is a fixed 1-5 integer, not tenant-configurable
+
+`manager_rating`/`calibration_rating`/`final_rating` are all `CHECK
+(... BETWEEN 1 AND 5)` at the database level — there is no per-tenant
+rating-scale configuration (a 3-point scale, custom labels like
+"Exceeds/Meets/Below," etc.), unlike, say, leave policy's own tenant-
+configurable entitlement days. **Revisit when:** a real pilot client
+specifically asks for a different scale — building tenant-configurable
+scales ahead of that ask would be exactly the kind of speculative
+over-building Section 10 warns against.

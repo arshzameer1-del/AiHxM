@@ -461,6 +461,43 @@ export class EmployeeGroupsService {
     });
   }
 
+  /**
+   * The REVERSE of `resolvePolicy`/`resolvePolicyInternal` — those answer
+   * "which policy applies to THIS employee"; this answers "which
+   * employees currently belong to THIS group," the population a review
+   * cycle (Phase 11) launches against. `groupId: null` resolves to every
+   * active employee in the tenant, matching Phase 11's own "no configured
+   * participant group means everyone" rule.
+   *
+   * Deliberately ungated, the same "authorization is the calling
+   * module's job" boundary `resolvePolicyInternal` already established —
+   * `PerformanceService` has already authorized its own caller against
+   * `performance.manage.all` before ever asking for this, so re-applying
+   * `employee_group.manage` on top would serve no purpose here.
+   */
+  async resolveGroupMembers(claims: RequestClaims, groupId: string | null): Promise<string[]> {
+    return this.db.withClaims(claims, async (client) => {
+      if (!groupId) {
+        const result = await client.query<{ id: string }>(
+          "SELECT id FROM employees WHERE employment_status = 'active'"
+        );
+        return result.rows.map((r) => r.id);
+      }
+      const conditions = await client.query<{ field: string; equals: string }>(
+        "SELECT field, equals FROM employee_group_conditions WHERE group_id = $1",
+        [groupId]
+      );
+      if (conditions.rowCount === 0) return [];
+      const employees = await client.query(
+        "SELECT id, department, location, designation, employment_type, employment_status FROM employees WHERE employment_status = 'active'"
+      );
+      return employees.rows
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .filter((e: any) => conditions.rows.every((c) => e[CONDITION_FIELD_TO_COLUMN[c.field]] === c.equals))
+        .map((e) => e.id as string);
+    });
+  }
+
   private async requireGroupManage(claims: RequestClaims): Promise<void> {
     if (!(await this.entitlements.isModuleEnabled(claims, GROUP_MODULE_KEY))) {
       throw new NotFoundException();

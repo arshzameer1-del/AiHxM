@@ -22,6 +22,7 @@ import { EmployeesModule } from "./employees/employees.module";
 import { EmployeeGroupsModule } from "./employee-groups/employee-groups.module";
 import { LeaveModule } from "./leave/leave.module";
 import { RecruitmentModule } from "./recruitment/recruitment.module";
+import { PerformanceModule } from "./performance/performance.module";
 
 /**
  * Phase 2/3/4/5 root module: health check, the Platform Provisioning Panel
@@ -59,6 +60,7 @@ import { RecruitmentModule } from "./recruitment/recruitment.module";
     EmployeeGroupsModule,
     LeaveModule,
     RecruitmentModule,
+    PerformanceModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],

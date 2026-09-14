@@ -932,3 +932,132 @@ export type DecideOfferResponse = {
    * complete with a freshly assigned Employee Number. */
   employee: EmployeeView | null;
 };
+
+// --- Phase 11: Performance & Goals --------------------------------------
+// Plan doc Section 7: "Review cycles, calibration." See 0019_performance.sql
+// for the schema and Decision #11 for the design writeup (why this phase
+// deliberately does NOT route anything through the Phase 6 workflow
+// engine, and how the self/manager/calibration visibility rule reuses
+// the Phase 4 field-permission engine's conditional-rule mechanism).
+
+export type ReviewCycleStatus = "draft" | "active" | "calibration" | "closed";
+
+export type ReviewCycleView = {
+  id: string;
+  companyId: string;
+  name: string;
+  periodStart: string;
+  periodEnd: string;
+  participantGroupId: string | null;
+  status: ReviewCycleStatus;
+  createdByUserAccountId: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateReviewCycleRequest = {
+  name: string;
+  periodStart: string;
+  periodEnd: string;
+  /** Omitted/null means "all active employees" — resolved at launch
+   * time, not frozen into a list at creation time. */
+  participantGroupId?: string;
+};
+
+/** Launching a cycle resolves its participant population (the group's
+ * matching employees, or every active employee when none is set) and
+ * creates one `performance_reviews` row per participant. */
+export type LaunchReviewCycleResponse = {
+  cycle: ReviewCycleView;
+  participantCount: number;
+};
+
+export type GoalStatus = "active" | "completed";
+
+export type GoalView = {
+  id: string;
+  companyId: string;
+  reviewCycleId: string;
+  employeeId: string;
+  parentGoalId: string | null;
+  title: string;
+  description: string | null;
+  weight: number | null;
+  status: GoalStatus;
+  createdByUserAccountId: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateGoalRequest = {
+  reviewCycleId: string;
+  employeeId: string;
+  parentGoalId?: string;
+  title: string;
+  description?: string;
+  weight?: number;
+};
+
+export type UpdateGoalRequest = {
+  title?: string;
+  description?: string;
+  weight?: number;
+  status?: GoalStatus;
+};
+
+export type PerformanceReviewStatus = "pending" | "in_progress" | "completed" | "calibrated" | "released";
+
+/**
+ * The sensitive fields below are `null`/absent for a caller the
+ * conditional field-permission rules in 0020_performance_seed.sql don't
+ * yet grant visibility into — e.g. an employee_self_service caller sees
+ * all five as absent from the raw API response (not merely null) until
+ * `status` reaches `"released"`, the same "genuinely absent from
+ * `Object.keys()`" contract Phase 4's field-permission engine has always
+ * had.
+ */
+export type PerformanceReviewView = {
+  id: string;
+  companyId: string;
+  reviewCycleId: string;
+  employeeId: string;
+  status: PerformanceReviewStatus;
+  selfAssessment: string | null;
+  selfAssessmentSubmittedAt: string | null;
+  managerAssessment?: string | null;
+  managerRating?: number | null;
+  managerAssessmentSubmittedAt: string | null;
+  calibrationRating?: number | null;
+  calibrationComment?: string | null;
+  calibratedAt: string | null;
+  finalRating?: number | null;
+  releasedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SubmitSelfAssessmentRequest = {
+  selfAssessment: string;
+};
+
+export type SubmitManagerAssessmentRequest = {
+  managerAssessment: string;
+  managerRating: number;
+};
+
+export type CalibrateReviewRequest = {
+  calibrationRating: number;
+  calibrationComment?: string;
+};
+
+/** Ratings distribution for one cycle (optionally scoped to one
+ * employee group) — what an HR Admin actually looks at during
+ * calibration before adjusting any individual review. */
+export type RatingDistributionView = {
+  reviewCycleId: string;
+  /** Keyed by manager_rating (1-5, as a string key) -> count of reviews
+   * currently at that rating and still awaiting calibration/release. */
+  distribution: Record<string, number>;
+  totalReviews: number;
+  pendingCalibration: number;
+};

@@ -11,31 +11,42 @@ technical call lives in [`DECISIONS.md`](./DECISIONS.md); operational
 concerns — security hardening, dependency vulnerabilities, deferred
 performance work — are tracked in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
 
-**Current phase: Phase 10 — Recruitment & Onboarding (complete).** Exit
-criterion: a job requisition can be created and routed through a real
-tenant-defined approval chain (the Phase 6 workflow engine, reused
-completely unchanged — no new approver type needed this phase, unlike
-Phase 9), a candidate can be moved through a real forward-only Kanban
-pipeline (`applied` → `screening` → `interview` → `offer`, plus
-`rejected`), an offer can be extended and either declined or accepted,
-and accepting an offer creates a real Employee record — via
-`EmployeesService.create()`, the second real caller of Phase 7's Employee
-Number assignment machinery — all proven against real Postgres with no
-mocks, plus a real-HTTP e2e round trip over the actual guards/controllers/
-`ValidationPipe` stack (see Decision #10).
+**Current phase: Phase 11 — Performance & Goals (complete).** Exit
+criterion: a review cycle can be created and launched against a real
+employee-group-scoped (or company-wide) participant population, a goal
+can be set and cascaded from a parent goal, an employee can submit a
+self-assessment and their manager a manager-assessment, HR Admin can view
+a cycle's rating distribution and adjust individual ratings during
+calibration, and the final rating becomes visible to the employee, their
+manager, and HR Admin only once the cycle closes — all proven against
+real Postgres with no mocks, plus a real-HTTP e2e round trip over the
+actual guards/controllers/`ValidationPipe` stack (see Decision #11).
 
-The interesting design question this phase turned out to hinge on wasn't
-new engine capability (there is none — Section 10's "don't let the
-workflow engine become over-general" guardrail cuts toward reusing what
-already exists, not adding to it) but a genuinely new kind of
-participant: a candidate has no login, no session, and no RBAC scope of
-their own, so every permission check across requisitions, candidates,
-applications, and offers is the recruiter's own `recruitment.manage.all`,
-never a `.self`/`.team` scope. Offer acceptance surfaced a real,
-documented cross-module permission coupling in the process — see
-Decision #10 for the full writeup, including the honestly-tracked scope
-limits (no candidate self-service portal, no notification dispatch on
-pipeline events, forward-only Kanban moves) in `KNOWN_ISSUES.md`.
+Unlike Phase 9 (a genuine new workflow-engine capability) and Phase 10
+(reusing the engine's existing approver type as-is), Phase 11 routes
+NOTHING through the Phase 6 workflow engine at all — launching a cycle,
+submitting either assessment, calibrating, and closing are all
+single-actor RBAC-gated actions, a third distinct data point for Section
+10's "don't over-generalize the engine" guardrail. The interesting reuse
+this phase turned on instead was the Phase 4 field-permission engine's
+CONDITIONAL rule mechanism — the same `{field, equals}` JSONB shape Phase
+7 introduced for Termination Reason, applied here to a status
+(`performance_reviews.status = 'released'`) the record transitions
+through over its own lifecycle rather than a fixed classification, proving
+the mechanism generalizes beyond the one case that motivated it. See
+Decision #11 for the full writeup, including the honestly-tracked scope
+limits (a review that never reached "completed" is silently skipped when
+its cycle closes, a launched cycle's participant population is frozen at
+launch time, no tenant-configurable rating scale) in `KNOWN_ISSUES.md`.
+
+Before Phase 11, Phase 10 built Recruitment & Onboarding — a job
+requisition routed through the Phase 6 workflow engine completely
+unchanged, a candidate moved through a real forward-only Kanban pipeline
+(`applied` → `screening` → `interview` → `offer`, plus `rejected`), and
+an accepted offer creating a real Employee record via
+`EmployeesService.create()` — the second real caller of Phase 7's
+Employee Number assignment machinery, surfacing a real, documented
+cross-module permission coupling along the way (see Decision #10).
 
 Before Phase 10, Phase 9 built Leave & Attendance — plan doc Section 7's
 own **"real go/no-go checkpoint"**: a real leave request resolves its
@@ -96,7 +107,7 @@ existed to trigger that fix) — in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
 | Database | Postgres (Supabase-managed in staging/prod; local Postgres for dev) — raw SQL migrations, no ORM (Decision #2) |
 | Auth | Real self-hosted auth now — bcrypt passwords, mandatory TOTP MFA, account lockout, password reset (see `apps/api/src/auth`, Decision #3). Swappable for Supabase Auth later without touching RLS or claims |
 | File storage | `FileStorageService` interface (`apps/api/src/file-storage`) — a local-filesystem implementation for now, Supabase Storage/S3 swappable in behind it later without touching callers (Decision #7) |
-| Business-logic API | NestJS (TypeScript) — owns module licensing (`apps/api/src/entitlements`, Decision #5), RBAC (`apps/api/src/rbac`, Decision #4, extended with a `.team` scope in Decision #7), field permissions, the WRICEF framework (`apps/api/src/workflow`, `custom-fields`, `notifications`, `document-templates`, `import-export`, Decision #6, extended with `manager_of_submitter` routing in Decision #9), Employee Core (`apps/api/src/employees`, Decision #7), Employee Groups & Leave Policy Config (`apps/api/src/employee-groups`, Decision #8), Leave & Attendance (`apps/api/src/leave`, Decision #9), and Recruitment & Onboarding (`apps/api/src/recruitment`, Decision #10) |
+| Business-logic API | NestJS (TypeScript) — owns module licensing (`apps/api/src/entitlements`, Decision #5), RBAC (`apps/api/src/rbac`, Decision #4, extended with a `.team` scope in Decision #7), field permissions, the WRICEF framework (`apps/api/src/workflow`, `custom-fields`, `notifications`, `document-templates`, `import-export`, Decision #6, extended with `manager_of_submitter` routing in Decision #9), Employee Core (`apps/api/src/employees`, Decision #7), Employee Groups & Leave Policy Config (`apps/api/src/employee-groups`, Decision #8), Leave & Attendance (`apps/api/src/leave`, Decision #9), Recruitment & Onboarding (`apps/api/src/recruitment`, Decision #10), and Performance & Goals (`apps/api/src/performance`, Decision #11) |
 | Background jobs / SLA timers | `@nestjs/schedule` cron sweep for now, not Redis + BullMQ — see Decision #6 for why, and when that changes |
 | Frontend | React + Vite + Tailwind + React Router, Apple HIG design tokens |
 | Monorepo | Turborepo (npm workspaces) |
@@ -166,6 +177,7 @@ apps/
       employee-groups/ Employee Groups & Leave Policy Config: attribute-based groups, leave policies, most-specific-match-wins resolution (Decision #8)
       leave/          Leave & Attendance: leave requests (policy resolution, balances, overlap notices, On-Behalf, `manager_of_submitter` routing) and biometric/GPS/manual attendance clock-in/out (Decision #9, plan doc Section 7's "real go/no-go checkpoint")
       recruitment/    Recruitment & Onboarding: requisition approval (reusing the workflow engine as-is), candidates, a forward-only Kanban pipeline, and offer extension/acceptance — the second real caller of Employee Number assignment (Decision #10)
+      performance/    Performance & Goals: review cycles launched against an employee-group population, cascading goals, self/manager assessments, HR calibration, and a status-gated release reusing the field-permission engine's conditional rules — no workflow engine involvement (Decision #11)
       dummy/          Proof-of-concept object the RBAC/licensing/workflow/import-export engines were originally proven against, before Employee Core existed
   web/
     src/
@@ -242,11 +254,15 @@ provisioning it hasn't happened yet.
 
 ## What's next
 
-Phase 11 — Performance & Goals (review cycles, calibration), per
-`claude/development-plan.md` Section 7's own ordering. The technical
-go/no-go caveat from Phase 9 still stands exactly as stated in Decision
-#9 and `KNOWN_ISSUES.md`: every phase completed so far proves the
-platform internally coherent enough to keep building on, not a
-substitute for an actual pilot company's HR Admin, managers, and
+Phase 12 — Compensation & Payroll (EOBI/PESSI/FBR tax calculation, bank
+disbursement export), per `claude/development-plan.md` Section 7's own
+ordering — the plan doc's own **"highest-liability phase"**: a real
+accountant verifying the first payroll runs against actual Pakistani
+tax/EOBI/PESSI rules is non-negotiable before this phase's output is
+trusted with real money, no matter how thoroughly it's automated-test-
+covered. The technical go/no-go caveat from Phase 9 still stands exactly
+as stated in Decision #9 and `KNOWN_ISSUES.md`: every phase completed so
+far proves the platform internally coherent enough to keep building on,
+not a substitute for an actual pilot company's HR Admin, managers, and
 employees using it for real. See `claude/development-plan.md` Section 7
 for the full phase plan.
