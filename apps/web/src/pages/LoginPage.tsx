@@ -52,8 +52,8 @@ export function LoginPage() {
     try {
       const result = await api.login(email, password);
       if (result.status === "ok") {
-        setSessionToken(result.token);
-        navigate("/", { replace: true });
+        const identity = await setSessionToken(result.token);
+        navigate(identity.isPlatformAdmin ? "/" : "/app", { replace: true });
       } else if (result.status === "mfa_setup_required") {
         setStep({
           name: "mfaSetup",
@@ -77,8 +77,8 @@ export function LoginPage() {
     setLoading(true);
     try {
       const result = await api.confirmMfaEnrollment(mfaTicket, code);
-      setSessionToken(result.token);
-      navigate("/", { replace: true });
+      const identity = await setSessionToken(result.token);
+      navigate(identity.isPlatformAdmin ? "/" : "/app", { replace: true });
     } catch (err) {
       fail(err, "Could not verify that code.");
     } finally {
@@ -92,8 +92,8 @@ export function LoginPage() {
     setLoading(true);
     try {
       const result = await api.verifyMfa(mfaTicket, code);
-      setSessionToken(result.token);
-      navigate("/", { replace: true });
+      const identity = await setSessionToken(result.token);
+      navigate(identity.isPlatformAdmin ? "/" : "/app", { replace: true });
     } catch (err) {
       fail(err, "Could not verify that code.");
     } finally {

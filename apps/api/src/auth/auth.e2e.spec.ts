@@ -146,6 +146,23 @@ describe("Auth HTTP surface (e2e) — real tenant-user login (Decision #12)", ()
     expect(selfView.body.id).toBe(employeeId);
     expect(selfView.body.firstName).toBe("Nadia");
 
+    // Decision #13 — GET /auth/me reads back exactly what this real
+    // session IS: employee_self_service, linked to the Employee record
+    // createLogin() created, in this tenant, with the employee module on.
+    const meRes = await request(app.getHttpServer())
+      .get("/auth/me")
+      .set("Authorization", `Bearer ${nadiaToken}`);
+    expect(meRes.status).toBe(200);
+    expect(meRes.body).toMatchObject({
+      isPlatformAdmin: false,
+      companyId,
+      fullName: "Nadia Employee",
+      email,
+      roleKeys: ["employee_self_service"],
+      employeeId,
+    });
+    expect(meRes.body.enabledModules).toContain("employee");
+
     // ...and nothing more — employee_self_service holds no
     // employee.manage.all, so creating another employee must be refused.
     const forbiddenCreate = await request(app.getHttpServer())
@@ -160,5 +177,19 @@ describe("Auth HTTP surface (e2e) — real tenant-user login (Decision #12)", ()
       .post("/auth/login")
       .send({ email: "no-such-user@example.com", password: "irrelevant" });
     expect(wrongPassword.status).toBe(401);
+  });
+
+  it("GET /auth/me: an hr_admin fixture with no Employee record of their own gets roleKeys but employeeId: null, and no bearer token at all is rejected", async () => {
+    const meRes = await request(app.getHttpServer())
+      .get("/auth/me")
+      .set("Authorization", `Bearer ${hrAdminToken}`);
+    expect(meRes.status).toBe(200);
+    expect(meRes.body.isPlatformAdmin).toBe(false);
+    expect(meRes.body.companyId).toBe(companyId);
+    expect(meRes.body.roleKeys).toEqual(["hr_admin"]);
+    expect(meRes.body.employeeId).toBeNull();
+
+    const noToken = await request(app.getHttpServer()).get("/auth/me");
+    expect(noToken.status).toBe(401);
   });
 });

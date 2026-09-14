@@ -3,8 +3,9 @@ import * as jwt from "jsonwebtoken";
 import { generateSecret, verify as verifyTotp, generateURI } from "otplib";
 import { createHash, randomBytes } from "crypto";
 import { DatabaseService } from "../database/database.service";
+import { EntitlementsService } from "../entitlements/entitlements.service";
 import type { RequestClaims } from "../database/tenant-context";
-import type { LoginResult, PasswordResetRequestResult } from "@boostfactor/shared-types";
+import type { LoginResult, MeResponse, PasswordResetRequestResult, TenantRoleKey } from "@boostfactor/shared-types";
 import { decryptMfaSecret, encryptMfaSecret } from "./mfa-secret-crypto";
 import { hashPassword, verifyPassword } from "./password";
 import { signMfaTicket, verifyMfaTicket } from "./tickets";
@@ -48,7 +49,10 @@ function sha256(input: string): string {
 
 @Injectable()
 export class AuthService {
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly entitlements: EntitlementsService
+  ) {}
 
   // --- Login ------------------------------------------------------------
 
@@ -234,6 +238,104 @@ export class AuthService {
   // scoped to the pre-authentication identity flows: login, MFA, and
   // password reset. Both call `hashPassword` from ./password, the same
   // helper this service uses for its own password-reset flow.
+
+  // --- Session identity ---------------------------------------------------
+
+  /**
+   * `GET /auth/me` (Decision #13) — the one piece of post-authentication
+   * identity AuthService itself answers, because it's the direct
+   * counterpart of `resolveIdentityForAccount()` above: that function
+   * decides what a token IS at login time, this reads back what the
+   * caller's ALREADY-issued token means, for the frontend's own routing.
+   * Runs entirely under the caller's own (non-elevated) claims — nothing
+   * here needs `is_service`, since every row read is something the caller
+   * is already entitled to see about themselves under plain RLS (their
+   * own `user_accounts`/`company_admins`/`employees` row by `id`/
+   * `user_account_id = sub`, their own `user_role_assignments` rows, and
+   * their own company's `companies`/`tenant_module_entitlement` rows —
+   * all proven readable under plain claims already, by `RbacService`'s
+   * `hasPermission()` and `companies_select`'s own RLS policy).
+   */
+  async me(claims: RequestClaims): Promise<MeResponse> {
+    if (claims.is_platform_admin) {
+      const admin = await this.db.withClaims(claims, async (client) => {
+        const result = await client.query<{ full_name: string; email: string }>(
+          "SELECT full_name, email FROM platform_admins WHERE user_account_id = $1",
+          [claims.sub]
+        );
+        return result.rows[0];
+      });
+      return {
+        isPlatformAdmin: true,
+        companyId: null,
+        companyName: null,
+        email: admin?.email ?? "",
+        fullName: admin?.full_name ?? "",
+        roleKeys: [],
+        employeeId: null,
+        enabledModules: [],
+      };
+    }
+
+    if (!claims.company_id) {
+      // Shouldn't happen for a real session token — every non-platform-
+      // admin token AuthService issues carries the company_id its
+      // identity tier resolved. Safe-deny rather than guess.
+      throw new UnauthorizedException("Session has no company context");
+    }
+    const companyId = claims.company_id;
+
+    return this.db.withClaims(claims, async (client) => {
+      // Sequential, not Promise.all: every query here shares ONE pooled
+      // client (this transaction), and pg deprecates/warns on issuing a
+      // new query on a client that's still executing a prior one — unlike
+      // RbacService's Promise.all usages elsewhere, which parallelize
+      // across genuinely separate `withClaims()` connections, not queries
+      // sharing a single client.
+      const account = await client.query<{ email: string }>(
+        "SELECT email FROM user_accounts WHERE id = $1",
+        [claims.sub]
+      );
+      const company = await client.query<{ name: string }>("SELECT name FROM companies WHERE id = $1", [
+        companyId,
+      ]);
+      const employee = await client.query<{ id: string; first_name: string; last_name: string }>(
+        "SELECT id, first_name, last_name FROM employees WHERE user_account_id = $1 AND company_id = $2",
+        [claims.sub, companyId]
+      );
+      const roles = await client.query<{ key: TenantRoleKey }>(
+        `SELECT r.key FROM user_role_assignments ura
+         JOIN roles r ON r.id = ura.role_id
+         WHERE ura.user_account_id = $1 AND ura.company_id = $2`,
+        [claims.sub, companyId]
+      );
+      const enabledModules = await this.entitlements.getEnabledModuleKeys(client, companyId);
+
+      const employeeRow = employee.rows[0];
+      let fullName = employeeRow ? `${employeeRow.first_name} ${employeeRow.last_name}` : undefined;
+      if (!fullName) {
+        // Tier 2 (Company Super Admin) has no employees row — fall back
+        // to company_admins.full_name, the only other place a display
+        // name for this tier exists.
+        const companyAdmin = await client.query<{ full_name: string }>(
+          "SELECT full_name FROM company_admins WHERE user_account_id = $1",
+          [claims.sub]
+        );
+        fullName = companyAdmin.rows[0]?.full_name;
+      }
+
+      return {
+        isPlatformAdmin: false,
+        companyId,
+        companyName: company.rows[0]?.name ?? null,
+        email: account.rows[0]?.email ?? "",
+        fullName: fullName ?? account.rows[0]?.email ?? "",
+        roleKeys: roles.rows.map((r) => r.key),
+        employeeId: employeeRow?.id ?? null,
+        enabledModules,
+      };
+    });
+  }
 
   // --- Internal DB helpers (always via SERVICE_CLAIMS pre-auth) ----------
 

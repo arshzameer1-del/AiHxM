@@ -593,3 +593,35 @@ user out of band. **Revisit when:** Notifications (Phase 6's WRICEF
 pillar, already built) gets its first real tenant-facing email template —
 this is a natural first use of it, not attempted here to keep this fix
 scoped to the actual MVP blocker.
+
+## 2026-09 — Shared portal shell (Task #47 / Decision #13): real routing and identity, placeholder screens
+
+**Real and tested:** `GET /auth/me`, role/module-aware nav, and
+Platform-Admin-vs-tenant routing (`/` vs `/app`). **Not yet built:** the
+actual content behind `/app/employees`, `/app/admin`, `/app/leave`,
+`/app/recruitment`, `/app/performance`, and `/app/profile` — each is a
+truthful `ComingSoonPage` placeholder, not a stub pretending to be
+finished. **Revisit when:** Tasks #48-52 (already on the task list) build
+each screen against its already-tested API.
+
+**A real, pre-existing UX dead-end, now visible for the first time:** a
+freshly-bootstrapped Company (Super) Admin (Phase 2's tier-2 login) lands
+in the tenant portal with `roleKeys: []` and a "No role assigned yet"
+message — correct, but there is currently no self-service way for them to
+grant themselves a role; that still requires a Platform Admin to call
+`POST /platform/role-assignments` from the Platform Admin Panel (Decision
+#12's documented bootstrap chain). **Revisit when:** the P1 Admin Center
+work (MVP gate audit's Priority Plan item 5) or a real pilot onboarding
+makes this friction worth closing — e.g. letting a Company Admin request
+a role grant, or having company creation auto-grant `hr_admin` to the
+first Company Admin. Not solved here to keep this task scoped to shell/
+routing, not tenant-onboarding policy.
+
+**Not yet done at all:** an automated browser/E2E test of any of this —
+`auth.e2e.spec.ts` proves the API contract `GET /auth/me` promises, and
+`tsc`/`eslint`/`vite build` prove the frontend compiles against it, but
+nothing has actually driven a browser through the login → portal-redirect
+flow yet. Tracked as the same gap the MVP gate audit's Test Gap List
+already named (no Playwright/Cypress config anywhere in the repo).
+**Revisit when:** Task #53's verification pass, once more of the portal
+has real content worth clicking through end to end.

@@ -176,6 +176,34 @@ export type SessionResult = {
   token: string;
 };
 
+/**
+ * `GET /auth/me` — Decision #13. What a logged-in session actually is, for
+ * the frontend's own purposes: which portal shell to render (Platform
+ * Admin vs. a tenant's HR Admin/Manager/Employee screens) and which nav
+ * sections to show. This is describing the session, not a new
+ * authorization mechanism — every real read/write still goes through
+ * EntitlementsService/RbacService server-side exactly as before; a client
+ * that lies about what it does with this response gets 403s and 404s same
+ * as always. `roleKeys` is independent of which of AuthService's three
+ * login tiers actually resolved the session (see its SessionIdentity doc
+ * comment) — it's always a direct read of this user's own
+ * `user_role_assignments` rows in this company, which is why a Company
+ * (Super) Admin who hasn't yet been granted a tenant role via
+ * `POST /platform/role-assignments` correctly gets `roleKeys: []` here
+ * (Decision #12's "what this unblocks").
+ */
+export type MeResponse = {
+  isPlatformAdmin: boolean;
+  companyId: string | null;
+  companyName: string | null;
+  email: string;
+  fullName: string;
+  roleKeys: TenantRoleKey[];
+  /** The `employees` row linked to this login, if any — null for Platform Admin and for a Company Admin with no Employee record. */
+  employeeId: string | null;
+  enabledModules: ModuleKey[];
+};
+
 export type PasswordResetRequestBody = {
   email: string;
 };
@@ -1091,3 +1119,5 @@ export type RatingDistributionView = {
   totalReviews: number;
   pendingCalibration: number;
 };
+
+// -----------------------------------------------------------------------

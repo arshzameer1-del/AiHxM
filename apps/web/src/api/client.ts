@@ -10,6 +10,7 @@ import type {
   EmployeeNumberFormat,
   ImpersonateResponse,
   LoginResult,
+  MeResponse,
   ModuleKey,
   PasswordResetRequestResult,
   PlatformAdmin,
@@ -100,6 +101,12 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ token, newPassword }),
     }),
+
+  // Decision #13 — what the shared portal shell (Layout/AuthContext) uses
+  // to decide which portal to render and which nav sections to show. This
+  // DOES send the stored bearer token (unlike the pre-auth calls above) —
+  // it's read back after a session already exists.
+  getMe: () => request<MeResponse>("/auth/me"),
 
   // --- Platform Admins ------------------------------------------------------
   listPlatformAdmins: () => request<PlatformAdmin[]>("/platform/admins"),

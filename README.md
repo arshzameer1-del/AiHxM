@@ -254,15 +254,46 @@ provisioning it hasn't happened yet.
 
 ## What's next
 
-Phase 12 — Compensation & Payroll (EOBI/PESSI/FBR tax calculation, bank
-disbursement export), per `claude/development-plan.md` Section 7's own
-ordering — the plan doc's own **"highest-liability phase"**: a real
+**Updated 2026-09** — Phase 12 (Payroll) work was in progress when a fresh
+MVP-gate audit (`claude/mvp-gate-audit.md`, tracked in this repo's Claude
+Project) reframed priority: every phase through Phase 11 proves the
+backend internally coherent — real Postgres, real RBAC, real HTTP round
+trips — but nothing in the product could actually be *used* by a pilot
+company through a screen. That audit's own instructions are explicit:
+**Payroll stays paused until the MVP gate clears — one pilot company
+using BoostFactor through the real UI for the core HR workflows.**
+Phase 12's migrations/code remain written and uncommitted, not rolled
+back (per this project's "no destructive operations without confirmation"
+rule) — see `KNOWN_ISSUES.md`'s Phase 12 entries and `DECISIONS.md`'s
+Decision #14 references for where that work left off.
+
+Current priority, per the audit's Priority Plan:
+
+1. **The three tenant portals** (Employee/ESS, Manager/MSS, HR Admin) —
+   the actual pilot blocker. Decision #12 closed the prerequisite gap
+   (no real tenant-role user could log in at all); Decision #13 built the
+   shared shell — `GET /auth/me`, role/module-aware nav, and
+   Platform-Admin-vs-tenant routing (`/` vs `/app`) — with the real
+   feature screens (Employee Core, Employee Groups & Leave Policy Config,
+   Leave & Attendance, Recruitment, Performance) still to come, in that
+   order, against the already-tested API each module already has.
+2. Cross-tenant negative tests across every tenant-scoped endpoint (none
+   exist yet — a real security gap, not just a test-coverage one).
+3. A realistic pilot seed-data script (one demo company, employees,
+   managers, groups, policies, a few in-flight records).
+4. Backend test coverage for modules that still have none (`auth` now has
+   real coverage as of Decision #12/#13; `companies`, `platform-admins`,
+   `audit`, `notifications`, `document-templates`, `file-storage` still
+   don't).
+
+Payroll (Phase 12 — EOBI/PESSI/FBR tax calculation, bank disbursement
+export) resumes only after that gate clears and real pilot feedback
+exists, per `claude/development-plan.md` Section 7's own ordering and the
+updated instructions' explicit sequencing. It remains, as originally
+documented, the plan's own **"highest-liability phase"**: a real
 accountant verifying the first payroll runs against actual Pakistani
-tax/EOBI/PESSI rules is non-negotiable before this phase's output is
-trusted with real money, no matter how thoroughly it's automated-test-
-covered. The technical go/no-go caveat from Phase 9 still stands exactly
-as stated in Decision #9 and `KNOWN_ISSUES.md`: every phase completed so
-far proves the platform internally coherent enough to keep building on,
-not a substitute for an actual pilot company's HR Admin, managers, and
-employees using it for real. See `claude/development-plan.md` Section 7
-for the full phase plan.
+tax/EOBI/PESSI rules will be non-negotiable before its output is trusted
+with real money, no matter how thoroughly it's automated-test-covered.
+See `claude/development-plan.md` Section 7 for the full phase plan and
+`claude/mvp-gate-audit.md` for the full audit this reprioritization comes
+from.
