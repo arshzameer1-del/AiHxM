@@ -16,7 +16,27 @@ const RESET_TOKEN_TTL_MINUTES = 30;
 /** Never carries a real user's claims — see tenant-context.ts's doc comment on `is_service`. */
 const SERVICE_CLAIMS: RequestClaims = { is_platform_admin: false, is_service: true, sub: "auth-service" };
 
-type AdminIdentity = {
+/**
+ * What a successfully-authenticated `user_accounts` row actually IS, for
+ * the purpose of the token this issues. Three tiers, checked in this
+ * order — see `resolveIdentityForAccount()`:
+ *   1. Platform Admin (`platform_admins`) — internal ops, no company_id.
+ *   2. Company (Super) Admin (`company_admins`) — Phase 2's one-per-tenant
+ *      bootstrap login, predates Phase 4's RBAC engine entirely.
+ *   3. A real Phase 4+ RBAC user (`user_role_assignments`) — hr_admin /
+ *      line_manager / employee_self_service. This tier didn't exist until
+ *      now: every phase from 4 onward built and tested its RBAC engine
+ *      against `user_role_assignments` rows created directly by fixture
+ *      SQL, but nothing in the actual login flow ever looked at that
+ *      table — a Company Admin's own login carried a `company_id` and
+ *      NOTHING else, so `RbacService.hasPermission()` found zero rows for
+ *      them against every Phase 4+ module. See Decision #12.
+ * `adminStatus` is named for tiers 1/2's own admin-profile status column;
+ * tier 3 has no separate profile row to hold one, so it's always
+ * `"active"` there — `user_accounts.status` (checked once, before this
+ * even runs) is what actually gates a locked tenant user.
+ */
+type SessionIdentity = {
   is_platform_admin: boolean;
   company_id: string | null;
   adminStatus: "active" | "locked";
@@ -63,8 +83,9 @@ export class AuthService {
 
     await this.resetFailedAttempts(account.id);
 
-    // MFA is mandatory for both admin tiers (plan doc Phase 3 row) — a
-    // password-only session is never issued for either.
+    // MFA is mandatory for all three tiers (plan doc Phase 3 row,
+    // extended by Decision #12 to cover tenant RBAC users too) — a
+    // password-only session is never issued for any of them.
     if (!account.mfa_enabled) {
       const secret = generateSecret();
       await this.setPendingMfaSecret(account.id, encryptMfaSecret(secret));
@@ -122,7 +143,7 @@ export class AuthService {
     }
   }
 
-  private issueSessionToken(identity: AdminIdentity, userAccountId: string): string {
+  private issueSessionToken(identity: SessionIdentity, userAccountId: string): string {
     const secret = process.env.JWT_SECRET;
     if (!secret) throw new Error("JWT_SECRET is not set");
     return jwt.sign(
@@ -232,7 +253,7 @@ export class AuthService {
     });
   }
 
-  private async resolveIdentityForAccount(userAccountId: string): Promise<AdminIdentity> {
+  private async resolveIdentityForAccount(userAccountId: string): Promise<SessionIdentity> {
     return this.db.withClaims(SERVICE_CLAIMS, async (client) => {
       const platformAdmin = await client.query(
         "SELECT status FROM platform_admins WHERE user_account_id = $1",
@@ -254,9 +275,27 @@ export class AuthService {
         };
       }
 
+      // Tier 3 (Decision #12): a real RBAC user provisioned via
+      // `EmployeesService.createLogin()` — hr_admin / line_manager /
+      // employee_self_service. `user_role_assignments.company_id` is the
+      // authorization-bearing relationship (what `RbacService.can()`
+      // actually checks), so it's what this token's `company_id` comes
+      // from, not a join through `employees`. A user can only hold role
+      // assignments in one company today (no multi-tenant employees), so
+      // `LIMIT 1` is safe; nothing enforces that invariant at the DB level
+      // yet — a documented gap, not an oversight (see KNOWN_ISSUES.md).
+      const rbacUser = await client.query(
+        "SELECT DISTINCT company_id FROM user_role_assignments WHERE user_account_id = $1 LIMIT 1",
+        [userAccountId]
+      );
+      if ((rbacUser.rowCount ?? 0) > 0) {
+        return { is_platform_admin: false, company_id: rbacUser.rows[0].company_id, adminStatus: "active" };
+      }
+
       // Shouldn't happen outside of a bug — every user_accounts row is
-      // created in the same transaction as its admin-profile link.
-      throw new UnauthorizedException("This account is not linked to any admin profile");
+      // created either with an admin-profile link (platform_admins /
+      // company_admins) or a role assignment (EmployeesService.createLogin).
+      throw new UnauthorizedException("This account is not linked to any admin profile or role");
     });
   }
 

@@ -4,6 +4,7 @@ import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
 import { RbacService } from "../rbac/rbac.service";
 import { EntitlementsService } from "../entitlements/entitlements.service";
+import { AuditService } from "../audit/audit.service";
 import { EmployeesService } from "../employees/employees.service";
 import { LocalFileStorageService } from "../file-storage/local-file-storage.service";
 import { EmployeeGroupsService } from "./employee-groups.service";
@@ -31,8 +32,9 @@ describe("EmployeeGroupsService", () => {
     db = new DatabaseService(pool);
     const rbac = new RbacService(db);
     const entitlements = new EntitlementsService(db);
+    const audit = new AuditService();
     groups = new EmployeeGroupsService(db, rbac, entitlements);
-    employees = new EmployeesService(db, rbac, entitlements, new LocalFileStorageService());
+    employees = new EmployeesService(db, rbac, entitlements, audit, new LocalFileStorageService());
   });
 
   afterAll(async () => {

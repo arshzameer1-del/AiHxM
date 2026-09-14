@@ -64,7 +64,7 @@ describe("Leave & Attendance HTTP surface (e2e)", () => {
     const rbac = new RbacService(db);
     const entitlements = new EntitlementsService(db);
     const audit = new AuditService();
-    employees = new EmployeesService(db, rbac, entitlements, new LocalFileStorageService());
+    employees = new EmployeesService(db, rbac, entitlements, audit, new LocalFileStorageService());
     groups = new EmployeeGroupsService(db, rbac, entitlements);
     workflow = new WorkflowService(db, rbac, audit);
 

@@ -49,7 +49,7 @@ describe("PerformanceService", () => {
     rbac = new RbacService(db);
     entitlements = new EntitlementsService(db);
     audit = new AuditService();
-    employees = new EmployeesService(db, rbac, entitlements, new LocalFileStorageService());
+    employees = new EmployeesService(db, rbac, entitlements, audit, new LocalFileStorageService());
     groups = new EmployeeGroupsService(db, rbac, entitlements);
     performance = new PerformanceService(db, rbac, entitlements, audit, groups);
 

@@ -1,9 +1,11 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
 import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
+import { AuditService } from "../audit/audit.service";
+import { hashPassword } from "../auth/password";
 import { FILE_STORAGE, type FileStorageService } from "../file-storage/file-storage.interface";
 import { formatEmployeeNumber, parseEmployeeNumberSequence } from "./employee-number.util";
 import type {
@@ -23,6 +25,9 @@ const OBJECT_KEY = "employee";
 const VIEW_PERMISSION = "employee.view";
 const MANAGE_PERMISSION = "employee.manage.all";
 const SENSITIVE_FIELDS = ["cnic", "dateOfBirth", "salaryBand", "bankAccountNumber", "terminationReason"] as const;
+// Decision #12 — the only roles `createLogin()` is allowed to grant.
+// Deliberately excludes the Phase 4 `rbac_demo_*` proof-of-concept roles.
+const TENANT_ROLE_KEYS = ["hr_admin", "line_manager", "employee_self_service"] as const;
 const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024; // 10MB — see addDocument()'s doc comment.
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -114,6 +119,7 @@ export class EmployeesService {
     private readonly db: DatabaseService,
     private readonly rbac: RbacService,
     private readonly entitlements: EntitlementsService,
+    private readonly audit: AuditService,
     @Inject(FILE_STORAGE) private readonly fileStorage: FileStorageService
   ) {}
 
@@ -461,6 +467,122 @@ export class EmployeesService {
         [employeeId]
       );
       return result.rows.map(rowToJobHistory);
+    });
+  }
+
+  /**
+   * Decision #12: creates a real login for an Employee record AND grants
+   * it role(s) in one call — the tenant-scoped, HR-Admin-self-service
+   * counterpart to the Platform-Admin-only `POST /platform/role-
+   * assignments` endpoint. Before this existed, there was no way for an
+   * HR Admin to onboard a real user without a Platform Admin or a
+   * database console: `RoleAssignmentsController` is deliberately
+   * Platform-Admin-only, and nothing else ever created a `user_accounts`
+   * row for an `employees` record at all.
+   *
+   * Deliberately refuses to grant anything outside the three real tenant
+   * roles (`TENANT_ROLE_KEYS`) — an HR Admin managing their own users
+   * should never be able to reach for a Phase 4 `rbac_demo_*`
+   * proof-of-concept role, which this endpoint's permission gate
+   * (`employee.manage.all`) was never designed to authorize.
+   *
+   * RLS note: `user_accounts_insert` and `user_role_assignments_write`
+   * both require `is_platform_admin() OR is_service()` — neither allows
+   * a plain tenant session, by design (0002/0004's own header comments:
+   * "the auth service itself can operate before either [real] identity
+   * is established," and role-granting is meant to go through a trusted
+   * gate, not any authenticated session). This method IS that trusted
+   * gate: `requireModuleAndManagePermission()` above already verified
+   * the REAL caller holds `employee.manage.all` in their own company
+   * before any of this runs, so the transaction below elevates to a
+   * `is_service` claims object — but keeps the caller's own
+   * `company_id` on it (not a bare service claims with none), so every
+   * company-scoped table's normal `company_id = current_company_id()`
+   * RLS branch still applies. Elevating to `is_service` bypasses that
+   * scoping for `employees` specifically (its policy has an unconditional
+   * `is_service()` branch) — so the employee lookup below filters on
+   * `company_id = $2` explicitly rather than relying on RLS to do it,
+   * exactly the discipline `is_service` code always needs.
+   */
+  async createLogin(
+    claims: RequestClaims,
+    employeeId: string,
+    input: { initialPassword: string; roleKeys: string[] }
+  ): Promise<{ employee: EmployeeView; rolesGranted: string[] }> {
+    await this.requireModuleAndManagePermission(claims);
+    if (!claims.company_id) throw new ForbiddenException();
+
+    const uniqueRoleKeys = Array.from(new Set(input.roleKeys));
+    if (uniqueRoleKeys.length === 0) {
+      throw new BadRequestException("At least one role must be granted");
+    }
+    const invalidRoleKeys = uniqueRoleKeys.filter((key) => !TENANT_ROLE_KEYS.includes(key as (typeof TENANT_ROLE_KEYS)[number]));
+    if (invalidRoleKeys.length > 0) {
+      throw new BadRequestException(`Cannot grant role(s): ${invalidRoleKeys.join(", ")}`);
+    }
+
+    const elevatedClaims: RequestClaims = {
+      is_platform_admin: false,
+      is_service: true,
+      company_id: claims.company_id,
+      sub: "employees-service",
+    };
+
+    return this.db.withClaims(elevatedClaims, async (client) => {
+      const employeeResult = await client.query("SELECT * FROM employees WHERE id = $1 AND company_id = $2", [
+        employeeId,
+        claims.company_id,
+      ]);
+      if (employeeResult.rowCount === 0) throw new NotFoundException("Employee not found");
+      const employee = employeeResult.rows[0];
+      if (employee.user_account_id) {
+        throw new ConflictException("This employee already has a login");
+      }
+      if (!employee.email) {
+        throw new BadRequestException("Employee must have an email address before a login can be created");
+      }
+
+      const passwordHash = await hashPassword(input.initialPassword);
+      let userAccountId: string;
+      try {
+        const account = await client.query(
+          "INSERT INTO user_accounts (email, password_hash) VALUES ($1, $2) RETURNING id",
+          [employee.email, passwordHash]
+        );
+        userAccountId = account.rows[0].id;
+      } catch (err) {
+        // user_accounts.email is globally UNIQUE (Section 5) — a friendly
+        // 409 instead of a raw constraint-violation 500, matching the
+        // clarity every other module's duplicate-key path already has.
+        if ((err as { code?: string }).code === "23505") {
+          throw new ConflictException(`A login already exists for ${employee.email}`);
+        }
+        throw err;
+      }
+
+      await client.query("UPDATE employees SET user_account_id = $1, updated_at = now() WHERE id = $2", [
+        userAccountId,
+        employeeId,
+      ]);
+
+      for (const roleKey of uniqueRoleKeys) {
+        const role = await client.query("SELECT id FROM roles WHERE key = $1", [roleKey]);
+        if (role.rowCount === 0) throw new NotFoundException(`No role with key "${roleKey}"`);
+        await client.query(
+          "INSERT INTO user_role_assignments (user_account_id, company_id, role_id) VALUES ($1, $2, $3)",
+          [userAccountId, claims.company_id, role.rows[0].id]
+        );
+      }
+
+      await this.audit.record(client, claims, {
+        companyId: claims.company_id ?? null,
+        action: "employee.login_created",
+        target: employeeId,
+        metadata: { roleKeys: uniqueRoleKeys },
+      });
+
+      const updated = await client.query("SELECT * FROM employees WHERE id = $1", [employeeId]);
+      return { employee: rowToEmployee(updated.rows[0]) as EmployeeView, rolesGranted: uniqueRoleKeys };
     });
   }
 

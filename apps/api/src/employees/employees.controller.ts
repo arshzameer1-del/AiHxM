@@ -18,6 +18,7 @@ import type { RequestClaims } from "../database/tenant-context";
 import { EmployeesService } from "./employees.service";
 import { CreateEmployeeDto } from "./dto/create-employee.dto";
 import { UpdateEmployeeDto } from "./dto/update-employee.dto";
+import { CreateEmployeeLoginDto } from "./dto/create-employee-login.dto";
 import { RecordJobHistoryDto, UploadEmployeeDocumentDto } from "./dto/record-job-history.dto";
 
 /**
@@ -58,6 +59,12 @@ export class EmployeesController {
   @Patch(":id")
   update(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: UpdateEmployeeDto) {
     return this.employees.update(claims, id, dto);
+  }
+
+  /** Decision #12 — see EmployeesService.createLogin()'s doc comment. */
+  @Post(":id/account")
+  createLogin(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: CreateEmployeeLoginDto) {
+    return this.employees.createLogin(claims, id, dto);
   }
 
   @Post(":id/documents")

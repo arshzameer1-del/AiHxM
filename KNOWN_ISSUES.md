@@ -557,3 +557,39 @@ configurable entitlement days. **Revisit when:** a real pilot client
 specifically asks for a different scale — building tenant-configurable
 scales ahead of that ask would be exactly the kind of speculative
 over-building Section 10 warns against.
+
+## 2026-09 — MVP Gate Audit, and closing the real-tenant-login gap it found (Decision #12)
+
+**FIXED.** The audit (`claude/mvp-gate-audit.md`) found that no real
+`hr_admin`/`line_manager`/`employee_self_service` user could ever log in
+through the actual product — `AuthService` only recognized Platform Admin
+and Company Admin identities, and a Company Admin's own login carried no
+RBAC role at all. Fixed in Decision #12: a third identity tier in
+`resolveIdentityForAccount()`, plus `EmployeesService.createLogin()` as
+the tenant-scoped, HR-Admin-self-service way to actually create one of
+these logins. Verified with a real login → MFA-enrollment → RBAC-scoped-
+request round trip over actual HTTP (`auth.e2e.spec.ts`), `auth`'s
+first-ever dedicated test file. This was arguably a more fundamental
+blocker than the missing frontend the audit's own headline finding
+named — a finished tenant portal would have had no real users able to
+sign into it without this fix.
+
+**A real, documented simplification riding along with that fix:** a
+`user_accounts` row can only meaningfully hold role assignments in ONE
+company today — `resolveIdentityForAccount`'s tier-3 branch does `SELECT
+DISTINCT company_id ... LIMIT 1`, silently picking one if a user
+somehow held role assignments in more than one company (nothing at the
+database level prevents that; nothing elsewhere in this codebase models
+a person working across multiple tenants either). **Revisit when:** a
+real pilot client actually has someone who needs access to more than one
+of their own companies — cross-company access is not a concept BoostFactor
+has anywhere else yet, so this isn't a narrower gap than the rest of the
+product, just the first place it became visible.
+
+**Also real, not yet built:** `EmployeesService.createLogin()` sends no
+welcome email / credential-delivery mechanism — the HR Admin who creates
+a login currently has to communicate the initial password to the new
+user out of band. **Revisit when:** Notifications (Phase 6's WRICEF
+pillar, already built) gets its first real tenant-facing email template —
+this is a natural first use of it, not attempted here to keep this fix
+scoped to the actual MVP blocker.

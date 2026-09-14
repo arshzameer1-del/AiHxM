@@ -4,6 +4,7 @@ import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
 import { RbacService } from "../rbac/rbac.service";
 import { EntitlementsService } from "../entitlements/entitlements.service";
+import { AuditService } from "../audit/audit.service";
 import { LocalFileStorageService } from "../file-storage/local-file-storage.service";
 import { EmployeesService } from "./employees.service";
 
@@ -25,7 +26,7 @@ describe("EmployeesService", () => {
   beforeAll(async () => {
     pool = new Pool({ connectionString: process.env.APP_DATABASE_URL });
     db = new DatabaseService(pool);
-    employees = new EmployeesService(db, new RbacService(db), new EntitlementsService(db), new LocalFileStorageService());
+    employees = new EmployeesService(db, new RbacService(db), new EntitlementsService(db), new AuditService(), new LocalFileStorageService());
   });
 
   afterAll(async () => {

@@ -41,7 +41,7 @@ describe("RecruitmentService", () => {
     const entitlements = new EntitlementsService(db);
     const audit = new AuditService();
     workflow = new WorkflowService(db, rbac, audit);
-    employees = new EmployeesService(db, rbac, entitlements, new LocalFileStorageService());
+    employees = new EmployeesService(db, rbac, entitlements, audit, new LocalFileStorageService());
     recruitment = new RecruitmentService(db, rbac, entitlements, audit, workflow, employees);
 
     const stamp = Date.now();

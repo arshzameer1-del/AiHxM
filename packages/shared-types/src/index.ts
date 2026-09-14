@@ -584,6 +584,36 @@ export type UpdateEmployeeRequest = Partial<
   terminationReason?: string;
 };
 
+/**
+ * The three real tenant RBAC roles (0011_employee_seed.sql) — deliberately
+ * excludes the `rbac_demo_*` proof-of-concept roles from Phase 4, which
+ * `EmployeesService.createLogin()` refuses to grant (see Decision #12).
+ */
+export type TenantRoleKey = "hr_admin" | "line_manager" | "employee_self_service";
+
+/**
+ * Decision #12: before this, there was no way for an Employee record to
+ * get an actual login — `AuthService`'s real `/auth/login` flow only ever
+ * recognized Platform Admin and Company (Super) Admin identities, and a
+ * Company Admin's own login carried no `user_role_assignments` row at
+ * all, so it held zero permissions against any Phase 4+ module. This is
+ * the tenant-scoped, HR-Admin-self-service counterpart to the
+ * Platform-Admin-only `POST /platform/role-assignments` endpoint —
+ * `EmployeesService.createLogin()` creates the `user_accounts` row AND
+ * grants role(s) in one call, gated by `employee.manage.all` so an HR
+ * Admin never needs a Platform Admin or a database console to onboard
+ * their own tenant's users.
+ */
+export type CreateEmployeeLoginRequest = {
+  initialPassword: string;
+  roleKeys: TenantRoleKey[];
+};
+
+export type CreateEmployeeLoginResponse = {
+  employee: EmployeeView;
+  rolesGranted: TenantRoleKey[];
+};
+
 export type OrgChartNode = {
   id: string;
   employeeNumber: string;
