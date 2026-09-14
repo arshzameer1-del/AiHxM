@@ -652,3 +652,22 @@ hr_admin that's everyone, which is fine at pilot scale (~20-50 employees
 per the audit's own seed-data target) but will need a search/autocomplete
 before it's usable at hundreds of employees. **Revisit when:** the pilot
 seed-data script (P0 #3) makes this concretely slow to use, not before.
+
+**Found and fixed via manual browser verification (Decision #16):** a
+real rendering-order bug in `LoginSection` (`EmployeeDetailPage.tsx`)
+meant the one-time password banner never displayed after a successful
+`createLogin()` call — the login was genuinely created, but the HR Admin
+would never see the password to hand off. `employees.e2e.spec.ts`
+(correctly) tests the API contract and could not have caught this; it
+took an actual Playwright pass driving the real running app to surface
+it. Fixed by reordering the JSX conditional and keying `LoginSection` on
+`employee.id`. **The outstanding gap this is evidence for, not a
+substitute for:** there is still no *automated* browser/E2E test running
+in CI or as part of the normal verification loop — this was one manual
+pass over one screen, prompted by a direct user request to "show the
+prototype," not a repeatable check. Automating even a thin version of
+this (Playwright driving login → one create/edit/detail round trip per
+portal screen) remains the real fix and is still not built. **Revisit
+when:** each new portal screen (Tasks #49-52) at minimum gets the same
+kind of manual pass before being called done, and a real automated
+suite is scoped once enough of the portal exists to make one worthwhile.

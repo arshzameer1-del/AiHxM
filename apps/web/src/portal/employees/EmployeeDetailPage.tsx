@@ -78,6 +78,7 @@ export function EmployeeDetailPage() {
 
       {canManage && (
         <LoginSection
+          key={employee.id}
           employee={employee}
           onChanged={(updated) => setEmployee(updated)}
         />
@@ -363,15 +364,15 @@ function LoginSection({
     <section className="bg-card rounded-card p-5 shadow-sm mb-6 space-y-4">
       <h2 className="font-semibold text-sm uppercase tracking-wide text-label-tertiary">Login &amp; access</h2>
 
-      {employee.userAccountId ? (
-        <p className="text-sm text-label-secondary">This employee already has a login.</p>
-      ) : createdCredential ? (
+      {createdCredential ? (
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs space-y-1">
           <div className="font-semibold text-amber-900">
             Login created for {createdCredential.email} — share this password now, it won't be shown again:
           </div>
           <code className="block bg-white rounded px-2 py-1">{createdCredential.password}</code>
         </div>
+      ) : employee.userAccountId ? (
+        <p className="text-sm text-label-secondary">This employee already has a login.</p>
       ) : creating ? (
         <form onSubmit={handleCreate} className="space-y-3 bg-black/5 rounded-lg p-3">
           {!employee.email && (
