@@ -706,3 +706,49 @@ UI implication yet since there's only one to assign, but
 generalizing the day a second one ships — flagged here so that's not a
 surprise. **Revisit when:** a second policy type is actually built, or a
 customer asks to self-manage module entitlements.
+
+## 2026-09 — Leave & Attendance (Task #50 / Decision #18): what's real vs. not yet built, and a P0 gap for PILOT
+
+**Real and tested:** self-submit, on-behalf submit, approve, reject,
+cancel, clock in/out, balance display, non-blocking overlap notices, and
+the RBAC-driven visibility split across `hr_admin`/`line_manager`/
+`employee_self_service` — all verified with a live Playwright pass
+against a freshly seeded demo tenant, real HTTP round trips throughout.
+
+**Found and fixed:** `MyLeaveCard` rendered for any role holding
+`identity.employeeId`, but `line_manager` only holds `employee.view.team`
+(never `.self`) per `0011_employee_seed.sql` — a live pass caught the
+resulting `404`s on the Line Manager's own `GET /employees/:id` and
+`GET /employees/:id/leave-balances` calls. Fixed by gating the card on
+`roleKeys.includes("hr_admin") || roleKeys.includes("employee_self_service")`
+in addition to the existing `employeeId` check — the two roles that
+actually hold `.all`/`.self` on Employee.
+
+**P0 gap for PILOT, not covered by Task #50's own scope and not
+previously ticketed:** no real tenant role, and no screen anywhere in
+`apps/web`, can create the `workflow_templates` row (key `leave_request`)
+that `LeaveRequestsService.submit()` requires — `workflow_template.manage.all`
+(`0008_workflow_seed.sql`) is granted only to `rbac_demo_full_access`, a
+Phase 4 demo-only role. `leave-requests.service.spec.ts`'s own fixture
+already works around this by granting its test HR Admin that extra role,
+with a comment acknowledging the real-world gap rather than raising it.
+**A brand-new company onboarded today has no way to make Leave &
+Attendance work at all without a developer manually calling
+`POST /workflow/templates` with a hand-crafted demo-role grant** — this
+session's own Task #50 verification fixture had to do exactly that to
+test anything beyond the empty-state screen. **Revisit before PILOT
+onboarding, not before MVP** — a Workflow Templates admin screen (or, at
+minimum, a documented manual seeding runbook and a real permission grant
+on `hr_admin` or a dedicated role) needs to exist before a real customer
+is onboarded, or every pilot company will need this exact manual
+workaround performed for them by hand.
+
+**Still true, pre-existing, not introduced by this task:** the
+submit/workflow non-atomicity this codebase already documents (the
+`leave_requests` row and its `workflow_instance_id` are written in two
+separate, non-atomic steps) was directly observed twice during this
+task's own verification — an On-Behalf submission whose workflow routing
+failed (no manager, or no login) still left a real, visible "Pending"
+row with working Approve/Reject/Cancel buttons and no approval chain
+behind it. Not a regression; flagged here only because this pass is what
+surfaced it concretely rather than as an abstract risk.

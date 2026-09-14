@@ -1,6 +1,9 @@
 import type {
   AssignGroupPolicyRequest,
+  AttendanceRecordView,
   AuditLogEntry,
+  ClockInRequest,
+  ClockOutRequest,
   Company,
   CompanyAdmin,
   CompanyConfig,
@@ -13,13 +16,16 @@ import type {
   CreateEmployeeRequest,
   CreateLeavePolicyRequest,
   CreatePlatformAdminRequest,
+  DecideLeaveRequestRequest,
   EmployeeGroupPolicyAssignmentView,
   EmployeeGroupView,
   EmployeeNumberFormat,
   EmployeeView,
   ImpersonateResponse,
   JobHistoryEntryView,
+  LeaveBalanceView,
   LeavePolicyView,
+  LeaveRequestView,
   LoginResult,
   MeResponse,
   ModuleKey,
@@ -28,6 +34,8 @@ import type {
   PolicyType,
   ResolvedPolicyView,
   SessionResult,
+  SubmitLeaveRequestRequest,
+  SubmitLeaveRequestResponse,
   UpdateEmployeeGroupRequest,
   UpdateEmployeeRequest,
   UpdateLeavePolicyRequest,
@@ -267,4 +275,37 @@ export const api = {
 
   resolvedPolicy: (employeeId: string, policyType: PolicyType = "leave") =>
     request<ResolvedPolicyView>(`/employees/${employeeId}/resolved-policy?policyType=${policyType}`),
+
+  // --- Leave & Attendance (Task #50) -----------------------------------
+  // listLeaveRequests() is the same "server already RBAC-scopes it" shape
+  // as listEmployees()/listEmployeeGroups() — hr_admin (view.all),
+  // line_manager (view.team), employee_self_service (view.self) all call
+  // this identical endpoint and render whatever comes back.
+  listLeaveRequests: (employeeId?: string) =>
+    request<LeaveRequestView[]>(`/leave-requests${employeeId ? `?employeeId=${employeeId}` : ""}`),
+
+  submitLeaveRequest: (input: SubmitLeaveRequestRequest) =>
+    request<SubmitLeaveRequestResponse>("/leave-requests", { method: "POST", body: JSON.stringify(input) }),
+
+  // Who is actually allowed to decide a given request is entirely
+  // workflow-routing-determined server-side (LeaveRequestsService.decide()'s
+  // own doc comment) — this call is offered to any pending row the UI
+  // shows and a real 403 is the honest answer for a non-approver, exactly
+  // like every other cosmetically-gated action in this portal.
+  decideLeaveRequest: (id: string, input: DecideLeaveRequestRequest) =>
+    request<LeaveRequestView>(`/leave-requests/${id}/decision`, { method: "PATCH", body: JSON.stringify(input) }),
+
+  cancelLeaveRequest: (id: string) => request<void>(`/leave-requests/${id}/cancel`, { method: "POST" }),
+
+  getLeaveBalances: (employeeId: string) =>
+    request<LeaveBalanceView[]>(`/employees/${employeeId}/leave-balances`),
+
+  clockIn: (input: ClockInRequest) =>
+    request<AttendanceRecordView>("/attendance/clock-in", { method: "POST", body: JSON.stringify(input) }),
+
+  clockOut: (input: ClockOutRequest) =>
+    request<AttendanceRecordView>("/attendance/clock-out", { method: "POST", body: JSON.stringify(input) }),
+
+  listAttendance: (employeeId: string) =>
+    request<AttendanceRecordView[]>(`/employees/${employeeId}/attendance`),
 };

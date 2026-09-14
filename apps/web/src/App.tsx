@@ -16,6 +16,7 @@ import { EmployeeCreatePage } from "./portal/employees/EmployeeCreatePage";
 import { EmployeeDetailPage } from "./portal/employees/EmployeeDetailPage";
 import { MyProfilePage } from "./portal/employees/MyProfilePage";
 import { AdminCenterPage } from "./portal/admin/AdminCenterPage";
+import { LeavePage } from "./portal/leave/LeavePage";
 
 /**
  * Any URL this router doesn't otherwise recognize — including a plain
@@ -74,15 +75,11 @@ export default function App() {
                     employee_group.manage/leave_policy.manage gates are the
                     real one, same split every portal screen follows. */}
                 <Route path="admin" element={<AdminCenterPage />} />
-                <Route
-                  path="leave"
-                  element={
-                    <ComingSoonPage
-                      title="Leave & Attendance"
-                      description="Request, approve, and track leave and attendance."
-                    />
-                  }
-                />
+                {/* Task #50 — Leave & Attendance. Server-side RBAC/workflow
+                    routing decides who can submit/decide/cancel what;
+                    LeavePage renders one screen for every role, same
+                    pattern as Task #48/#49. */}
+                <Route path="leave" element={<LeavePage />} />
                 <Route
                   path="recruitment"
                   element={
