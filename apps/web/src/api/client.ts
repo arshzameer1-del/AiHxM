@@ -1,7 +1,10 @@
 import type {
+  ApplicationStage,
+  ApplicationView,
   AssignGroupPolicyRequest,
   AttendanceRecordView,
   AuditLogEntry,
+  CandidateView,
   ClockInRequest,
   ClockOutRequest,
   Company,
@@ -9,26 +12,34 @@ import type {
   CompanyConfig,
   CompanyDashboardRow,
   CompanyDetail,
+  CreateApplicationRequest,
+  CreateCandidateRequest,
   CreateCompanyRequest,
   CreateEmployeeGroupRequest,
   CreateEmployeeLoginRequest,
   CreateEmployeeLoginResponse,
   CreateEmployeeRequest,
+  CreateJobRequisitionRequest,
   CreateLeavePolicyRequest,
   CreatePlatformAdminRequest,
   DecideLeaveRequestRequest,
+  DecideOfferResponse,
   EmployeeGroupPolicyAssignmentView,
   EmployeeGroupView,
   EmployeeNumberFormat,
   EmployeeView,
+  ExtendOfferRequest,
   ImpersonateResponse,
   JobHistoryEntryView,
+  JobRequisitionView,
   LeaveBalanceView,
   LeavePolicyView,
   LeaveRequestView,
   LoginResult,
   MeResponse,
   ModuleKey,
+  MoveApplicationStageRequest,
+  OfferView,
   PasswordResetRequestResult,
   PlatformAdmin,
   PolicyType,
@@ -308,4 +319,67 @@ export const api = {
 
   listAttendance: (employeeId: string) =>
     request<AttendanceRecordView[]>(`/employees/${employeeId}/attendance`),
+
+  // --- Recruitment (Task #51) -------------------------------------------
+  // recruitment.manage.all is a single scope-less permission granted only
+  // to hr_admin (0018_recruitment_seed.sql — no .self/.team split exists
+  // here, and no candidate login ever exists), so unlike Leave/Employee
+  // Core there is no RBAC-driven view variance for these endpoints to
+  // account for: every call below is HR-Admin-only in practice, and the
+  // frontend renders a single screen rather than a per-role variant.
+  createRequisition: (input: CreateJobRequisitionRequest) =>
+    request<JobRequisitionView>("/job-requisitions", { method: "POST", body: JSON.stringify(input) }),
+
+  listRequisitions: () => request<JobRequisitionView[]>("/job-requisitions"),
+
+  getRequisition: (id: string) => request<JobRequisitionView>(`/job-requisitions/${id}`),
+
+  submitRequisition: (id: string) =>
+    request<JobRequisitionView>(`/job-requisitions/${id}/submit`, { method: "POST" }),
+
+  // Reuses the same {decision, comment?} shape as decideLeaveRequest —
+  // RecruitmentController's own doc comment confirms it reuses
+  // DecideLeaveRequestDto server-side rather than a near-identical DTO.
+  // Routing is workflow-determined server-side (same
+  // workflow_template.manage.all gap flagged in Decision #18 blocks this
+  // too, since no "job_requisition" template exists for a real tenant
+  // today), so this call is offered on any pending_approval row and a
+  // real 403/404 is the honest answer when routing isn't configured.
+  decideRequisition: (id: string, input: DecideLeaveRequestRequest) =>
+    request<JobRequisitionView>(`/job-requisitions/${id}/decision`, { method: "PATCH", body: JSON.stringify(input) }),
+
+  createCandidate: (input: CreateCandidateRequest) =>
+    request<CandidateView>("/candidates", { method: "POST", body: JSON.stringify(input) }),
+
+  listCandidates: () => request<CandidateView[]>("/candidates"),
+
+  createApplication: (input: CreateApplicationRequest) =>
+    request<ApplicationView>("/applications", { method: "POST", body: JSON.stringify(input) }),
+
+  listApplications: (requisitionId?: string) =>
+    request<ApplicationView[]>(`/applications${requisitionId ? `?requisitionId=${requisitionId}` : ""}`),
+
+  // moveApplicationStage() is forward-only server-side (FORWARD_STAGES)
+  // and explicitly refuses a direct move to "hired" — decideOffer(...,
+  // "accepted") is the only path that reaches "hired". The UI only needs
+  // to offer the buttons that make sense for the current stage; the
+  // server is what actually enforces the rest.
+  moveApplicationStage: (id: string, stage: ApplicationStage) =>
+    request<ApplicationView>(`/applications/${id}/stage`, {
+      method: "PATCH",
+      body: JSON.stringify({ stage } satisfies MoveApplicationStageRequest),
+    }),
+
+  extendOffer: (input: ExtendOfferRequest) =>
+    request<OfferView>("/offers", { method: "POST", body: JSON.stringify(input) }),
+
+  rescindOffer: (id: string) => request<OfferView>(`/offers/${id}/rescind`, { method: "POST" }),
+
+  // On "accepted" this creates a real Employee record (with a real
+  // Employee Number) server-side in a separate transaction from the
+  // offer/application status update — DecideOfferResponse.employee is
+  // non-null only in that case, which is what the Pipeline UI uses to
+  // show a "hired as employee #..." confirmation rather than assuming.
+  decideOffer: (id: string, decision: "accepted" | "declined") =>
+    request<DecideOfferResponse>(`/offers/${id}/decision`, { method: "PATCH", body: JSON.stringify({ decision }) }),
 };

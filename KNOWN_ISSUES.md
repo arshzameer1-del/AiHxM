@@ -752,3 +752,67 @@ failed (no manager, or no login) still left a real, visible "Pending"
 row with working Approve/Reject/Cancel buttons and no approval chain
 behind it. Not a regression; flagged here only because this pass is what
 surfaced it concretely rather than as an abstract risk.
+
+## 2026-09 — Recruitment (Task #51 / Decision #19): what's real vs. not yet built, a real API gap, and the same P0 workflow-template blocker
+
+**Real and tested:** create/submit/approve/reject a job requisition, add
+candidates to a company-wide pool, attach candidates to an approved
+requisition's pipeline, forward-only Kanban stage moves (server-enforced
+and UI-mirrored — no "Move to Hired" button is ever offered, since only
+`decideOffer(..., "accepted")` can set that stage), extend/rescind/decide
+an offer, and offer acceptance creating a real Employee record with a
+real Employee Number — all verified with a live Playwright pass against
+a freshly seeded demo tenant, real HTTP round trips throughout, 16/16
+assertions passing.
+
+**Found and fixed:** the "Hired as Employee #..." confirmation shown
+after accepting an offer never actually rendered, not even transiently —
+confirmed via network-response capture that the backend succeeded every
+time (a real Employee record, real Employee Number) while a 2-second DOM
+poll never once saw the confirmation text. Root cause: the confirmation
+lived in `ApplicationCard`'s own local state, but accepting an offer
+triggers a reload that moves the application from the "offer" column's
+list to the "hired" column's — unmounting that exact component instance
+and losing the state before a human (or even fast polling) could see it.
+Fixed by lifting the note into `PipelinePanel`'s own state, keyed by
+`applicationId`, so the fresh `ApplicationCard` instance that mounts in
+the new column reads the same value.
+
+**Real, load-bearing API gap — not a bug to fix in this task, but a
+genuine backend limitation:** there is no `GET /offers` or
+`GET /offers?applicationId=` endpoint anywhere in the API.
+`RecruitmentController` only exposes `POST /offers`,
+`POST /offers/:id/rescind`, and `PATCH /offers/:id/decision` — all three
+require an offer id the caller already has, and `ApplicationView` itself
+carries no `offerId` field. Once a page reloads, a previously-extended
+offer's id/salary/status genuinely cannot be retrieved from this screen —
+the UI only knows about offers it extended or decided within the current
+session (tracked in local state) and says so plainly rather than faking
+a control. **Revisit when:** an offer needs to be actionable (rescinded
+or decided) in a session that didn't extend it — likely means adding a
+`GET /offers?applicationId=` endpoint plus an `offerId` (or embedded
+latest-offer summary) on `ApplicationView`.
+
+**Same P0 gap as Task #50 (Decision #18), now confirmed to block
+Recruitment too, not a second separate discovery:**
+`submitRequisition()` requires an active `workflow_templates` row keyed
+`job_requisition`, created via `WorkflowService.createTemplate()`, which
+requires `workflow_template.manage.all` — granted only to
+`rbac_demo_full_access`, never `hr_admin` or any real tenant role.
+`0018_recruitment_seed.sql`'s own header comment incorrectly assumes this
+already works. **A brand-new company onboarded today has no way to make
+Recruitment's requisition-approval step work at all without the same
+manual `rbac_demo_full_access` + direct `POST /workflow/templates` call
+Task #50's fixture needed** — this session's own verification fixture
+had to do exactly that again. **Revisit before PILOT onboarding, same as
+Decision #18's note** — this is one gap blocking two modules, not two
+gaps.
+
+**Not yet built:** a System/Module Admin role (discussed this session,
+not yet implemented — see Decision #19's closing section) that would be
+the natural place to grant `workflow_template.manage.all` for real, plus
+role-assignment and user-creation permissions, added additively
+alongside `hr_admin` rather than replacing it; a "hiring manager reviews
+their own requisition's pipeline" view — `recruitment.manage.all` has no
+`.team` scope at all, a deliberate scope narrowing `0018_recruitment_seed.sql`'s
+own comment already flags, not an oversight.

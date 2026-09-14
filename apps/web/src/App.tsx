@@ -17,6 +17,7 @@ import { EmployeeDetailPage } from "./portal/employees/EmployeeDetailPage";
 import { MyProfilePage } from "./portal/employees/MyProfilePage";
 import { AdminCenterPage } from "./portal/admin/AdminCenterPage";
 import { LeavePage } from "./portal/leave/LeavePage";
+import { RecruitmentPage } from "./portal/recruitment/RecruitmentPage";
 
 /**
  * Any URL this router doesn't otherwise recognize — including a plain
@@ -80,15 +81,12 @@ export default function App() {
                     LeavePage renders one screen for every role, same
                     pattern as Task #48/#49. */}
                 <Route path="leave" element={<LeavePage />} />
-                <Route
-                  path="recruitment"
-                  element={
-                    <ComingSoonPage
-                      title="Recruitment"
-                      description="Job requisitions, candidate pipeline, and offers."
-                    />
-                  }
-                />
+                {/* Task #51 — Recruitment. recruitment.manage.all is
+                    hr_admin-only with no self/team scoping, so unlike
+                    Leave/Employee Core there's no per-role rendering
+                    here; PortalLayout's nav already keeps this route
+                    hr_admin-only. */}
+                <Route path="recruitment" element={<RecruitmentPage />} />
                 <Route
                   path="performance"
                   element={
