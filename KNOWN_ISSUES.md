@@ -439,3 +439,66 @@ for them anyway. **Revisit when:** a real tenant needs leave tracking for
 employees without logins — likely needs a separate "record leave
 directly, no approval routing" HR-only path rather than forcing every
 leave request through the workflow engine.
+
+## 2026-09 — Phase 10 (Recruitment & Onboarding): deliberate scope narrowing, tracked honestly
+
+### `decideOffer()` accepting an offer requires the caller to ALSO hold `employee.manage.all`, not just `recruitment.manage.all`
+
+`RecruitmentService.decideOffer()` calls `EmployeesService.create()`
+directly when a candidate accepts an offer, and that method enforces its
+own `employee.manage.all` gate — `RecruitmentService` does not, and
+should not, bypass another module's own authorization for creating its
+own object. Today's only `recruitment.manage.all` holder (`hr_admin`)
+also holds `employee.manage.all`, so this is invisible in practice, but a
+future dedicated "Recruiter" role that isn't also HR Admin could manage
+an entire pipeline right up to offer acceptance and then hit a
+`ForbiddenException` at that one step. `decideOffer()` catches this
+specific case and re-throws a clearer message naming both permissions
+rather than surfacing `EmployeesService`'s generic message out of
+context, but the underlying coupling remains. See Decision #10's
+"Alternatives considered" for why duplicating Employee Number assignment
+logic to avoid this coupling was rejected. **Revisit when:** a real
+tenant wants a Recruiter role distinct from HR Admin — grant that role
+BOTH `recruitment.manage.all` and `employee.manage.all` as the immediate
+fix, or reconsider whether accepting an offer should route through a
+narrower "create an employee from a hire" capability that doesn't
+require the full `employee.manage.all` grant.
+
+### No candidate self-service — every check is the recruiter's permission, never the candidate's
+
+`candidates` deliberately has no `user_account_id` and no login of any
+kind (see Decision #10, point 2) — there is no way for a candidate to
+check their own application status, and no `.self` scope anywhere in
+this object graph. This is a real, deliberate gap against a fuller ATS
+product (many candidates expect a status-check portal or at least an
+email notification when their stage changes — notifications aren't wired
+here either, see the next entry), not an oversight. **Revisit when:** a
+real pilot client specifically asks for candidate-facing status
+visibility — building a lower-trust identity type for candidates is real
+scope, not a small addition.
+
+### No notification dispatch on stage changes or offer decisions
+
+Phase 6 built a `notification_log` table and dispatch service
+(deliberately logged/stubbed, no real provider wired), but
+`RecruitmentService` doesn't call into it anywhere — moving a candidate
+through the pipeline, extending an offer, or deciding one leaves no
+notification trail and sends nothing to anyone. Every other
+approval-driven object built so far (leave requests, job requisitions)
+has the same gap, so this isn't specific to recruitment, but it's most
+visible here since a real hiring process runs heavily on "candidate got
+an email" moments. **Revisit when:** a real notification provider gets
+wired up (tracked generally since Phase 6) — recruitment stage/offer
+events are an obvious first set of triggers to attach to it.
+
+### The Kanban pipeline is forward-only — no backward moves
+
+`moveApplicationStage()` refuses any move that isn't strictly forward in
+`FORWARD_STAGES`' fixed order (or to `rejected`, allowed from anywhere
+non-terminal). A real recruiter occasionally needs to move a candidate
+backward (a scheduling mixup, a decision to re-interview) — not
+supported yet. See Decision #10's "Alternatives considered" for why this
+was deferred rather than guessed at. **Revisit when:** a real pilot
+client hits this friction in practice — the semantics of "what does a
+backward move do to an existing offer on that application" need a real
+answer, not a guessed one.

@@ -1250,5 +1250,142 @@ has one real object actually depending on all of them at once — the
 
 ---
 
-*Next decision goes here as Decision #10, appended below this line —
+## Decision #10 — Phase 10 (Recruitment & Onboarding): reusing the workflow engine as-is, candidates with no login at all, and the second real caller of Employee Number assignment
+
+**Context.** Plan doc Section 7's Phase 10 row is terse: "Requisition →
+offer → hire, Kanban pipeline... Employee number gets assigned here, at
+offer acceptance." Unlike Phase 9, nothing in this phase's own
+description asks for a new engine capability — no new approver type, no
+new RBAC scope. The interesting design questions turned out to be about
+what this phase does NOT need to build, and about a genuinely new kind
+of participant in the system: a person with no login at all.
+
+**1. Requisition approval reuses the Phase 6 workflow engine completely
+unchanged — no new approver type, unlike Phase 9's `manager_of_submitter`.**
+
+`RecruitmentService.submitRequisition()` calls
+`WorkflowService.submitForApproval()` exactly the way
+`LeaveRequestsService.submit()` does, with a plain `role` approver (e.g.,
+"HR Admin approves any new requisition"). Section 10's own "don't let the
+workflow engine become over-general" guardrail is usually read as a
+reason to hold back from ADDING capability; here it cuts the other way —
+the engine already does everything a requisition-approval chain needs, so
+the right move is to add nothing and just use it, exactly the discipline
+that made Phase 9's own `manager_of_submitter` addition justified in the
+first place (it was added because the engine genuinely couldn't do that
+yet, not preemptively).
+
+**2. A candidate has no login, no session, and no RBAC scope of their
+own — every permission check in this whole object graph is the
+recruiter's, never a `.self`/`.team` scope.**
+
+Every other object built since Phase 7 (`employees`, `leave_requests`,
+`attendance_records`) has, at minimum, a plausible self-service caller —
+the record is ABOUT a `user_accounts` row that can also act on it. A
+candidate breaks that pattern entirely: they are a real person the system
+tracks, but they never authenticate into BoostFactor, so there is no
+`candidate.view.self` to build, and `candidates` deliberately has no
+`user_account_id` column at all (unlike `employees`, which has a
+nullable one for exactly the "not every record has a login" case Phase 9
+also hit). Every write and read across `job_requisitions`, `candidates`,
+`applications`, and `offers` is gated by a single scope-less
+`recruitment.manage.all`, granted to `hr_admin` — the recruiter's own
+permission, standing in for the whole pipeline the way `leave_policy.manage`
+stands in for policy configuration. A real "candidate self-service
+portal" (checking their own application status, e.g.) is a plausible
+future need, deliberately not built now — see `KNOWN_ISSUES.md`.
+
+**3. The Kanban pipeline is a forward-only state machine, not a free
+graph — and `hired` is reachable only through accepting an offer, never
+through a direct stage move.**
+
+`ApplicationStage`'s five working stages (`applied` → `screening` →
+`interview` → `offer`, plus the terminal `rejected`) form a fixed forward
+order (`FORWARD_STAGES` in `recruitment.service.ts`); moving backward is
+refused outright, and `rejected` is reachable from any non-terminal stage
+at any point (a candidate can drop out, or be dropped, at any stage — that
+one transition doesn't respect the forward order). `hired` is refused as
+a direct target from `moveApplicationStage()` specifically: it is set
+ONLY by `decideOffer()` accepting an offer, which is also the moment the
+real `Employee` record gets created. Allowing a direct "mark this
+`hired`" stage move would create a Kanban card claiming a hire happened
+with no Employee record behind it — a data-integrity gap worse than the
+inconvenience of forcing every hire through the one real path.
+
+**4. Offer acceptance is the second real caller of
+`EmployeesService.create()`'s Employee Number assignment — and it
+surfaced a real cross-module permission coupling, documented rather than
+silently worked around.**
+
+`RecruitmentService.decideOffer()` calls `this.employees.create(claims,
+...)` directly when a candidate accepts — reusing Phase 7's Employee
+Number assignment machinery exactly as built, proving it against a
+second real caller (the first being direct HR-Admin creation/bulk
+import) rather than assuming it still works unchanged. `EmployeesService.create()`
+enforces its OWN `employee.manage.all` gate, which `RecruitmentService`
+does not — and cannot — bypass, since object-level authorization for
+creating an Employee record is `EmployeesService`'s job, not
+`RecruitmentService`'s to second-guess. Today's only `recruitment.manage.all`
+holder (`hr_admin`) also holds `employee.manage.all`, so this coupling is
+invisible in practice — but it is a real, documented gap for a future
+dedicated "Recruiter" role that isn't also HR Admin: such a role could
+manage the entire pipeline right up to the moment of acceptance, then
+hit a confusing `ForbiddenException` at the one step that actually
+matters. `decideOffer()` catches that specific case and re-throws a
+clearer message naming both permissions, rather than letting
+`EmployeesService`'s generic "not permitted to manage employees" message
+surface out of context. Tracked in `KNOWN_ISSUES.md` with a concrete
+revisit trigger.
+
+### Alternatives considered
+
+- **Giving `RecruitmentService.decideOffer()` its own employee-creation
+  SQL**, bypassing `EmployeesService.create()` entirely, to sidestep the
+  permission coupling above. Rejected: that would duplicate Employee
+  Number assignment logic (`employee_number_sequences`' atomic
+  `FOR UPDATE` locking, the tenant's configured prefix/padding format) in
+  a second place, which is exactly the kind of drift Section 5's "Employee
+  Number... fixed before Employee Core is built, not left to fall out of
+  whatever the ORM defaults to" rule exists to prevent. A documented
+  permission coupling is a smaller, more honest cost than a second,
+  parallel Employee Number implementation that could silently diverge
+  from the first.
+- **A `candidate.view.self` permission and a lightweight candidate login**,
+  so a candidate could check their own application status. Rejected for
+  now: no BPD or plan doc section asks for a candidate-facing portal in
+  this phase, and building one means inventing an entirely new,
+  lower-trust identity type (a candidate is not a tenant employee) with
+  its own auth considerations — real scope, not a small addition,
+  deliberately deferred rather than guessed at ahead of demand.
+- **Allowing `moveApplicationStage()` to move an application backward**
+  (e.g., "interview" back to "screening" after a scheduling mixup).
+  Rejected for this phase: a real ATS often wants this, but it's not
+  asked for by the exit criterion, and getting the semantics right (does
+  a backward move un-rescind a rescinded offer? does it matter which
+  stage you're moving back FROM?) is a real design question better
+  answered against actual pilot-client friction than guessed at now.
+
+### What this unblocks
+
+Phase 10's exit criterion is verified two ways, both against real
+Postgres with no mocks: `recruitment.service.spec.ts` (9 tests) at the
+service level — requisition approval through a real tenant-configured
+workflow template, the forward-only Kanban pipeline including the
+refused backward move and the refused direct jump to `hired`, offer
+extension/rescission/re-extension, and a full accept-creates-Employee
+round trip confirming the resulting record's Employee Number, department,
+and designation all trace back correctly to the requisition and
+candidate — plus `recruitment.e2e.spec.ts` (1 test), the same real-HTTP
+layer Phase 9 established: a full requisition → approval → candidate →
+pipeline → offer → hire round trip through the actual guards/controllers/
+`ValidationPipe` stack. Full suite now **106/106 passing**; `npm run
+build`/`npm run lint` clean across all three workspaces. Phase 11
+(Performance & Goals) now has a second, independently-proven example of
+a tenant-configured workflow approval chain to build against, and a
+second real caller confirming Phase 7's Employee Number machinery
+generalizes beyond its original single call site.
+
+---
+
+*Next decision goes here as Decision #11, appended below this line —
 never inserted above it.*

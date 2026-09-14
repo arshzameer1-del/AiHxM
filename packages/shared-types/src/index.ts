@@ -818,3 +818,117 @@ export type ClockInRequest = {
 export type ClockOutRequest = {
   employeeNumber: string;
 };
+
+// --- Phase 10: Recruitment & Onboarding --------------------------------
+// Plan doc Section 7: "Requisition to hire, Kanban pipeline... Employee
+// number gets assigned here, at offer acceptance." See
+// 0017_recruitment.sql for the schema and Decision #10 for the design
+// writeup (requisition approval reusing the Phase 6 workflow engine
+// as-is, candidates deliberately having no login/session of their own,
+// and offer acceptance as the second real caller of Employee Number
+// assignment).
+
+export type RequisitionStatus = "draft" | "pending_approval" | "approved" | "rejected" | "closed";
+
+export type JobRequisitionView = {
+  id: string;
+  companyId: string;
+  title: string;
+  department: string | null;
+  headcount: number;
+  salaryBand: string | null;
+  justification: string | null;
+  hiringManagerId: string | null;
+  status: RequisitionStatus;
+  workflowInstanceId: string | null;
+  createdByUserAccountId: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateJobRequisitionRequest = {
+  title: string;
+  department?: string;
+  /** Defaults to 1 when omitted. */
+  headcount?: number;
+  salaryBand?: string;
+  justification?: string;
+  hiringManagerId?: string;
+};
+
+export type CandidateView = {
+  id: string;
+  companyId: string;
+  firstName: string;
+  lastName: string;
+  email: string | null;
+  phone: string | null;
+  createdAt: string;
+};
+
+export type CreateCandidateRequest = {
+  firstName: string;
+  lastName: string;
+  email?: string;
+  phone?: string;
+};
+
+/** The Kanban board's own column set. Forward-only in this phase — see
+ * KNOWN_ISSUES.md — `rejected` is reachable from any non-terminal stage,
+ * but there is no "move a candidate backward" path yet. */
+export type ApplicationStage = "applied" | "screening" | "interview" | "offer" | "hired" | "rejected";
+
+export type ApplicationView = {
+  id: string;
+  companyId: string;
+  requisitionId: string;
+  candidateId: string;
+  stage: ApplicationStage;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateApplicationRequest = {
+  requisitionId: string;
+  candidateId: string;
+};
+
+export type MoveApplicationStageRequest = {
+  stage: ApplicationStage;
+};
+
+export type OfferStatus = "pending" | "accepted" | "declined" | "rescinded";
+
+export type OfferView = {
+  id: string;
+  companyId: string;
+  applicationId: string;
+  salary: number;
+  startDate: string;
+  status: OfferStatus;
+  extendedByUserAccountId: string;
+  /** Set once `decideOffer()` records the candidate's decision — an
+   * `accepted` offer's `hiredEmployeeId` then points at the real
+   * Employee record it created. */
+  hiredEmployeeId: string | null;
+  decidedAt: string | null;
+  createdAt: string;
+};
+
+export type ExtendOfferRequest = {
+  applicationId: string;
+  salary: number;
+  startDate: string;
+};
+
+export type DecideOfferRequest = {
+  decision: "accepted" | "declined";
+};
+
+export type DecideOfferResponse = {
+  offer: OfferView;
+  /** Present only when `decision: "accepted"` — the real Employee
+   * record `decideOffer()` created via `EmployeesService.create()`,
+   * complete with a freshly assigned Employee Number. */
+  employee: EmployeeView | null;
+};
