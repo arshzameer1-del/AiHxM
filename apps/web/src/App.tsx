@@ -11,6 +11,10 @@ import { PlatformAdminsPage } from "./pages/PlatformAdminsPage";
 import { PortalLayout } from "./portal/PortalLayout";
 import { PortalHomePage } from "./portal/PortalHomePage";
 import { ComingSoonPage } from "./portal/ComingSoonPage";
+import { EmployeeListPage } from "./portal/employees/EmployeeListPage";
+import { EmployeeCreatePage } from "./portal/employees/EmployeeCreatePage";
+import { EmployeeDetailPage } from "./portal/employees/EmployeeDetailPage";
+import { MyProfilePage } from "./portal/employees/MyProfilePage";
 
 /**
  * Any URL this router doesn't otherwise recognize — including a plain
@@ -56,24 +60,14 @@ export default function App() {
             <Route path="/app" element={<RequireTenant />}>
               <Route element={<PortalLayout />}>
                 <Route index element={<PortalHomePage />} />
-                <Route
-                  path="profile"
-                  element={
-                    <ComingSoonPage
-                      title="My Profile"
-                      description="View and update your own employee profile."
-                    />
-                  }
-                />
-                <Route
-                  path="employees"
-                  element={
-                    <ComingSoonPage
-                      title="Employees"
-                      description="Employee list, profiles, and org chart for HR Admins and Managers."
-                    />
-                  }
-                />
+                {/* Task #48 — Employee Core. My Profile is the
+                    employee_self_service view of the same object the
+                    other three routes show HR Admins/Managers; RBAC (not
+                    a route guard) is what actually scopes each one. */}
+                <Route path="profile" element={<MyProfilePage />} />
+                <Route path="employees" element={<EmployeeListPage />} />
+                <Route path="employees/new" element={<EmployeeCreatePage />} />
+                <Route path="employees/:id" element={<EmployeeDetailPage />} />
                 <Route
                   path="admin"
                   element={

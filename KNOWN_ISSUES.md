@@ -625,3 +625,30 @@ flow yet. Tracked as the same gap the MVP gate audit's Test Gap List
 already named (no Playwright/Cypress config anywhere in the repo).
 **Revisit when:** Task #53's verification pass, once more of the portal
 has real content worth clicking through end to end.
+
+## 2026-09 — Employee Core UI (Task #48 / Decision #15): what's real vs. not yet built
+
+**Real and tested:** employee list/detail/create (HR Admin), the
+RBAC-scoped team view (Line Manager), the read-only self profile
+(Employee), and `EmployeesService.createLogin()`'s first UI (Decision
+#12's login-granting flow). All proven over real HTTP in
+`employees.e2e.spec.ts`, including the cross-role negative case (a
+manager can't see, or get anything but an empty list for, someone outside
+their team).
+
+**Not yet built, though the API already supports it:** document
+upload/download (`POST`/`GET /employees/:id/documents`), recording an
+ad-hoc job-history event beyond the automatic 'hire' entry (`POST
+/employees/:id/job-history` — promotions, transfers, salary changes all
+have no form yet), and the org chart (`GET /employees/org-chart`) has no
+screen at all. **Revisit when:** these come up as an actual pilot
+blocker — document storage in particular needs its own UI thought (upload
+progress, file-type icons, a real download-as-blob flow) that didn't fit
+this task's "list/detail/create/self-profile" scope.
+
+**A real, narrow UX gap:** `EmployeeCreatePage`'s manager dropdown lists
+every employee the caller's `GET /employees` call returns — for an
+hr_admin that's everyone, which is fine at pilot scale (~20-50 employees
+per the audit's own seed-data target) but will need a search/autocomplete
+before it's usable at hundreds of employees. **Revisit when:** the pilot
+seed-data script (P0 #3) makes this concretely slow to use, not before.

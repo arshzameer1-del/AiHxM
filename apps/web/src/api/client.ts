@@ -6,15 +6,21 @@ import type {
   CompanyDashboardRow,
   CompanyDetail,
   CreateCompanyRequest,
+  CreateEmployeeLoginRequest,
+  CreateEmployeeLoginResponse,
+  CreateEmployeeRequest,
   CreatePlatformAdminRequest,
   EmployeeNumberFormat,
+  EmployeeView,
   ImpersonateResponse,
+  JobHistoryEntryView,
   LoginResult,
   MeResponse,
   ModuleKey,
   PasswordResetRequestResult,
   PlatformAdmin,
   SessionResult,
+  UpdateEmployeeRequest,
 } from "@boostfactor/shared-types";
 
 const TOKEN_KEY = "boostfactor.platformAdminToken";
@@ -169,4 +175,30 @@ export const api = {
 
   listAuditLog: (companyId?: string) =>
     request<AuditLogEntry[]>(`/platform/audit-log${companyId ? `?companyId=${companyId}` : ""}`),
+
+  // --- Employee Core (Task #48) --------------------------------------------
+  // Every one of these hits the same RLS/RBAC-scoped endpoints Phase 7
+  // already built and tested — GET /employees itself returns only the
+  // rows (and only the fields on each row) the caller's real role
+  // actually grants, so hr_admin/line_manager/employee_self_service all
+  // call the identical listEmployees(), never a role-specific query.
+  listEmployees: () => request<EmployeeView[]>("/employees"),
+
+  getEmployee: (id: string) => request<EmployeeView>(`/employees/${id}`),
+
+  createEmployee: (input: CreateEmployeeRequest) =>
+    request<EmployeeView>("/employees", { method: "POST", body: JSON.stringify(input) }),
+
+  updateEmployee: (id: string, patch: UpdateEmployeeRequest) =>
+    request<EmployeeView>(`/employees/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  // Decision #12/#13's own first UI surface — an HR Admin granting a
+  // tenant-scoped login + role(s) to an employee they already created.
+  createEmployeeLogin: (id: string, input: CreateEmployeeLoginRequest) =>
+    request<CreateEmployeeLoginResponse>(`/employees/${id}/account`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  listJobHistory: (id: string) => request<JobHistoryEntryView[]>(`/employees/${id}/job-history`),
 };

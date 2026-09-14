@@ -1451,8 +1451,24 @@ Routing: Phase 2's existing Platform Admin routes (`/`, `/companies/...`, `/audi
 
 ---
 
-*Next decision goes here as Decision #15, appended below this line —
-never inserted above it. (#14 is reserved — the still-paused Phase 12
-Payroll work's internal comments were renumbered to it so this entry
-could correctly be #13, keeping this file's numbering in commit order
-regardless of which work resumes first.)*
+## Decision #15 — Task #48: Employee Core UI, and letting RBAC's own view-scope drive one screen instead of three
+
+**Context.** With Decision #13's shell in place, the first real portal screen to build was Employee Core — the module every other tenant screen (Leave, Recruitment, Performance) will eventually need an employee picker or identity for. The task list names it as three audiences (HR Admin list/detail/create, self profile), which read at first like three separate builds.
+
+**Decision: one `GET /employees`-backed list/detail pair, not three.** `EmployeesService.list()`/`get()` (Phase 7, unchanged) already return exactly the rows and fields `RbacService`'s view-scope grants the caller — `.all` for `hr_admin`, `.team` (direct reports only) for `line_manager`, `.self` for `employee_self_service` — because that scoping was built for the API to be correct regardless of who calls it, not only for a Platform-Admin-style tool. `EmployeeListPage` and `EmployeeDetailPage` (`apps/web/src/portal/employees/`) call the identical endpoints for every role and simply render whatever comes back; the only role-aware branching in either component is cosmetic (an hr_admin sees "New Employee"/"Edit" affordances a line_manager doesn't, gated on `identity.roleKeys`, mirroring `PortalLayout`'s nav-visibility courtesy from Decision #13 — the real gate stays server-side, proven directly this session: `employees.e2e.spec.ts`'s second test hits `GET /employees/:id` as a manager against an employee outside their team and gets a real 404, and `GET /employees` for that same manager correctly comes back `[]`, not an error).
+
+`MyProfilePage` (the ESS-only route, `/app/profile`) is a separate component only because its content differs meaningfully — no Edit button, no Login section, a shorter job-history view — not because it needed a different data-fetching approach; it calls the same `GET /employees/:id` (via `identity.employeeId`) as the shared `EmployeeFields` display component the detail page also uses. Confirming there's no self-service edit path to wire up here wasn't an oversight: `employee.manage.all` is `hr_admin`-only per `0011_employee_seed.sql`'s own seed — even editing your own record requires it, so `MyProfilePage` is correctly read-only.
+
+**Decision: `EmployeeFields` renders exactly what the API sends, nothing inferred.** Sensitive fields (`cnic`/`dateOfBirth`/`salaryBand`/`bankAccountNumber`/`terminationReason`) are OMITTED from the JSON entirely when a caller's field-level access resolves to `hidden` (`RbacService.filterRecordFields()`'s own doc comment) — never sent as `null`. The shared display component checks `key in employee`, not `employee[key] != null`, so a hidden field simply doesn't render a row at all, and a visible-but-empty field (a new hire with no department yet) renders "—". Getting this distinction backwards would either show "—" for data a caller isn't authorized to see the existence of, or hide a legitimately-empty field a caller IS authorized to see.
+
+**Decision: `EmployeesService.createLogin()` (Decision #12) gets its first UI**, as a "Login & access" section on the detail page, deliberately built to look like the Platform Admin panel's existing `CompanyDetailPage` → `AdminsTab` "create login" flow (same inline-reveal form, same "share this password now, it won't be shown again" one-time banner) rather than a new pattern — the tenant-scoped version of the same idea an HR Admin using both panels would already recognize.
+
+**What's deliberately not built here**, matching the task's own named scope (list/detail/create/self-profile, not the whole Employee Core surface): document upload/download (needs multipart + blob-download UI plumbing) and a form for recording ad-hoc job-history events (promotions/transfers outside the auto-logged 'hire') are both real, working API endpoints (`POST/GET /employees/:id/documents`, `POST /employees/:id/job-history`) with no screen yet — read-only job history IS shown (a cheap `GET`, and the natural complement to a detail page), but nothing writes to it beyond the automatic 'hire' event `create()` already logs. Org chart (`GET /employees/org-chart`) also has no screen yet. None of these block a pilot HR Admin from onboarding and maintaining their roster through the UI; they're natural fast-follows, not silently dropped scope — tracked in `KNOWN_ISSUES.md`.
+
+**Verification.** `apps/api/src/employees/employees.e2e.spec.ts` — Employee Core's first HTTP-level (not just service-level) e2e test — drives the exact sequence the new UI performs (create → list → get → update → create-login → job-history) over real HTTP through the actual controller/guards/`ValidationPipe` stack, asserting the response shapes the React components actually destructure (`employeeNumber` matches `/^EMP-/`, sensitive fields present as keys for an `hr_admin` caller, `rolesGranted`/`employee.userAccountId` after login creation, the auto-logged `hire` event), plus the cross-role negative case above. Full suite now **130/130 passing** (17 suites — `employees` gains a second spec file alongside its existing `employees.service.spec.ts`). `tsc`/`eslint`/`turbo build` clean across all three workspaces. No browser click-through yet — same honestly-flagged gap as Decision #13, deferred to Task #53.
+
+---
+
+*Next decision goes here as Decision #16, appended below this line —
+never inserted above it. (#14 remains reserved for the still-paused
+Phase 12 Payroll work.)*
