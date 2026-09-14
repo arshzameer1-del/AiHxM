@@ -1,4 +1,5 @@
 import type {
+  AssignGroupPolicyRequest,
   AuditLogEntry,
   Company,
   CompanyAdmin,
@@ -6,21 +7,30 @@ import type {
   CompanyDashboardRow,
   CompanyDetail,
   CreateCompanyRequest,
+  CreateEmployeeGroupRequest,
   CreateEmployeeLoginRequest,
   CreateEmployeeLoginResponse,
   CreateEmployeeRequest,
+  CreateLeavePolicyRequest,
   CreatePlatformAdminRequest,
+  EmployeeGroupPolicyAssignmentView,
+  EmployeeGroupView,
   EmployeeNumberFormat,
   EmployeeView,
   ImpersonateResponse,
   JobHistoryEntryView,
+  LeavePolicyView,
   LoginResult,
   MeResponse,
   ModuleKey,
   PasswordResetRequestResult,
   PlatformAdmin,
+  PolicyType,
+  ResolvedPolicyView,
   SessionResult,
+  UpdateEmployeeGroupRequest,
   UpdateEmployeeRequest,
+  UpdateLeavePolicyRequest,
 } from "@boostfactor/shared-types";
 
 const TOKEN_KEY = "boostfactor.platformAdminToken";
@@ -70,8 +80,26 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     throw new ApiError(res.status, Array.isArray(message) ? message.join(", ") : message);
   }
 
-  if (res.status === 204) return undefined as T;
-  return res.json() as Promise<T>;
+  // A void-returning Nest handler (every DELETE/unassign this project has —
+  // Task #49's deleteEmployeeGroup/unassignGroupPolicy/deleteLeavePolicy
+  // are the first callers) defaults to a 200 with an EMPTY body, not a
+  // 204, unless the controller opts into @HttpCode(204) explicitly. The
+  // old `res.status === 204` check missed that real case entirely:
+  // res.json() on an empty body throws "Unexpected end of JSON input", a
+  // plain SyntaxError, not an ApiError — so a caller's `catch (err) { err
+  // instanceof ApiError ? ... }` fell through to a generic failure message
+  // even though the mutation had already succeeded server-side, and
+  // (because the exception was thrown before the caller's own success
+  // callback ran) the UI never refreshed to show the real, successfully
+  // updated state either. Found via an actual Playwright pass driving the
+  // real running app — the exact "verify, don't just claim" gap this
+  // project's discipline exists to catch. Reading the body as text FIRST
+  // and only parsing it as JSON when it's non-empty is correct for every
+  // status code, not just 204, so this protects any future void endpoint
+  // too, not only today's three.
+  const text = await res.text();
+  if (!text) return undefined as T;
+  return JSON.parse(text) as T;
 }
 
 export const api = {
@@ -201,4 +229,42 @@ export const api = {
     }),
 
   listJobHistory: (id: string) => request<JobHistoryEntryView[]>(`/employees/${id}/job-history`),
+
+  // --- Employee Groups & Leave Policies (Task #49) --------------------------
+  // Admin Center's own screen for the Phase 8 resolver: the API already
+  // decides who matches which group and which policy wins (most-specific
+  // match, safe-deny default) — this is purely CRUD + assignment against
+  // employee_group.manage/leave_policy.manage, exactly as those two gates
+  // are split server-side in EmployeeGroupsService.
+  listEmployeeGroups: () => request<EmployeeGroupView[]>("/employee-groups"),
+
+  createEmployeeGroup: (input: CreateEmployeeGroupRequest) =>
+    request<EmployeeGroupView>("/employee-groups", { method: "POST", body: JSON.stringify(input) }),
+
+  updateEmployeeGroup: (id: string, patch: UpdateEmployeeGroupRequest) =>
+    request<EmployeeGroupView>(`/employee-groups/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  deleteEmployeeGroup: (id: string) => request<void>(`/employee-groups/${id}`, { method: "DELETE" }),
+
+  assignGroupPolicy: (groupId: string, input: AssignGroupPolicyRequest) =>
+    request<EmployeeGroupPolicyAssignmentView>(`/employee-groups/${groupId}/policy-assignments`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  unassignGroupPolicy: (groupId: string, policyType: PolicyType) =>
+    request<void>(`/employee-groups/${groupId}/policy-assignments/${policyType}`, { method: "DELETE" }),
+
+  listLeavePolicies: () => request<LeavePolicyView[]>("/leave-policies"),
+
+  createLeavePolicy: (input: CreateLeavePolicyRequest) =>
+    request<LeavePolicyView>("/leave-policies", { method: "POST", body: JSON.stringify(input) }),
+
+  updateLeavePolicy: (id: string, patch: UpdateLeavePolicyRequest) =>
+    request<LeavePolicyView>(`/leave-policies/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  deleteLeavePolicy: (id: string) => request<void>(`/leave-policies/${id}`, { method: "DELETE" }),
+
+  resolvedPolicy: (employeeId: string, policyType: PolicyType = "leave") =>
+    request<ResolvedPolicyView>(`/employees/${employeeId}/resolved-policy?policyType=${policyType}`),
 };

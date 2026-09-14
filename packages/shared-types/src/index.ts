@@ -715,6 +715,11 @@ export type EmployeeGroupView = {
    * condition matches. Its length is also this group's specificity for
    * most-specific-match-wins resolution. */
   conditions: EmployeeGroupCondition[];
+  /** This group's current policy assignments (Task #49's Admin Center UI
+   * needs to show "what's assigned right now" without an extra call per
+   * group per policyType) — populated the same way `conditions` is, a
+   * second batch query alongside the group list, not N+1. */
+  policyAssignments: EmployeeGroupPolicyAssignmentView[];
   createdAt: string;
   updatedAt: string;
 };

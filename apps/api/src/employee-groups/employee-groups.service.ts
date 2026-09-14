@@ -41,13 +41,18 @@ function toIso(value: any): string {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function rowToGroup(row: any, conditions: EmployeeGroupCondition[]): EmployeeGroupView {
+function rowToGroup(
+  row: any,
+  conditions: EmployeeGroupCondition[],
+  policyAssignments: EmployeeGroupPolicyAssignmentView[] = []
+): EmployeeGroupView {
   return {
     id: row.id,
     companyId: row.company_id,
     name: row.name,
     description: row.description,
     conditions,
+    policyAssignments,
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
   };
@@ -144,20 +149,34 @@ export class EmployeeGroupsService {
   async listGroups(claims: RequestClaims): Promise<EmployeeGroupView[]> {
     await this.requireGroupManage(claims);
     return this.db.withClaims(claims, async (client) => {
-      // One query for every group, one for every condition — not N+1 per
-      // group, the same "resolve once per request" discipline Phase 7's
-      // resolveViewScope/loadFieldPermissionRules established.
-      const [groups, conditions] = await Promise.all([
-        client.query("SELECT * FROM employee_groups ORDER BY created_at ASC"),
-        client.query("SELECT * FROM employee_group_conditions ORDER BY field ASC"),
-      ]);
-      const byGroup = new Map<string, EmployeeGroupCondition[]>();
+      // One query for every group, one for every condition, one for every
+      // policy assignment — not N+1 per group, the same "resolve once per
+      // request" discipline Phase 7's resolveViewScope/loadFieldPermissionRules
+      // established. Sequential awaits on this one shared client, not
+      // Promise.all — see Decision #13's own note on `pg`'s "client already
+      // executing a query" deprecation warning for the identical shape;
+      // this was the pre-existing instance that decision flagged but left
+      // alone, fixed now while this function is already being touched.
+      const groups = await client.query("SELECT * FROM employee_groups ORDER BY created_at ASC");
+      const conditions = await client.query("SELECT * FROM employee_group_conditions ORDER BY field ASC");
+      const assignments = await client.query(
+        "SELECT * FROM employee_group_policy_assignments ORDER BY created_at ASC"
+      );
+      const conditionsByGroup = new Map<string, EmployeeGroupCondition[]>();
       for (const row of conditions.rows) {
-        const list = byGroup.get(row.group_id) ?? [];
+        const list = conditionsByGroup.get(row.group_id) ?? [];
         list.push({ field: row.field, equals: row.equals });
-        byGroup.set(row.group_id, list);
+        conditionsByGroup.set(row.group_id, list);
       }
-      return groups.rows.map((row) => rowToGroup(row, byGroup.get(row.id) ?? []));
+      const assignmentsByGroup = new Map<string, EmployeeGroupPolicyAssignmentView[]>();
+      for (const row of assignments.rows) {
+        const list = assignmentsByGroup.get(row.group_id) ?? [];
+        list.push(rowToAssignment(row));
+        assignmentsByGroup.set(row.group_id, list);
+      }
+      return groups.rows.map((row) =>
+        rowToGroup(row, conditionsByGroup.get(row.id) ?? [], assignmentsByGroup.get(row.id) ?? [])
+      );
     });
   }
 
@@ -170,7 +189,15 @@ export class EmployeeGroupsService {
         "SELECT field, equals FROM employee_group_conditions WHERE group_id = $1 ORDER BY field",
         [id]
       );
-      return rowToGroup(group.rows[0], conditions.rows.map((r) => ({ field: r.field, equals: r.equals })));
+      const assignments = await client.query(
+        "SELECT * FROM employee_group_policy_assignments WHERE group_id = $1 ORDER BY created_at ASC",
+        [id]
+      );
+      return rowToGroup(
+        group.rows[0],
+        conditions.rows.map((r) => ({ field: r.field, equals: r.equals })),
+        assignments.rows.map(rowToAssignment)
+      );
     });
   }
 
@@ -209,7 +236,11 @@ export class EmployeeGroupsService {
         );
         conditions = existing.rows.map((r) => ({ field: r.field, equals: r.equals }));
       }
-      return rowToGroup(after, conditions);
+      const assignments = await client.query(
+        "SELECT * FROM employee_group_policy_assignments WHERE group_id = $1 ORDER BY created_at ASC",
+        [id]
+      );
+      return rowToGroup(after, conditions, assignments.rows.map(rowToAssignment));
     });
   }
 

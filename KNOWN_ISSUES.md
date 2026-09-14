@@ -671,3 +671,38 @@ portal screen) remains the real fix and is still not built. **Revisit
 when:** each new portal screen (Tasks #49-52) at minimum gets the same
 kind of manual pass before being called done, and a real automated
 suite is scoped once enough of the portal exists to make one worthwhile.
+
+## 2026-09 — Admin Center (Task #49 / Decision #17): what's real vs. not yet built
+
+**Real and tested:** employee-group CRUD (name, description, dynamic
+conditions), leave-policy CRUD (annual/casual/sick days, tenant default),
+and assigning/removing a group's leave-policy assignment — all against
+the already-tested Phase 8 resolver, all verified with a live Playwright
+pass including the delete-blocked-while-in-use guardrail and (after the
+`request()` fix below) live UI updates on every delete/unassign with no
+page reload.
+
+**Found and fixed via the same manual-verification pass (also written up
+in Decision #17):** the shared `request()` helper in `apps/web/src/api/client.ts`
+mishandled every void-returning DELETE/unassign endpoint — a `200` with
+an empty body (Nest's real default; no controller in this codebase uses
+`@HttpCode(204)`) made `res.json()` throw a plain `SyntaxError`, which no
+caller's `err instanceof ApiError` check recognized. The mutation always
+succeeded server-side; the UI always showed a generic failure and never
+refreshed to the new, correct state. Fixed generally (read the body as
+text first, parse only if non-empty, for any status code) rather than
+special-cased for these three calls, so it's already correct for any
+future void endpoint. **Still true, unchanged from the note above:**
+this was a manual pass, not a regression test — nothing in CI would
+catch this class of bug coming back.
+
+**Not yet built:** no "module visibility" screen (P1 #5's third item,
+alongside groups/policies) — a tenant's enabled-modules list is still
+Platform-Admin-only (`CompanyDetailPage`'s config tab), not something an
+HR Admin can see or request changes to from their own Admin Center.
+Second policy type support (`PolicyType` is still just `"leave"`) has no
+UI implication yet since there's only one to assign, but
+`PolicyAssignment`'s hardcoded `policyType: "leave"` will need
+generalizing the day a second one ships — flagged here so that's not a
+surprise. **Revisit when:** a second policy type is actually built, or a
+customer asks to self-manage module entitlements.

@@ -331,6 +331,7 @@ describe("EmployeeGroupsService", () => {
         conditions: [{ field: "employmentType", equals: "contract" }],
       });
       expect(created.conditions).toEqual([{ field: "employmentType", equals: "contract" }]);
+      expect(created.policyAssignments).toEqual([]);
 
       const list = await groups.listGroups(hrAdminClaims);
       expect(list.map((g) => g.id)).toContain(created.id);
@@ -345,6 +346,34 @@ describe("EmployeeGroupsService", () => {
 
       await groups.deleteGroup(hrAdminClaims, created.id);
       await expect(groups.getGroup(hrAdminClaims, created.id)).rejects.toThrow(NotFoundException);
+    });
+
+    it("surfaces a group's current policy assignment on both listGroups() and getGroup() (Task #49's Admin Center UI reads this to show what's assigned without a call per group)", async () => {
+      const group = await groups.createGroup(hrAdminClaims, {
+        name: "Islamabad Contractors",
+        conditions: [{ field: "location", equals: "Islamabad" }],
+      });
+      const policy = await groups.createLeavePolicy(hrAdminClaims, {
+        name: "Contractor Leave",
+        annualLeaveDays: 10,
+      });
+
+      await groups.assignPolicy(hrAdminClaims, group.id, { policyType: "leave", policyId: policy.id });
+
+      const fetched = await groups.getGroup(hrAdminClaims, group.id);
+      expect(fetched.policyAssignments).toEqual([
+        expect.objectContaining({ groupId: group.id, policyType: "leave", policyId: policy.id }),
+      ]);
+
+      const list = await groups.listGroups(hrAdminClaims);
+      const listed = list.find((g) => g.id === group.id);
+      expect(listed?.policyAssignments).toEqual([
+        expect.objectContaining({ groupId: group.id, policyType: "leave", policyId: policy.id }),
+      ]);
+
+      await groups.unassignPolicy(hrAdminClaims, group.id, "leave");
+      const afterUnassign = await groups.getGroup(hrAdminClaims, group.id);
+      expect(afterUnassign.policyAssignments).toEqual([]);
     });
   });
 });
