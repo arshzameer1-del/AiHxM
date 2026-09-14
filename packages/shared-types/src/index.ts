@@ -495,6 +495,12 @@ export type CsvImportResult<T> = {
 
 export type EmploymentStatus = "active" | "on_leave" | "terminated";
 
+// Phase 8 addition (plan doc Section 12's own canonical example names both
+// "location" and "employment type" as attributes a tenant would group
+// employees by) — a real employee attribute, not scaffolding invented only
+// to make Employee Groups have something to condition on.
+export type EmploymentType = "permanent" | "contract" | "probation" | "intern";
+
 export type EmployeeView = {
   id: string;
   companyId: string;
@@ -508,6 +514,8 @@ export type EmployeeView = {
   maritalStatus: string | null;
   department: string | null;
   designation: string | null;
+  location: string | null;
+  employmentType: EmploymentType;
   managerId: string | null;
   employmentStatus: EmploymentStatus;
   dateOfJoining: string;
@@ -533,6 +541,8 @@ export type CreateEmployeeRequest = {
   maritalStatus?: string;
   department?: string;
   designation?: string;
+  location?: string;
+  employmentType?: EmploymentType;
   managerId?: string;
   dateOfJoining?: string;
   salaryBand?: string;
@@ -596,4 +606,103 @@ export type RecordJobHistoryRequest = {
   designation?: string;
   salaryBand?: string;
   notes?: string;
+};
+
+// --- Phase 8: Employee Groups & Leave Policy Config -------------------
+// Plan doc Section 12: a generic per-group policy resolution mechanism
+// that reuses Phase 4's own resolver pattern rather than inventing a
+// second one — most-specific-match-wins (a group's specificity is simply
+// how many conditions it has), additive combination (independent
+// resolution per `PolicyType`, combined by the caller), safe-deny default
+// (an unmatched employee falls back to the tenant's explicitly-designated
+// default policy for that type, never a guess). See
+// 0012_employee_groups_leave_policy.sql's header comment for the full
+// design writeup and Decision #8 in DECISIONS.md.
+
+/** The fixed, validated set of employee attributes a group can condition
+ * on — matches the CHECK constraint on employee_group_conditions.field.
+ * Deliberately not "any employee field" (typo-ing a field name here would
+ * otherwise silently produce a condition that can never match). */
+export type EmployeeGroupConditionField = "department" | "location" | "designation" | "employmentType" | "employmentStatus";
+
+export type EmployeeGroupCondition = {
+  field: EmployeeGroupConditionField;
+  equals: string;
+};
+
+export type EmployeeGroupView = {
+  id: string;
+  companyId: string;
+  name: string;
+  description: string | null;
+  /** ANDed together — a group matches an employee only when EVERY
+   * condition matches. Its length is also this group's specificity for
+   * most-specific-match-wins resolution. */
+  conditions: EmployeeGroupCondition[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateEmployeeGroupRequest = {
+  name: string;
+  description?: string;
+  /** At least one condition is required — a group with zero conditions
+   * would match every employee, which is what the tenant-level default
+   * policy already exists to express explicitly (see LeavePolicyView.isDefault). */
+  conditions: EmployeeGroupCondition[];
+};
+
+export type UpdateEmployeeGroupRequest = Partial<CreateEmployeeGroupRequest>;
+
+/** Only "leave" exists yet (Phase 8 builds exactly one concrete policy
+ * type to prove the mechanism) — more can be added later without any
+ * schema change to employee_groups/employee_group_conditions themselves. */
+export type PolicyType = "leave";
+
+export type LeavePolicyView = {
+  id: string;
+  companyId: string;
+  name: string;
+  annualLeaveDays: number;
+  casualLeaveDays: number;
+  sickLeaveDays: number;
+  /** At most one leave policy per tenant may have this set — the
+   * safe-deny fallback target when no employee group matches. */
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateLeavePolicyRequest = {
+  name: string;
+  annualLeaveDays?: number;
+  casualLeaveDays?: number;
+  sickLeaveDays?: number;
+  isDefault?: boolean;
+};
+
+export type UpdateLeavePolicyRequest = Partial<CreateLeavePolicyRequest>;
+
+export type EmployeeGroupPolicyAssignmentView = {
+  id: string;
+  groupId: string;
+  policyType: PolicyType;
+  policyId: string;
+  createdAt: string;
+};
+
+export type AssignGroupPolicyRequest = {
+  policyType: PolicyType;
+  policyId: string;
+};
+
+/** The resolver's own return shape — `groupId: null` and `isDefault: true`
+ * together mean "no group matched, the tenant's default policy applied";
+ * `policyId: null` means genuinely unconfigured (no group matched AND no
+ * default exists for this policyType) — safe-deny, not a guess. */
+export type ResolvedPolicyView = {
+  policyType: PolicyType;
+  policyId: string | null;
+  groupId: string | null;
+  isDefault: boolean;
 };

@@ -913,5 +913,155 @@ Phase 6 can now route, extend, and template a real record instead of only
 
 ---
 
-*Next decision goes here as Decision #8, appended below this line — never
+## Decision #8 — Employee Groups & Leave Policy Config: reusing Phase 4's resolver pattern instead of inventing a second one
+
+**Context.** Plan doc Section 12 (Phase 8's own "immediate next action"
+entry) is explicit and prescriptive in a way most phase descriptions
+aren't: build a generic per-group policy resolution mechanism "that
+reuses Phase 4's own resolver pattern — most-specific-match-wins,
+additive combination, safe-deny default — rather than inventing a second
+resolution algorithm for policies." `RbacService.resolveFieldAccess()`'s
+own doc comment had already named "most-specific-match-wins" as a real
+gap, deliberately left unbuilt for `field_permission_rules` ("a
+documented gap for whenever a real module first needs it"). This is that
+module — the first place in the codebase where two configured rules can
+both structurally match the same record and something has to decide
+which one actually wins, not just whether either wins.
+
+**The call.** Three concrete pieces, each mapped onto Phase 8's actual
+schema (`0012_employee_groups_leave_policy.sql`, `0013_employee_groups_seed.sql`,
+`apps/api/src/employee-groups/`):
+
+1. **Most-specific-match-wins.** An `employee_group` is defined by one or
+   more ANDed `employee_group_conditions` rows. A group's specificity is
+   simply `COUNT(*)` of its own conditions — no separate priority column
+   to keep in sync by hand, and no ambiguity about what "more specific"
+   means: a group conditioning on both `department` AND `location` is,
+   by construction, more specific than one conditioning on `department`
+   alone. When more than one group's full condition set matches the same
+   employee for the same `policy_type`, `EmployeeGroupsService.resolvePolicy()`
+   picks the one with more conditions. A genuine tie (two groups, same
+   specificity, both matching, different assignments) is broken
+   deterministically by earliest-created group (`ORDER BY g.created_at ASC`
+   feeding a `Map` iterated in that order, with `>` not `>=` in the
+   winner comparison) — an explicit, tested rule, not left to whatever
+   order Postgres's query planner happens to return joined rows in.
+2. **Additive combination.** Resolution is independent per `policy_type`
+   (`employee_group_policy_assignments.policy_type` — only `'leave'`
+   exists yet). A caller resolving two different policy types for the
+   same employee gets each resolved on its own by the identical
+   most-specific-match rule, and the two results simply combine — one
+   group's leave-policy assignment never competes with a different
+   group's assignment for some other policy type, the same way RBAC's
+   own field-permission rules never compete across different `field_key`
+   values. `policy_id` is deliberately NOT a real foreign key (which
+   table it points into depends on `policy_type`) — the same pragmatic,
+   documented tradeoff `custom_fields`' JSONB-over-EAV design already
+   made (Decision #6), not a real gap: application code validates the
+   referenced row exists and belongs to the caller's tenant before
+   writing the assignment, and `deleteLeavePolicy()` explicitly refuses
+   to delete a policy that's still assigned to a group rather than
+   leaving a dangling reference.
+3. **Safe-deny default.** If no group matches at all, or none of the
+   matching groups carries an assignment for the requested `policy_type`,
+   resolution falls back to the tenant's explicitly-designated default
+   (`leave_policies.is_default`) — never an arbitrary guess. A database-
+   level partial unique index (`idx_leave_policies_one_default`) makes
+   "at most one default per tenant" a real invariant, not just an
+   application convention; `createLeavePolicy`/`updateLeavePolicy`
+   proactively un-default the previous default when a new one is set,
+   rather than erroring, so this reads as "the tenant just changed their
+   mind" instead of a conflict to fight through. If a tenant hasn't
+   designated a default at all, resolution returns `policyId: null` —
+   the same "hidden unless something explicitly grants otherwise"
+   posture `resolveFieldAccess()` already takes for an unmatched field.
+
+**Two module gates, deliberately different.** `employee_group.manage`
+(create/edit/delete a group and its conditions) is gated behind the
+`employee` module — segmenting employees by attribute is generic
+infrastructure any future module could hang a policy off of, not
+leave-specific. `leave_policy.manage` (create/edit/delete a leave policy,
+and — for now — assign any policy to a group) is gated behind `leave`,
+since leave policies are this phase's only concrete, licensed consumer.
+Both permissions are deliberately scope-less (no `.self`/`.all`/`.team`
+suffix) — `RbacService.can()`'s own doc comment already covers a
+permission with neither suffix as "sufficient on its own," which is
+exactly right for a tenant-wide configuration action with no per-record
+ownership concept. Both are granted to `hr_admin` only, matching Section
+3's Module Admin tier.
+
+**A genuinely new employee attribute, added deliberately.** Section 12's
+own canonical example ("employees in Department=Engineering,
+Location=Karachi get Policy X") names `location`, which `employees`
+didn't have before this phase, and `employment type` doesn't exist as an
+attribute in Phase 7's schema at all — a plain-text `department`/
+`designation` pair was all that phase needed. Rather than avoid the
+example or fake it with a workaround, `0012_employee_groups_leave_policy.sql`
+adds both as real columns (`location text`, `employment_type text` with
+a `CHECK` over `permanent`/`contract`/`probation`/`intern`, defaulting to
+`permanent`) — genuinely useful attributes for a multi-branch SMB or one
+that distinguishes permanent from contract staff, not scaffolding
+invented only to make this phase's demo work.
+
+**A fixed, validated condition-field set, not "any employee field."**
+`employee_group_conditions.field` is constrained by a `CHECK` to exactly
+five values (`department`, `location`, `designation`, `employmentType`,
+`employmentStatus`), mirrored by a `class-validator` `@IsIn()` on the DTO
+and a `CONDITION_FIELD_TO_COLUMN` map in the service. This is a direct
+response to the exact bug Phase 4 hit and fixed for real
+(`0011_employee_seed.sql`'s header comment): seeding a `field_key` as a
+database column name instead of the API-facing camelCase silently
+resolved to the safe-deny default instead of erroring. Typo-ing a
+condition's `field` here would have the same silent-failure shape — a
+group that can never match anything, with no error to surface it — so
+it's closed off at both the database and the DTO layer instead of
+trusted to careful typing.
+
+### Alternatives considered
+
+- **A `priority` integer column on `employee_groups`**, set by hand,
+  instead of deriving specificity from condition count. Rejected:
+  it moves the actual rule ("more specific wins") out of the data model
+  and into "whatever number an HR Admin typed in," which can silently
+  drift out of sync with what the conditions themselves would imply —
+  the whole point of borrowing "most-specific-match-wins" from Phase 4's
+  vocabulary was to make specificity a structural property, not a manual
+  one.
+- **A single JSONB `condition` column per group** (an array of
+  `{field, equals}` pairs), matching `field_permission_rules.condition`'s
+  own shape exactly, instead of a separate `employee_group_conditions`
+  table. Rejected: `field_permission_rules.condition` only ever needs to
+  express ONE condition (Section 2's Termination Reason example is a
+  single `{field, equals}` pair); this phase's own canonical example
+  needs at least two ANDed together, and a real table gives "how many
+  conditions does this group have" (specificity) as a plain `COUNT(*)`
+  rather than requiring a `jsonb_array_length()` everywhere that number
+  matters.
+- **Exposing `resolvePolicy()` to a self-service employee** viewing their
+  own record, gated by `employee.view.self` instead of admin-only
+  `leave_policy.manage`. Rejected for now: there's no real "my leave
+  balance" screen yet for that resolution to feed into — Phase 9 (Leave &
+  Attendance) is where that caller actually exists, and it can widen this
+  gate then with a real UI in hand rather than this phase guessing at the
+  right shape now. Tracked in `KNOWN_ISSUES.md`.
+
+### What this unblocks
+
+Phase 8's exit criterion is verified the same way Section 12 itself asks
+for — "proven by an automated test the same way every prior phase's
+resolver logic was": `employee-groups.service.spec.ts`'s 13 tests against
+real Postgres, covering most-specific-match-wins (including a genuine
+same-specificity tie), the safe-deny default fallback, the "at most one
+default policy" invariant and its un-default-on-set behavior, group CRUD
+including condition replacement on update, the two module/permission
+gates, and additive independence across repeated resolutions. Full suite
+now **75/75 passing**; `npm run build`/`npm run lint` clean across all
+three workspaces. Phase 9 (Leave & Attendance) now has real,
+tenant-configurable policy groups with a real resolution mechanism to
+attach actual leave entitlements and balances to, instead of having to
+invent a flat one-policy-fits-all model it would later have to retrofit.
+
+---
+
+*Next decision goes here as Decision #9, appended below this line — never
 inserted above it.*

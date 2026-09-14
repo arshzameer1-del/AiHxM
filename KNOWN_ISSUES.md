@@ -283,3 +283,43 @@ inherit that gap silently: `FileInterceptor("file", { limits: { fileSize:
 `EmployeesService.addDocument` independently re-checks the size on the
 buffer it actually receives. The broader "no payload size limits anywhere
 else" gap remains open and tracked above.
+
+## 2026-09 — Phase 8 (Employee Groups & Leave Policy Config): deliberate scope narrowing, tracked honestly
+
+### `resolvePolicy()` is admin-only for now, not yet exposed to self-service
+
+`EmployeeGroupsService.resolvePolicy()` — the actual "which leave policy
+applies to this employee" resolver — is gated behind `leave_policy.manage`
+(HR Admin only), the same as every other write/config action this phase
+adds. There is deliberately no `employee.view.self`-scoped path yet for
+an employee to see their own resolved policy. This is a real, currently-
+missing capability, not an oversight: Phase 9 (Leave & Attendance) is
+where a genuine "my leave balance" self-service screen first needs this
+resolution, and it can widen the gate then against that real caller and
+UI rather than this phase guessing at the right shape (does an employee
+need the resolved policy_id, or a friendlier summary of what it grants?)
+in the abstract. See Decision #8's "Alternatives considered" for the
+reasoning. **Revisit when:** Phase 9 builds the leave-balance view.
+
+### `policy_id` on `employee_group_policy_assignments` is not a real foreign key
+
+Deliberate, matching `custom_fields`' own JSONB-over-EAV tradeoff
+(Decision #6): which table `policy_id` points into depends on
+`policy_type`, and Postgres can't express a conditional FK across tables.
+Application code (`assignPolicy`/`deleteLeavePolicy`) validates existence
+and tenant ownership before writing or refusing to delete, so this is
+covered today with exactly one `policy_type` (`leave`) in existence — but
+it's worth flagging now, before a second `policy_type` arrives, that
+whoever adds one must remember to extend both of those checks by hand;
+nothing enforces it structurally. **Revisit when:** a second `policy_type`
+is added — audit `assignPolicy`/`deleteLeavePolicy`/`resolvePolicy` for
+every place that currently hardcodes `'leave'`.
+
+### Assigning ANY future policy type currently requires `leave_policy.manage`
+
+`EmployeeGroupsService.assignPolicy()` is gated by `leave_policy.manage`
+regardless of which `policy_type` is being assigned, since `'leave'` is
+the only one that exists. Documented in the method's own doc comment as a
+permission choice to revisit once a second `policy_type` ships — at that
+point assigning it shouldn't require holding an unrelated leave-specific
+permission.

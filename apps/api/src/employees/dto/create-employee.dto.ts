@@ -1,4 +1,5 @@
-import { IsDateString, IsOptional, IsString, IsUUID, MinLength } from "class-validator";
+import { IsDateString, IsIn, IsOptional, IsString, IsUUID, MinLength } from "class-validator";
+import type { EmploymentType } from "@boostfactor/shared-types";
 
 export class CreateEmployeeDto {
   @IsString()
@@ -40,6 +41,14 @@ export class CreateEmployeeDto {
   @IsOptional()
   @IsString()
   designation?: string;
+
+  @IsOptional()
+  @IsString()
+  location?: string;
+
+  @IsOptional()
+  @IsIn(["permanent", "contract", "probation", "intern"])
+  employmentType?: EmploymentType;
 
   @IsOptional()
   @IsUUID()

@@ -40,6 +40,8 @@ function rowToEmployee(row: any): Record<string, unknown> {
     maritalStatus: row.marital_status,
     department: row.department,
     designation: row.designation,
+    location: row.location,
+    employmentType: row.employment_type,
     managerId: row.manager_id,
     employmentStatus: row.employment_status,
     dateOfJoining: toIsoDate(row.date_of_joining),
@@ -125,9 +127,10 @@ export class EmployeesService {
       const result = await client.query(
         `INSERT INTO employees
            (company_id, user_account_id, employee_number, first_name, last_name, email, phone, cnic,
-            date_of_birth, gender, marital_status, department, designation, manager_id, date_of_joining,
-            salary_band, bank_account_number)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, COALESCE($15, CURRENT_DATE), $16, $17)
+            date_of_birth, gender, marital_status, department, designation, location, employment_type,
+            manager_id, date_of_joining, salary_band, bank_account_number)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+                 COALESCE($15, 'permanent'), $16, COALESCE($17, CURRENT_DATE), $18, $19)
          RETURNING *`,
         [
           claims.company_id,
@@ -143,6 +146,8 @@ export class EmployeesService {
           input.maritalStatus ?? null,
           input.department ?? null,
           input.designation ?? null,
+          input.location ?? null,
+          input.employmentType ?? null,
           input.managerId ?? null,
           input.dateOfJoining ?? null,
           input.salaryBand ?? null,
@@ -264,6 +269,8 @@ export class EmployeesService {
         marital_status: patch.maritalStatus ?? before.marital_status,
         department: patch.department ?? before.department,
         designation: patch.designation ?? before.designation,
+        location: patch.location ?? before.location,
+        employment_type: patch.employmentType ?? before.employment_type,
         manager_id: patch.managerId ?? before.manager_id,
         employment_status: patch.employmentStatus ?? before.employment_status,
         date_of_joining: patch.dateOfJoining ?? before.date_of_joining,
@@ -276,9 +283,10 @@ export class EmployeesService {
       const result = await client.query(
         `UPDATE employees SET
            first_name = $2, last_name = $3, email = $4, phone = $5, cnic = $6, date_of_birth = $7,
-           gender = $8, marital_status = $9, department = $10, designation = $11, manager_id = $12,
-           employment_status = $13, date_of_joining = $14, termination_date = $15, termination_reason = $16,
-           salary_band = $17, bank_account_number = $18, updated_at = now()
+           gender = $8, marital_status = $9, department = $10, designation = $11, location = $12,
+           employment_type = $13, manager_id = $14, employment_status = $15, date_of_joining = $16,
+           termination_date = $17, termination_reason = $18, salary_band = $19, bank_account_number = $20,
+           updated_at = now()
          WHERE id = $1
          RETURNING *`,
         [
@@ -293,6 +301,8 @@ export class EmployeesService {
           next.marital_status,
           next.department,
           next.designation,
+          next.location,
+          next.employment_type,
           next.manager_id,
           next.employment_status,
           next.date_of_joining,

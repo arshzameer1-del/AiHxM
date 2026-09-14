@@ -1,5 +1,5 @@
 import { IsDateString, IsIn, IsOptional, IsString, IsUUID } from "class-validator";
-import type { EmploymentStatus } from "@boostfactor/shared-types";
+import type { EmploymentStatus, EmploymentType } from "@boostfactor/shared-types";
 
 export class UpdateEmployeeDto {
   @IsOptional()
@@ -41,6 +41,14 @@ export class UpdateEmployeeDto {
   @IsOptional()
   @IsString()
   designation?: string;
+
+  @IsOptional()
+  @IsString()
+  location?: string;
+
+  @IsOptional()
+  @IsIn(["permanent", "contract", "probation", "intern"])
+  employmentType?: EmploymentType;
 
   @IsOptional()
   @IsUUID()

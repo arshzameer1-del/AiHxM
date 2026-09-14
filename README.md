@@ -11,29 +11,46 @@ technical call lives in [`DECISIONS.md`](./DECISIONS.md); operational
 concerns — security hardening, dependency vulnerabilities, deferred
 performance work — are tracked in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
 
-**Current phase: Phase 7 — Employee Core (complete).**
-Exit criterion: an Employee record gets a correctly tenant-scoped,
-immutable Employee Number assigned automatically, appears on an org
-chart, has its sensitive fields (CNIC, date of birth, salary band, bank
-account, Termination Reason) visible or hidden per role exactly the way
-Phase 4's engine already proved for `dummy_records`, can have a document
-attached to it, and has its job history recorded — all verified end to
-end, including over real HTTP against a live server, not just at the
-service layer (see Decision #7).
+**Current phase: Phase 8 — Employee Groups & Leave Policy Config (complete).**
+Exit criterion: a tenant can define at least two employee groups by
+attribute (department, location, employment type), assign a different
+leave policy to each, and a real Employee record (Phase 7) resolves to
+the correct policy automatically based on which group(s) it matches —
+proven by an automated test the same way every prior phase's resolver
+logic was (see Decision #8).
 
-The first real HR module — everything in Phases 1–6 was infrastructure
-this phase now actually uses. `employees`/`employee_documents`/
-`employee_job_history` are real, RLS-protected tenant tables; three real
-RBAC roles (HR Admin, Line Manager, Employee self-service) replace the
-Phase 4 demo roles for this object, exercising a new `.team` scope
-(direct reports only) alongside the existing `.self`/`.all`; a dedicated
-`employee_number_sequences` table assigns Employee Numbers atomically per
-the plan doc's Section 5 rules, including preserving a legacy number on
-import and advancing the sequence past it; and a new swappable
-`FileStorageService` (local-filesystem today, Supabase Storage/S3 later
-behind the same interface) backs the document vault.
+Built by deliberately REUSING Phase 4's own resolver pattern rather than
+inventing a second one, per the plan doc's own explicit instruction for
+this phase: most-specific-match-wins (a group's specificity is simply how
+many `employee_group_conditions` it has — more conditions matched, more
+specific), additive combination (resolution is independent per
+`policy_type`, so future policy types beyond `leave` combine rather than
+compete), and safe-deny default (an employee matching no group falls back
+to the tenant's one explicitly-designated default leave policy, never a
+guess). Two new, genuinely useful employee attributes — `location` and
+`employmentType` — were added to the Employee object along the way,
+since the plan doc's own canonical example for this phase names both.
 
-Before this, Phase 6 built all five buildable WRICEF pillars (Workflows,
+Before Phase 8, Phase 7 built the first real HR module — an Employee
+record gets a correctly tenant-scoped, immutable Employee Number assigned
+automatically, appears on an org chart, has its sensitive fields (CNIC,
+date of birth, salary band, bank account, Termination Reason) visible or
+hidden per role exactly the way Phase 4's engine already proved for
+`dummy_records`, can have a document attached to it, and has its job
+history recorded — all verified end to end, including over real HTTP
+against a live server, not just at the service layer (see Decision #7).
+`employees`/`employee_documents`/`employee_job_history` are real,
+RLS-protected tenant tables; three real RBAC roles (HR Admin, Line
+Manager, Employee self-service) replace the Phase 4 demo roles for this
+object, exercising a new `.team` scope (direct reports only) alongside
+the existing `.self`/`.all`; a dedicated `employee_number_sequences`
+table assigns Employee Numbers atomically per the plan doc's Section 5
+rules, including preserving a legacy number on import and advancing the
+sequence past it; and a swappable `FileStorageService` (local-filesystem
+today, Supabase Storage/S3 later behind the same interface) backs the
+document vault.
+
+Before that, Phase 6 built all five buildable WRICEF pillars (Workflows,
 Enhancements, Interfaces, Conversions, Forms — Reports waits for Phase 14
 per Section 6), and a post-Phase-5 security & quality audit closed a
 stale wide-open CORS default, added security headers (helmet) and rate
@@ -53,7 +70,7 @@ existed to trigger that fix) — in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
 | Database | Postgres (Supabase-managed in staging/prod; local Postgres for dev) — raw SQL migrations, no ORM (Decision #2) |
 | Auth | Real self-hosted auth now — bcrypt passwords, mandatory TOTP MFA, account lockout, password reset (see `apps/api/src/auth`, Decision #3). Swappable for Supabase Auth later without touching RLS or claims |
 | File storage | `FileStorageService` interface (`apps/api/src/file-storage`) — a local-filesystem implementation for now, Supabase Storage/S3 swappable in behind it later without touching callers (Decision #7) |
-| Business-logic API | NestJS (TypeScript) — owns module licensing (`apps/api/src/entitlements`, Decision #5), RBAC (`apps/api/src/rbac`, Decision #4, extended with a `.team` scope in Decision #7), field permissions, the WRICEF framework (`apps/api/src/workflow`, `custom-fields`, `notifications`, `document-templates`, `import-export`, Decision #6), and Employee Core (`apps/api/src/employees`, Decision #7) |
+| Business-logic API | NestJS (TypeScript) — owns module licensing (`apps/api/src/entitlements`, Decision #5), RBAC (`apps/api/src/rbac`, Decision #4, extended with a `.team` scope in Decision #7), field permissions, the WRICEF framework (`apps/api/src/workflow`, `custom-fields`, `notifications`, `document-templates`, `import-export`, Decision #6), Employee Core (`apps/api/src/employees`, Decision #7), and Employee Groups & Leave Policy Config (`apps/api/src/employee-groups`, Decision #8) |
 | Background jobs / SLA timers | `@nestjs/schedule` cron sweep for now, not Redis + BullMQ — see Decision #6 for why, and when that changes |
 | Frontend | React + Vite + Tailwind + React Router, Apple HIG design tokens |
 | Monorepo | Turborepo (npm workspaces) |
@@ -71,13 +88,18 @@ module 404s rather than 403ing or degrading, and `tenant_module_entitlement`
 is the only table it ever reads from — Decision #6 for the WRICEF
 Workflow engine's design (a plain DB sweep instead of BullMQ/Redis for SLA
 escalation, and why `manager_of_submitter` approval routing waits for
-Phase 7's employee hierarchy) — and Decision #7 for Phase 7's three real
+Phase 7's employee hierarchy) — Decision #7 for Phase 7's three real
 calls: a dedicated `employee_number_sequences` table instead of a
 `company_config` column (a real Postgres RLS-plus-`FOR UPDATE` gotcha
 this phase ran into and fixed), the swappable `FileStorageService`
 interface behind the document vault, and RBAC's new `.team` scope
 (direct reports only, resolved generically by the caller rather than
-`RbacService` knowing what an employee or a manager is).
+`RbacService` knowing what an employee or a manager is) — and Decision #8
+for Phase 8's resolution mechanism: most-specific-match-wins derived
+structurally from condition count rather than a hand-set priority column,
+additive combination independent per `policy_type`, and a database-
+enforced "at most one default policy per tenant" invariant backing the
+safe-deny fallback.
 
 ## Repo layout
 
@@ -100,6 +122,7 @@ apps/
       import-export/  Generic CSV parse/validate/generate utility (WRICEF Conversions)
       file-storage/   Swappable FileStorageService interface + local-filesystem implementation (Decision #7)
       employees/      Employee Core: org chart, master data, document vault, job history, Employee Number assignment (Decision #7, plan doc Section 5)
+      employee-groups/ Employee Groups & Leave Policy Config: attribute-based groups, leave policies, most-specific-match-wins resolution (Decision #8)
       dummy/          Proof-of-concept object the RBAC/licensing/workflow/import-export engines were originally proven against, before Employee Core existed
   web/
     src/
@@ -176,6 +199,10 @@ provisioning it hasn't happened yet.
 
 ## What's next
 
-Phase 8 — Employee Groups & Leave Policy Config: per-group policy
-resolution, reusing Phase 4's field-permission resolver pattern. See
-`claude/development-plan.md` Section 7 for the full phase plan.
+Phase 9 — Leave & Attendance: the full leave lifecycle (request, approve
+via the Phase 6 workflow engine, on-behalf submission, overlap notices)
+consuming Phase 8's real policy groups, plus biometric/GPS clock-in keyed
+off `employee_number`, never the internal UUID. Plan doc Section 7 flags
+this as **the real go/no-go checkpoint** — get one pilot company fully
+live here before building further. See `claude/development-plan.md`
+Section 7 for the full phase plan.
