@@ -6,6 +6,7 @@ import { AuditService } from "../audit/audit.service";
 import { RbacService } from "../rbac/rbac.service";
 import type {
   ApproverType,
+  EscalationApproverType,
   WorkflowApprovalStatus,
   WorkflowInstanceView,
   WorkflowStepApprovalView,
@@ -32,7 +33,7 @@ type TemplateApproverRow = {
   approver_type: ApproverType;
   role_id: string | null;
   user_account_id: string | null;
-  escalation_approver_type: ApproverType | null;
+  escalation_approver_type: EscalationApproverType | null;
   escalation_role_id: string | null;
   escalation_user_account_id: string | null;
 };
@@ -89,7 +90,7 @@ export class WorkflowService {
           approverType: ApproverType;
           roleId?: string;
           userAccountId?: string;
-          escalationApproverType?: ApproverType;
+          escalationApproverType?: EscalationApproverType;
           escalationRoleId?: string;
           escalationUserAccountId?: string;
         }>;
@@ -237,7 +238,21 @@ export class WorkflowService {
 
   async submitForApproval(
     claims: RequestClaims,
-    dto: { templateKey: string; objectKey: string; recordId: string; record: Record<string, unknown> }
+    dto: {
+      templateKey: string;
+      objectKey: string;
+      recordId: string;
+      record: Record<string, unknown>;
+      /**
+       * Who a `manager_of_submitter` approver should actually resolve
+       * against — see 0014_workflow_manager_of_submitter.sql's header
+       * comment. Omit for the ordinary case (the caller is submitting
+       * their own record); an On-Behalf submission (Phase 9's leave
+       * requests) passes the EMPLOYEE's own `user_account_id` here, not
+       * the HR Admin's who is actually calling this method.
+       */
+      subjectUserAccountId?: string;
+    }
   ): Promise<WorkflowInstanceView> {
     if (!claims.company_id) throw new ForbiddenException();
 
@@ -259,15 +274,17 @@ export class WorkflowService {
         throw new BadRequestException("Template has no steps configured");
       }
 
+      const subjectUserAccountId = dto.subjectUserAccountId ?? claims.sub;
       const instanceResult = await client.query<{ id: string; created_at: Date; updated_at: Date }>(
-        `INSERT INTO workflow_instances (company_id, template_id, object_key, record_id, submitted_by_user_account_id, record_snapshot)
-         VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+        `INSERT INTO workflow_instances
+           (company_id, template_id, object_key, record_id, submitted_by_user_account_id, subject_user_account_id, record_snapshot)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
          RETURNING id, created_at, updated_at`,
-        [claims.company_id, template.id, dto.objectKey, dto.recordId, claims.sub, JSON.stringify(dto.record)]
+        [claims.company_id, template.id, dto.objectKey, dto.recordId, claims.sub, subjectUserAccountId, JSON.stringify(dto.record)]
       );
       const instanceId = instanceResult.rows[0].id;
 
-      await this.activateFromStep(client, instanceId, steps, 0, dto.record);
+      await this.activateFromStep(client, instanceId, steps, 0, dto.record, subjectUserAccountId);
 
       await this.audit.record(client, claims, {
         companyId: claims.company_id ?? null,
@@ -342,8 +359,14 @@ export class WorkflowService {
         throw new BadRequestException(`Step is already ${stepInstance.status}, no decision can be recorded`);
       }
 
-      const instanceResult = await client.query<{ id: string; status: string; company_id: string; template_id: string }>(
-        `SELECT id, status, company_id, template_id FROM workflow_instances WHERE id = $1`,
+      const instanceResult = await client.query<{
+        id: string;
+        status: string;
+        company_id: string;
+        template_id: string;
+        subject_user_account_id: string;
+      }>(
+        `SELECT id, status, company_id, template_id, subject_user_account_id FROM workflow_instances WHERE id = $1`,
         [stepInstance.workflow_instance_id]
       );
       if (instanceResult.rowCount === 0) throw new NotFoundException("Workflow instance not found");
@@ -369,7 +392,8 @@ export class WorkflowService {
       for (const approval of approvalsResult.rows) {
         if (approval.status !== "pending" && approval.status !== "escalated") continue;
         const isOriginalApprover =
-          (approval.approver_type === "specific_user" && approval.user_account_id === claims.sub) ||
+          ((approval.approver_type === "specific_user" || approval.approver_type === "manager_of_submitter") &&
+            approval.user_account_id === claims.sub) ||
           (approval.approver_type === "role" && (await this.userHoldsRole(client, claims.sub, instance.company_id, approval.role_id)));
         const isEscalationTarget = approval.status === "escalated" && approval.escalated_to_user_account_id === claims.sub;
         if (isOriginalApprover || isEscalationTarget) {
@@ -415,7 +439,7 @@ export class WorkflowService {
           const steps = await this.loadTemplateStepsWithApprovers(client, instance.template_id);
           const nextIndex = steps.findIndex((s) => s.stepOrder === stepInstance.step_order) + 1;
           const record = await this.getRecordSnapshot(client, instance.id);
-          await this.activateFromStep(client, instance.id, steps, nextIndex, record);
+          await this.activateFromStep(client, instance.id, steps, nextIndex, record, instance.subject_user_account_id);
         }
       }
 
@@ -456,7 +480,7 @@ export class WorkflowService {
         let escalationTarget: string | null = null;
         if (approval.template_approver_id) {
           const templateApprover = await client.query<{
-            escalation_approver_type: ApproverType | null;
+            escalation_approver_type: EscalationApproverType | null;
             escalation_role_id: string | null;
             escalation_user_account_id: string | null;
           }>(
@@ -568,7 +592,8 @@ export class WorkflowService {
       approvers: TemplateApproverRow[];
     }>,
     index: number,
-    record: Record<string, unknown>
+    record: Record<string, unknown>,
+    subjectUserAccountId: string
   ): Promise<void> {
     if (index >= steps.length) {
       await client.query(`UPDATE workflow_instances SET status = 'approved', updated_at = now() WHERE id = $1`, [
@@ -584,7 +609,7 @@ export class WorkflowService {
          VALUES ($1, $2, $3, 'skipped')`,
         [instanceId, step.stepOrder, step.name]
       );
-      return this.activateFromStep(client, instanceId, steps, index + 1, record);
+      return this.activateFromStep(client, instanceId, steps, index + 1, record, subjectUserAccountId);
     }
 
     const dueAt = step.slaHours ? new Date(Date.now() + step.slaHours * 60 * 60 * 1000) : null;
@@ -596,13 +621,55 @@ export class WorkflowService {
     const stepInstanceId = stepInstanceResult.rows[0].id;
 
     for (const approver of step.approvers) {
+      let userAccountId = approver.user_account_id;
+      if (approver.approver_type === "manager_of_submitter") {
+        userAccountId = await this.resolveManagerOfSubmitter(client, subjectUserAccountId);
+        if (!userAccountId) {
+          // Safe-deny, not a silent stall: a manager_of_submitter step
+          // with nobody to route to is a real configuration/data problem
+          // (the subject has no Employee record, or no manager on file,
+          // or their manager has no login) — surface it immediately as a
+          // clear error rather than creating an approval line nobody can
+          // ever act on. See KNOWN_ISSUES.md for the one honestly-scoped
+          // limitation this still leaves: if this happens on a step
+          // AFTER the first (activated later, from decide()), the error
+          // surfaces on the PRECEDING approver's decide() call rather
+          // than at submission time.
+          throw new BadRequestException(
+            "Cannot route to manager_of_submitter: the subject has no employee record, no manager on file, or their manager has no login"
+          );
+        }
+      }
       await client.query(
         `INSERT INTO workflow_step_approvals
            (step_instance_id, template_approver_id, approver_type, role_id, user_account_id, due_at)
          VALUES ($1, $2, $3, $4, $5, $6)`,
-        [stepInstanceId, approver.id, approver.approver_type, approver.role_id, approver.user_account_id, dueAt]
+        [stepInstanceId, approver.id, approver.approver_type, approver.role_id, userAccountId, dueAt]
       );
     }
+  }
+
+  /**
+   * Resolves "the manager of `subjectUserAccountId`" via the Employee
+   * Core hierarchy Phase 7 introduced — a deliberate, narrow exception to
+   * this engine's usual "never queries an arbitrary object's own table"
+   * rule (this class's own doc comment), in the same spirit it already
+   * queries `user_role_assignments`/`roles` directly for the `role`
+   * approver type: `employees` is a well-known platform table now, not
+   * an arbitrary caller-owned one. Returns null if the subject has no
+   * Employee record, has no manager (top of the org chart), or their
+   * manager has no login (`user_account_id IS NULL`) — any of which means
+   * there is genuinely nobody to route to.
+   */
+  private async resolveManagerOfSubmitter(client: PoolClient, subjectUserAccountId: string): Promise<string | null> {
+    const result = await client.query<{ manager_user_account_id: string | null }>(
+      `SELECT mgr.user_account_id AS manager_user_account_id
+       FROM employees e
+       JOIN employees mgr ON mgr.id = e.manager_id
+       WHERE e.user_account_id = $1`,
+      [subjectUserAccountId]
+    );
+    return result.rows[0]?.manager_user_account_id ?? null;
   }
 
   private async loadInstance(client: PoolClient, instanceId: string): Promise<WorkflowInstanceView | null> {
@@ -661,6 +728,7 @@ export class WorkflowService {
       objectKey: inst.object_key,
       recordId: inst.record_id,
       submittedByUserAccountId: inst.submitted_by_user_account_id,
+      subjectUserAccountId: inst.subject_user_account_id,
       status: inst.status,
       steps,
       createdAt: toIso(inst.created_at),

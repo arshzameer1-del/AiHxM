@@ -304,4 +304,148 @@ describe("WorkflowService", () => {
       expect(instance.steps[0].approvals).toHaveLength(0);
     });
   });
+
+  /**
+   * Phase 9's own addition to this engine (Decision #6's deferred
+   * capability, now that Phase 7's employee/manager hierarchy exists to
+   * route against) — see 0014_workflow_manager_of_submitter.sql. A fresh,
+   * self-contained fixture company with real Employee Core rows, since
+   * this needs a manager_id hierarchy the rest of this file's
+   * `dummy_records`/rbac_demo fixtures have no reason to carry.
+   */
+  describe("manager_of_submitter routing (Phase 9)", () => {
+    let momCompanyId: string;
+    let managerEmployeeUserId: string;
+    let staffEmployeeUserId: string;
+    let noManagerEmployeeUserId: string;
+    let staffClaims: RequestClaims;
+    let managerClaims: RequestClaims;
+    let noManagerClaims: RequestClaims;
+    let templateKey: string;
+
+    beforeAll(async () => {
+      const stamp = `${Date.now()}-mom`;
+      await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const company = await client.query("INSERT INTO companies (name, slug) VALUES ($1, $2) RETURNING id", [
+          `MoM Co ${stamp}`,
+          `mom-co-${stamp}`,
+        ]);
+        momCompanyId = company.rows[0].id;
+        await client.query(
+          `INSERT INTO company_config (company_id, enabled_modules, employee_number_format)
+           VALUES ($1, '["employee"]'::jsonb, '{"prefix":"EMP","padding":4,"startingSequence":1,"preserveImportedNumbers":true}'::jsonb)`,
+          [momCompanyId]
+        );
+        await client.query(
+          "INSERT INTO tenant_module_entitlement (company_id, module_key, enabled) VALUES ($1, 'employee', true)",
+          [momCompanyId]
+        );
+
+        async function makeUser(email: string): Promise<string> {
+          const account = await client.query(
+            "INSERT INTO user_accounts (email, password_hash) VALUES ($1, 'x') RETURNING id",
+            [email]
+          );
+          return account.rows[0].id;
+        }
+        managerEmployeeUserId = await makeUser(`mom-manager-${stamp}@example.com`);
+        staffEmployeeUserId = await makeUser(`mom-staff-${stamp}@example.com`);
+        noManagerEmployeeUserId = await makeUser(`mom-nomanager-${stamp}@example.com`);
+
+        const manager = await client.query(
+          `INSERT INTO employees (company_id, user_account_id, employee_number, first_name, last_name)
+           VALUES ($1, $2, 'EMP-M1', 'Maya', 'Manager') RETURNING id`,
+          [momCompanyId, managerEmployeeUserId]
+        );
+        await client.query(
+          `INSERT INTO employees (company_id, user_account_id, employee_number, first_name, last_name, manager_id)
+           VALUES ($1, $2, 'EMP-S1', 'Sam', 'Staff', $3)`,
+          [momCompanyId, staffEmployeeUserId, manager.rows[0].id]
+        );
+        // Deliberately no employees row at all for noManagerEmployeeUserId —
+        // proves the "subject has no Employee record" unresolvable case.
+
+        const role = await client.query("SELECT id FROM roles WHERE key = 'rbac_demo_full_access'");
+        await client.query(
+          "INSERT INTO user_role_assignments (user_account_id, company_id, role_id) VALUES ($1, $2, $3), ($4, $2, $3)",
+          [staffEmployeeUserId, momCompanyId, role.rows[0].id, noManagerEmployeeUserId]
+        );
+      });
+
+      staffClaims = { is_platform_admin: false, company_id: momCompanyId, sub: staffEmployeeUserId };
+      managerClaims = { is_platform_admin: false, company_id: momCompanyId, sub: managerEmployeeUserId };
+      noManagerClaims = { is_platform_admin: false, company_id: momCompanyId, sub: noManagerEmployeeUserId };
+
+      templateKey = `mom-${Date.now()}`;
+      await workflow.createTemplate(staffClaims, {
+        key: templateKey,
+        name: "Manager approval",
+        objectKey: "dummy_record",
+        steps: [{ stepOrder: 1, name: "Manager approves", approvers: [{ approverType: "manager_of_submitter" }] }],
+      });
+    });
+
+    afterAll(async () => {
+      await db.withClaims(FIXTURE_CLAIMS, (client) => client.query("DELETE FROM companies WHERE id = $1", [momCompanyId]));
+    });
+
+    async function makeMomRecord(): Promise<string> {
+      return db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const result = await client.query(
+          `INSERT INTO dummy_records (company_id, title, status) VALUES ($1, 'MoM test', 'locked') RETURNING id`,
+          [momCompanyId]
+        );
+        return result.rows[0].id;
+      });
+    }
+
+    it("resolves the approval to the submitter's actual manager, and only that manager can decide it", async () => {
+      const recordId = await makeMomRecord();
+      const instance = await workflow.submitForApproval(staffClaims, {
+        templateKey,
+        objectKey: "dummy_record",
+        recordId,
+        record: { status: "locked" },
+      });
+      const approval = instance.steps[0].approvals[0];
+      expect(approval.approverType).toBe("manager_of_submitter");
+      expect(approval.userAccountId).toBe(managerEmployeeUserId);
+
+      // The submitter themselves is NOT the resolved approver — they
+      // cannot decide their own manager-approval step.
+      await expect(workflow.decide(staffClaims, instance.steps[0].id, { decision: "approved" })).rejects.toThrow();
+
+      const decided = await workflow.decide(managerClaims, instance.steps[0].id, { decision: "approved" });
+      expect(decided.status).toBe("approved");
+    });
+
+    it("resolves against the On-Behalf subject, not the caller who actually submitted", async () => {
+      // noManagerClaims (an HR-equivalent caller with no Employee record
+      // of their own — proven unable to resolve manager_of_submitter for
+      // THEMSELVES in the test above) submits FOR Sam via
+      // subjectUserAccountId — proving manager_of_submitter routes to
+      // SAM's manager, the subject, not the caller's own (nonexistent) one.
+      const recordId = await makeMomRecord();
+      const instance = await workflow.submitForApproval(noManagerClaims, {
+        templateKey,
+        objectKey: "dummy_record",
+        recordId,
+        record: { status: "locked" },
+        subjectUserAccountId: staffEmployeeUserId,
+      });
+      expect(instance.subjectUserAccountId).toBe(staffEmployeeUserId);
+      expect(instance.steps[0].approvals[0].userAccountId).toBe(managerEmployeeUserId);
+    });
+
+    it("safe-denies (throws) rather than silently creating an unreachable approval when the subject has no manager", async () => {
+      await expect(
+        workflow.submitForApproval(noManagerClaims, {
+          templateKey,
+          objectKey: "dummy_record",
+          recordId: await makeMomRecord(),
+          record: { status: "locked" },
+        })
+      ).rejects.toThrow();
+    });
+  });
 });

@@ -14,8 +14,8 @@ import {
 } from "class-validator";
 
 export class WorkflowApproverConfigDto {
-  @IsIn(["role", "specific_user"])
-  approverType!: "role" | "specific_user";
+  @IsIn(["role", "specific_user", "manager_of_submitter"])
+  approverType!: "role" | "specific_user" | "manager_of_submitter";
 
   @IsOptional()
   @IsUUID()
@@ -25,6 +25,9 @@ export class WorkflowApproverConfigDto {
   @IsUUID()
   userAccountId?: string;
 
+  // Deliberately NOT "manager_of_submitter" — escalating to "the
+  // manager's manager" is unbuilt scope (see KNOWN_ISSUES.md); an
+  // escalation target is always a fixed role or a specific person.
   @IsOptional()
   @IsIn(["role", "specific_user"])
   escalationApproverType?: "role" | "specific_user";

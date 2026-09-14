@@ -362,24 +362,49 @@ export class EmployeeGroupsService {
   }
 
   /**
-   * The resolver itself — Phase 8's whole reason to exist. Deliberately
-   * admin-gated (leave_policy.manage) for now rather than exposed to an
-   * employee viewing their own record: Phase 9 (Leave & Attendance) is
-   * where a real "my leave balance" self-service view first needs this,
-   * and it can widen the gate then with its own real caller in hand
-   * rather than this phase guessing at that shape now.
-   *
-   * See 0012_employee_groups_leave_policy.sql's header comment for the
-   * full algorithm writeup. In one line: every employee_group whose
-   * conditions ALL match the employee is a candidate; among candidates
-   * that also carry an assignment for `policyType`, the one with the MOST
-   * conditions (most specific) wins; if none match (or none of the
-   * matches carry an assignment), fall back to the tenant's explicitly
-   * designated default policy for that type; if there isn't one either,
-   * return `policyId: null` rather than guessing.
+   * The HR-facing resolver — admin-gated (leave_policy.manage), used by
+   * `GET /employees/:employeeId/resolved-policy`. Phase 9 (Leave &
+   * Attendance) is the first real caller that needs resolution from a
+   * NON-admin context (an ordinary employee submitting their own leave
+   * request), so it calls `resolvePolicyInternal` below instead of
+   * widening this method's own gate — see that method's doc comment for
+   * why the split, rather than this comment's Phase-8-era prediction of
+   * "just widen the gate," is the actual right shape. This method is now
+   * a thin, admin-only wrapper around the shared algorithm.
    */
   async resolvePolicy(claims: RequestClaims, employeeId: string, policyType: PolicyType): Promise<ResolvedPolicyView> {
     await this.requireLeavePolicyManage(claims);
+    return this.resolvePolicyInternal(claims, employeeId, policyType);
+  }
+
+  /**
+   * The resolver's actual algorithm — Phase 8's whole reason to exist,
+   * see 0012_employee_groups_leave_policy.sql's header comment for the
+   * full writeup. In one line: every employee_group whose conditions ALL
+   * match the employee is a candidate; among candidates that also carry
+   * an assignment for `policyType`, the one with the MOST conditions
+   * (most specific) wins; if none match (or none of the matches carry an
+   * assignment), fall back to the tenant's explicitly designated default
+   * policy for that type; if there isn't one either, return `policyId:
+   * null` rather than guessing.
+   *
+   * Deliberately UNGATED by `leave_policy.manage` — this is the internal,
+   * cross-module entry point `LeaveRequestsService` (Phase 9) calls after
+   * it has already authorized the caller against ITS OWN permissions
+   * (`leave_request.create.self`/`leave_request.manage.all`). This is the
+   * same division of labor `WorkflowService` already established for
+   * object-level authorization ("whether the caller may submit or view a
+   * given record at all is explicitly NOT this service's job" — see its
+   * own class doc comment): the calling module decides who may ask for a
+   * resolution, this method just resolves it, checking only that the
+   * `leave` module itself is licensed. Not exported through any
+   * controller directly — `resolvePolicy` above is the only HTTP-reachable
+   * path, and it still requires `leave_policy.manage`.
+   */
+  async resolvePolicyInternal(claims: RequestClaims, employeeId: string, policyType: PolicyType): Promise<ResolvedPolicyView> {
+    if (!(await this.entitlements.isModuleEnabled(claims, LEAVE_MODULE_KEY))) {
+      throw new NotFoundException();
+    }
     return this.db.withClaims(claims, async (client) => {
       const employeeResult = await client.query(
         "SELECT department, location, designation, employment_type, employment_status FROM employees WHERE id = $1",

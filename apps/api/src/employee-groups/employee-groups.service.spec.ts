@@ -242,6 +242,17 @@ describe("EmployeeGroupsService", () => {
       await expect(groups.resolvePolicy(managerClaims, karachiEngineerId, "leave")).rejects.toThrow(ForbiddenException);
     });
 
+    it("resolvePolicyInternal (Phase 9's cross-module entry point) bypasses leave_policy.manage but still requires the leave module", async () => {
+      // managerClaims holds no employee_group.manage/leave_policy.manage
+      // at all — resolvePolicy() (the admin-facing method) rejects it,
+      // proven above, but resolvePolicyInternal() is meant for a calling
+      // module (LeaveRequestsService) that has already authorized the
+      // caller through its own permissions, so it must NOT re-apply the
+      // admin gate here.
+      const resolved = await groups.resolvePolicyInternal(managerClaims, karachiEngineerId, "leave");
+      expect(resolved.policyId).toBe(karachiEngineeringPolicyId);
+    });
+
     it("404s when the leave module is disabled for the tenant, exactly like every other module gate", async () => {
       await db.withClaims(FIXTURE_CLAIMS, (client) =>
         client.query("UPDATE tenant_module_entitlement SET enabled = false WHERE company_id = $1 AND module_key = 'leave'", [
@@ -250,6 +261,10 @@ describe("EmployeeGroupsService", () => {
       );
       await expect(groups.resolvePolicy(hrAdminClaims, karachiEngineerId, "leave")).rejects.toThrow(NotFoundException);
       await expect(groups.createLeavePolicy(hrAdminClaims, { name: "Should 404" })).rejects.toThrow(NotFoundException);
+      // resolvePolicyInternal skips the permission gate but must still
+      // enforce the module-license gate — a disabled module has to 404
+      // for the internal caller too, not just the admin-facing method.
+      await expect(groups.resolvePolicyInternal(managerClaims, karachiEngineerId, "leave")).rejects.toThrow(NotFoundException);
       await db.withClaims(FIXTURE_CLAIMS, (client) =>
         client.query("UPDATE tenant_module_entitlement SET enabled = true WHERE company_id = $1 AND module_key = 'leave'", [
           companyId,

@@ -14,6 +14,10 @@ export class SubmitForApprovalDto {
 
   @IsObject()
   record!: Record<string, unknown>;
+
+  @IsOptional()
+  @IsUUID()
+  subjectUserAccountId?: string;
 }
 
 export class ApprovalDecisionDto {

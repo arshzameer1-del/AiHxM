@@ -1063,5 +1063,192 @@ invent a flat one-policy-fits-all model it would later have to retrofit.
 
 ---
 
-*Next decision goes here as Decision #9, appended below this line — never
-inserted above it.*
+## Decision #9 — Phase 9 (Leave & Attendance): `manager_of_submitter` routing, the `resolvePolicy`/`resolvePolicyInternal` split, and the leave/attendance schema
+
+**Context.** Plan doc Section 7 calls Phase 9 "the real go/no-go
+checkpoint" — the first phase where every pillar built so far (Phase 4's
+RBAC, Phase 5's module licensing, Phase 6's workflow engine, Phase 7's
+Employee Core hierarchy, Phase 8's policy resolver) has to serve one real
+object together, not in isolation. Three real design decisions came out
+of actually wiring that up, none of them visible from any single prior
+phase's own exit criterion.
+
+**1. `manager_of_submitter`: a workflow approver type resolved fresh, per
+instance, against the Employee Core hierarchy — not against `role_id`/
+`user_account_id` at all.**
+
+Decision #6 explicitly deferred this ("a real approver-type case Phase 7
+will need once a real manager hierarchy exists") rather than guessing at
+its shape ahead of that hierarchy existing. Now that it does, the actual
+design: `workflow_template_step_approvers.approver_type` gains a third
+value that, uniquely among the three, carries neither `role_id` nor
+`user_account_id` at template-configuration time (a widened CHECK
+constraint in `0014_workflow_manager_of_submitter.sql` enforces this
+shape). Resolution happens at step-activation time, via a new private
+`WorkflowService.resolveManagerOfSubmitter()` that queries the
+`employees` table directly — a deliberate, narrow exception to this
+engine's own "never touches an arbitrary object's own table" rule
+(`WorkflowService`'s class doc comment), justified the same way it
+already queries `roles`/`user_role_assignments` for the `role` type:
+`employees` is a well-known platform table now, not an arbitrary
+caller-owned one.
+
+The harder problem this exposed: "the manager of whom?" A workflow
+instance previously only recorded who clicked submit
+(`submitted_by_user_account_id`) — fine when that's always also who the
+record is about, but Phase 9's own On-Behalf requirement (an HR Admin
+submitting a leave request for an employee who may not use the
+self-service portal at all) breaks that assumption outright. Resolving
+`manager_of_submitter` against the HR Admin's own manager (or lack of
+one) would be a real correctness bug, not a style choice. The fix: a new
+`workflow_instances.subject_user_account_id` column, distinct from
+`submitted_by_user_account_id`, defaulting to the caller
+(`claims.sub`) but overridable via `submitForApproval()`'s new optional
+`subjectUserAccountId` parameter — Phase 9's `LeaveRequestsService`
+passes the actual employee's `user_account_id` here for every
+submission, self or On-Behalf alike, so `manager_of_submitter` always
+resolves against the right person regardless of who physically clicked
+submit.
+
+Unresolvable cases (no Employee record, no manager on file, or a manager
+with no login) throw `BadRequestException` immediately at
+step-activation time rather than silently creating an approval line
+nobody can ever act on — safe-deny, the same posture every resolver in
+this codebase takes for "nothing applicable found." One honestly-scoped
+limitation, not silently glossed over: this only happens reliably for the
+FIRST step at submission time; if a later step (activated from `decide()`)
+fails to resolve, the error surfaces on the preceding approver's
+`decide()` call instead of at submission time. Tracked in
+`KNOWN_ISSUES.md`, not fixed now — doing so would mean making `decide()`
+itself capable of leaving a workflow instance in a genuinely stuck state
+with a clear remediation path, which is more machinery than this phase's
+actual approver chains (never more than two steps deep) need yet.
+
+**2. Splitting `EmployeeGroupsService.resolvePolicy()` into a thin
+admin-gated wrapper and an ungated `resolvePolicyInternal()` — instead of
+just widening the original method's permission gate.**
+
+Decision #8's own "Alternatives considered" section predicted this
+moment and explicitly deferred it: `resolvePolicy()` was built
+admin-only (`leave_policy.manage`) because Phase 8 had no real caller
+that needed resolution from a non-admin context. Phase 9's
+`LeaveRequestsService.submit()` is exactly that caller — an ordinary
+self-service employee, holding only `leave_request.create.self`, needs
+their own policy resolved in order to submit their own leave request at
+all. Widening `resolvePolicy()`'s gate to accept `leave_request.create.self`
+was rejected outright: that permission has nothing to do with resolving
+policy for an ARBITRARY employee over HTTP, and `resolvePolicy()` is
+directly HTTP-reachable via `GET /employees/:employeeId/resolved-policy`.
+Doing so would let any authenticated self-service employee resolve any
+OTHER employee's leave policy just by changing the URL's `:employeeId`.
+
+The actual fix mirrors `WorkflowService`'s own established division of
+labor (its class doc comment: "whether the caller may submit or view a
+given record at all is explicitly NOT this service's job"): a new
+`resolvePolicyInternal()` holds the entire resolution algorithm
+(unchanged from Phase 8, just re-homed) and checks only that the `leave`
+module itself is licensed — no permission gate at all. It is never
+exposed through any controller; `resolvePolicy()` becomes a thin
+wrapper that still requires `leave_policy.manage` before delegating to
+it. `LeaveRequestsService` calls the internal method only AFTER it has
+already authorized its own caller against `leave_request.create.self`/
+`leave_request.manage.all` — the calling module decides who may ask for
+a resolution, `EmployeeGroupsService` just resolves it. This is the same
+shape as every "authorization is the calling module's job" boundary
+already in this codebase, applied for the first time to a boundary
+between two feature modules rather than between a generic engine and its
+caller.
+
+**3. The leave/attendance schema itself: lazy balance seeding, calendar-day
+counting, and `employee_number`-keyed attendance.**
+
+`leave_balances` rows are created lazily — the first time
+`LeaveRequestsService` needs one for a given employee/leave_type/year,
+seeded from whatever `resolvePolicyInternal()` currently resolves to at
+that moment — rather than pre-populated for every employee on a
+schedule. Most SMB employees never touch most leave types in a given
+year; pre-populating three rows per employee per year regardless would
+be pure waste, and would also freeze that year's entitlement at
+whatever the policy happened to say on some arbitrary seeding date
+rather than at actual first-use time. An existing balance row's
+`entitled_days` is never silently overwritten by a later resolution —
+once created, only `used_days` moves (via approval), preserving room for
+a manual HR adjustment to stick.
+
+Day counting is calendar-day, inclusive of both ends, with no business-
+day or public-holiday exclusion — there is no holiday-calendar object
+anywhere else in this codebase, and inventing one solely to make this
+calculation more realistic would be exactly the ahead-of-demand
+over-building Section 10 warns against. Similarly, a request spanning a
+year boundary (e.g. Dec 30 – Jan 3) draws its entire balance from the
+START date's year rather than being split proportionally across two
+years' entitlements — a documented simplification, not an oversight.
+Both are tracked in `KNOWN_ISSUES.md`.
+
+`attendance_records` stores `employee_number` denormalized alongside the
+resolved `employee_id` FK, per plan doc Section 5's rule that any
+external interface (a biometric device, a kiosk) speaks the number it
+scanned, never the internal UUID — the two-IDs-two-jobs split Section 5
+already established, applied to a real external-facing surface for the
+first time. "Already clocked in" is enforced by checking for an existing
+open row (`clock_out_at IS NULL`) rather than a separate status flag, and
+a partial index (`idx_attendance_records_open`) keeps that check cheap
+regardless of how large the table grows.
+
+### Alternatives considered
+
+- **Making `WorkflowService.submitForApproval()`/`decide()` and
+  `LeaveRequestsService`'s own `leave_requests`/`leave_balances` writes
+  share one transaction.** Rejected: `DatabaseService.withClaims()`
+  deliberately gives each call its own pooled connection/transaction (its
+  own doc comment: "there is deliberately no 'give me a raw client with
+  no claims' escape hatch... a new, explicitly-named method, not a
+  default nobody has to opt into"). Making cross-service transaction
+  sharing possible would mean threading an optional `client` parameter
+  through every method of every service this call graph touches, a much
+  larger and riskier change than this phase's actual reliability needs —
+  a crash in the narrow window between the workflow call and the balance
+  update is a real but rare failure mode, honestly documented in
+  `KNOWN_ISSUES.md` rather than either silently accepted or used to
+  justify a disproportionate refactor.
+- **Auto-approving leave requests for a tenant with no `leave_request`
+  workflow template configured**, instead of letting
+  `WorkflowService.submitForApproval()`'s existing `NotFoundException`
+  ("No active workflow template with that key") surface as-is. Rejected:
+  silently skipping approval routing because configuration is missing is
+  a worse failure mode than a clear setup error — an HR Admin who hasn't
+  configured a leave approval workflow yet needs to be told that, not
+  have every leave request quietly rubber-stamp itself.
+- **Allowing self-cancellation of a still-pending leave request** (an
+  employee changed their mind before any approver acted), gated by a new
+  `leave_request.cancel.self` permission. Rejected for now: not asked for
+  by this phase's exit criterion, and `0016_leave_attendance_seed.sql`'s
+  permission set doesn't include it — adding it now means inventing a new
+  permission ahead of actual demand rather than in response to it.
+  Cancellation is `leave_request.manage.all`-only, matching that
+  permission's own seeded description. Tracked in `KNOWN_ISSUES.md`.
+
+### What this unblocks
+
+Phase 9's exit criterion is verified two ways, both against real
+Postgres with no mocks: `leave-requests.service.spec.ts` (14 tests) at
+the service level — policy resolution via `resolvePolicyInternal`,
+lazy balance seeding, `manager_of_submitter` routing through a real
+tenant-configured workflow template, balance decrement strictly on
+approval (not on rejection), non-blocking overlap notices for a
+same-manager teammate, On-Behalf submission correctly routed against the
+subject rather than the caller, the "no login" safe-deny case, and
+attendance clock-in/out including the "already clocked in" conflict —
+plus `leave.e2e.spec.ts` (3 tests), the real-HTTP layer this phase's own
+plan doc entry calls for on top of service-level tests: a full submit ->
+manager-approves -> balance-decrements round trip through the actual
+guards/controllers/`ValidationPipe` stack, not just direct service
+calls. Full suite now **96/96 passing**; `npm run build`/`npm run lint`
+clean across all three workspaces. Every pillar built since Phase 4 now
+has one real object actually depending on all of them at once — the
+"go" the plan doc's own go/no-go framing asked this phase to earn.
+
+---
+
+*Next decision goes here as Decision #10, appended below this line —
+never inserted above it.*

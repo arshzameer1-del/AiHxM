@@ -11,27 +11,49 @@ technical call lives in [`DECISIONS.md`](./DECISIONS.md); operational
 concerns — security hardening, dependency vulnerabilities, deferred
 performance work — are tracked in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
 
-**Current phase: Phase 8 — Employee Groups & Leave Policy Config (complete).**
-Exit criterion: a tenant can define at least two employee groups by
-attribute (department, location, employment type), assign a different
-leave policy to each, and a real Employee record (Phase 7) resolves to
-the correct policy automatically based on which group(s) it matches —
-proven by an automated test the same way every prior phase's resolver
-logic was (see Decision #8).
+**Current phase: Phase 9 — Leave & Attendance (complete).** Plan doc
+Section 7 calls this **"the real go/no-go checkpoint"** — the first phase
+where every pillar built since Phase 4 (RBAC, module licensing, the
+workflow engine, the Employee Core hierarchy, Phase 8's policy resolver)
+serves one real object together. Exit criterion: a real leave request
+submitted by a self-service employee resolves its policy via Phase 8's
+resolver, seeds and later decrements a real leave balance, routes for
+approval through a real tenant-configured workflow using this phase's new
+`manager_of_submitter` approver type (resolved against the Employee Core
+hierarchy, correctly targeting the SUBJECT's manager even for an
+On-Behalf submission), surfaces a non-blocking overlap notice when a
+same-manager teammate's request overlaps, and a biometric/GPS/manual
+attendance clock-in/out round trip works keyed off `employee_number` —
+all proven against real Postgres with no mocks, plus a real-HTTP e2e
+layer over the actual guards/controllers/`ValidationPipe` stack, not just
+service-level tests (see Decision #9).
 
-Built by deliberately REUSING Phase 4's own resolver pattern rather than
-inventing a second one, per the plan doc's own explicit instruction for
-this phase: most-specific-match-wins (a group's specificity is simply how
-many `employee_group_conditions` it has — more conditions matched, more
-specific), additive combination (resolution is independent per
-`policy_type`, so future policy types beyond `leave` combine rather than
-compete), and safe-deny default (an employee matching no group falls back
-to the tenant's one explicitly-designated default leave policy, never a
-guess). Two new, genuinely useful employee attributes — `location` and
-`employmentType` — were added to the Employee object along the way,
-since the plan doc's own canonical example for this phase names both.
+Built on two extensions to prior phases rather than new machinery from
+scratch: the Phase 6 workflow engine gained `manager_of_submitter`
+(Decision #6's own explicitly-deferred capability), resolved fresh per
+instance against `employees.manager_id` and routed against a new
+`workflow_instances.subject_user_account_id` column so On-Behalf
+submissions resolve against the actual employee, not whoever clicked
+submit; and `EmployeeGroupsService.resolvePolicy()` (Phase 8, admin-only)
+gained an ungated sibling, `resolvePolicyInternal()`, so a self-service
+employee holding only `leave_request.create.self` can have their own
+policy resolved without being able to resolve anyone else's over HTTP.
+Both are the kind of design decision that was genuinely unclear until a
+real caller existed to prove out — see Decision #9 for the full writeup,
+including the honestly-tracked scope limits (cross-service transactional
+non-atomicity, calendar-day leave counting, `manage.all`-only
+cancellation) in `KNOWN_ISSUES.md`.
 
-Before Phase 8, Phase 7 built the first real HR module — an Employee
+Before Phase 9, Phase 8 built Employee Groups & Leave Policy Config: a
+tenant defines employee groups by attribute (department, location,
+employment type), assigns a different leave policy to each, and a real
+Employee record resolves to the correct policy automatically based on
+which group(s) it matches — most-specific-match-wins, additive
+combination per `policy_type`, and a safe-deny default policy fallback,
+deliberately reusing Phase 4's own resolver pattern rather than inventing
+a second one (see Decision #8).
+
+Before that, Phase 7 built the first real HR module — an Employee
 record gets a correctly tenant-scoped, immutable Employee Number assigned
 automatically, appears on an org chart, has its sensitive fields (CNIC,
 date of birth, salary band, bank account, Termination Reason) visible or
@@ -70,7 +92,7 @@ existed to trigger that fix) — in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
 | Database | Postgres (Supabase-managed in staging/prod; local Postgres for dev) — raw SQL migrations, no ORM (Decision #2) |
 | Auth | Real self-hosted auth now — bcrypt passwords, mandatory TOTP MFA, account lockout, password reset (see `apps/api/src/auth`, Decision #3). Swappable for Supabase Auth later without touching RLS or claims |
 | File storage | `FileStorageService` interface (`apps/api/src/file-storage`) — a local-filesystem implementation for now, Supabase Storage/S3 swappable in behind it later without touching callers (Decision #7) |
-| Business-logic API | NestJS (TypeScript) — owns module licensing (`apps/api/src/entitlements`, Decision #5), RBAC (`apps/api/src/rbac`, Decision #4, extended with a `.team` scope in Decision #7), field permissions, the WRICEF framework (`apps/api/src/workflow`, `custom-fields`, `notifications`, `document-templates`, `import-export`, Decision #6), Employee Core (`apps/api/src/employees`, Decision #7), and Employee Groups & Leave Policy Config (`apps/api/src/employee-groups`, Decision #8) |
+| Business-logic API | NestJS (TypeScript) — owns module licensing (`apps/api/src/entitlements`, Decision #5), RBAC (`apps/api/src/rbac`, Decision #4, extended with a `.team` scope in Decision #7), field permissions, the WRICEF framework (`apps/api/src/workflow`, `custom-fields`, `notifications`, `document-templates`, `import-export`, Decision #6, extended with `manager_of_submitter` routing in Decision #9), Employee Core (`apps/api/src/employees`, Decision #7), Employee Groups & Leave Policy Config (`apps/api/src/employee-groups`, Decision #8), and Leave & Attendance (`apps/api/src/leave`, Decision #9) |
 | Background jobs / SLA timers | `@nestjs/schedule` cron sweep for now, not Redis + BullMQ — see Decision #6 for why, and when that changes |
 | Frontend | React + Vite + Tailwind + React Router, Apple HIG design tokens |
 | Monorepo | Turborepo (npm workspaces) |
@@ -99,7 +121,15 @@ for Phase 8's resolution mechanism: most-specific-match-wins derived
 structurally from condition count rather than a hand-set priority column,
 additive combination independent per `policy_type`, and a database-
 enforced "at most one default policy per tenant" invariant backing the
-safe-deny fallback.
+safe-deny fallback — and Decision #9 for Phase 9's three real calls:
+`manager_of_submitter` as a workflow approver type resolved fresh per
+instance against the Employee Core hierarchy (with a new
+`subject_user_account_id` column so On-Behalf submissions route against
+the actual employee, not the submitter), splitting
+`EmployeeGroupsService.resolvePolicy()` into a thin admin-gated wrapper
+and an ungated `resolvePolicyInternal()` for a real self-service caller,
+and the leave/attendance schema's own tradeoffs (lazy balance seeding,
+calendar-day counting, `employee_number`-keyed attendance).
 
 ## Repo layout
 
@@ -123,6 +153,7 @@ apps/
       file-storage/   Swappable FileStorageService interface + local-filesystem implementation (Decision #7)
       employees/      Employee Core: org chart, master data, document vault, job history, Employee Number assignment (Decision #7, plan doc Section 5)
       employee-groups/ Employee Groups & Leave Policy Config: attribute-based groups, leave policies, most-specific-match-wins resolution (Decision #8)
+      leave/          Leave & Attendance: leave requests (policy resolution, balances, overlap notices, On-Behalf, `manager_of_submitter` routing) and biometric/GPS/manual attendance clock-in/out (Decision #9, plan doc Section 7's "real go/no-go checkpoint")
       dummy/          Proof-of-concept object the RBAC/licensing/workflow/import-export engines were originally proven against, before Employee Core existed
   web/
     src/
@@ -199,10 +230,12 @@ provisioning it hasn't happened yet.
 
 ## What's next
 
-Phase 9 — Leave & Attendance: the full leave lifecycle (request, approve
-via the Phase 6 workflow engine, on-behalf submission, overlap notices)
-consuming Phase 8's real policy groups, plus biometric/GPS clock-in keyed
-off `employee_number`, never the internal UUID. Plan doc Section 7 flags
-this as **the real go/no-go checkpoint** — get one pilot company fully
-live here before building further. See `claude/development-plan.md`
-Section 7 for the full phase plan.
+Phase 10 — Recruitment & Onboarding, per `claude/development-plan.md`
+Section 7's own ordering. Phase 9 having actually closed the "real
+go/no-go checkpoint" the plan doc names — a real leave request now flows
+end to end through every pillar built since Phase 4 — the honest caveat
+attached to that checkpoint stands as stated in Decision #9 and
+`KNOWN_ISSUES.md`: this is a technical go/no-go (the platform is
+internally coherent enough to keep building on), not a substitute for an
+actual pilot company's HR Admin, managers, and employees using it for
+real. See `claude/development-plan.md` Section 7 for the full phase plan.

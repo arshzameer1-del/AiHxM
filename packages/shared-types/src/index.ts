@@ -278,18 +278,29 @@ export type DummyRecordView = {
 
 // --- Phase 6: WRICEF Framework Skeleton — Workflow engine -----------------
 // See apps/api/migrations/0007_wricef_workflow.sql and
-// apps/api/src/workflow/workflow.service.ts. "manager_of_submitter" is
-// deliberately not a supported ApproverType yet — it needs the
-// employee/manager hierarchy Phase 7 (Employee Core) introduces; see
-// KNOWN_ISSUES.md.
+// apps/api/src/workflow/workflow.service.ts. "manager_of_submitter" was
+// deliberately not a supported ApproverType at first — it needed the
+// employee/manager hierarchy Phase 7 (Employee Core) introduces — and is
+// added in Phase 9 (0014_workflow_manager_of_submitter.sql) as that
+// phase's own leave-approval routing needs it. It carries neither a
+// `roleId` nor a `userAccountId` at template-configuration time (there is
+// no fixed role or person to name in advance); WorkflowService resolves
+// it fresh, per instance, from the submitting employee's own manager at
+// the moment the step activates. It is deliberately NOT a valid
+// `escalationApproverType` — escalating to "the manager's manager" is
+// unbuilt scope (see KNOWN_ISSUES.md); an escalation target is always
+// `role` or `specific_user`, enforced by the DTO independently of this
+// shared type.
 
-export type ApproverType = "role" | "specific_user";
+export type ApproverType = "role" | "specific_user" | "manager_of_submitter";
+
+export type EscalationApproverType = "role" | "specific_user";
 
 export type WorkflowApproverConfig = {
   approverType: ApproverType;
   roleId?: string;
   userAccountId?: string;
-  escalationApproverType?: ApproverType;
+  escalationApproverType?: EscalationApproverType;
   escalationRoleId?: string;
   escalationUserAccountId?: string;
 };
@@ -358,6 +369,10 @@ export type WorkflowInstanceView = {
   objectKey: string;
   recordId: string;
   submittedByUserAccountId: string;
+  /** See 0014_workflow_manager_of_submitter.sql: who a `manager_of_submitter`
+   * approver resolves against — the caller for an ordinary submission, or
+   * (for an On-Behalf submission) the employee the request is actually about. */
+  subjectUserAccountId: string;
   status: WorkflowInstanceStatus;
   steps: WorkflowStepInstanceView[];
   createdAt: string;
@@ -375,6 +390,9 @@ export type SubmitForApprovalRequest = {
    * 0007_wricef_workflow.sql's header comment.
    */
   record: Record<string, unknown>;
+  /** See WorkflowInstanceView.subjectUserAccountId. Omit for an ordinary
+   * self-submission; set for an On-Behalf submission. */
+  subjectUserAccountId?: string;
 };
 
 export type ApprovalDecisionRequest = {
@@ -705,4 +723,98 @@ export type ResolvedPolicyView = {
   policyId: string | null;
   groupId: string | null;
   isDefault: boolean;
+};
+
+// --- Phase 9: Leave & Attendance ---------------------------------------
+// Plan doc Section 7's own words: "the real go/no-go checkpoint." See
+// 0015_leave_attendance.sql for the schema and Decision #9 for the
+// design writeup (balance seeding from Phase 8's resolver, overlap
+// notices, On-Behalf, manager_of_submitter routing, employee_number-keyed
+// clock-in).
+
+export type LeaveType = "annual" | "casual" | "sick";
+
+export type LeaveBalanceView = {
+  id: string;
+  employeeId: string;
+  leaveType: LeaveType;
+  year: number;
+  entitledDays: number;
+  usedDays: number;
+  remainingDays: number;
+};
+
+export type LeaveRequestStatus = "pending" | "approved" | "rejected" | "cancelled";
+
+export type OverlapWarning = {
+  employeeId: string;
+  employeeFullName: string;
+  leaveRequestId: string;
+  startDate: string;
+  endDate: string;
+};
+
+export type LeaveRequestView = {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  leaveType: LeaveType;
+  startDate: string;
+  endDate: string;
+  daysRequested: number;
+  reason: string | null;
+  status: LeaveRequestStatus;
+  submittedByUserAccountId: string;
+  /** True when `submittedByUserAccountId` differs from the employee's own
+   * `userAccountId` — an On-Behalf submission (HR/a manager submitting
+   * for someone who can't use the app themselves), derived rather than
+   * separately stored. */
+  isOnBehalf: boolean;
+  workflowInstanceId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SubmitLeaveRequestRequest = {
+  employeeId: string;
+  leaveType: LeaveType;
+  startDate: string;
+  endDate: string;
+  reason?: string;
+};
+
+export type SubmitLeaveRequestResponse = {
+  request: LeaveRequestView;
+  /** Non-blocking — plan doc Section 7 calls these "overlap notices," not
+   * overlap rejections. Empty when nothing on the same team overlaps. */
+  overlapWarnings: OverlapWarning[];
+};
+
+export type DecideLeaveRequestRequest = {
+  decision: "approved" | "rejected";
+  comment?: string;
+};
+
+export type AttendanceSource = "biometric" | "gps" | "manual";
+
+export type AttendanceRecordView = {
+  id: string;
+  employeeId: string;
+  employeeNumber: string;
+  source: AttendanceSource;
+  clockInAt: string;
+  clockOutAt: string | null;
+  gpsLat: number | null;
+  gpsLng: number | null;
+};
+
+export type ClockInRequest = {
+  employeeNumber: string;
+  source: AttendanceSource;
+  gpsLat?: number;
+  gpsLng?: number;
+};
+
+export type ClockOutRequest = {
+  employeeNumber: string;
 };

@@ -20,6 +20,7 @@ import { ImportExportModule } from "./import-export/import-export.module";
 import { FileStorageModule } from "./file-storage/file-storage.module";
 import { EmployeesModule } from "./employees/employees.module";
 import { EmployeeGroupsModule } from "./employee-groups/employee-groups.module";
+import { LeaveModule } from "./leave/leave.module";
 
 /**
  * Phase 2/3/4/5 root module: health check, the Platform Provisioning Panel
@@ -55,6 +56,7 @@ import { EmployeeGroupsModule } from "./employee-groups/employee-groups.module";
     FileStorageModule,
     EmployeesModule,
     EmployeeGroupsModule,
+    LeaveModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],

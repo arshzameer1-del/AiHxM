@@ -288,7 +288,17 @@ else" gap remains open and tracked above.
 
 ### `resolvePolicy()` is admin-only for now, not yet exposed to self-service
 
-`EmployeeGroupsService.resolvePolicy()` — the actual "which leave policy
+**RESOLVED in Phase 9.** `EmployeeGroupsService.resolvePolicy()` stays
+admin-only (`leave_policy.manage`), but Phase 9 added
+`resolvePolicyInternal()` — an ungated (module-license-only) sibling that
+`LeaveRequestsService` calls after authorizing its own caller against
+`leave_request.create.self`/`leave_request.manage.all`. This is what a
+real "my leave balance" self-service screen (`LeaveRequestsService.getBalances()`)
+turned out to need, exactly as predicted below — see Decision #9's
+section 2 for the full writeup of why a new method, not a widened gate
+on the original one, was the right shape.
+
+~~`EmployeeGroupsService.resolvePolicy()` — the actual "which leave policy
 applies to this employee" resolver — is gated behind `leave_policy.manage`
 (HR Admin only), the same as every other write/config action this phase
 adds. There is deliberately no `employee.view.self`-scoped path yet for
@@ -299,7 +309,7 @@ resolution, and it can widen the gate then against that real caller and
 UI rather than this phase guessing at the right shape (does an employee
 need the resolved policy_id, or a friendlier summary of what it grants?)
 in the abstract. See Decision #8's "Alternatives considered" for the
-reasoning. **Revisit when:** Phase 9 builds the leave-balance view.
+reasoning.~~
 
 ### `policy_id` on `employee_group_policy_assignments` is not a real foreign key
 
@@ -323,3 +333,109 @@ the only one that exists. Documented in the method's own doc comment as a
 permission choice to revisit once a second `policy_type` ships — at that
 point assigning it shouldn't require holding an unrelated leave-specific
 permission.
+
+## 2026-09 — Phase 9 (Leave & Attendance): deliberate scope narrowing, tracked honestly
+
+### Cross-service transactional non-atomicity between `WorkflowService` and `LeaveRequestsService`
+
+`DatabaseService.withClaims()` gives each call its own pooled connection
+and transaction (BEGIN/COMMIT per call) — there is no support for sharing
+one transaction across service boundaries (see its own doc comment).
+`LeaveRequestsService.submit()` calls `WorkflowService.submitForApproval()`
+as a separate transaction from its own `leave_requests` insert, and
+`LeaveRequestsService.decide()` calls `WorkflowService.decide()` as a
+separate transaction from its own `leave_requests`/`leave_balances`
+updates. A crash in the narrow window between these calls could leave a
+leave request without a `workflow_instance_id` (submit), or an approved
+workflow instance whose `leave_requests.status`/`leave_balances.used_days`
+were never updated to match (decide). This is a genuine, deliberate scope
+tradeoff — see Decision #9's "Alternatives considered" for why a shared-
+transaction mechanism wasn't built to close it. **Revisit when:** a real
+production incident or a stricter reliability requirement makes this
+worth the much larger refactor (threading an optional shared `client`
+through every service in this call graph) it would take to fix properly.
+
+### `manager_of_submitter` resolution failures on a step AFTER the first surface late
+
+`WorkflowService.activateFromStep()` throws immediately if a
+`manager_of_submitter` approver can't be resolved (no Employee record, no
+manager, or a manager with no login) — but that only happens reliably
+"at submission time" for the FIRST step. A later step (activated from
+inside `decide()`, once an earlier step is approved) that fails to
+resolve surfaces its `BadRequestException` on the PRECEDING approver's
+`decide()` call instead of at the point the tenant configured the broken
+template. An approver who innocently approves step 1 could unexpectedly
+receive an error instead of a clean "approved" response. **Revisit when:**
+multi-step `manager_of_submitter` chains (e.g. "manager, then their
+manager") become a real tenant need — Section 10 explicitly keeps
+escalation-to-a-manager's-manager out of scope for now (see
+`EscalationApproverType`'s own comment), so this compounds with an
+already-deferred capability rather than being urgent on its own.
+
+### Calendar-day leave counting, no business-day/holiday exclusion
+
+`inclusiveDayCount()` in `leave-requests.service.ts` counts every day
+between `startDate`/`endDate` inclusive, including weekends and public
+holidays — there is no company-holiday-calendar object anywhere in this
+codebase to exclude against. A 5-day leave request over a week containing
+a weekend consumes 5 days of entitlement, not 3. **Revisit when:** a
+holiday-calendar object is built for some other reason (payroll, most
+likely) — retrofitting this calculation to use it then is straightforward;
+inventing one solely for this calculation now would be scope creep ahead
+of actual demand.
+
+### Balance year = the request's start date's year, for a request spanning a year boundary
+
+A leave request from Dec 30 to Jan 3 draws its ENTIRE `daysRequested`
+against the START year's balance (`leave_balances` keyed by `year`) —
+it is not split proportionally across the two years' entitlements. A
+documented simplification, not a bug: most SMB leave requests don't
+span a calendar year boundary, and getting the split "right" (which
+year's balance should a shared day draw from, and does that change if
+the tenant's leave year isn't the calendar year at all?) is a real design
+question with no obvious answer, better deferred until a tenant actually
+hits it. **Revisit when:** a real year-boundary-spanning request comes up
+in practice, or a tenant needs a non-calendar leave year.
+
+### Cancellation is `leave_request.manage.all`-only — no self-cancel-your-own-pending-request path
+
+An employee cannot cancel their own still-pending leave request even
+before any approver has acted on it — only a caller holding
+`leave_request.manage.all` (HR Admin) can cancel any request, matching
+that permission's own seeded description exactly.
+`0016_leave_attendance_seed.sql` has no `leave_request.cancel.self`
+permission; adding one now would be inventing scope ahead of actual
+demand rather than in response to it (Section 10's guardrail). See
+Decision #9's "Alternatives considered." **Revisit when:** a real tenant
+asks for self-cancellation — add the permission, seed it to
+`employee_self_service`, and gate `cancel()` on either it (with an
+ownership + still-pending check) or `manage.all`.
+
+### Cancelling a leave request does not touch its workflow instance
+
+`LeaveRequestsService.cancel()` sets `leave_requests.status = 'cancelled'`
+directly without informing `WorkflowService` — the underlying workflow
+instance (if still `in_progress`) is left exactly as it was, status and
+all. This is harmless today (nothing re-reads a cancelled leave request's
+workflow instance for any decision), but an approver who still has a
+pending approval line on it could, in principle, still "approve" a
+workflow step whose parent leave request is already cancelled — that
+approval would just have no effect, since `decide()` only writes back to
+`leave_requests` when it's still `pending`. **Revisit when:** a "cancel
+the underlying workflow instance too" capability is added to
+`WorkflowService` for some other object's benefit — leave requests should
+adopt it too.
+
+### An employee with no `user_account_id` can never have a leave request submitted for them
+
+`LeaveRequestsService.submit()` throws `BadRequestException` outright for
+any employee record with `user_account_id IS NULL` — routing (both
+`subjectUserAccountId` and `manager_of_submitter` resolution) needs a
+real login to key against, and there is no meaningful way to route an
+approval for someone with no account at all. This is a genuine, if
+unusual, gap for a tenant that maintains "ghost" employee records (e.g.
+payroll-only staff who never use self-service) and wants leave tracked
+for them anyway. **Revisit when:** a real tenant needs leave tracking for
+employees without logins — likely needs a separate "record leave
+directly, no approval routing" HR-only path rather than forcing every
+leave request through the workflow engine.
