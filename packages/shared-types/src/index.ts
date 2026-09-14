@@ -613,11 +613,14 @@ export type UpdateEmployeeRequest = Partial<
 };
 
 /**
- * The three real tenant RBAC roles (0011_employee_seed.sql) — deliberately
- * excludes the `rbac_demo_*` proof-of-concept roles from Phase 4, which
- * `EmployeesService.createLogin()` refuses to grant (see Decision #12).
+ * The four real tenant RBAC roles (0011_employee_seed.sql,
+ * 0024_system_admin.sql) — deliberately excludes the `rbac_demo_*`
+ * proof-of-concept roles from Phase 4, which `EmployeesService.createLogin()`
+ * refuses to grant (see Decision #12). `system_admin` (Decision #20) was
+ * added additively alongside the original three, not in place of any of
+ * them.
  */
-export type TenantRoleKey = "hr_admin" | "line_manager" | "employee_self_service";
+export type TenantRoleKey = "hr_admin" | "line_manager" | "employee_self_service" | "system_admin";
 
 /**
  * Decision #12: before this, there was no way for an Employee record to
@@ -1126,3 +1129,45 @@ export type RatingDistributionView = {
 };
 
 // -----------------------------------------------------------------------
+// Decision #20 (Task #52) — System Admin: the tenant-scoped counterpart to
+// Platform Admin's `/platform/role-assignments`/`/platform/roles`
+// (0004_rbac.sql, apps/api/src/rbac/). Reuses `UserRoleAssignment`/`Role`
+// above for the underlying data shape; these types are specific to the
+// system-admin module's own read model (an assignment joined with the
+// employee it belongs to, for display) and request shape (keyed by
+// employeeId rather than a bare userAccountId, since a System Admin picks
+// "which employee" from a list, not a raw account id).
+// -----------------------------------------------------------------------
+
+/**
+ * One row in the "who can I grant a login or a role to" picker
+ * (`GET /system-admin/assignable-users`) — deliberately NOT `EmployeeView`:
+ * a System Admin has no `employee.view.*` permission of their own (see
+ * 0024_system_admin.sql's role description) and doesn't need one just to
+ * see who exists and what access they already hold.
+ */
+export type AssignableUserView = {
+  employeeId: string;
+  employeeNumber: string;
+  fullName: string;
+  email: string | null;
+  userAccountId: string | null;
+  hasLogin: boolean;
+  roleKeys: TenantRoleKey[];
+};
+
+export type SystemAdminRoleAssignmentView = {
+  id: string;
+  userAccountId: string;
+  employeeId: string | null;
+  employeeName: string | null;
+  email: string | null;
+  roleKey: TenantRoleKey;
+  roleName: string;
+  createdAt: string;
+};
+
+export type AssignSystemAdminRoleRequest = {
+  employeeId: string;
+  roleKey: TenantRoleKey;
+};

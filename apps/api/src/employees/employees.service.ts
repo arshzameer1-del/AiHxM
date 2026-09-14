@@ -24,10 +24,18 @@ const MODULE_KEY = "employee" as const;
 const OBJECT_KEY = "employee";
 const VIEW_PERMISSION = "employee.view";
 const MANAGE_PERMISSION = "employee.manage.all";
+// Decision #20 (Task #52) — lets a System Admin (who does not hold
+// employee.manage.all) provision logins too, without granting them full
+// HR-Admin employee-management rights. See requireModuleAndAccountPermission().
+const ACCOUNT_PERMISSION = "user_account.manage.all";
 const SENSITIVE_FIELDS = ["cnic", "dateOfBirth", "salaryBand", "bankAccountNumber", "terminationReason"] as const;
-// Decision #12 — the only roles `createLogin()` is allowed to grant.
-// Deliberately excludes the Phase 4 `rbac_demo_*` proof-of-concept roles.
-const TENANT_ROLE_KEYS = ["hr_admin", "line_manager", "employee_self_service"] as const;
+// Decision #12, widened by Decision #20 — the only roles `createLogin()`
+// is allowed to grant. Deliberately excludes the Phase 4 `rbac_demo_*`
+// proof-of-concept roles. `system_admin` was added here so an HR Admin
+// creating a brand-new login can grant System Admin at the same time,
+// rather than needing a separate Platform-Admin-mediated step afterward —
+// see 0024_system_admin.sql's own "Bootstrap note".
+const TENANT_ROLE_KEYS = ["hr_admin", "line_manager", "employee_self_service", "system_admin"] as const;
 const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024; // 10MB — see addDocument()'s doc comment.
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -492,24 +500,26 @@ export class EmployeesService {
    * "the auth service itself can operate before either [real] identity
    * is established," and role-granting is meant to go through a trusted
    * gate, not any authenticated session). This method IS that trusted
-   * gate: `requireModuleAndManagePermission()` above already verified
-   * the REAL caller holds `employee.manage.all` in their own company
-   * before any of this runs, so the transaction below elevates to a
-   * `is_service` claims object — but keeps the caller's own
-   * `company_id` on it (not a bare service claims with none), so every
-   * company-scoped table's normal `company_id = current_company_id()`
-   * RLS branch still applies. Elevating to `is_service` bypasses that
-   * scoping for `employees` specifically (its policy has an unconditional
-   * `is_service()` branch) — so the employee lookup below filters on
-   * `company_id = $2` explicitly rather than relying on RLS to do it,
-   * exactly the discipline `is_service` code always needs.
+   * gate: `requireModuleAndAccountPermission()` above already verified
+   * the REAL caller holds `employee.manage.all` OR `user_account.manage.all`
+   * (Decision #20 — a System Admin without full HR-Admin rights can still
+   * provision logins) in their own company before any of this runs, so
+   * the transaction below elevates to a `is_service` claims object — but
+   * keeps the caller's own `company_id` on it (not a bare service claims
+   * with none), so every company-scoped table's normal
+   * `company_id = current_company_id()` RLS branch still applies.
+   * Elevating to `is_service` bypasses that scoping for `employees`
+   * specifically (its policy has an unconditional `is_service()` branch)
+   * — so the employee lookup below filters on `company_id = $2`
+   * explicitly rather than relying on RLS to do it, exactly the
+   * discipline `is_service` code always needs.
    */
   async createLogin(
     claims: RequestClaims,
     employeeId: string,
     input: { initialPassword: string; roleKeys: string[] }
   ): Promise<{ employee: EmployeeView; rolesGranted: string[] }> {
-    await this.requireModuleAndManagePermission(claims);
+    await this.requireModuleAndAccountPermission(claims);
     if (!claims.company_id) throw new ForbiddenException();
 
     const uniqueRoleKeys = Array.from(new Set(input.roleKeys));
@@ -592,6 +602,33 @@ export class EmployeesService {
     }
     if (!(await this.rbac.can(claims, MANAGE_PERMISSION))) {
       throw new ForbiddenException("Not permitted to manage employee records");
+    }
+  }
+
+  /**
+   * Decision #20 (Task #52) — `createLogin()`'s own gate, deliberately
+   * separate from `requireModuleAndManagePermission()` above: every OTHER
+   * method on this service (create/update/addDocument/addJobHistory)
+   * keeps requiring the broader `employee.manage.all` unchanged. Only
+   * login provisioning also accepts `user_account.manage.all`, so a
+   * System Admin — who holds that permission but deliberately no
+   * `employee.*` permission at all (0024_system_admin.sql's role
+   * description) — can create a login for an existing employee without
+   * being granted full HR-Admin rights over employee records just to do
+   * it. `employee` module licensing is still required either way: a
+   * login is meaningless for a record the tenant isn't even licensed to
+   * have.
+   */
+  private async requireModuleAndAccountPermission(claims: RequestClaims): Promise<void> {
+    if (!(await this.entitlements.isModuleEnabled(claims, MODULE_KEY))) {
+      throw new NotFoundException();
+    }
+    const [canManageEmployees, canManageAccounts] = await Promise.all([
+      this.rbac.can(claims, MANAGE_PERMISSION),
+      this.rbac.can(claims, ACCOUNT_PERMISSION),
+    ]);
+    if (!canManageEmployees && !canManageAccounts) {
+      throw new ForbiddenException("Not permitted to create a login for this employee");
     }
   }
 
