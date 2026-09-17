@@ -18,6 +18,7 @@ import { MyProfilePage } from "./portal/employees/MyProfilePage";
 import { AdminCenterPage } from "./portal/admin/AdminCenterPage";
 import { LeavePage } from "./portal/leave/LeavePage";
 import { RecruitmentPage } from "./portal/recruitment/RecruitmentPage";
+import { SystemAdminPage } from "./portal/system-admin/SystemAdminPage";
 
 /**
  * Any URL this router doesn't otherwise recognize — including a plain
@@ -87,6 +88,12 @@ export default function App() {
                     here; PortalLayout's nav already keeps this route
                     hr_admin-only. */}
                 <Route path="recruitment" element={<RecruitmentPage />} />
+                {/* Task #52 (Decision #20) — System Admin. Gated the same
+                    courtesy way as Admin Center: role_assignment.manage.all/
+                    workflow_template.manage.all are the real gates,
+                    enforced server-side; PortalLayout's nav keeps this
+                    route system_admin-only. */}
+                <Route path="system-admin" element={<SystemAdminPage />} />
                 <Route
                   path="performance"
                   element={

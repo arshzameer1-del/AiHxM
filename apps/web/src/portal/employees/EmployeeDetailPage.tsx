@@ -17,6 +17,7 @@ const ROLE_LABELS: Record<TenantRoleKey, string> = {
   hr_admin: "HR Admin",
   line_manager: "Line Manager",
   employee_self_service: "Employee (self-service)",
+  system_admin: "System Admin",
 };
 
 export function EmployeeDetailPage() {

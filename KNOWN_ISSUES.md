@@ -816,3 +816,47 @@ alongside `hr_admin` rather than replacing it; a "hiring manager reviews
 their own requisition's pipeline" view — `recruitment.manage.all` has no
 `.team` scope at all, a deliberate scope narrowing `0018_recruitment_seed.sql`'s
 own comment already flags, not an oversight.
+
+## 2026-09 — System Admin (Task #52 / Decision #20): the Decision #18/#19 P0 gap is now CLOSED, and one smaller gap it leaves behind
+
+**CLOSED — superseding the Decision #18/#19 entries above.** The P0 gap
+those two decisions named ("no real tenant role, and no screen anywhere
+in `apps/web`, can create the `workflow_templates` row either module
+needs") is resolved: `system_admin` is a real, assignable role
+(`0024_system_admin.sql`) holding `workflow_template.manage.all`, and
+`WorkflowTemplatesPanel` (`/app/system-admin`) lets a real tenant login
+configure both `leave_request` and `job_requisition` templates through
+the UI. Verified live: a fresh company's own bootstrap `hr_admin`
+self-service-granted `system_admin` to a colleague (no developer
+intervention, no `rbac_demo_full_access`, no direct API call), who then
+configured a real workflow template through the real form. The two
+prior entries are left in place above for their still-relevant framing
+(the RBAC-engine comparison in Decision #19's closing section, the
+`manager_of_submitter`-vs-role-approver note) but their P0 status no
+longer applies.
+
+**Real and tested (this task):** role catalog + assignable-users +
+role-assignment listing, create-login (widened to accept `system_admin`
+and to gate on the new `user_account.manage.all` permission as an
+alternative to `employee.manage.all`), grant/revoke role, and workflow
+template create — all proven twice: a permanent Jest suite
+(`system-admin.service.spec.ts`, 11 tests, no mocks, including
+cross-tenant 404s on both assign and revoke) and a live Playwright pass
+through the real UI with real mandatory MFA enrollment.
+
+**Not yet built:** no "edit an existing template" capability —
+`WorkflowController` exposes create only, never update, so a workflow's
+steps cannot be changed once configured except by a direct database
+edit. **Revisit when:** a pilot company needs to change an
+already-configured approval chain (e.g., adding a second approval step)
+— likely means a `PATCH /workflow/templates/:id` (or a new-version-plus-
+supersede model, since existing `workflow_instances` reference a
+template by id) plus an "Edit" control alongside "Configure" once a
+template already exists.
+
+**Still true, unchanged by this task:** the very first login for a
+brand-new company still needs Platform-Admin-staff assistance — this was
+never in scope to fix here, and `0024_system_admin.sql`'s own bootstrap
+note says so explicitly. Once that first `hr_admin` exists, though,
+everything downstream (granting `system_admin`, configuring both
+modules' workflows) is now fully self-service.

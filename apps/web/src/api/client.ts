@@ -1,7 +1,9 @@
 import type {
   ApplicationStage,
   ApplicationView,
+  AssignableUserView,
   AssignGroupPolicyRequest,
+  AssignSystemAdminRoleRequest,
   AttendanceRecordView,
   AuditLogEntry,
   CandidateView,
@@ -22,6 +24,7 @@ import type {
   CreateJobRequisitionRequest,
   CreateLeavePolicyRequest,
   CreatePlatformAdminRequest,
+  CreateWorkflowTemplateRequest,
   DecideLeaveRequestRequest,
   DecideOfferResponse,
   EmployeeGroupPolicyAssignmentView,
@@ -44,12 +47,15 @@ import type {
   PlatformAdmin,
   PolicyType,
   ResolvedPolicyView,
+  Role,
   SessionResult,
   SubmitLeaveRequestRequest,
   SubmitLeaveRequestResponse,
+  SystemAdminRoleAssignmentView,
   UpdateEmployeeGroupRequest,
   UpdateEmployeeRequest,
   UpdateLeavePolicyRequest,
+  WorkflowTemplate,
 } from "@boostfactor/shared-types";
 
 const TOKEN_KEY = "boostfactor.platformAdminToken";
@@ -382,4 +388,33 @@ export const api = {
   // show a "hired as employee #..." confirmation rather than assuming.
   decideOffer: (id: string, decision: "accepted" | "declined") =>
     request<DecideOfferResponse>(`/offers/${id}/decision`, { method: "PATCH", body: JSON.stringify({ decision }) }),
+
+  // --- Task #52 (Decision #20): System Admin — workflow templates + role assignment ---
+
+  // Any real session holding workflow_template.manage.all — today only
+  // system_admin (see 0024_system_admin.sql; rbac_demo_full_access still
+  // holds it too, but that's Phase 4 test scaffolding, never assigned to
+  // a real company).
+  listWorkflowTemplates: () => request<WorkflowTemplate[]>("/workflow/templates"),
+
+  createWorkflowTemplate: (input: CreateWorkflowTemplateRequest) =>
+    request<WorkflowTemplate>("/workflow/templates", { method: "POST", body: JSON.stringify(input) }),
+
+  // The real tenant role catalog (4 roles), for resolving a roleId for a
+  // "role" approver step — see SystemAdminService.listAssignableRoles()'s
+  // own comment on why this can't just be a hardcoded list client-side.
+  listAssignableRoles: () => request<Role[]>("/system-admin/roles"),
+
+  listAssignableUsers: () => request<AssignableUserView[]>("/system-admin/assignable-users"),
+
+  listSystemAdminRoleAssignments: () => request<SystemAdminRoleAssignmentView[]>("/system-admin/role-assignments"),
+
+  assignSystemAdminRole: (input: AssignSystemAdminRoleRequest) =>
+    request<SystemAdminRoleAssignmentView>("/system-admin/role-assignments", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  revokeSystemAdminRole: (id: string) =>
+    request<{ message: string }>(`/system-admin/role-assignments/${id}`, { method: "DELETE" }),
 };

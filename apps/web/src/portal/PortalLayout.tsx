@@ -36,6 +36,13 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): 
     items.push({ to: "/app/admin", label: "Admin Center" });
   }
 
+  // Decision #20 — deliberately not module-gated: workflow/role
+  // configuration is a core platform capability, not a licensed module,
+  // same posture as Admin Center above.
+  if (hasRole("system_admin")) {
+    items.push({ to: "/app/system-admin", label: "System Admin" });
+  }
+
   if (hasModule("leave") && roleKeys.length > 0) {
     items.push({ to: "/app/leave", label: "Leave & Attendance" });
   }
