@@ -71,7 +71,7 @@ export function PortalLayout() {
     <div className="min-h-screen flex">
       <aside className="w-56 shrink-0 border-r border-black/5 bg-card px-3 py-6 flex flex-col">
         <div className="px-3 mb-8">
-          <div className="text-lg font-bold tracking-tight">BoostFactor</div>
+          <div className="text-lg font-bold tracking-tight">AI HXM</div>
           <div className="text-xs text-label-tertiary truncate">{identity?.companyName ?? "Your company"}</div>
         </div>
 

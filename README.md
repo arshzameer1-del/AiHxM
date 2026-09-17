@@ -1,4 +1,4 @@
-# BoostFactor
+# AI HXM
 
 Multi-tenant HR, payroll, attendance, and performance management platform
 for Pakistan SMBs — an affordable, locally-compliant counterpart to SAP
@@ -6,7 +6,10 @@ SuccessFactors.
 
 This repo is the real product codebase (not the clickable prototype). The
 full architecture and phase plan live in the `BoostFactor` Claude Project
-as `claude/development-plan.md`; the reasoning behind every irreversible
+(the Project container itself is still named `BoostFactor` as of this
+writing — rename it in claude.ai when convenient and this reference can
+be updated to match) as `claude/development-plan.md`; the reasoning
+behind every irreversible
 technical call lives in [`DECISIONS.md`](./DECISIONS.md); operational
 concerns — security hardening, dependency vulnerabilities, deferred
 performance work — are tracked in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
@@ -210,11 +213,11 @@ cp .env.example apps/api/.env
 
 # 4. Apply database migrations (creates tables, the app_role login, and
 #    every RLS policy in one step)
-npm run migrate --workspace=@boostfactor/api
+npm run migrate --workspace=@ai-hxm/api
 
 # 5. Bootstrap the very first Platform Admin account (idempotent — safe to
 #    re-run; does nothing once PLATFORM_ADMIN_BOOTSTRAP_EMAIL already exists)
-npm run seed --workspace=@boostfactor/api
+npm run seed --workspace=@ai-hxm/api
 
 # 6. Run everything (API on :4000, web on :5173)
 npm run dev
@@ -261,7 +264,7 @@ backend internally coherent — real Postgres, real RBAC, real HTTP round
 trips — but nothing in the product could actually be *used* by a pilot
 company through a screen. That audit's own instructions are explicit:
 **Payroll stays paused until the MVP gate clears — one pilot company
-using BoostFactor through the real UI for the core HR workflows.**
+using AI HXM through the real UI for the core HR workflows.**
 Phase 12's migrations/code remain written and uncommitted, not rolled
 back (per this project's "no destructive operations without confirmation"
 rule) — see `KNOWN_ISSUES.md`'s Phase 12 entries and `DECISIONS.md`'s

@@ -141,7 +141,7 @@ export function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center px-4">
       <div className="w-full max-w-sm bg-card rounded-card p-6 shadow-sm">
-        <h1 className="text-2xl font-bold mb-1">BoostFactor</h1>
+        <h1 className="text-2xl font-bold mb-1">AI HXM</h1>
         <p className="text-sm text-label-tertiary mb-6">Sign in</p>
 
         {error && <div className="text-danger text-sm mb-4">{error}</div>}

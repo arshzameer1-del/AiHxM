@@ -58,10 +58,10 @@ jobs:
         run: npm run build
 
       - name: Apply database migrations
-        run: npm run migrate --workspace=@boostfactor/api
+        run: npm run migrate --workspace=@ai-hxm/api
 
       - name: Seed the first Platform Admin (idempotent)
-        run: npm run seed --workspace=@boostfactor/api
+        run: npm run seed --workspace=@ai-hxm/api
 
       - name: Run tests (real Postgres — RLS is the point, not mocked)
-        run: npm run test --workspace=@boostfactor/api
+        run: npm run test --workspace=@ai-hxm/api

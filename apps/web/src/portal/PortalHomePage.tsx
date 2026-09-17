@@ -22,7 +22,7 @@ export function PortalHomePage() {
           <h2 className="text-base font-semibold mb-1">No role assigned yet</h2>
           <p className="text-sm text-label-secondary">
             Your login exists, but you haven't been granted an HR Admin, Manager, or Employee role in
-            BoostFactor yet. Ask your company's HR Admin (or your Platform Admin, if this is a brand-new
+            AI HXM yet. Ask your company's HR Admin (or your Platform Admin, if this is a brand-new
             company) to grant you one.
           </p>
         </div>

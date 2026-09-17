@@ -1,8 +1,8 @@
 {
-  "name": "boostfactor",
+  "name": "ai-hxm",
   "private": true,
   "version": "0.1.0",
-  "description": "BoostFactor — multi-tenant HR/payroll/attendance/performance SaaS for Pakistan SMBs",
+  "description": "AI HXM — multi-tenant HR/payroll/attendance/performance SaaS for Pakistan SMBs",
   "workspaces": [
     "apps/*",
     "packages/*"

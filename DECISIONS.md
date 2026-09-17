@@ -1567,6 +1567,18 @@ Routing: Phase 2's existing Platform Admin routes (`/`, `/companies/...`, `/audi
 
 ---
 
-*Next decision goes here as Decision #21, appended below this line —
+## Decision #21 — Product renamed BoostFactor → AI HXM: what changed, what deliberately didn't
+
+**Context.** The user renamed the product ("boostfactor name already available on dev" — a naming collision elsewhere, not this repo). "AI HXM" was chosen (HXM = Human Experience Management, the same term SAP itself now uses for SuccessFactors — a deliberate echo of the "affordable local counterpart to SAP SuccessFactors" positioning), styled as `AI HXM` for display text and `ai-hxm` / `@ai-hxm/*` for code identifiers.
+
+**Changed.** Every user-visible mention of the old name: the sidebar/header brand mark and browser tab title (`Layout.tsx`, `PortalLayout.tsx`, `LoginPage.tsx`, `index.html`), the "no role assigned yet" copy on `PortalHomePage.tsx`, and the health-check endpoint's own `service` field (`app.service.ts`). The two deployable app packages' identities: `apps/api/package.json` and `apps/web/package.json` renamed to `@ai-hxm/api`/`@ai-hxm/web`, the workspace root `package.json`'s name/description, `.github/workflows/ci.yml`'s `--workspace=@ai-hxm/api` filters (3 call sites), and `README.md`'s title and workspace-command examples. Verified after the rename: full backend suite **142/142** passing under the new package name, `npx tsc -b`/`eslint` clean on `apps/web` (same one pre-existing, expected `leaveLabels.ts` Payroll-`LeaveType` error as always), both dev servers boot cleanly under `npm run dev --workspace=@ai-hxm/api`/`@ai-hxm/web`, and a live screenshot of the real login page confirms the rendered brand mark.
+
+**Deliberately NOT changed, and why.** `packages/shared-types`'s own package name stays `@boostfactor/shared-types` for now — it's the one identifier over 130 files import (`import type {...} from "@boostfactor/shared-types"`), including the still-paused Phase 12 Payroll module (`apps/api/src/payroll/**`) and two already-tracked-but-uncommitted paused Leave files (`leave-requests.service.ts`, `dto/submit-leave-request.dto.ts`, both carrying the paused `LeaveType` "unpaid" usage). Renaming it would mean either touching those paused files' import lines too (a real, if purely mechanical, edit to files the standing instruction says must stay untouched and never committed) or leaving the repo in a broken, inconsistent state where `AppModule`'s already-registered (uncommitted) `PayrollModule` import fails to resolve — a real regression risk to the whole test suite for zero user-facing benefit, since this identifier is a TypeScript compile-time-only label (`import type`, erased at build, never shipped to a browser or visible to any user). Revisit this one specific rename together with Payroll itself, once the MVP gate clears and those files get real attention anyway — at that point it's a five-minute find-replace, not a standalone risk. Also deliberately left alone: the local Postgres/Redis container names, database name, and role/password in `docker-compose.yml` and CI (`boostfactor`/`boostfactor_dev`) — pure internal infrastructure, invisible to any user, and renaming a live database name mid-project is real disruptive churn (every fixture, every `.env`, every running dev instance) for a string nobody outside this container ever sees.
+
+**Still open.** The actual claude.ai Project this repository's docs live in is still named "BoostFactor" — no tool available in this environment can rename a Claude Project container; the user needs to do that themselves in claude.ai, at which point `README.md`'s explicit note about it (left in place, not silently glossed over) should be updated to match.
+
+---
+
+*Next decision goes here as Decision #22, appended below this line —
 never inserted above it. (#14 remains reserved for the still-paused
 Phase 12 Payroll work.)*
