@@ -3,7 +3,7 @@ import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
 import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
-import type { AssignableUserView, SystemAdminRoleAssignmentView, TenantRoleKey } from "@boostfactor/shared-types";
+import type { AssignableUserView, Role, SystemAdminRoleAssignmentView, TenantRoleKey } from "@boostfactor/shared-types";
 
 const ROLE_ASSIGNMENT_PERMISSION = "role_assignment.manage.all";
 // Kept in sync with, but deliberately not imported from, employees.service.ts's
@@ -63,6 +63,28 @@ export class SystemAdminService {
     if (!(await this.rbac.can(claims, ROLE_ASSIGNMENT_PERMISSION))) {
       throw new ForbiddenException("Not permitted to manage role assignments");
     }
+  }
+
+  /**
+   * The real tenant role catalog (id/key/name), filtered to
+   * `ASSIGNABLE_ROLE_KEYS` — deliberately NOT `RolesService.list()`
+   * (`/platform/roles`, Platform-Admin-only), and deliberately excludes
+   * the Phase 4 `rbac_demo_*` proof-of-concept roles a tenant System Admin
+   * should never see, let alone reference. Exists so the Workflow
+   * Templates screen can resolve a real `roleId` for a "role" approver
+   * step without the frontend ever needing to know role UUIDs are
+   * migration-generated and not stable ahead of time.
+   */
+  async listAssignableRoles(claims: RequestClaims): Promise<Role[]> {
+    await this.requirePermission(claims);
+    return this.db.withClaims(claims, async (client) => {
+      const result = await client.query(
+        "SELECT * FROM roles WHERE key = ANY($1::text[]) ORDER BY key ASC",
+        [ASSIGNABLE_ROLE_KEYS]
+      );
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return result.rows.map((row: any) => ({ id: row.id, key: row.key, name: row.name, description: row.description ?? null }));
+    });
   }
 
   /**

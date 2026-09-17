@@ -16,6 +16,11 @@ import { AssignSystemAdminRoleDto } from "./dto/assign-system-admin-role.dto";
 export class SystemAdminController {
   constructor(private readonly systemAdmin: SystemAdminService) {}
 
+  @Get("roles")
+  listAssignableRoles(@CurrentClaims() claims: RequestClaims) {
+    return this.systemAdmin.listAssignableRoles(claims);
+  }
+
   @Get("assignable-users")
   listAssignableUsers(@CurrentClaims() claims: RequestClaims) {
     return this.systemAdmin.listAssignableUsers(claims);
