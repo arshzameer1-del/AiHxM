@@ -20,7 +20,9 @@ const LEAVE_MODULE_KEY = "leave" as const;
 const WORKFLOW_TEMPLATE_KEY = "leave_request";
 const WORKFLOW_OBJECT_KEY = "leave_request";
 
-const LEAVE_TYPE_TO_POLICY_COLUMN: Record<LeaveType, string> = {
+// `unpaid` deliberately has no entry — see submit()'s own comment on why
+// it draws against no policy/entitlement at all.
+const LEAVE_TYPE_TO_POLICY_COLUMN: Record<Exclude<LeaveType, "unpaid">, string> = {
   annual: "annual_leave_days",
   casual: "casual_leave_days",
   sick: "sick_leave_days",
@@ -169,8 +171,23 @@ export class LeaveRequestsService {
     const daysRequested = inclusiveDayCount(input.startDate, input.endDate);
     if (daysRequested <= 0) throw new BadRequestException("A leave request must span at least one day");
 
-    const resolved = await this.employeeGroups.resolvePolicyInternal(claims, input.employeeId, "leave");
-    if (!resolved.policyId) {
+    // `unpaid` (Phase 12 addition — see Decision #14) is deliberately NOT
+    // one of `LEAVE_TYPE_TO_POLICY_COLUMN`'s three entries: it has no
+    // entitlement, no policy to resolve, and no balance to check or
+    // decrement — an employee can always request it, in any amount,
+    // precisely because it isn't a benefit being drawn down. It still
+    // routes through the same approval workflow as any other leave type
+    // (a manager still has to approve someone taking unpaid time off),
+    // and PayrollService (Phase 12) is what actually turns an approved
+    // `unpaid` request into a real deduction, by reading these rows
+    // directly rather than this service tracking a running balance for
+    // something that was never bounded in the first place.
+    const isUnpaid = input.leaveType === "unpaid";
+
+    const resolved = isUnpaid
+      ? null
+      : await this.employeeGroups.resolvePolicyInternal(claims, input.employeeId, "leave");
+    if (!isUnpaid && !resolved?.policyId) {
       throw new BadRequestException(
         "No leave policy is configured for this employee — assign a tenant-wide default leave policy or an employee group policy first"
       );
@@ -184,24 +201,26 @@ export class LeaveRequestsService {
     const year = new Date(input.startDate).getUTCFullYear();
 
     const result = await this.db.withClaims(claims, async (client) => {
-      const policyResult = await client.query<{
-        annual_leave_days: number;
-        casual_leave_days: number;
-        sick_leave_days: number;
-      }>(`SELECT annual_leave_days, casual_leave_days, sick_leave_days FROM leave_policies WHERE id = $1`, [
-        resolved.policyId,
-      ]);
-      if (policyResult.rowCount === 0) throw new NotFoundException("Resolved leave policy no longer exists");
-      const entitledColumn = LEAVE_TYPE_TO_POLICY_COLUMN[input.leaveType];
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const entitledFromPolicy = Number((policyResult.rows[0] as any)[entitledColumn]);
+      if (!isUnpaid) {
+        const policyResult = await client.query<{
+          annual_leave_days: number;
+          casual_leave_days: number;
+          sick_leave_days: number;
+        }>(`SELECT annual_leave_days, casual_leave_days, sick_leave_days FROM leave_policies WHERE id = $1`, [
+          resolved?.policyId,
+        ]);
+        if (policyResult.rowCount === 0) throw new NotFoundException("Resolved leave policy no longer exists");
+        const entitledColumn = LEAVE_TYPE_TO_POLICY_COLUMN[input.leaveType as Exclude<typeof input.leaveType, "unpaid">];
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const entitledFromPolicy = Number((policyResult.rows[0] as any)[entitledColumn]);
 
-      const balance = await this.getOrCreateBalance(client, employee.company_id, employee.id, input.leaveType, year, entitledFromPolicy);
-      const remaining = Number(balance.entitled_days) - Number(balance.used_days);
-      if (daysRequested > remaining) {
-        throw new BadRequestException(
-          `Insufficient ${input.leaveType} leave balance: requested ${daysRequested} day(s), ${remaining} remaining for ${year}`
-        );
+        const balance = await this.getOrCreateBalance(client, employee.company_id, employee.id, input.leaveType, year, entitledFromPolicy);
+        const remaining = Number(balance.entitled_days) - Number(balance.used_days);
+        if (daysRequested > remaining) {
+          throw new BadRequestException(
+            `Insufficient ${input.leaveType} leave balance: requested ${daysRequested} day(s), ${remaining} remaining for ${year}`
+          );
+        }
       }
 
       const overlapWarnings = await this.findOverlapWarnings(client, employee, input.startDate, input.endDate);
@@ -297,6 +316,10 @@ export class LeaveRequestsService {
           leaveRequestId,
         ]);
         const year = new Date(leaveRequestRow.start_date).getUTCFullYear();
+        // For `leave_type = 'unpaid'` this WHERE simply matches no row —
+        // there never was a `leave_balances` row to decrement in the
+        // first place (see submit()'s own comment) — so no special-case
+        // branch is needed here, just this note explaining why.
         await client.query(
           `UPDATE leave_balances SET used_days = used_days + $4, updated_at = now()
            WHERE employee_id = $1 AND leave_type = $2 AND year = $3`,
@@ -403,7 +426,9 @@ export class LeaveRequestsService {
     if (!visible) throw new NotFoundException("Employee not found");
 
     const year = new Date().getUTCFullYear();
-    const leaveTypes: LeaveType[] = ["annual", "casual", "sick"];
+    // `unpaid` has no balance concept at all (see submit()'s own comment)
+    // so it's deliberately excluded from the set getBalances() reports on.
+    const leaveTypes: Exclude<LeaveType, "unpaid">[] = ["annual", "casual", "sick"];
     const resolved = await this.employeeGroups.resolvePolicyInternal(claims, employeeId, "leave");
 
     return this.db.withClaims(claims, async (client) => {

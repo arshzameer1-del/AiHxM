@@ -798,7 +798,15 @@ export type ResolvedPolicyView = {
 // notices, On-Behalf, manager_of_submitter routing, employee_number-keyed
 // clock-in).
 
-export type LeaveType = "annual" | "casual" | "sick";
+/**
+ * `unpaid` was added in Phase 12 (see Decision #14 and
+ * 0021_leave_unpaid_type.sql) specifically so `PayrollService` has real
+ * leave data to compute an unpaid-leave deduction against — it carries no
+ * entitlement/balance of its own (`LeaveRequestsService` skips policy
+ * resolution and balance checking entirely for it), unlike the other
+ * three types.
+ */
+export type LeaveType = "annual" | "casual" | "sick" | "unpaid";
 
 export type LeaveBalanceView = {
   id: string;
@@ -1170,4 +1178,149 @@ export type SystemAdminRoleAssignmentView = {
 export type AssignSystemAdminRoleRequest = {
   employeeId: string;
   roleKey: TenantRoleKey;
+};
+
+// -----------------------------------------------------------------------
+// Phase 12 — Compensation & Payroll (Decision #14). Plan doc Section 10's
+// guardrail applies to every type below exactly as it does to the schema
+// and the service: passing this phase's own tests is not the same thing
+// as being safe to run with real money — see Decision #14 and
+// KNOWN_ISSUES.md for exactly which figures still need direct accountant/
+// EOBI/PESSI/SESSI confirmation.
+// -----------------------------------------------------------------------
+
+export type CompensationView = {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  monthlySalary: number;
+  effectiveFrom: string;
+  /** null = this is the employee's current rate. */
+  effectiveTo: string | null;
+  createdByUserAccountId: string;
+  createdAt: string;
+};
+
+export type SetCompensationRequest = {
+  employeeId: string;
+  monthlySalary: number;
+  effectiveFrom: string;
+};
+
+export type SocialSecurityScheme = "none" | "pessi" | "sessi";
+
+/**
+ * One row per tenant. Every rate/base here is tenant-editable DATA, not a
+ * hardcoded constant — Decision #14's response to real, documented
+ * uncertainty in the current EOBI wage base and PESSI/SESSI wage
+ * ceilings (see `claude/statutory-payroll-rates-pakistan.md`). Lazily
+ * seeded with researched-but-unconfirmed defaults the first time a
+ * tenant has none, the same pattern Phase 9 used for leave balances.
+ */
+export type PayrollSettingsView = {
+  companyId: string;
+  eobiEmployeeRatePercent: number;
+  eobiEmployerRatePercent: number;
+  eobiWageBase: number;
+  socialSecurityScheme: SocialSecurityScheme;
+  socialSecurityEmployerRatePercent: number;
+  socialSecurityWageCeiling: number | null;
+  updatedAt: string;
+};
+
+export type UpdatePayrollSettingsRequest = {
+  eobiEmployeeRatePercent?: number;
+  eobiEmployerRatePercent?: number;
+  eobiWageBase?: number;
+  socialSecurityScheme?: SocialSecurityScheme;
+  socialSecurityEmployerRatePercent?: number;
+  socialSecurityWageCeiling?: number | null;
+};
+
+export type TaxSlabView = {
+  id: string;
+  companyId: string;
+  minAnnualIncome: number;
+  /** null = the top, uncapped bracket. */
+  maxAnnualIncome: number | null;
+  baseTax: number;
+  ratePercent: number;
+};
+
+/** Replaces the tenant's entire tax slab table in one call — a partial
+ * edit to a progressive bracket table (e.g. deleting one row) can leave
+ * income gaps or overlaps that are much harder to validate piecemeal. */
+export type SetTaxSlabsRequest = {
+  slabs: Array<{
+    minAnnualIncome: number;
+    maxAnnualIncome: number | null;
+    baseTax: number;
+    ratePercent: number;
+  }>;
+};
+
+export type PayrollRunStatus = "draft" | "calculated" | "finalized";
+
+export type PayrollRunView = {
+  id: string;
+  companyId: string;
+  periodStart: string;
+  periodEnd: string;
+  status: PayrollRunStatus;
+  createdByUserAccountId: string;
+  finalizedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreatePayrollRunRequest = {
+  periodStart: string;
+  periodEnd: string;
+};
+
+/** One ordered entry in a payslip's `calculationBreakdown` — the direct
+ * answer to this phase's own exit criterion's "every intermediate figure
+ * inspectable" requirement. */
+export type PayrollCalculationStep = {
+  label: string;
+  value: number | string;
+};
+
+export type PayslipView = {
+  id: string;
+  companyId: string;
+  payrollRunId: string;
+  employeeId: string;
+  /** Denormalized snapshot at calculation time — see 0022_payroll.sql's
+   * header comment for why these don't just join to `employees` live. */
+  employeeNumber: string;
+  bankAccountNumber: string | null;
+  daysInPeriod: number;
+  paidDays: number;
+  unpaidLeaveDays: number;
+  grossPay: number;
+  taxableAnnualIncome: number;
+  incomeTaxMonthly: number;
+  eobiEmployeeContribution: number;
+  eobiEmployerContribution: number;
+  socialSecurityEmployerContribution: number;
+  netPay: number;
+  calculationBreakdown: PayrollCalculationStep[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** One per-employee failure from `calculateRun()` — collected rather
+ * than thrown on the first bad row, the same "real error report, never
+ * silent partial failure" discipline `ImportExportService.parseAndValidate()`
+ * established for Conversions. */
+export type PayrollCalculationError = {
+  employeeId: string;
+  message: string;
+};
+
+export type CalculatePayrollRunResponse = {
+  run: PayrollRunView;
+  payslipCount: number;
+  errors: PayrollCalculationError[];
 };

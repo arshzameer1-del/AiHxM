@@ -24,6 +24,7 @@ import { LeaveModule } from "./leave/leave.module";
 import { RecruitmentModule } from "./recruitment/recruitment.module";
 import { PerformanceModule } from "./performance/performance.module";
 import { SystemAdminModule } from "./system-admin/system-admin.module";
+import { PayrollModule } from "./payroll/payroll.module";
 
 /**
  * Phase 2/3/4/5 root module: health check, the Platform Provisioning Panel
@@ -63,6 +64,7 @@ import { SystemAdminModule } from "./system-admin/system-admin.module";
     RecruitmentModule,
     PerformanceModule,
     SystemAdminModule,
+    PayrollModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],

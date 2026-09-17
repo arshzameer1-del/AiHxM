@@ -5,7 +5,7 @@ export class SubmitLeaveRequestDto {
   @IsUUID()
   employeeId!: string;
 
-  @IsIn(["annual", "casual", "sick"])
+  @IsIn(["annual", "casual", "sick", "unpaid"])
   leaveType!: LeaveType;
 
   @IsDateString()
