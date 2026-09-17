@@ -6,6 +6,7 @@ import type {
   AssignSystemAdminRoleRequest,
   AttendanceRecordView,
   AuditLogEntry,
+  CalibrateReviewRequest,
   CandidateView,
   ClockInRequest,
   ClockOutRequest,
@@ -21,9 +22,11 @@ import type {
   CreateEmployeeLoginRequest,
   CreateEmployeeLoginResponse,
   CreateEmployeeRequest,
+  CreateGoalRequest,
   CreateJobRequisitionRequest,
   CreateLeavePolicyRequest,
   CreatePlatformAdminRequest,
+  CreateReviewCycleRequest,
   CreateWorkflowTemplateRequest,
   DecideLeaveRequestRequest,
   DecideOfferResponse,
@@ -32,6 +35,7 @@ import type {
   EmployeeNumberFormat,
   EmployeeView,
   ExtendOfferRequest,
+  GoalView,
   ImpersonateResponse,
   JobHistoryEntryView,
   JobRequisitionView,
@@ -44,16 +48,22 @@ import type {
   MoveApplicationStageRequest,
   OfferView,
   PasswordResetRequestResult,
+  PerformanceReviewView,
   PlatformAdmin,
   PolicyType,
+  RatingDistributionView,
   ResolvedPolicyView,
+  ReviewCycleView,
   Role,
   SessionResult,
   SubmitLeaveRequestRequest,
   SubmitLeaveRequestResponse,
+  SubmitManagerAssessmentRequest,
+  SubmitSelfAssessmentRequest,
   SystemAdminRoleAssignmentView,
   UpdateEmployeeGroupRequest,
   UpdateEmployeeRequest,
+  UpdateGoalRequest,
   UpdateLeavePolicyRequest,
   WorkflowTemplate,
 } from "@boostfactor/shared-types";
@@ -417,4 +427,59 @@ export const api = {
 
   revokeSystemAdminRole: (id: string) =>
     request<{ message: string }>(`/system-admin/role-assignments/${id}`, { method: "DELETE" }),
+
+  // --- Task #53 (Performance & Goals, Phase 11) ---
+  // Review Cycles
+  listReviewCycles: () => request<ReviewCycleView[]>("/review-cycles"),
+
+  getReviewCycle: (id: string) => request<ReviewCycleView>(`/review-cycles/${id}`),
+
+  createReviewCycle: (input: CreateReviewCycleRequest) =>
+    request<ReviewCycleView>("/review-cycles", { method: "POST", body: JSON.stringify(input) }),
+
+  launchReviewCycle: (id: string) =>
+    request<ReviewCycleView>(`/review-cycles/${id}/launch`, { method: "POST" }),
+
+  beginCalibration: (id: string) =>
+    request<ReviewCycleView>(`/review-cycles/${id}/begin-calibration`, { method: "POST" }),
+
+  closeReviewCycle: (id: string) =>
+    request<{ cycle: ReviewCycleView; releasedCount: number }>(`/review-cycles/${id}/close`, { method: "POST" }),
+
+  getRatingDistribution: (cycleId: string) =>
+    request<RatingDistributionView>(`/review-cycles/${cycleId}/rating-distribution`),
+
+  // Goals
+  listGoals: (params?: { reviewCycleId?: string; employeeId?: string }) =>
+    request<GoalView[]>(`/goals${params ? `?${new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined) as [string, string][]).toString()}` : ""}`),
+
+  createGoal: (input: CreateGoalRequest) =>
+    request<GoalView>("/goals", { method: "POST", body: JSON.stringify(input) }),
+
+  updateGoal: (id: string, patch: UpdateGoalRequest) =>
+    request<GoalView>(`/goals/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  // Performance Reviews
+  listPerformanceReviews: (params?: { reviewCycleId?: string; employeeId?: string }) =>
+    request<PerformanceReviewView[]>(`/performance-reviews${params ? `?${new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined) as [string, string][]).toString()}` : ""}`),
+
+  getPerformanceReview: (id: string) => request<PerformanceReviewView>(`/performance-reviews/${id}`),
+
+  submitSelfAssessment: (id: string, input: SubmitSelfAssessmentRequest) =>
+    request<PerformanceReviewView>(`/performance-reviews/${id}/self-assessment`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
+
+  submitManagerAssessment: (id: string, input: SubmitManagerAssessmentRequest) =>
+    request<PerformanceReviewView>(`/performance-reviews/${id}/manager-assessment`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
+
+  calibrateReview: (id: string, input: CalibrateReviewRequest) =>
+    request<PerformanceReviewView>(`/performance-reviews/${id}/calibrate`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
 };

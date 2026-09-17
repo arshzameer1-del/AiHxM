@@ -19,6 +19,7 @@ import { AdminCenterPage } from "./portal/admin/AdminCenterPage";
 import { LeavePage } from "./portal/leave/LeavePage";
 import { RecruitmentPage } from "./portal/recruitment/RecruitmentPage";
 import { SystemAdminPage } from "./portal/system-admin/SystemAdminPage";
+import { PerformancePage } from "./portal/performance/PerformancePage";
 
 /**
  * Any URL this router doesn't otherwise recognize — including a plain
@@ -94,15 +95,7 @@ export default function App() {
                     enforced server-side; PortalLayout's nav keeps this
                     route system_admin-only. */}
                 <Route path="system-admin" element={<SystemAdminPage />} />
-                <Route
-                  path="performance"
-                  element={
-                    <ComingSoonPage
-                      title="Performance"
-                      description="Review cycles, goals, assessments, and calibration."
-                    />
-                  }
-                />
+                <Route path="performance" element={<PerformancePage />} />
               </Route>
             </Route>
           </Route>
