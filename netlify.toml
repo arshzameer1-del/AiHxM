@@ -16,14 +16,12 @@
   command = "npm install && npx turbo run build --filter=@ai-hxm/web"
   publish = "apps/web/dist"
 
-# 1) Proxy every /api/* call to the real NestJS backend (Render). Replace
-#    the placeholder host below with your actual Render service URL
-#    (Render dashboard > your service > the URL at the top, no trailing
-#    slash) once it exists. This rule must come BEFORE the catch-all SPA
-#    rule below — Netlify uses the first matching rule.
+# 1) Proxy every /api/* call to the real NestJS backend (Render). This
+#    rule must come BEFORE the catch-all SPA rule below — Netlify uses
+#    the first matching rule.
 [[redirects]]
   from = "/api/*"
-  to = "https://REPLACE-WITH-YOUR-RENDER-SERVICE.onrender.com/:splat"
+  to = "https://aihxm.onrender.com/:splat"
   status = 200
   force = true
 
