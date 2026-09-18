@@ -82,6 +82,11 @@ export class EmployeeGroupsController {
     return this.employeeGroups.deleteLeavePolicy(claims, id);
   }
 
+  @Get("leave-policies/:id/history")
+  getLeavePolicyHistory(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.employeeGroups.getLeavePolicyHistory(claims, id);
+  }
+
   @Get("employees/:employeeId/resolved-policy")
   resolvePolicy(
     @CurrentClaims() claims: RequestClaims,

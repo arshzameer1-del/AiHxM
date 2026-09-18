@@ -244,16 +244,89 @@ only, never done in production (see `AuthService.requestPasswordReset`).
 
 ## Connecting a real Supabase project
 
-Local Postgres is a stand-in. To point this at a real Supabase project
-once one exists: create the project, copy its connection strings into
-`DATABASE_URL` and `APP_DATABASE_URL` in `apps/api/.env` (Settings →
-Database → Connection string), then run the migrations and seed script
-again. The SQL itself doesn't change — see Decision #1's portability note.
+Local Postgres is a stand-in. To point this at a real Supabase project:
+
+1. **Get the connection strings.** Supabase dashboard → your project →
+   Project Settings → Database → Connection string. You need both the
+   **Direct connection** (port 5432 — required for migrations, which run
+   DDL that PgBouncer's transaction-pooling mode doesn't reliably support)
+   and the **Connection pooling** string (port 6543 — better for the
+   API's own runtime traffic, which opens many short-lived connections).
+2. **Generate a real `app_role` password** (e.g. `openssl rand -base64
+   24`) — never reuse the codebase's built-in local-dev default
+   (`app_role_dev_password`). See `apps/api/.env.production.example` for
+   the full annotated template, including exactly which value goes in
+   `DATABASE_URL` vs. `APP_DATABASE_URL` vs. `APP_ROLE_PASSWORD`.
+3. **Run migrations once** with `APP_ROLE_PASSWORD` set:
+   `APP_ROLE_PASSWORD=<the generated password> npm run migrate --workspace=@ai-hxm/api`.
+   `migrate.ts` applies every migration file unchanged (see Decision #1's
+   portability note — the SQL itself never changes) and then rotates
+   `app_role`'s password to the real value via
+   `apps/api/src/database/migrate.ts` — safe to re-run any time a new
+   migration ships; it's a no-op on `app_role`'s password if
+   `APP_ROLE_PASSWORD` is left unset, so local dev is unaffected either
+   way.
+4. **TLS is automatic.** Supabase requires it; `apps/api/src/database/db-connection.util.ts`
+   detects a `*.supabase.co`/`*.supabase.com` host and enables it for
+   every connection this codebase opens (the running API, the migration
+   runner, both seed scripts) — nothing to configure unless you're
+   pointing at some other managed Postgres host, in which case
+   `DATABASE_SSL=true` forces it on explicitly.
+5. **Seed the first Platform Admin**: `npm run seed --workspace=@ai-hxm/api`,
+   same as local dev.
+
 Swapping the `user_accounts` table this repo builds today for Supabase
 Auth's `auth.users` as the identity source of truth is a Decision #3-scoped
-follow-up once the project exists; nothing about RLS or `RequestClaims`
-changes either way. This needs the project owner's own Supabase account —
-provisioning it hasn't happened yet.
+follow-up, not required to go live — nothing about RLS or `RequestClaims`
+changes either way, and the self-hosted auth this codebase already has
+(bcrypt + mandatory TOTP MFA) is real, tested production auth on its own.
+
+## Deploying for a real test/staging pass (Supabase + Render + Netlify)
+
+The pairing this project has used for its first real (non-sandbox)
+deployment: **Supabase** for the database (above), **Render** for the
+NestJS API, **Netlify** for the static React frontend. Netlify can't run
+the API itself — it's a static/serverless host, and this API is a
+persistent Node server — hence the split.
+
+1. **Database**: provision Supabase per the section above.
+2. **API on Render**: push this repo to a git remote Render can see
+   (GitHub/GitLab), then either use the included `render.yaml` Blueprint
+   (Render dashboard → New → Blueprint → point it at the repo — it reads
+   the build/start commands and env var list from that file, prompting
+   you once for each secret) or configure a Web Service by hand:
+   - Build command: `npm install && npx turbo run build --filter=@ai-hxm/api`
+   - Start command: `node apps/api/dist/main.js`
+   - Health check path: `/health`
+   - Env vars: everything in `apps/api/.env.production.example`
+   Render assigns a real HTTPS URL (`https://<service>.onrender.com`) once
+   deployed.
+3. **Frontend on Netlify**: connect the same repo. The included
+   `netlify.toml` (repo root) sets the build command, publish directory
+   (`apps/web/dist`), and — the important part — a redirect rule that
+   proxies `/api/*` to the Render URL from step 2, so the frontend's
+   existing `fetch('/api${path}')` calls (`apps/web/src/api/client.ts`)
+   keep working completely unchanged: same-origin from the browser's
+   point of view, no CORS dance, no frontend code edit. **Replace the
+   placeholder host in `netlify.toml`'s first redirect with your real
+   Render URL from step 2 before deploying.** Netlify assigns a real
+   HTTPS URL (`https://<site>.netlify.app`).
+4. **Close the loop**: set the API's `CORS_ORIGIN` and `APP_BASE_URL` env
+   vars on Render to that real Netlify URL (`CORS_ORIGIN` is only a
+   fallback safety net here — the actual browser traffic never leaves
+   Netlify's origin thanks to the redirect proxy above, but the API
+   still validates it).
+5. **Real email is optional for a test pass.** Leaving `SMTP_*` unset
+   makes `MailerService` fall back to logging instead of sending — fine
+   for exercising functionality that doesn't depend on a real inbox
+   arriving; fill in a real provider (SendGrid/Mailgun/SES/Gmail SMTP)
+   only once that matters.
+
+None of this requires a single frontend or backend code change beyond
+what's already in this repo — `netlify.toml`, `render.yaml`, and
+`apps/api/.env.production.example` are the only new files this needed,
+plus the `app_role`-password-rotation and automatic-Supabase-TLS support
+in `apps/api/src/database/`.
 
 ## What's next
 

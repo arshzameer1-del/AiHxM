@@ -3,6 +3,7 @@ import type { EmployeeView, JobHistoryEntryView } from "@boostfactor/shared-type
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { EmployeeFields } from "./EmployeeFields";
+import { OnboardingOffboardingSection } from "../onboarding-offboarding/OnboardingOffboardingSection";
 
 /**
  * The employee_self_service view of the same object `EmployeeDetailPage`
@@ -51,6 +52,13 @@ export function MyProfilePage() {
           Only your HR Admin can update this record. Contact them if anything here is out of date.
         </p>
       </section>
+
+      <OnboardingOffboardingSection
+        key={`my-checklists-${employee.id}`}
+        employeeId={employee.id}
+        employmentStatus={employee.employmentStatus}
+        canManage={false}
+      />
 
       <section className="bg-card rounded-card p-5 shadow-sm">
         <h2 className="font-semibold text-sm uppercase tracking-wide text-label-tertiary mb-3">

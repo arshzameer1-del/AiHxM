@@ -372,17 +372,35 @@ escalation-to-a-manager's-manager out of scope for now (see
 `EscalationApproverType`'s own comment), so this compounds with an
 already-deferred capability rather than being urgent on its own.
 
-### Calendar-day leave counting, no business-day/holiday exclusion
+### Calendar-day leave counting excludes holidays, but still not weekends/business-days
 
-`inclusiveDayCount()` in `leave-requests.service.ts` counts every day
-between `startDate`/`endDate` inclusive, including weekends and public
-holidays — there is no company-holiday-calendar object anywhere in this
-codebase to exclude against. A 5-day leave request over a week containing
-a weekend consumes 5 days of entitlement, not 3. **Revisit when:** a
-holiday-calendar object is built for some other reason (payroll, most
-likely) — retrofitting this calculation to use it then is straightforward;
-inventing one solely for this calculation now would be scope creep ahead
-of actual demand.
+**Fully resolved 2026-09-18.** `inclusiveDayCount()` in
+`leave-requests.service.ts` used to count every day between
+`startDate`/`endDate` inclusive, including weekends and public holidays,
+because there was no company-holiday-calendar object anywhere in this
+codebase to exclude against. Holiday Management (`0030_holiday_management.sql`)
+built that calendar, and `countLeaveDays()` (same file) started subtracting
+any MANDATORY (non-optional) company holiday that falls inside the
+request's date range before returning `daysRequested` — see that
+function's own doc comment for the full reasoning, including why optional
+holidays deliberately aren't subtracted. That closed the holiday half of
+this gap but left weekends open, for exactly the reason below.
+
+The weekend half closed the same day the reasoning below anticipated: the
+Work Schedule & Employee Schedule Assignment Architecture
+(`claude/aihxm-work-schedule-architecture.md`) shipped its first
+increment, giving this schema the "which days are this employee's days
+off" concept that didn't exist before (a `work_schedule_days` weekly
+pattern resolved per-employee via `WorkScheduleResolutionService`, not a
+single hard-coded Mon-Fri assumption). `countLeaveDays()` now walks the
+request day-by-day calling `WorkScheduleResolutionService.isWorkingDay()`
+— composing "does this employee's resolved weekly pattern mark the day
+working" AND "is it not a mandatory holiday" — instead of subtracting
+mandatory holidays from a raw calendar-day count. A 5-day leave request
+over a week containing the employee's own rest days (Friday/Saturday,
+Saturday/Sunday, or any other pattern an admin configures) now correctly
+consumes only the working days in that range, per-employee, without this
+service knowing or caring what those days are.
 
 ### Balance year = the request's start date's year, for a request spanning a year boundary
 

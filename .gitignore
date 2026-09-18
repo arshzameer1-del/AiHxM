@@ -5,6 +5,12 @@ build
 .env
 .env.local
 .env.*.local
+
+# Locally-generated TOTP secrets for the dev-only demo-seeding/screenshot
+# scripts (apps/web/demo-auth.cjs, seed-demo*.cjs, tour.cjs) — regenerable
+# fixture material, not something that belongs in git history even for a
+# throwaway demo company.
+apps/web/.demo-secrets.json
 *.log
 .DS_Store
 apps/web/dist

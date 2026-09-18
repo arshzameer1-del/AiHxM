@@ -72,7 +72,7 @@ describe("Companies HTTP surface (e2e) — Platform Admin company management", (
   it("create company via POST /companies", async () => {
     const slug = `http-create-${Date.now()}`;
     const res = await request(app.getHttpServer())
-      .post("/companies")
+      .post("/platform/companies")
       .set("Authorization", `Bearer ${platformAdminToken}`)
       .send({
         name: "HTTP Create Test Company",
@@ -93,7 +93,7 @@ describe("Companies HTTP surface (e2e) — Platform Admin company management", (
 
   it("list companies via GET /companies", async () => {
     const res = await request(app.getHttpServer())
-      .get("/companies")
+      .get("/platform/companies")
       .set("Authorization", `Bearer ${platformAdminToken}`);
 
     expect(res.status).toBe(200);
@@ -107,7 +107,7 @@ describe("Companies HTTP surface (e2e) — Platform Admin company management", (
   it("get company detail via GET /companies/:id", async () => {
     // First create a company
     const createRes = await request(app.getHttpServer())
-      .post("/companies")
+      .post("/platform/companies")
       .set("Authorization", `Bearer ${platformAdminToken}`)
       .send({
         name: "Detail Test Company",
@@ -118,7 +118,7 @@ describe("Companies HTTP surface (e2e) — Platform Admin company management", (
 
     // Then get its detail
     const res = await request(app.getHttpServer())
-      .get(`/companies/${companyId}`)
+      .get(`/platform/companies/${companyId}`)
       .set("Authorization", `Bearer ${platformAdminToken}`);
 
     expect(res.status).toBe(200);
@@ -130,7 +130,7 @@ describe("Companies HTTP surface (e2e) — Platform Admin company management", (
 
   it("update company via PATCH /companies/:id", async () => {
     const createRes = await request(app.getHttpServer())
-      .post("/companies")
+      .post("/platform/companies")
       .set("Authorization", `Bearer ${platformAdminToken}`)
       .send({
         name: "Update Test Company",
@@ -140,7 +140,7 @@ describe("Companies HTTP surface (e2e) — Platform Admin company management", (
     const companyId = createRes.body.company.id;
 
     const res = await request(app.getHttpServer())
-      .patch(`/companies/${companyId}`)
+      .patch(`/platform/companies/${companyId}`)
       .set("Authorization", `Bearer ${platformAdminToken}`)
       .send({
         status: "suspended",
@@ -154,7 +154,7 @@ describe("Companies HTTP surface (e2e) — Platform Admin company management", (
 
   it("add company admin via POST /companies/:id/admins", async () => {
     const createRes = await request(app.getHttpServer())
-      .post("/companies")
+      .post("/platform/companies")
       .set("Authorization", `Bearer ${platformAdminToken}`)
       .send({
         name: "Admin Test Company",
@@ -165,7 +165,7 @@ describe("Companies HTTP surface (e2e) — Platform Admin company management", (
     const adminEmail = `new-admin-${Date.now()}@example.com`;
 
     const res = await request(app.getHttpServer())
-      .post(`/companies/${companyId}/admins`)
+      .post(`/platform/companies/${companyId}/admins`)
       .set("Authorization", `Bearer ${platformAdminToken}`)
       .send({
         fullName: "New Admin",
@@ -177,9 +177,9 @@ describe("Companies HTTP surface (e2e) — Platform Admin company management", (
     expect(res.body.hasLogin).toBe(false);
   });
 
-  it("create admin login via POST /companies/:id/admins/:adminId/login", async () => {
+  it("create admin login via POST /companies/:id/admins/:adminId/account", async () => {
     const createRes = await request(app.getHttpServer())
-      .post("/companies")
+      .post("/platform/companies")
       .set("Authorization", `Bearer ${platformAdminToken}`)
       .send({
         name: "Login Company",
@@ -194,7 +194,7 @@ describe("Companies HTTP surface (e2e) — Platform Admin company management", (
     const adminId = createRes.body.admins[0].id;
 
     const res = await request(app.getHttpServer())
-      .post(`/companies/${companyId}/admins/${adminId}/login`)
+      .post(`/platform/companies/${companyId}/admins/${adminId}/account`)
       .set("Authorization", `Bearer ${platformAdminToken}`)
       .send({
         initialPassword: "SecurePassword123!",
@@ -206,7 +206,7 @@ describe("Companies HTTP surface (e2e) — Platform Admin company management", (
 
   it("impersonate company (Login As) via POST /companies/:id/impersonate", async () => {
     const createRes = await request(app.getHttpServer())
-      .post("/companies")
+      .post("/platform/companies")
       .set("Authorization", `Bearer ${platformAdminToken}`)
       .send({
         name: "Impersonate Company",
@@ -216,7 +216,7 @@ describe("Companies HTTP surface (e2e) — Platform Admin company management", (
     const companyId = createRes.body.company.id;
 
     const res = await request(app.getHttpServer())
-      .post(`/companies/${companyId}/impersonate`)
+      .post(`/platform/companies/${companyId}/impersonate`)
       .set("Authorization", `Bearer ${platformAdminToken}`);
 
     expect(res.status).toBe(201);
@@ -227,7 +227,7 @@ describe("Companies HTTP surface (e2e) — Platform Admin company management", (
 
   it("update company config via PATCH /companies/:id/config", async () => {
     const createRes = await request(app.getHttpServer())
-      .post("/companies")
+      .post("/platform/companies")
       .set("Authorization", `Bearer ${platformAdminToken}`)
       .send({
         name: "Config Company",
@@ -237,7 +237,7 @@ describe("Companies HTTP surface (e2e) — Platform Admin company management", (
     const companyId = createRes.body.company.id;
 
     const res = await request(app.getHttpServer())
-      .patch(`/companies/${companyId}/config`)
+      .patch(`/platform/companies/${companyId}/config`)
       .set("Authorization", `Bearer ${platformAdminToken}`)
       .send({
         employeeNumberFormat: { prefix: "NEWPREFIX" },
@@ -249,9 +249,9 @@ describe("Companies HTTP surface (e2e) — Platform Admin company management", (
     expect(res.body.branding.primaryColor).toBe("#0000FF");
   });
 
-  it("lock/unlock company admin via PATCH /companies/:id/admins/:adminId/status", async () => {
+  it("lock/unlock company admin via PATCH /companies/:id/admins/:adminId", async () => {
     const createRes = await request(app.getHttpServer())
-      .post("/companies")
+      .post("/platform/companies")
       .set("Authorization", `Bearer ${platformAdminToken}`)
       .send({
         name: "Status Company",
@@ -266,7 +266,7 @@ describe("Companies HTTP surface (e2e) — Platform Admin company management", (
     const adminId = createRes.body.admins[0].id;
 
     const lockedRes = await request(app.getHttpServer())
-      .patch(`/companies/${companyId}/admins/${adminId}/status`)
+      .patch(`/platform/companies/${companyId}/admins/${adminId}`)
       .set("Authorization", `Bearer ${platformAdminToken}`)
       .send({ status: "locked" });
 
@@ -274,7 +274,7 @@ describe("Companies HTTP surface (e2e) — Platform Admin company management", (
     expect(lockedRes.body.status).toBe("locked");
 
     const unlockedRes = await request(app.getHttpServer())
-      .patch(`/companies/${companyId}/admins/${adminId}/status`)
+      .patch(`/platform/companies/${companyId}/admins/${adminId}`)
       .set("Authorization", `Bearer ${platformAdminToken}`)
       .send({ status: "active" });
 

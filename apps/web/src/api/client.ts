@@ -3,9 +3,12 @@ import type {
   ApplicationView,
   AssignableUserView,
   AssignGroupPolicyRequest,
+  AssignShiftRequest,
   AssignSystemAdminRoleRequest,
+  AttendanceCorrectionRequestView,
   AttendanceRecordView,
   AuditLogEntry,
+  CalculatePayrollRunResponse,
   CalibrateReviewRequest,
   CandidateView,
   ClockInRequest,
@@ -15,6 +18,7 @@ import type {
   CompanyConfig,
   CompanyDashboardRow,
   CompanyDetail,
+  CompensationView,
   CreateApplicationRequest,
   CreateCandidateRequest,
   CreateCompanyRequest,
@@ -23,49 +27,89 @@ import type {
   CreateEmployeeLoginResponse,
   CreateEmployeeRequest,
   CreateGoalRequest,
+  CreateHolidayRequest,
   CreateJobRequisitionRequest,
   CreateLeavePolicyRequest,
+  CreateOffboardingItemTemplateRequest,
+  CreateOnboardingItemTemplateRequest,
+  CreatePayrollRunRequest,
   CreatePlatformAdminRequest,
   CreateReviewCycleRequest,
+  CreateShiftRequest,
   CreateWorkflowTemplateRequest,
+  DecideAttendanceCorrectionRequest,
   DecideLeaveRequestRequest,
   DecideOfferResponse,
   EmployeeGroupPolicyAssignmentView,
   EmployeeGroupView,
   EmployeeNumberFormat,
+  EmployeeOffboardingView,
+  EmployeeOnboardingView,
   EmployeeView,
   ExtendOfferRequest,
   GoalView,
+  HolidayView,
+  ConfigurationDomainSummary,
   ImpersonateResponse,
+  InitiateOffboardingRequest,
   JobHistoryEntryView,
   JobRequisitionView,
   LeaveBalanceView,
+  LeavePolicyVersionView,
   LeavePolicyView,
   LeaveRequestView,
   LoginResult,
   MeResponse,
   ModuleKey,
   MoveApplicationStageRequest,
+  OffboardingChecklistItemView,
+  OffboardingItemTemplateView,
   OfferView,
+  OnboardingChecklistItemView,
+  OnboardingItemTemplateView,
   PasswordResetRequestResult,
+  PayrollRunView,
+  PayrollSettingsView,
+  PayslipView,
   PerformanceReviewView,
   PlatformAdmin,
   PolicyType,
   RatingDistributionView,
   ResolvedPolicyView,
+  ResolvedWorkScheduleView,
   ReviewCycleView,
   Role,
   SessionResult,
+  SetCompensationRequest,
+  SetTaxSlabsRequest,
+  SetWeeklyPatternRequest,
+  ShiftAssignmentView,
+  ShiftView,
+  SignupRequest,
+  SignupResponse,
+  SubmitAttendanceCorrectionRequest,
   SubmitLeaveRequestRequest,
   SubmitLeaveRequestResponse,
   SubmitManagerAssessmentRequest,
   SubmitSelfAssessmentRequest,
   SystemAdminRoleAssignmentView,
+  TaxSlabSetView,
+  TaxSlabView,
+  UpdateChecklistItemRequest,
   UpdateEmployeeGroupRequest,
   UpdateEmployeeRequest,
   UpdateGoalRequest,
+  UpdateHolidayRequest,
   UpdateLeavePolicyRequest,
+  UpdateOffboardingItemTemplateRequest,
+  UpdateOnboardingItemTemplateRequest,
+  UpdatePayrollSettingsRequest,
+  UpdateShiftRequest,
+  UpdateWorkScheduleAssignmentRuleRequest,
   WorkflowTemplate,
+  WorkScheduleAssignmentRuleView,
+  WorkScheduleDayView,
+  CreateWorkScheduleAssignmentRuleRequest,
 } from "@boostfactor/shared-types";
 
 const TOKEN_KEY = "boostfactor.platformAdminToken";
@@ -170,6 +214,14 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ token, newPassword }),
     }),
+
+  // Self-service company signup (signup.controller.ts) — the other
+  // deliberately unauthenticated write endpoint, alongside /auth/*.
+  // Doesn't return a session: the new admin still goes through the
+  // same mandatory-MFA-enrollment login flow as anyone else, on
+  // /login, right after this succeeds.
+  signup: (input: SignupRequest) =>
+    request<SignupResponse>("/signup", { method: "POST", body: JSON.stringify(input) }),
 
   // Decision #13 — what the shared portal shell (Layout/AuthContext) uses
   // to decide which portal to render and which nav sections to show. This
@@ -300,8 +352,142 @@ export const api = {
 
   deleteLeavePolicy: (id: string) => request<void>(`/leave-policies/${id}`, { method: "DELETE" }),
 
+  getLeavePolicyHistory: (id: string) => request<LeavePolicyVersionView[]>(`/leave-policies/${id}/history`),
+
   resolvedPolicy: (employeeId: string, policyType: PolicyType = "leave") =>
     request<ResolvedPolicyView>(`/employees/${employeeId}/resolved-policy?policyType=${policyType}`),
+
+  // --- Shift Management (0026_shift_management.sql) ---------------------
+  listShifts: () => request<ShiftView[]>("/shifts"),
+
+  createShift: (input: CreateShiftRequest) =>
+    request<ShiftView>("/shifts", { method: "POST", body: JSON.stringify(input) }),
+
+  updateShift: (id: string, patch: UpdateShiftRequest) =>
+    request<ShiftView>(`/shifts/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  assignShift: (input: AssignShiftRequest) =>
+    request<ShiftAssignmentView>("/shift-assignments", { method: "POST", body: JSON.stringify(input) }),
+
+  getEmployeeShift: (employeeId: string) =>
+    request<ShiftAssignmentView | null>(`/employees/${employeeId}/shift`),
+
+  getEmployeeShiftHistory: (employeeId: string) =>
+    request<ShiftAssignmentView[]>(`/employees/${employeeId}/shift-history`),
+
+  // --- Work Schedule & Employee Schedule Assignment Architecture ---------
+  // (0037_work_schedule.sql, shipped 2026-09-18) — the Configuration UI
+  // half (WS-022–024) these three calls exist for was the only piece of
+  // that increment still frontend-less; see the roadmap's own Part 4
+  // entry for this UI increment for the full reasoning.
+  getWeeklyPattern: (shiftId: string) => request<WorkScheduleDayView[]>(`/shifts/${shiftId}/weekly-pattern`),
+
+  setWeeklyPattern: (shiftId: string, input: SetWeeklyPatternRequest) =>
+    request<WorkScheduleDayView[]>(`/shifts/${shiftId}/weekly-pattern`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }),
+
+  listAssignmentRules: () => request<WorkScheduleAssignmentRuleView[]>("/shift-assignment-rules"),
+
+  createAssignmentRule: (input: CreateWorkScheduleAssignmentRuleRequest) =>
+    request<WorkScheduleAssignmentRuleView>("/shift-assignment-rules", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  updateAssignmentRule: (id: string, patch: UpdateWorkScheduleAssignmentRuleRequest) =>
+    request<WorkScheduleAssignmentRuleView>(`/shift-assignment-rules/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+
+  deleteAssignmentRule: (id: string) => request<void>(`/shift-assignment-rules/${id}`, { method: "DELETE" }),
+
+  getEmployeeWorkSchedule: (employeeId: string, date?: string) =>
+    request<ResolvedWorkScheduleView>(`/employees/${employeeId}/work-schedule${date ? `?date=${date}` : ""}`),
+
+  // --- Holiday Management (0030_holiday_management.sql) ------------------
+  // Unlike Shift Management's self/team/all split, there's a single view
+  // permission here (holiday.view.all) granted broadly to every role —
+  // the calendar is non-sensitive, company-wide data everyone sees.
+  listHolidays: (year?: string) => request<HolidayView[]>(`/holidays${year ? `?year=${year}` : ""}`),
+
+  createHoliday: (input: CreateHolidayRequest) =>
+    request<HolidayView>("/holidays", { method: "POST", body: JSON.stringify(input) }),
+
+  updateHoliday: (id: string, patch: UpdateHolidayRequest) =>
+    request<HolidayView>(`/holidays/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  deleteHoliday: (id: string) => request<void>(`/holidays/${id}`, { method: "DELETE" }),
+
+  // --- Onboarding & Offboarding (0035_onboarding_offboarding.sql) --------
+  // Gated on the existing `recruitment`/`exit` module entitlements
+  // respectively — see OnboardingService/OffboardingService's own header
+  // comments for why. Deliberately two parallel sets of calls (not one
+  // generic "checklist" client, mirroring the two separate NestJS
+  // controllers/services these both call into).
+  listOnboardingItemTemplates: () => request<OnboardingItemTemplateView[]>("/onboarding/item-templates"),
+
+  createOnboardingItemTemplate: (input: CreateOnboardingItemTemplateRequest) =>
+    request<OnboardingItemTemplateView>("/onboarding/item-templates", { method: "POST", body: JSON.stringify(input) }),
+
+  updateOnboardingItemTemplate: (id: string, patch: UpdateOnboardingItemTemplateRequest) =>
+    request<OnboardingItemTemplateView>(`/onboarding/item-templates/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+
+  deactivateOnboardingItemTemplate: (id: string) =>
+    request<OnboardingItemTemplateView>(`/onboarding/item-templates/${id}/deactivate`, { method: "PATCH" }),
+
+  listOnboardingInProgress: () => request<EmployeeOnboardingView[]>("/onboarding"),
+
+  initiateOnboarding: (employeeId: string) =>
+    request<EmployeeOnboardingView>(`/employees/${employeeId}/onboarding`, { method: "POST" }),
+
+  getOnboardingForEmployee: (employeeId: string) =>
+    request<EmployeeOnboardingView | null>(`/employees/${employeeId}/onboarding`),
+
+  updateOnboardingItem: (itemId: string, input: UpdateChecklistItemRequest) =>
+    request<OnboardingChecklistItemView>(`/onboarding-items/${itemId}`, { method: "PATCH", body: JSON.stringify(input) }),
+
+  listOffboardingItemTemplates: () => request<OffboardingItemTemplateView[]>("/offboarding/item-templates"),
+
+  createOffboardingItemTemplate: (input: CreateOffboardingItemTemplateRequest) =>
+    request<OffboardingItemTemplateView>("/offboarding/item-templates", { method: "POST", body: JSON.stringify(input) }),
+
+  updateOffboardingItemTemplate: (id: string, patch: UpdateOffboardingItemTemplateRequest) =>
+    request<OffboardingItemTemplateView>(`/offboarding/item-templates/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+
+  deactivateOffboardingItemTemplate: (id: string) =>
+    request<OffboardingItemTemplateView>(`/offboarding/item-templates/${id}/deactivate`, { method: "PATCH" }),
+
+  listOffboardingInProgress: () => request<EmployeeOffboardingView[]>("/offboarding"),
+
+  initiateOffboarding: (employeeId: string, input: InitiateOffboardingRequest) =>
+    request<EmployeeOffboardingView>(`/employees/${employeeId}/offboarding`, { method: "POST", body: JSON.stringify(input) }),
+
+  getOffboardingForEmployee: (employeeId: string) =>
+    request<EmployeeOffboardingView | null>(`/employees/${employeeId}/offboarding`),
+
+  updateOffboardingItem: (itemId: string, input: UpdateChecklistItemRequest) =>
+    request<OffboardingChecklistItemView>(`/offboarding-items/${itemId}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
+
+  completeOffboarding: (employeeId: string) =>
+    request<EmployeeOffboardingView>(`/employees/${employeeId}/offboarding/complete`, { method: "POST" }),
+
+  // --- Configuration Center (0032_configuration_center.sql) --------------
+  // Server-side filtered to domains this caller actually has view/manage
+  // access to — a card missing here means the real permission check on
+  // that domain's own service failed, not that this endpoint hid it.
+  getConfigurationCenterSummary: () => request<ConfigurationDomainSummary[]>("/configuration-center"),
 
   // --- Leave & Attendance (Task #50) -----------------------------------
   // listLeaveRequests() is the same "server already RBAC-scopes it" shape
@@ -335,6 +521,21 @@ export const api = {
 
   listAttendance: (employeeId: string) =>
     request<AttendanceRecordView[]>(`/employees/${employeeId}/attendance`),
+
+  submitAttendanceCorrection: (input: SubmitAttendanceCorrectionRequest) =>
+    request<AttendanceCorrectionRequestView>("/attendance-corrections", { method: "POST", body: JSON.stringify(input) }),
+
+  listPendingAttendanceCorrections: () =>
+    request<AttendanceCorrectionRequestView[]>("/attendance-corrections/pending"),
+
+  decideAttendanceCorrection: (id: string, input: DecideAttendanceCorrectionRequest) =>
+    request<AttendanceCorrectionRequestView>(`/attendance-corrections/${id}/decision`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
+
+  listAttendanceCorrections: (employeeId: string) =>
+    request<AttendanceCorrectionRequestView[]>(`/employees/${employeeId}/attendance-corrections`),
 
   // --- Recruitment (Task #51) -------------------------------------------
   // recruitment.manage.all is a single scope-less permission granted only
@@ -482,4 +683,86 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(input),
     }),
+
+  // --- Phase 12 (Compensation & Payroll, Decision #14) ---------------------
+  // `payroll.manage.all` (hr_admin) gates compensation/settings/tax-slabs/
+  // run-lifecycle writes; `payroll_review.view.self` (employee_self_service)
+  // only ever sees their own payslip, and only once its run is finalized —
+  // enforced entirely server-side (PayrollService.listPayslips/getPayslip),
+  // same "server already scopes it" posture as every other module here.
+  setCompensation: (input: SetCompensationRequest) =>
+    request<CompensationView>("/payroll/compensation", { method: "POST", body: JSON.stringify(input) }),
+
+  getCompensationHistory: (employeeId: string) =>
+    request<CompensationView[]>(`/payroll/compensation/${employeeId}`),
+
+  getPayrollSettings: () => request<PayrollSettingsView>("/payroll/settings"),
+
+  updatePayrollSettings: (patch: UpdatePayrollSettingsRequest) =>
+    request<PayrollSettingsView>("/payroll/settings", { method: "PATCH", body: JSON.stringify(patch) }),
+
+  listTaxSlabs: () => request<TaxSlabView[]>("/payroll/tax-slabs"),
+
+  setTaxSlabs: (input: SetTaxSlabsRequest) =>
+    request<TaxSlabView[]>("/payroll/tax-slabs", { method: "POST", body: JSON.stringify(input) }),
+
+  getTaxSlabHistory: () => request<TaxSlabSetView[]>("/payroll/tax-slabs/history"),
+
+  listPayrollRuns: () => request<PayrollRunView[]>("/payroll/runs"),
+
+  getPayrollRun: (id: string) => request<PayrollRunView>(`/payroll/runs/${id}`),
+
+  createPayrollRun: (input: CreatePayrollRunRequest) =>
+    request<PayrollRunView>("/payroll/runs", { method: "POST", body: JSON.stringify(input) }),
+
+  // Re-runnable while draft/calculated (fully replaces that run's
+  // payslips each time); refused once finalized — PayrollService.calculateRun()'s
+  // own rule, not re-validated client-side.
+  calculatePayrollRun: (id: string) =>
+    request<CalculatePayrollRunResponse>(`/payroll/runs/${id}/calculate`, { method: "POST" }),
+
+  finalizePayrollRun: (id: string) =>
+    request<PayrollRunView>(`/payroll/runs/${id}/finalize`, { method: "POST" }),
+
+  listPayslips: (params?: { payrollRunId?: string; employeeId?: string }) =>
+    request<PayslipView[]>(
+      `/payslips${
+        params
+          ? `?${new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined) as [string, string][]).toString()}`
+          : ""
+      }`
+    ),
+
+  getPayslip: (id: string) => request<PayslipView>(`/payslips/${id}`),
+
+  // The one non-JSON endpoint in this client — GET /payroll/runs/:id/disbursement
+  // streams a CSV (Content-Disposition: attachment), not a JSON body, so
+  // it can't go through the shared `request()` helper. Triggers a real
+  // browser download rather than returning the text, since that's the
+  // only thing an HR Admin actually wants to do with a bank file.
+  async downloadDisbursementFile(runId: string): Promise<void> {
+    const token = getToken();
+    const res = await fetch(`/api/payroll/runs/${runId}/disbursement`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = await res.json();
+        message = body.message ?? message;
+      } catch {
+        // not JSON — keep the generic message
+      }
+      throw new ApiError(res.status, message);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `payroll-disbursement-${runId}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  },
 };

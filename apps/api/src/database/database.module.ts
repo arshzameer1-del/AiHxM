@@ -2,6 +2,7 @@ import { Global, Module, OnModuleDestroy } from "@nestjs/common";
 import { Pool } from "pg";
 import { DatabaseService } from "./database.service";
 import { PG_POOL } from "./pg-pool.token";
+import { resolveSslConfig } from "./db-connection.util";
 
 /**
  * Global module so every feature module can inject DatabaseService
@@ -22,7 +23,7 @@ import { PG_POOL } from "./pg-pool.token";
         if (!connectionString) {
           throw new Error("APP_DATABASE_URL is not set");
         }
-        return new Pool({ connectionString });
+        return new Pool({ connectionString, ssl: resolveSslConfig(connectionString) });
       },
     },
     DatabaseService,

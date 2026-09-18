@@ -123,6 +123,30 @@ export type CreateCompanyRequest = {
   };
 };
 
+/**
+ * The public, unauthenticated counterpart of `CreateCompanyRequest` —
+ * a prospective customer creating their OWN company and first login,
+ * with no Platform Admin in the loop at all. See
+ * `apps/api/src/signup/signup.service.ts` for what this actually
+ * provisions in one transaction (company, config, entitlements, the
+ * admin's login, AND their `hr_admin` role — unlike the Platform-Admin
+ * flow, there's no separate human to grant that role afterward).
+ */
+export type SignupRequest = {
+  companyName: string;
+  slug?: string;
+  packageTier?: PackageTier;
+  adminFullName: string;
+  adminEmail: string;
+  adminPassword: string;
+};
+
+export type SignupResponse = {
+  companyId: string;
+  slug: string;
+  packageTier: PackageTier;
+};
+
 export type AuditLogEntry = {
   id: string;
   companyId: string | null;
@@ -743,6 +767,11 @@ export type UpdateEmployeeGroupRequest = Partial<CreateEmployeeGroupRequest>;
  * schema change to employee_groups/employee_group_conditions themselves. */
 export type PolicyType = "leave";
 
+// annualLeaveDays/casualLeaveDays/sickLeaveDays live on this view for API
+// stability, but as of 0033_effective_dating_leave_tax.sql they're sourced
+// from this policy's CURRENT leave_policy_versions row, not a column on
+// leave_policies itself (see LeavePolicyVersionView below) — the id/name/
+// isDefault fields are this policy's stable identity and never version.
 export type LeavePolicyView = {
   id: string;
   companyId: string;
@@ -753,6 +782,8 @@ export type LeavePolicyView = {
   /** At most one leave policy per tenant may have this set — the
    * safe-deny fallback target when no employee group matches. */
   isDefault: boolean;
+  /** The CURRENT version's effective_from — when today's entitlement figures took effect. */
+  effectiveFrom: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -766,6 +797,19 @@ export type CreateLeavePolicyRequest = {
 };
 
 export type UpdateLeavePolicyRequest = Partial<CreateLeavePolicyRequest>;
+
+/** One historical (or current) entitlement version of a leave policy —
+ * `GET /leave-policies/:id/history`, ordered oldest first. */
+export type LeavePolicyVersionView = {
+  id: string;
+  policyId: string;
+  annualLeaveDays: number;
+  casualLeaveDays: number;
+  sickLeaveDays: number;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  createdAt: string;
+};
 
 export type EmployeeGroupPolicyAssignmentView = {
   id: string;
@@ -871,6 +915,19 @@ export type DecideLeaveRequestRequest = {
 
 export type AttendanceSource = "biometric" | "gps" | "manual";
 
+// Computed at read time by AttendanceService, joining the employee's
+// shift assignment as of the punch's own date — never stored on
+// attendance_records itself. "no_shift_assigned" is deliberately not an
+// error: most SMB pilots won't configure Shift Management on day one, and
+// attendance recording must keep working with no shift resolved at all.
+// "rest_day"/"holiday" added 2026-09-18 by the Work Schedule Resolution
+// Service (see below) — before that, a day the weekly pattern marked off
+// (or a mandatory holiday) was evaluated against the shift's flat
+// start/end time like any other day, which could mis-flag a scheduled
+// day off as "late." Adding union members is additive/non-breaking for
+// any existing caller matching on the other four values.
+export type AttendanceStatus = "on_time" | "late" | "early_departure" | "no_shift_assigned" | "rest_day" | "holiday";
+
 export type AttendanceRecordView = {
   id: string;
   employeeId: string;
@@ -880,6 +937,8 @@ export type AttendanceRecordView = {
   clockOutAt: string | null;
   gpsLat: number | null;
   gpsLng: number | null;
+  status: AttendanceStatus;
+  shiftName: string | null;
 };
 
 export type ClockInRequest = {
@@ -891,6 +950,270 @@ export type ClockInRequest = {
 
 export type ClockOutRequest = {
   employeeNumber: string;
+};
+
+// --- Shift Management (0026_shift_management.sql) ----------------------
+// See claude/aihxm-master-audit-and-roadmap.md Part 3 for why this exists:
+// Attendance previously had no concept of a "supposed to start at" time,
+// so there was no way to tell on-time from late. Deliberately scoped to
+// definitions + effective-dated assignments + late/early detection —
+// rotations, swaps, and shift premiums are explicitly out of scope for
+// this increment (see the migration's own header comment).
+
+export type ShiftView = {
+  id: string;
+  name: string;
+  startTime: string; // "HH:MM" or "HH:MM:SS", local wall-clock time-of-day
+  endTime: string;
+  crossesMidnight: boolean;
+  graceMinutesLate: number;
+  graceMinutesEarly: number;
+  isDefault: boolean;
+  // Added 2026-09-18 by the Work Schedule architecture — see the section
+  // below. Default server-side to 'fixed'/'Asia/Karachi' so every
+  // pre-existing caller (frontend form, tests) keeps working unchanged.
+  scheduleType: ScheduleType;
+  timezone: string;
+};
+
+export type CreateShiftRequest = {
+  name: string;
+  startTime: string;
+  endTime: string;
+  crossesMidnight?: boolean;
+  graceMinutesLate?: number;
+  graceMinutesEarly?: number;
+  isDefault?: boolean;
+  scheduleType?: ScheduleType;
+  timezone?: string;
+};
+
+export type UpdateShiftRequest = Partial<CreateShiftRequest>;
+
+export type ShiftAssignmentView = {
+  id: string;
+  employeeId: string;
+  employeeNumber: string;
+  employeeName: string;
+  shiftId: string;
+  shiftName: string;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+};
+
+export type AssignShiftRequest = {
+  employeeId: string;
+  shiftId: string;
+  effectiveFrom: string;
+  effectiveTo?: string;
+};
+
+// --- Work Schedule & Employee Schedule Assignment Architecture ---------
+// See claude/aihxm-work-schedule-architecture.md (mandatory standard,
+// pasted 2026-09-18) and claude/aihxm-master-audit-and-roadmap.md Part 4's
+// reconciliation entry. This EXTENDS Shift Management above rather than
+// replacing it: `ShiftView` is now also the Work Schedule "definition"
+// object (gains `scheduleType`/`timezone`); what's new is its weekly
+// pattern + breaks (previously every day implicitly shared one start/end
+// time), configurable assignment RULES (Rules-Engine-backed, so an
+// employee can receive a schedule via "Department = X AND Group = Y"
+// rather than only a direct per-employee assignment), and the resolution
+// surface (`ResolvedWorkScheduleView`) Attendance/Leave now consume
+// instead of each computing their own notion of "working day."
+
+export type ScheduleType = "fixed" | "flexible" | "shift" | "rotating" | "individual";
+
+export type WorkScheduleBreakView = {
+  id: string;
+  startTime: string;
+  endTime: string;
+  isPaid: boolean;
+};
+
+export type WorkScheduleDayView = {
+  dayOfWeek: number; // 0 = Sunday .. 6 = Saturday (Postgres EXTRACT(DOW)/JS Date#getUTCDay() convention)
+  isWorking: boolean;
+  startTime: string | null;
+  endTime: string | null;
+  isFlexible: boolean;
+  flexibleStartTime: string | null;
+  flexibleEndTime: string | null;
+  coreStartTime: string | null;
+  coreEndTime: string | null;
+  isHalfDay: boolean;
+  breaks: WorkScheduleBreakView[];
+};
+
+export type SetWeeklyPatternRequest = {
+  days: Array<{
+    dayOfWeek: number;
+    isWorking: boolean;
+    startTime?: string;
+    endTime?: string;
+    isFlexible?: boolean;
+    flexibleStartTime?: string;
+    flexibleEndTime?: string;
+    coreStartTime?: string;
+    coreEndTime?: string;
+    isHalfDay?: boolean;
+    breaks?: Array<{ startTime: string; endTime: string; isPaid?: boolean }>;
+  }>;
+};
+
+// A deliberately narrow mirror of the RulesEngine's own expression
+// grammar (apps/api/src/rules-engine/rules-engine.engine.ts) for exactly
+// this one consumer — the Rules Engine itself is explicitly not yet a
+// rule-authoring system with a shared, cross-domain expression type (see
+// its own doc comment: "no field registry" until a second consumer
+// defines what shape it needs). This is that second consumer's own
+// narrow shape, not a premature shared registry.
+export type WorkScheduleRuleOperator =
+  | "equals"
+  | "notEquals"
+  | "in"
+  | "notIn"
+  | "greaterThan"
+  | "greaterThanOrEqual"
+  | "lessThan"
+  | "lessThanOrEqual"
+  | "between"
+  | "contains"
+  | "isEmpty"
+  | "isNotEmpty";
+
+export type WorkScheduleRuleCondition = { field: string; operator: WorkScheduleRuleOperator; value?: unknown };
+
+export type WorkScheduleRuleExpression =
+  | { all: WorkScheduleRuleExpression[] }
+  | { any: WorkScheduleRuleExpression[] }
+  | { not: WorkScheduleRuleExpression }
+  | WorkScheduleRuleCondition;
+
+export type WorkScheduleAssignmentRuleView = {
+  id: string;
+  name: string;
+  priority: number;
+  conditionExpression: WorkScheduleRuleExpression;
+  scheduleId: string;
+  scheduleName: string;
+  isActive: boolean;
+};
+
+export type CreateWorkScheduleAssignmentRuleRequest = {
+  name: string;
+  priority?: number;
+  conditionExpression: WorkScheduleRuleExpression;
+  scheduleId: string;
+  isActive?: boolean;
+};
+
+export type UpdateWorkScheduleAssignmentRuleRequest = Partial<CreateWorkScheduleAssignmentRuleRequest>;
+
+export type WorkScheduleAssignmentSource = "individual" | "temporary" | "rule" | "default";
+
+/** The single resolved-schedule shape Attendance/Leave (and, per the
+ * architecture doc's Section 36, a future `GET /employees/:id/work-schedule`
+ * caller) all consume — see WorkScheduleResolutionService. */
+export type ResolvedWorkScheduleView = {
+  date: string;
+  hasSchedule: boolean;
+  scheduleId: string | null;
+  scheduleName: string | null;
+  scheduleType: ScheduleType | null;
+  timezone: string | null;
+  assignmentSource: WorkScheduleAssignmentSource | null;
+  assignmentRuleName: string | null;
+  isWorking: boolean;
+  isHalfDay: boolean;
+  startTime: string | null;
+  endTime: string | null;
+  crossesMidnight: boolean;
+  isFlexible: boolean;
+  flexibleStartTime: string | null;
+  flexibleEndTime: string | null;
+  coreStartTime: string | null;
+  coreEndTime: string | null;
+  breaks: WorkScheduleBreakView[];
+  graceMinutesLate: number;
+  graceMinutesEarly: number;
+  isHoliday: boolean;
+  isMandatoryHoliday: boolean;
+  holidayName: string | null;
+};
+
+// --- Attendance Policies increment 1: correction requests --------------
+// See 0028_attendance_corrections.sql — one decision (approve/reject),
+// made by the requester's own manager or HR, not routed through the
+// generic Workflow Engine.
+export type AttendanceCorrectionStatus = "pending" | "approved" | "rejected";
+
+export type AttendanceCorrectionRequestView = {
+  id: string;
+  employeeId: string;
+  employeeNumber: string;
+  employeeName: string;
+  attendanceRecordId: string | null;
+  requestedDate: string;
+  requestedClockIn: string | null;
+  requestedClockOut: string | null;
+  reason: string;
+  status: AttendanceCorrectionStatus;
+  isOnBehalf: boolean;
+  decisionComment: string | null;
+  decidedAt: string | null;
+  createdAt: string;
+};
+
+export type SubmitAttendanceCorrectionRequest = {
+  employeeId: string;
+  requestedDate: string;
+  requestedClockIn?: string;
+  requestedClockOut?: string;
+  reason: string;
+  attendanceRecordId?: string;
+};
+
+export type DecideAttendanceCorrectionRequest = {
+  decision: "approved" | "rejected";
+  comment?: string;
+};
+
+// --- Holiday Management (0030_holiday_management.sql) -------------------
+// The calendar foundation Attendance Corrections' own header comment
+// deferred ("absence reporting needs a working-days/holiday calendar
+// first"). This increment is the calendar itself only — it does not yet
+// feed leave day-count calculation or attendance absence detection.
+export type HolidayView = {
+  id: string;
+  name: string;
+  holidayDate: string;
+  isOptional: boolean;
+};
+
+export type CreateHolidayRequest = {
+  name: string;
+  holidayDate: string;
+  isOptional?: boolean;
+};
+
+export type UpdateHolidayRequest = Partial<CreateHolidayRequest>;
+
+// --- Configuration Center (0032_configuration_center.sql) --------------
+// A read-only, permission-filtered index over the configuration domains
+// that already have their own real admin screen (leave policies, employee
+// groups, shifts, holidays, workflow templates, custom fields, tax slabs)
+// -- this does not introduce a new place configuration lives, it makes
+// the six-plus existing places discoverable from one screen. `count` is
+// omitted (not zero) for a domain the caller has no view/manage access to
+// -- ConfigurationCenterService filters those out server-side rather than
+// returning a card the caller can't act on.
+export type ConfigurationDomainSummary = {
+  domainKey: string;
+  label: string;
+  description: string;
+  adminRoute: string;
+  supportsEffectiveDating: boolean;
+  count: number;
 };
 
 // --- Phase 10: Recruitment & Onboarding --------------------------------
@@ -1237,6 +1560,10 @@ export type UpdatePayrollSettingsRequest = {
   socialSecurityWageCeiling?: number | null;
 };
 
+// effectiveFrom/effectiveTo (0033_effective_dating_leave_tax.sql): every
+// bracket row is part of exactly one dated SET — listTaxSlabs()/
+// setTaxSlabs() only ever return/replace the CURRENT set
+// (effectiveTo: null); a closed set only appears via the history endpoint.
 export type TaxSlabView = {
   id: string;
   companyId: string;
@@ -1245,6 +1572,16 @@ export type TaxSlabView = {
   maxAnnualIncome: number | null;
   baseTax: number;
   ratePercent: number;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+};
+
+/** One historical (or current) tax slab SET — `GET /payroll/tax-slabs/history`,
+ * ordered oldest first. All slabs in one entry share the same effectiveFrom/effectiveTo. */
+export type TaxSlabSetView = {
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  slabs: TaxSlabView[];
 };
 
 /** Replaces the tenant's entire tax slab table in one call — a partial
@@ -1323,4 +1660,238 @@ export type CalculatePayrollRunResponse = {
   run: PayrollRunView;
   payslipCount: number;
   errors: PayrollCalculationError[];
+};
+
+// --- Onboarding & Offboarding (0035_onboarding_offboarding.sql) --------
+// Part 2's gap matrix row #21 ("Onboarding & Offboarding") flagged High —
+// "real customer-facing gap". Onboarding is gated on the existing
+// `recruitment` module_catalog entry (its own seeded name is literally
+// "Recruitment & Onboarding" — see 0006_module_entitlement.sql), and
+// Offboarding is gated on the existing `exit` module_catalog entry
+// ("Exit & Offboarding") — both were pure placeholder rows with zero
+// backend behind them since Phase 5; this increment is their first real
+// implementation, not a new sellable module.
+//
+// Both sides share one checklist shape: a company configures a list of
+// item TEMPLATES (title/category/who's responsible), and each real
+// onboarding/offboarding instance clones the currently-active templates
+// into its own item rows at creation time — so editing the template list
+// later never rewrites history for an in-flight checklist. `responsibleRole`
+// reuses the exact self/team/all RBAC scope vocabulary every other module
+// in this codebase already uses, rather than inventing a parallel one:
+// "self" = the employee completes it themselves, "team" = their manager,
+// "all" = HR. Deliberately NOT routed through the Workflow Engine for a
+// multi-step approval chain (unlike Leave/Recruitment) — same reasoning
+// Attendance Corrections used for its own single-decider action: a
+// checklist item has exactly one responsible party, not a chain of
+// approvers. A real Workflow-Engine-routed clearance chain (e.g. IT then
+// Finance then HR sign-off before an offboarding can finalize) is a
+// deliberate, named follow-on for if/when real demand asks for it.
+
+export type ChecklistCategory = "it" | "hr" | "finance" | "facilities" | "general";
+export type ChecklistResponsibleRole = "self" | "team" | "all";
+export type ChecklistItemStatus = "pending" | "completed" | "skipped";
+
+export type OnboardingItemTemplateView = {
+  id: string;
+  title: string;
+  category: ChecklistCategory;
+  responsibleRole: ChecklistResponsibleRole;
+  sortOrder: number;
+  isActive: boolean;
+};
+
+export type CreateOnboardingItemTemplateRequest = {
+  title: string;
+  category: ChecklistCategory;
+  responsibleRole: ChecklistResponsibleRole;
+  sortOrder?: number;
+};
+
+export type UpdateOnboardingItemTemplateRequest = Partial<CreateOnboardingItemTemplateRequest> & {
+  isActive?: boolean;
+};
+
+export type OnboardingChecklistItemView = {
+  id: string;
+  templateItemId: string | null;
+  title: string;
+  category: ChecklistCategory;
+  responsibleRole: ChecklistResponsibleRole;
+  sortOrder: number;
+  status: ChecklistItemStatus;
+  notes: string | null;
+  completedAt: string | null;
+};
+
+export type EmployeeOnboardingView = {
+  id: string;
+  employeeId: string;
+  employeeNumber: string;
+  employeeName: string;
+  status: "in_progress" | "completed";
+  startedAt: string;
+  completedAt: string | null;
+  items: OnboardingChecklistItemView[];
+};
+
+export type UpdateChecklistItemRequest = {
+  status: ChecklistItemStatus;
+  notes?: string;
+};
+
+export type OffboardingReason = "resignation" | "termination" | "retirement" | "end_of_contract" | "other";
+
+export type OffboardingItemTemplateView = {
+  id: string;
+  title: string;
+  category: ChecklistCategory;
+  responsibleRole: ChecklistResponsibleRole;
+  sortOrder: number;
+  isActive: boolean;
+};
+
+export type CreateOffboardingItemTemplateRequest = {
+  title: string;
+  category: ChecklistCategory;
+  responsibleRole: ChecklistResponsibleRole;
+  sortOrder?: number;
+};
+
+export type UpdateOffboardingItemTemplateRequest = Partial<CreateOffboardingItemTemplateRequest> & {
+  isActive?: boolean;
+};
+
+export type OffboardingChecklistItemView = {
+  id: string;
+  templateItemId: string | null;
+  title: string;
+  category: ChecklistCategory;
+  responsibleRole: ChecklistResponsibleRole;
+  sortOrder: number;
+  status: ChecklistItemStatus;
+  notes: string | null;
+  completedAt: string | null;
+};
+
+export type EmployeeOffboardingView = {
+  id: string;
+  employeeId: string;
+  employeeNumber: string;
+  employeeName: string;
+  reason: OffboardingReason;
+  lastWorkingDay: string;
+  notes: string | null;
+  status: "in_progress" | "completed";
+  startedAt: string;
+  completedAt: string | null;
+  items: OffboardingChecklistItemView[];
+};
+
+export type InitiateOffboardingRequest = {
+  reason: OffboardingReason;
+  lastWorkingDay: string;
+  notes?: string;
+};
+
+// --- Overtime & On-Duty, first increment (2026-09-18) -------------------
+// See 0038_overtime.sql. A per-company OvertimePolicyView is effective-
+// dated via the shared EffectiveDatingEngine (single open row, same shape
+// as TaxSlabView); an OvertimeRecordView snapshots its scheduled/actual/
+// overtime minutes and the rate that applied at submission time, so a
+// later policy or schedule change never rewrites an already-decided
+// claim's meaning. Decided via the same plain RBAC self/team/all shape
+// AttendanceCorrectionRequestView already uses, not the Workflow Engine.
+
+export type OvertimeDayType = "weekday" | "rest_day" | "holiday";
+
+export type OvertimeClaimStatus = "pending" | "approved" | "rejected";
+
+export type OvertimePolicyView = {
+  id: string;
+  companyId: string;
+  dailyThresholdMinutes: number;
+  roundingMinutes: number;
+  weekdayRateMultiplier: number;
+  restDayRateMultiplier: number;
+  holidayRateMultiplier: number;
+  effectiveFrom: string;
+};
+
+export type SetOvertimePolicyRequest = {
+  dailyThresholdMinutes?: number;
+  roundingMinutes?: number;
+  weekdayRateMultiplier?: number;
+  restDayRateMultiplier?: number;
+  holidayRateMultiplier?: number;
+};
+
+export type OvertimeRecordView = {
+  id: string;
+  employeeId: string;
+  employeeNumber: string;
+  employeeName: string;
+  attendanceRecordId: string | null;
+  workDate: string;
+  scheduledMinutes: number;
+  actualMinutes: number;
+  overtimeMinutes: number;
+  dayType: OvertimeDayType;
+  rateMultiplier: number;
+  reason: string | null;
+  status: OvertimeClaimStatus;
+  isOnBehalf: boolean;
+  decisionComment: string | null;
+  decidedAt: string | null;
+  createdAt: string;
+};
+
+export type SubmitOvertimeClaimRequest = {
+  employeeId: string;
+  workDate: string;
+  reason?: string;
+};
+
+export type DecideOvertimeClaimRequest = {
+  decision: "approved" | "rejected";
+  comment?: string;
+};
+
+// --- On-Duty, first increment (2026-09-18) -------------------------------
+// See 0040_on_duty.sql. Distinct from Overtime (claiming extra hours after
+// the fact): an On-Duty request authorizes, ahead of time, being away from
+// the ordinary schedule/location for official work (a field visit, client
+// site, training, business travel) over a date RANGE, not a single day's
+// clock-in/out comparison. Decided via the same plain RBAC self/team/all
+// shape AttendanceCorrectionRequestView/OvertimeRecordView already use.
+
+export type OnDutyRequestStatus = "pending" | "approved" | "rejected";
+
+export type OnDutyRequestView = {
+  id: string;
+  employeeId: string;
+  employeeNumber: string;
+  employeeName: string;
+  startDate: string;
+  endDate: string;
+  location: string | null;
+  reason: string | null;
+  status: OnDutyRequestStatus;
+  isOnBehalf: boolean;
+  decisionComment: string | null;
+  decidedAt: string | null;
+  createdAt: string;
+};
+
+export type SubmitOnDutyRequestRequest = {
+  employeeId: string;
+  startDate: string;
+  endDate: string;
+  location?: string;
+  reason?: string;
+};
+
+export type DecideOnDutyRequestRequest = {
+  decision: "approved" | "rejected";
+  comment?: string;
 };

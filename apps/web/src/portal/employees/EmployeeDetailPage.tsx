@@ -10,6 +10,7 @@ import type {
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { EmployeeFields } from "./EmployeeFields";
+import { OnboardingOffboardingSection } from "../onboarding-offboarding/OnboardingOffboardingSection";
 
 const EMPLOYMENT_TYPES: EmploymentType[] = ["permanent", "contract", "probation", "intern"];
 const EMPLOYMENT_STATUSES: EmploymentStatus[] = ["active", "on_leave", "terminated"];
@@ -84,6 +85,14 @@ export function EmployeeDetailPage() {
           onChanged={(updated) => setEmployee(updated)}
         />
       )}
+
+      <OnboardingOffboardingSection
+        key={`checklists-${employee.id}`}
+        employeeId={employee.id}
+        employmentStatus={employee.employmentStatus}
+        canManage={canManage}
+        onEmployeeTerminated={load}
+      />
 
       <section className="bg-card rounded-card p-5 shadow-sm">
         <h2 className="font-semibold text-sm uppercase tracking-wide text-label-tertiary mb-3">

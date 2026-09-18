@@ -6,6 +6,7 @@ import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
 import { ImportExportService } from "../import-export/import-export.service";
+import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
 import type {
   CalculatePayrollRunResponse,
   CompensationView,
@@ -17,6 +18,7 @@ import type {
   PayslipView,
   SetCompensationRequest,
   SetTaxSlabsRequest,
+  TaxSlabSetView,
   TaxSlabView,
   UpdatePayrollSettingsRequest,
 } from "@boostfactor/shared-types";
@@ -126,6 +128,8 @@ function rowToTaxSlab(row: any): TaxSlabView {
     maxAnnualIncome: row.max_annual_income === null ? null : Number(row.max_annual_income),
     baseTax: Number(row.base_tax),
     ratePercent: Number(row.rate_percent),
+    effectiveFrom: toIsoDate(row.effective_from),
+    effectiveTo: toIsoDateOrNull(row.effective_to),
   };
 }
 
@@ -188,15 +192,21 @@ export class PayrollService {
     private readonly rbac: RbacService,
     private readonly entitlements: EntitlementsService,
     private readonly audit: AuditService,
-    private readonly importExport: ImportExportService
+    private readonly importExport: ImportExportService,
+    private readonly effectiveDating: EffectiveDatingEngine
   ) {}
 
   // --- Compensation ------------------------------------------------------
 
   /**
    * Supersedes (not overwrites) the employee's current open-ended
-   * compensation row, the same discipline `leave_policies.is_default`
-   * established in Phase 8 for a different single-current-row invariant.
+   * compensation row via the shared EffectiveDatingEngine. This is a
+   * retrofit, not just a refactor: the original hand-written version had
+   * no same-day-collapse guard, so setting compensation twice in one day
+   * would have attempted to close a row at (effectiveFrom - 1 day),
+   * producing an invalid effective_to < effective_from range — a latent
+   * bug nothing had triggered yet. The engine's supersession rule fixes
+   * this the same way it already does for Leave Policies and Tax Slabs.
    * A mid-period salary change is this phase's own named edge case —
    * `calculateRun()` reads whichever segments overlap a given run's
    * period, old and new alike.
@@ -207,25 +217,20 @@ export class PayrollService {
       const employee = await this.loadEmployee(client, input.employeeId);
       if (!employee) throw new NotFoundException("Employee not found");
 
-      await client.query(
-        `UPDATE employee_compensation
-         SET effective_to = ($2::date - INTERVAL '1 day')::date
-         WHERE employee_id = $1 AND effective_to IS NULL AND effective_from < $2::date`,
-        [input.employeeId, input.effectiveFrom]
-      );
-
-      const result = await client.query(
-        `INSERT INTO employee_compensation (company_id, employee_id, monthly_salary, effective_from, created_by_user_account_id)
-         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [claims.company_id, input.employeeId, input.monthlySalary, input.effectiveFrom, claims.sub]
-      );
+      const { row } = await this.effectiveDating.applyVersionedRow(client, {
+        table: "employee_compensation",
+        scope: { employee_id: input.employeeId },
+        extraInsertColumns: { company_id: claims.company_id, created_by_user_account_id: claims.sub },
+        data: { monthly_salary: input.monthlySalary },
+        effectiveFrom: input.effectiveFrom,
+      });
       await this.audit.record(client, claims, {
         companyId: claims.company_id ?? null,
         action: "compensation.set",
         target: input.employeeId,
         metadata: { monthlySalary: input.monthlySalary, effectiveFrom: input.effectiveFrom },
       });
-      return rowToCompensation(result.rows[0]);
+      return rowToCompensation(row);
     });
   }
 
@@ -234,11 +239,12 @@ export class PayrollService {
     return this.db.withClaims(claims, async (client) => {
       const employee = await this.loadEmployee(client, employeeId);
       if (!employee) throw new NotFoundException("Employee not found");
-      const result = await client.query(
-        "SELECT * FROM employee_compensation WHERE employee_id = $1 ORDER BY effective_from DESC",
-        [employeeId]
-      );
-      return result.rows.map(rowToCompensation);
+      const rows = await this.effectiveDating.getHistory(client, {
+        table: "employee_compensation",
+        scope: { employee_id: employeeId },
+        orderBy: "effective_from DESC",
+      });
+      return rows.map(rowToCompensation);
     });
   }
 
@@ -319,18 +325,48 @@ export class PayrollService {
     }
 
     return this.db.withClaims(claims, async (client) => {
-      await client.query("DELETE FROM tax_slabs WHERE company_id = $1", [claims.company_id]);
-      const inserted: unknown[] = [];
-      for (const slab of sorted) {
-        const result = await client.query(
-          `INSERT INTO tax_slabs (company_id, min_annual_income, max_annual_income, base_tax, rate_percent)
-           VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-          [claims.company_id, slab.minAnnualIncome, slab.maxAnnualIncome, slab.baseTax, slab.ratePercent]
-        );
-        inserted.push(result.rows[0]);
-      }
+      // Supersession (close-then-insert, with the same-day collapse
+      // guard) now lives once, in the shared EffectiveDatingEngine,
+      // rather than hand-written here — see this method's own git
+      // history / the roadmap doc for why. Behavior is unchanged.
+      const { rows } = await this.effectiveDating.applyVersionedSet(client, {
+        table: "tax_slabs",
+        scope: { company_id: claims.company_id! },
+        rows: sorted.map((slab) => ({
+          min_annual_income: slab.minAnnualIncome,
+          max_annual_income: slab.maxAnnualIncome,
+          base_tax: slab.baseTax,
+          rate_percent: slab.ratePercent,
+        })),
+      });
       await this.audit.record(client, claims, { companyId: claims.company_id ?? null, action: "tax_slabs.set", metadata: { slabCount: sorted.length } });
-      return inserted.map(rowToTaxSlab);
+      return rows.map(rowToTaxSlab);
+    });
+  }
+
+  /** Full effective-dated history of the tenant's tax slab SETS, oldest
+   * first — one entry per (effective_from) generation, each carrying the
+   * full bracket table that was in effect for that era. Mirrors
+   * `EmployeeGroupsService.getLeavePolicyHistory()`'s shape. */
+  async getTaxSlabHistory(claims: RequestClaims): Promise<TaxSlabSetView[]> {
+    await this.requireHrManage(claims);
+    return this.db.withClaims(claims, async (client) => {
+      const rows = await this.effectiveDating.getHistory(client, {
+        table: "tax_slabs",
+        scope: { company_id: claims.company_id! },
+        orderBy: "effective_from ASC, min_annual_income ASC",
+      });
+      const byGeneration = new Map<string, TaxSlabSetView>();
+      for (const row of rows) {
+        const key = toIsoDate(row.effective_from);
+        let generation = byGeneration.get(key);
+        if (!generation) {
+          generation = { effectiveFrom: key, effectiveTo: toIsoDateOrNull(row.effective_to), slabs: [] };
+          byGeneration.set(key, generation);
+        }
+        generation.slabs.push(rowToTaxSlab(row));
+      }
+      return [...byGeneration.values()];
     });
   }
 
@@ -714,21 +750,36 @@ export class PayrollService {
   }
 
   private async loadOrSeedTaxSlabs(client: PoolClient, claims: RequestClaims): Promise<TaxSlabView[]> {
-    const existing = await client.query("SELECT * FROM tax_slabs WHERE company_id = $1 ORDER BY min_annual_income ASC", [claims.company_id]);
-    if ((existing.rowCount ?? 0) > 0) return existing.rows.map(rowToTaxSlab);
+    // Reads the CURRENT set only (effective_to IS NULL) — same "live
+    // decision paths keep reading current" discipline as leave policies;
+    // resolving a run's OWN period against historical slabs is a named,
+    // separate follow-on (migration 0033's header comment).
+    // "Current" read goes through the shared engine like every other
+    // caller; the one-time bootstrap INSERT below is a seeding concern
+    // specific to this method (not a supersession), so it stays bespoke.
+    const existing = await this.effectiveDating.getCurrentRows(client, {
+      table: "tax_slabs",
+      scope: { company_id: claims.company_id! },
+      orderBy: "min_annual_income ASC",
+    });
+    if (existing.length > 0) return existing.map(rowToTaxSlab);
     const inserted: unknown[] = [];
     for (const slab of DEFAULT_TAX_SLABS) {
       const result = await client.query(
-        `INSERT INTO tax_slabs (company_id, min_annual_income, max_annual_income, base_tax, rate_percent)
-         VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT (company_id, min_annual_income) DO NOTHING RETURNING *`,
+        `INSERT INTO tax_slabs (company_id, min_annual_income, max_annual_income, base_tax, rate_percent, effective_from)
+         VALUES ($1, $2, $3, $4, $5, CURRENT_DATE)
+         ON CONFLICT (company_id, min_annual_income) WHERE effective_to IS NULL DO NOTHING RETURNING *`,
         [claims.company_id, slab.min, slab.max, slab.base, slab.rate]
       );
       if ((result.rowCount ?? 0) > 0) inserted.push(result.rows[0]);
     }
     if (inserted.length > 0) return inserted.map(rowToTaxSlab);
-    const retry = await client.query("SELECT * FROM tax_slabs WHERE company_id = $1 ORDER BY min_annual_income ASC", [claims.company_id]);
-    return retry.rows.map(rowToTaxSlab);
+    const retry = await this.effectiveDating.getCurrentRows(client, {
+      table: "tax_slabs",
+      scope: { company_id: claims.company_id! },
+      orderBy: "min_annual_income ASC",
+    });
+    return retry.map(rowToTaxSlab);
   }
 
   private async loadEmployee(client: PoolClient, employeeId: string): Promise<{ id: string } | null> {

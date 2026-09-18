@@ -141,9 +141,9 @@ describe("Cross-Tenant Isolation (Security E2E) — Negative tests for tenant bo
     const aEmployeeEmail = `xtt-company-a-emp-${stamp}@example.com`;
     companyAEmployeeId = await db.withClaims(FIXTURE_CLAIMS, async (client) => {
       const emp = await client.query(
-        `INSERT INTO employees (company_id, first_name, last_name, email, employment_type, employment_status)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-        [companyAId, "Alice", "CompanyA", aEmployeeEmail, "permanent", "active"]
+        `INSERT INTO employees (company_id, employee_number, first_name, last_name, email, employment_type, employment_status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+        [companyAId, "A0001", "Alice", "CompanyA", aEmployeeEmail, "permanent", "active"]
       );
       return emp.rows[0].id as string;
     });
@@ -224,9 +224,9 @@ describe("Cross-Tenant Isolation (Security E2E) — Negative tests for tenant bo
     const bEmployeeEmail = `xtt-company-b-emp-${stamp}@example.com`;
     companyBEmployeeId = await db.withClaims(FIXTURE_CLAIMS, async (client) => {
       const emp = await client.query(
-        `INSERT INTO employees (company_id, first_name, last_name, email, employment_type, employment_status)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-        [companyBId, "Bob", "CompanyB", bEmployeeEmail, "permanent", "active"]
+        `INSERT INTO employees (company_id, employee_number, first_name, last_name, email, employment_type, employment_status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+        [companyBId, "B0001", "Bob", "CompanyB", bEmployeeEmail, "permanent", "active"]
       );
       return emp.rows[0].id as string;
     });
@@ -315,15 +315,17 @@ describe("Cross-Tenant Isolation (Security E2E) — Negative tests for tenant bo
         client
       ) => {
         const lr = await client.query(
-          `INSERT INTO leave_requests (company_id, employee_id, leave_type, start_date, end_date, status)
-           VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+          `INSERT INTO leave_requests (company_id, employee_id, leave_type, start_date, end_date, days_requested, status, submitted_by_user_account_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
           [
             companyAId,
             companyAEmployeeId,
             "annual",
             "2026-10-01",
             "2026-10-05",
+            5,
             "pending",
+            companyAEmployeeUserId,
           ]
         );
         return lr.rows[0].id as string;
@@ -352,10 +354,12 @@ describe("Cross-Tenant Isolation (Security E2E) — Negative tests for tenant bo
     });
 
     it("Company B's HR Admin cannot PATCH Company A's leave request (approve/reject)", async () => {
+      // Real route is PATCH /leave-requests/:id/decision (leave.controller.ts)
+      // — there is no bare PATCH /leave-requests/:id.
       const res = await request(app.getHttpServer())
-        .patch(`/leave-requests/${companyALeaveRequestId}`)
+        .patch(`/leave-requests/${companyALeaveRequestId}/decision`)
         .set("Authorization", `Bearer ${companyBHrAdminToken}`)
-        .send({ status: "approved" });
+        .send({ decision: "approved" });
 
       expect(res.status).toBe(404);
     });
@@ -366,15 +370,17 @@ describe("Cross-Tenant Isolation (Security E2E) — Negative tests for tenant bo
         client
       ) => {
         const lr = await client.query(
-          `INSERT INTO leave_requests (company_id, employee_id, leave_type, start_date, end_date, status)
-           VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+          `INSERT INTO leave_requests (company_id, employee_id, leave_type, start_date, end_date, days_requested, status, submitted_by_user_account_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
           [
             companyBId,
             companyBEmployeeId,
             "sick",
             "2026-10-10",
             "2026-10-12",
+            3,
             "pending",
+            companyBEmployeeUserId,
           ]
         );
         return lr.rows[0].id as string;
@@ -397,14 +403,18 @@ describe("Cross-Tenant Isolation (Security E2E) — Negative tests for tenant bo
     let companyARequisitionId: string;
     let companyBRequisitionId: string;
 
+    // Real table is job_requisitions (migrations/0017_recruitment.sql),
+    // NOT NULL on created_by_user_account_id, and the real routes are all
+    // under /job-requisitions (recruitment.controller.ts) — there is no
+    // /requisitions anywhere in this app.
     beforeAll(async () => {
       companyARequisitionId = await db.withClaims(FIXTURE_CLAIMS, async (
         client
       ) => {
         const req = await client.query(
-          `INSERT INTO requisitions (company_id, title, department, status)
-           VALUES ($1, $2, $3, $4) RETURNING id`,
-          [companyAId, "Senior Engineer", "Engineering", "open"]
+          `INSERT INTO job_requisitions (company_id, title, department, status, created_by_user_account_id)
+           VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+          [companyAId, "Senior Engineer", "Engineering", "draft", companyAHrAdminUserId]
         );
         return req.rows[0].id as string;
       });
@@ -413,9 +423,9 @@ describe("Cross-Tenant Isolation (Security E2E) — Negative tests for tenant bo
         client
       ) => {
         const req = await client.query(
-          `INSERT INTO requisitions (company_id, title, department, status)
-           VALUES ($1, $2, $3, $4) RETURNING id`,
-          [companyBId, "Sales Manager", "Sales", "open"]
+          `INSERT INTO job_requisitions (company_id, title, department, status, created_by_user_account_id)
+           VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+          [companyBId, "Sales Manager", "Sales", "draft", companyBHrAdminUserId]
         );
         return req.rows[0].id as string;
       });
@@ -423,7 +433,7 @@ describe("Cross-Tenant Isolation (Security E2E) — Negative tests for tenant bo
 
     it("Company A's HR Admin cannot GET Company B's requisition", async () => {
       const res = await request(app.getHttpServer())
-        .get(`/requisitions/${companyBRequisitionId}`)
+        .get(`/job-requisitions/${companyBRequisitionId}`)
         .set("Authorization", `Bearer ${companyAHrAdminToken}`);
 
       expect(res.status).toBe(404);
@@ -431,7 +441,7 @@ describe("Cross-Tenant Isolation (Security E2E) — Negative tests for tenant bo
 
     it("Company A's HR Admin cannot LIST Company B's requisitions in their list", async () => {
       const res = await request(app.getHttpServer())
-        .get("/requisitions")
+        .get("/job-requisitions")
         .set("Authorization", `Bearer ${companyAHrAdminToken}`);
 
       expect(res.status).toBe(200);
@@ -442,11 +452,15 @@ describe("Cross-Tenant Isolation (Security E2E) — Negative tests for tenant bo
       expect(companyBPresent).toBe(false);
     });
 
-    it("Company B's HR Admin cannot PATCH Company A's requisition", async () => {
+    it("Company B's HR Admin cannot PATCH (decide) Company A's requisition", async () => {
+      // decideRequisition() looks the row up under the caller's own RLS-
+      // scoped session first — a cross-tenant id 404s there regardless of
+      // the requisition's actual status, before any workflow/decision
+      // logic runs.
       const res = await request(app.getHttpServer())
-        .patch(`/requisitions/${companyARequisitionId}`)
+        .patch(`/job-requisitions/${companyARequisitionId}/decision`)
         .set("Authorization", `Bearer ${companyBHrAdminToken}`)
-        .send({ status: "closed" });
+        .send({ decision: "approved" });
 
       expect(res.status).toBe(404);
     });
@@ -461,14 +475,15 @@ describe("Cross-Tenant Isolation (Security E2E) — Negative tests for tenant bo
         client
       ) => {
         const cycle = await client.query(
-          `INSERT INTO review_cycles (company_id, name, status, period_start, period_end)
-           VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+          `INSERT INTO review_cycles (company_id, name, status, period_start, period_end, created_by_user_account_id)
+           VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
           [
             companyAId,
             "Q4 2026 Review",
             "active",
             "2026-10-01",
             "2026-12-31",
+            companyAHrAdminUserId,
           ]
         );
         return cycle.rows[0].id as string;
@@ -478,14 +493,15 @@ describe("Cross-Tenant Isolation (Security E2E) — Negative tests for tenant bo
         client
       ) => {
         const cycle = await client.query(
-          `INSERT INTO review_cycles (company_id, name, status, period_start, period_end)
-           VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+          `INSERT INTO review_cycles (company_id, name, status, period_start, period_end, created_by_user_account_id)
+           VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
           [
             companyBId,
             "H2 2026 Review",
             "draft",
             "2026-07-01",
             "2026-12-31",
+            companyBHrAdminUserId,
           ]
         );
         return cycle.rows[0].id as string;
@@ -513,11 +529,15 @@ describe("Cross-Tenant Isolation (Security E2E) — Negative tests for tenant bo
       expect(companyBPresent).toBe(false);
     });
 
-    it("Company B's HR Admin cannot PATCH Company A's review cycle", async () => {
+    it("Company B's HR Admin cannot close Company A's review cycle", async () => {
+      // There is no bare PATCH /review-cycles/:id — write actions are
+      // POST .../launch, .../begin-calibration, .../close
+      // (performance.controller.ts). closeCycle() looks the row up under
+      // the caller's own RLS-scoped session first, so a cross-tenant id
+      // 404s regardless of the cycle's actual status.
       const res = await request(app.getHttpServer())
-        .patch(`/review-cycles/${companyAReviewCycleId}`)
-        .set("Authorization", `Bearer ${companyBHrAdminToken}`)
-        .send({ status: "closed" });
+        .post(`/review-cycles/${companyAReviewCycleId}/close`)
+        .set("Authorization", `Bearer ${companyBHrAdminToken}`);
 
       expect(res.status).toBe(404);
     });
@@ -532,13 +552,17 @@ describe("Cross-Tenant Isolation (Security E2E) — Negative tests for tenant bo
       platformAdminUserId = await db.withClaims(FIXTURE_CLAIMS, async (
         client
       ) => {
+        const platformAdminEmail = `xtt-platform-admin-${Date.now()}@example.com`;
         const account = await client.query(
           "INSERT INTO user_accounts (email, password_hash) VALUES ($1, 'x') RETURNING id",
-          [`xtt-platform-admin-${Date.now()}@example.com`]
+          [platformAdminEmail]
         );
+        // The account insert above only RETURNING's id, not email — the
+        // original code read account.rows[0].email (always undefined)
+        // here, tripping platform_admins.email's NOT NULL constraint.
         await client.query(
           "INSERT INTO platform_admins (full_name, email, user_account_id) VALUES ($1, $2, $3)",
-          ["Isolation Test Admin", account.rows[0].email, account.rows[0].id]
+          ["Isolation Test Admin", platformAdminEmail, account.rows[0].id]
         );
         return account.rows[0].id as string;
       });
@@ -552,13 +576,18 @@ describe("Cross-Tenant Isolation (Security E2E) — Negative tests for tenant bo
     });
 
     it("Platform Admin with company_id=null cannot access tenant API endpoints (employees)", async () => {
+      // SessionGuard accepts any valid session JWT regardless of
+      // is_platform_admin/company_id — it's EntitlementsService.isModuleEnabled()
+      // that refuses a null company_id outright (returns false without
+      // even querying), which every module method then turns into a 404
+      // ("look like it doesn't exist" — Decision #5), not a 401. A
+      // Platform Admin session simply has no tenant module license to
+      // check against, the same as a session for an unlicensed tenant.
       const res = await request(app.getHttpServer())
         .get("/employees")
         .set("Authorization", `Bearer ${platformAdminToken}`);
 
-      // Should fail because Platform Admin's session has company_id=null,
-      // and tenant endpoints require a valid company_id in the session
-      expect(res.status).toBe(401);
+      expect(res.status).toBe(404);
     });
 
     it("Platform Admin cannot GET a Company A employee", async () => {
@@ -566,7 +595,7 @@ describe("Cross-Tenant Isolation (Security E2E) — Negative tests for tenant bo
         .get(`/employees/${companyAEmployeeId}`)
         .set("Authorization", `Bearer ${platformAdminToken}`);
 
-      expect(res.status).toBe(401);
+      expect(res.status).toBe(404);
     });
   });
 });

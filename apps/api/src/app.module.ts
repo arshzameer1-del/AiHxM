@@ -5,6 +5,7 @@ import { ScheduleModule } from "@nestjs/schedule";
 import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
 import { DatabaseModule } from "./database/database.module";
+import { CacheModule } from "./cache/cache.module";
 import { AuthModule } from "./auth/auth.module";
 import { CompaniesModule } from "./companies/companies.module";
 import { AuditModule } from "./audit/audit.module";
@@ -20,11 +21,16 @@ import { ImportExportModule } from "./import-export/import-export.module";
 import { FileStorageModule } from "./file-storage/file-storage.module";
 import { EmployeesModule } from "./employees/employees.module";
 import { EmployeeGroupsModule } from "./employee-groups/employee-groups.module";
+import { ShiftsModule } from "./shifts/shifts.module";
+import { HolidaysModule } from "./holidays/holidays.module";
 import { LeaveModule } from "./leave/leave.module";
 import { RecruitmentModule } from "./recruitment/recruitment.module";
 import { PerformanceModule } from "./performance/performance.module";
 import { SystemAdminModule } from "./system-admin/system-admin.module";
 import { PayrollModule } from "./payroll/payroll.module";
+import { SignupModule } from "./signup/signup.module";
+import { ConfigurationCenterModule } from "./configuration-center/configuration-center.module";
+import { OnboardingOffboardingModule } from "./onboarding-offboarding/onboarding-offboarding.module";
 
 /**
  * Phase 2/3/4/5 root module: health check, the Platform Provisioning Panel
@@ -45,6 +51,7 @@ import { PayrollModule } from "./payroll/payroll.module";
     ThrottlerModule.forRoot([{ name: "default", ttl: 60_000, limit: 100 }]),
     ScheduleModule.forRoot(),
     DatabaseModule,
+    CacheModule,
     AuthModule,
     CompaniesModule,
     AuditModule,
@@ -60,11 +67,16 @@ import { PayrollModule } from "./payroll/payroll.module";
     FileStorageModule,
     EmployeesModule,
     EmployeeGroupsModule,
+    ShiftsModule,
+    HolidaysModule,
     LeaveModule,
     RecruitmentModule,
     PerformanceModule,
     SystemAdminModule,
     PayrollModule,
+    ConfigurationCenterModule,
+    OnboardingOffboardingModule,
+    SignupModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],

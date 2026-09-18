@@ -52,6 +52,11 @@ export class PayrollController {
     });
   }
 
+  @Get("payroll/tax-slabs/history")
+  getTaxSlabHistory(@CurrentClaims() claims: RequestClaims) {
+    return this.payroll.getTaxSlabHistory(claims);
+  }
+
   @Post("payroll/runs")
   createRun(@CurrentClaims() claims: RequestClaims, @Body() dto: CreatePayrollRunDto) {
     return this.payroll.createRun(claims, dto);

@@ -7,6 +7,8 @@ import { EntitlementsService } from "../entitlements/entitlements.service";
 import { AuditService } from "../audit/audit.service";
 import { EmployeesService } from "../employees/employees.service";
 import { EmployeeGroupsService } from "../employee-groups/employee-groups.service";
+import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
+import { RulesEngine } from "../rules-engine/rules-engine.engine";
 import { LocalFileStorageService } from "../file-storage/local-file-storage.service";
 import { PerformanceService } from "./performance.service";
 
@@ -50,7 +52,7 @@ describe("PerformanceService", () => {
     entitlements = new EntitlementsService(db);
     audit = new AuditService();
     employees = new EmployeesService(db, rbac, entitlements, audit, new LocalFileStorageService());
-    groups = new EmployeeGroupsService(db, rbac, entitlements);
+    groups = new EmployeeGroupsService(db, rbac, entitlements, new EffectiveDatingEngine(), new RulesEngine());
     performance = new PerformanceService(db, rbac, entitlements, audit, groups);
 
     const stamp = Date.now();

@@ -3,6 +3,9 @@ import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
 import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
+import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
+import { RulesEngine, allEqual } from "../rules-engine/rules-engine.engine";
+import { EMPLOYEE_CONDITION_FIELD_TO_COLUMN as CONDITION_FIELD_TO_COLUMN } from "../employees/employee-condition-fields.util";
 import type {
   AssignGroupPolicyRequest,
   CreateEmployeeGroupRequest,
@@ -10,6 +13,7 @@ import type {
   EmployeeGroupCondition,
   EmployeeGroupPolicyAssignmentView,
   EmployeeGroupView,
+  LeavePolicyVersionView,
   LeavePolicyView,
   PolicyType,
   ResolvedPolicyView,
@@ -21,19 +25,6 @@ const GROUP_MODULE_KEY = "employee" as const;
 const LEAVE_MODULE_KEY = "leave" as const;
 const GROUP_MANAGE_PERMISSION = "employee_group.manage";
 const LEAVE_POLICY_MANAGE_PERMISSION = "leave_policy.manage";
-
-// API-facing camelCase condition field -> the actual `employees` column it
-// reads. Same "field_key is the API-facing name, not the DB column" trap
-// Phase 4's own seed data fell into once already (0011_employee_seed.sql's
-// header comment) — kept as an explicit map instead of a naive snake_case
-// conversion so a future column rename can't silently break matching.
-const CONDITION_FIELD_TO_COLUMN: Record<string, string> = {
-  department: "department",
-  location: "location",
-  designation: "designation",
-  employmentType: "employment_type",
-  employmentStatus: "employment_status",
-};
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toIso(value: any): string {
@@ -58,18 +49,37 @@ function rowToGroup(
   };
 }
 
+// `row` is the leave_policies identity row; `version` is its CURRENT
+// (effective_to IS NULL) leave_policy_versions row — joined by the
+// caller, never queried separately per policy (same "one query, not
+// N+1" discipline listGroups already follows for conditions/assignments).
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function rowToLeavePolicy(row: any): LeavePolicyView {
+function rowToLeavePolicy(row: any, version: any): LeavePolicyView {
   return {
     id: row.id,
     companyId: row.company_id,
     name: row.name,
+    annualLeaveDays: version.annual_leave_days,
+    casualLeaveDays: version.casual_leave_days,
+    sickLeaveDays: version.sick_leave_days,
+    isDefault: row.is_default,
+    effectiveFrom: toIso(version.effective_from).slice(0, 10),
+    createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at),
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function rowToLeavePolicyVersion(row: any): LeavePolicyVersionView {
+  return {
+    id: row.id,
+    policyId: row.policy_id,
     annualLeaveDays: row.annual_leave_days,
     casualLeaveDays: row.casual_leave_days,
     sickLeaveDays: row.sick_leave_days,
-    isDefault: row.is_default,
+    effectiveFrom: toIso(row.effective_from).slice(0, 10),
+    effectiveTo: row.effective_to ? toIso(row.effective_to).slice(0, 10) : null,
     createdAt: toIso(row.created_at),
-    updatedAt: toIso(row.updated_at),
   };
 }
 
@@ -113,7 +123,9 @@ export class EmployeeGroupsService {
   constructor(
     private readonly db: DatabaseService,
     private readonly rbac: RbacService,
-    private readonly entitlements: EntitlementsService
+    private readonly entitlements: EntitlementsService,
+    private readonly effectiveDating: EffectiveDatingEngine,
+    private readonly rulesEngine: RulesEngine
   ) {}
 
   // --- Employee Groups --------------------------------------------------
@@ -273,30 +285,56 @@ export class EmployeeGroupsService {
         // nicety, so this takes over rather than erroring.
         await client.query("UPDATE leave_policies SET is_default = false WHERE company_id = $1", [claims.company_id]);
       }
-      const result = await client.query(
-        `INSERT INTO leave_policies (company_id, name, annual_leave_days, casual_leave_days, sick_leave_days, is_default)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-        [
-          claims.company_id,
-          input.name,
-          input.annualLeaveDays ?? 0,
-          input.casualLeaveDays ?? 0,
-          input.sickLeaveDays ?? 0,
-          input.isDefault ?? false,
-        ]
+      const policyResult = await client.query(
+        `INSERT INTO leave_policies (company_id, name, is_default) VALUES ($1, $2, $3) RETURNING *`,
+        [claims.company_id, input.name, input.isDefault ?? false]
       );
-      return rowToLeavePolicy(result.rows[0]);
+      const policy = policyResult.rows[0];
+      // v1 — 0033_effective_dating_leave_tax.sql's own migration strategy,
+      // applied identically at creation time: effective from today. Now
+      // routed through the shared EffectiveDatingEngine rather than its
+      // own hand-written INSERT — see effective-dating.engine.ts's doc
+      // comment for why.
+      const { row: version } = await this.effectiveDating.applyVersionedRow(client, {
+        table: "leave_policy_versions",
+        scope: { policy_id: policy.id },
+        extraInsertColumns: { company_id: claims.company_id },
+        data: {
+          annual_leave_days: input.annualLeaveDays ?? 0,
+          casual_leave_days: input.casualLeaveDays ?? 0,
+          sick_leave_days: input.sickLeaveDays ?? 0,
+        },
+      });
+      return rowToLeavePolicy(policy, version);
     });
   }
 
   async listLeavePolicies(claims: RequestClaims): Promise<LeavePolicyView[]> {
     await this.requireLeavePolicyManage(claims);
     return this.db.withClaims(claims, async (client) => {
-      const result = await client.query("SELECT * FROM leave_policies ORDER BY created_at ASC");
-      return result.rows.map(rowToLeavePolicy);
+      // One query for policies, one for their current versions — not N+1
+      // per policy, same discipline listGroups() already established.
+      const policies = await client.query("SELECT * FROM leave_policies ORDER BY created_at ASC");
+      const versionRows = await this.effectiveDating.getCurrentRows(client, {
+        table: "leave_policy_versions",
+        scope: { company_id: claims.company_id! },
+      });
+      const versionByPolicy = new Map(versionRows.map((v) => [v.policy_id, v]));
+      return policies.rows.map((row) => rowToLeavePolicy(row, versionByPolicy.get(row.id)));
     });
   }
 
+  /**
+   * Splits the patch into identity fields (name, isDefault — updated in
+   * place on `leave_policies`, same as before this migration) and
+   * entitlement fields (annual/casual/sick — versioned). A same-day
+   * collapse guard keeps this simple: if the current open version was
+   * already created TODAY, this edit updates it in place rather than
+   * opening a second version for the same day, which would otherwise
+   * require a version whose own effective_from postdates its
+   * effective_to (invalid) if edited twice in one day. Effective-dating
+   * here is day-granularity by design, not intra-day.
+   */
   async updateLeavePolicy(claims: RequestClaims, id: string, patch: UpdateLeavePolicyRequest): Promise<LeavePolicyView> {
     await this.requireLeavePolicyManage(claims);
     return this.db.withClaims(claims, async (client) => {
@@ -311,22 +349,54 @@ export class EmployeeGroupsService {
         ]);
       }
 
-      const result = await client.query(
-        `UPDATE leave_policies SET
-           name = $2, annual_leave_days = $3, casual_leave_days = $4, sick_leave_days = $5, is_default = $6,
-           updated_at = now()
-         WHERE id = $1
-         RETURNING *`,
-        [
-          id,
-          patch.name ?? before.name,
-          patch.annualLeaveDays ?? before.annual_leave_days,
-          patch.casualLeaveDays ?? before.casual_leave_days,
-          patch.sickLeaveDays ?? before.sick_leave_days,
-          patch.isDefault ?? before.is_default,
-        ]
+      const policyResult = await client.query(
+        `UPDATE leave_policies SET name = $2, is_default = $3, updated_at = now() WHERE id = $1 RETURNING *`,
+        [id, patch.name ?? before.name, patch.isDefault ?? before.is_default]
       );
-      return rowToLeavePolicy(result.rows[0]);
+      const policy = policyResult.rows[0];
+
+      const openVersion = await this.effectiveDating.getCurrentRow(client, {
+        table: "leave_policy_versions",
+        scope: { policy_id: id },
+      });
+      const entitlementChanged =
+        patch.annualLeaveDays !== undefined || patch.casualLeaveDays !== undefined || patch.sickLeaveDays !== undefined;
+
+      let version = openVersion!;
+      if (entitlementChanged) {
+        const nextAnnual = patch.annualLeaveDays ?? openVersion!.annual_leave_days;
+        const nextCasual = patch.casualLeaveDays ?? openVersion!.casual_leave_days;
+        const nextSick = patch.sickLeaveDays ?? openVersion!.sick_leave_days;
+
+        // Supersession (including the same-day collapse guard — see this
+        // method's own doc comment) now lives once, in
+        // EffectiveDatingEngine, rather than hand-written here.
+        const { row } = await this.effectiveDating.applyVersionedRow(client, {
+          table: "leave_policy_versions",
+          scope: { policy_id: id },
+          extraInsertColumns: { company_id: claims.company_id! },
+          data: { annual_leave_days: nextAnnual, casual_leave_days: nextCasual, sick_leave_days: nextSick },
+        });
+        version = row;
+      }
+
+      return rowToLeavePolicy(policy, version);
+    });
+  }
+
+  /** `GET /leave-policies/:id/history` — every version this policy has ever
+   * had, oldest first, the actual "reconstruct what was in effect on date
+   * X" deliverable 0033_effective_dating_leave_tax.sql exists for. */
+  async getLeavePolicyHistory(claims: RequestClaims, id: string): Promise<LeavePolicyVersionView[]> {
+    await this.requireLeavePolicyManage(claims);
+    return this.db.withClaims(claims, async (client) => {
+      const policy = await client.query("SELECT 1 FROM leave_policies WHERE id = $1", [id]);
+      if (policy.rowCount === 0) throw new NotFoundException("Leave policy not found");
+      const rows = await this.effectiveDating.getHistory(client, {
+        table: "leave_policy_versions",
+        scope: { policy_id: id },
+      });
+      return rows.map(rowToLeavePolicyVersion);
     });
   }
 
@@ -465,10 +535,20 @@ export class EmployeeGroupsService {
         byGroup.set(row.group_id, entry);
       }
 
+      // Resolved once per employee, keyed by the API-facing field name (not
+      // the raw column) so it can be handed straight to the shared
+      // RulesEngine, which knows nothing about `employees` or SQL columns —
+      // same "engine stays generic, caller resolves its own facts" boundary
+      // the engine's own doc comment establishes.
+      const employeeContext: Record<string, unknown> = {};
+      for (const [apiField, column] of Object.entries(CONDITION_FIELD_TO_COLUMN)) {
+        employeeContext[apiField] = employee[column];
+      }
+
       let winner: { groupId: string; policyId: string; specificity: number } | null = null;
       for (const [groupId, entry] of byGroup) {
         if (!entry.policyId) continue; // matches structurally, but no assignment for this policyType
-        const allMatch = entry.conditions.every((c) => employee[CONDITION_FIELD_TO_COLUMN[c.field]] === c.equals);
+        const allMatch = this.rulesEngine.evaluate(allEqual(entry.conditions), employeeContext);
         if (!allMatch) continue;
         if (!winner || entry.conditions.length > winner.specificity) {
           winner = { groupId, policyId: entry.policyId, specificity: entry.conditions.length };
@@ -522,9 +602,16 @@ export class EmployeeGroupsService {
       const employees = await client.query(
         "SELECT id, department, location, designation, employment_type, employment_status FROM employees WHERE employment_status = 'active'"
       );
+      const expression = allEqual(conditions.rows);
       return employees.rows
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .filter((e: any) => conditions.rows.every((c) => e[CONDITION_FIELD_TO_COLUMN[c.field]] === c.equals))
+        .filter((e: any) => {
+          const context: Record<string, unknown> = {};
+          for (const [apiField, column] of Object.entries(CONDITION_FIELD_TO_COLUMN)) {
+            context[apiField] = e[column];
+          }
+          return this.rulesEngine.evaluate(expression, context);
+        })
         .map((e) => e.id as string);
     });
   }

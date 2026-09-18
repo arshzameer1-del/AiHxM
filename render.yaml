@@ -1,0 +1,55 @@
+# Render Blueprint for the backend (apps/api) half of a Supabase + Render
+# + Netlify test/staging deployment. Using a blueprint instead of only
+# clicking through Render's dashboard means this service's shape (build
+# command, start command, which env vars it needs) lives in the repo and
+# survives a "wait, how was this configured again?" six months from now —
+# the same reasoning this codebase applies to keeping migrations as files
+# instead of hand-run SQL.
+#
+# `sync: false` on every secret means Render prompts for the real value
+# once in its dashboard rather than storing it here — nothing sensitive
+# ever needs to be committed to get this working.
+#
+# To use: in the Render dashboard, "New +" > "Blueprint", point it at this
+# repo, and Render reads this file directly. You'll be prompted once for
+# each `sync: false` value below — paste in the real ones from your
+# Supabase project and generated secrets (see apps/api/.env.production.example).
+services:
+  - type: web
+    name: boostfactor-api
+    runtime: node
+    plan: free
+    buildCommand: npm install && npx turbo run build --filter=@ai-hxm/api
+    startCommand: node apps/api/dist/main.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: PORT
+        value: "4000"
+      - key: DATABASE_URL
+        sync: false
+      - key: APP_DATABASE_URL
+        sync: false
+      - key: APP_ROLE_PASSWORD
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: MFA_ENCRYPTION_KEY
+        sync: false
+      - key: PLATFORM_ADMIN_BOOTSTRAP_EMAIL
+        sync: false
+      - key: PLATFORM_ADMIN_BOOTSTRAP_PASSWORD
+        sync: false
+      - key: PLATFORM_ADMIN_BOOTSTRAP_NAME
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+      - key: APP_BASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false

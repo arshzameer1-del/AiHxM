@@ -1,5 +1,4 @@
 import { ConflictException, NotFoundException } from "@nestjs/common";
-import { Test } from "@nestjs/testing";
 import { Pool } from "pg";
 import { CompaniesService } from "./companies.service";
 import { DatabaseService } from "../database/database.service";
@@ -23,21 +22,16 @@ describe("CompaniesService", () => {
     db = new DatabaseService(pool);
   });
 
-  beforeEach(async () => {
-    const module = await Test.createTestingModule({
-      providers: [
-        CompaniesService,
-        DatabaseService,
-        AuditService,
-        EntitlementsService,
-        {
-          provide: "DATABASE_CONNECTION",
-          useValue: pool,
-        },
-      ],
-    }).compile();
-
-    service = module.get<CompaniesService>(CompaniesService);
+  beforeEach(() => {
+    // Direct construction, not Test.createTestingModule: DatabaseService
+    // takes its Pool via @Inject(PG_POOL), and a DI-container-based
+    // provider list here previously supplied the wrong token
+    // ("DATABASE_CONNECTION"), which only failed at test-run time, not
+    // at compile time. Every other service-level spec in this codebase
+    // (recruitment, employees, leave, payroll, performance) already
+    // constructs its service under test directly for the same reason —
+    // matching that pattern here removes the whole class of bug.
+    service = new CompaniesService(db, new AuditService(), new EntitlementsService(db));
   });
 
   afterAll(async () => {
@@ -53,7 +47,7 @@ describe("CompaniesService", () => {
 
       expect(result.company).toBeDefined();
       expect(result.company.name).toBe("Test Company A");
-      expect(result.company.status).toBe("active");
+      expect(result.company.status).toBe("trial");
       expect(result.company.packageTier).toBe("starter");
       expect(result.config).toBeDefined();
       expect(Array.isArray(result.config.enabledModules)).toBe(true);

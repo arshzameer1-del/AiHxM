@@ -23,6 +23,7 @@ import { join } from "path";
 import { Pool, PoolClient } from "pg";
 import { loadEnvFile } from "../load-env";
 import { runInTenantContext, type RequestClaims } from "./tenant-context";
+import { resolveSslConfig } from "./db-connection.util";
 
 const SEED_CLAIMS: RequestClaims = {
   is_platform_admin: false,
@@ -275,7 +276,7 @@ async function main() {
     throw new Error("APP_DATABASE_URL is not set");
   }
 
-  const pool = new Pool({ connectionString });
+  const pool = new Pool({ connectionString, ssl: resolveSslConfig(connectionString) });
 
   try {
     const companyName = "Acme Corp Pakistan";
@@ -332,19 +333,33 @@ async function main() {
       const employeeMap = new Map<string, string>(); // email -> id
       console.log(`Creating ${SEED_EMPLOYEES.length} employees...`);
 
-      for (const emp of SEED_EMPLOYEES) {
+      for (let i = 0; i < SEED_EMPLOYEES.length; i++) {
+        const emp = SEED_EMPLOYEES[i];
+        // NOTE: `employees` has no `salary` column (compensation lives in
+        // the payroll module's own `employee_compensation` table, keyed by
+        // employee_id with an effective-dated history) — this script only
+        // owns the HR-record fields; `seed-demo-logins.ts` is what turns
+        // `emp.salary` below into real `employee_compensation` rows once
+        // this script has created the employees themselves.
+        //
+        // employee_number is NOT NULL with no default — the real create
+        // path (EmployeesService) assigns it from the company's atomic
+        // `employee_number_sequences` counter; this script just mirrors
+        // company_config's seeded format ("ACME" + 4-digit padding, set
+        // above) directly rather than pulling in that service.
+        const employeeNumber = `ACME${String(i + 1).padStart(4, "0")}`;
         const result = await client.query(
-          `INSERT INTO employees (company_id, first_name, last_name, email, department, employment_type, employment_status, salary)
+          `INSERT INTO employees (company_id, employee_number, first_name, last_name, email, department, employment_type, employment_status)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
           [
             companyId,
+            employeeNumber,
             emp.firstName,
             emp.lastName,
             emp.email,
             emp.department,
             emp.employmentType,
             "active",
-            emp.salary,
           ]
         );
         employeeMap.set(emp.email, result.rows[0].id as string);

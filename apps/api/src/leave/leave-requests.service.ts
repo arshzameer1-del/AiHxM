@@ -7,6 +7,7 @@ import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
 import { EmployeeGroupsService } from "../employee-groups/employee-groups.service";
 import { WorkflowService } from "../workflow/workflow.service";
+import { WorkScheduleResolutionService } from "../shifts/work-schedule-resolution.service";
 import type {
   LeaveBalanceView,
   LeaveRequestView,
@@ -88,16 +89,49 @@ function rowToLeaveRequest(row: any, employeeUserAccountId: string | null): Leav
 }
 
 function inclusiveDayCount(startDate: string, endDate: string): number {
-  // Calendar days, inclusive of both ends — deliberately NOT business-day
-  // aware (no weekend/holiday exclusion). A real Pakistan SMB payroll
-  // product would eventually need a company holiday calendar for this;
-  // not built yet (see KNOWN_ISSUES.md) since no holiday-calendar object
-  // exists anywhere else in this codebase either — inventing one just for
-  // this calculation would be exactly the kind of ahead-of-demand
-  // over-building Section 10 warns against.
+  // Calendar days, inclusive of both ends.
   const start = Date.UTC(...(startDate.split("-").map(Number) as [number, number, number]));
   const end = Date.UTC(...(endDate.split("-").map(Number) as [number, number, number]));
   return Math.round((end - start) / (24 * 60 * 60 * 1000)) + 1;
+}
+
+function addOneDayIso(dateIso: string): string {
+  const [y, m, d] = dateIso.split("-").map(Number) as [number, number, number];
+  return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
+}
+
+/**
+ * Holiday- AND weekly-pattern-aware day count. The holiday half shipped
+ * first (mandatory company holidays only — see
+ * `HolidaysService.countMandatoryHolidaysInRange`'s own doc comment for
+ * why optional holidays deliberately aren't subtracted); the "NOT
+ * business-day/weekend aware" half that comment used to name as a
+ * separately-tracked gap (KNOWN_ISSUES.md, "no work-week/weekend concept
+ * exists anywhere in this schema") is closed here, now that the Work
+ * Schedule & Employee Schedule Assignment Architecture gives every
+ * employee a real, configurable weekly pattern to check against.
+ *
+ * Deliberately walks day-by-day (rather than one aggregate query) and
+ * asks `WorkScheduleResolutionService.isWorkingDay()` per day: that
+ * method already returns `true` for every day when the employee has no
+ * schedule configured at all (see its own doc comment), so a tenant that
+ * hasn't set up Work Schedule/Shift Management yet gets EXACTLY today's
+ * calendar-days-minus-mandatory-holidays behavior, unchanged — the
+ * weekend/off-day exclusion only engages once a tenant has actually
+ * configured a weekly pattern with a day marked off.
+ */
+async function countLeaveDays(
+  client: PoolClient,
+  workSchedule: WorkScheduleResolutionService,
+  employeeId: string,
+  startDate: string,
+  endDate: string
+): Promise<number> {
+  let count = 0;
+  for (let cursor = startDate; cursor <= endDate; cursor = addOneDayIso(cursor)) {
+    if (await workSchedule.isWorkingDay(client, employeeId, cursor)) count++;
+  }
+  return count;
 }
 
 /**
@@ -133,7 +167,8 @@ export class LeaveRequestsService {
     private readonly entitlements: EntitlementsService,
     private readonly audit: AuditService,
     private readonly employeeGroups: EmployeeGroupsService,
-    private readonly workflow: WorkflowService
+    private readonly workflow: WorkflowService,
+    private readonly workSchedule: WorkScheduleResolutionService
   ) {}
 
   async submit(claims: RequestClaims, input: SubmitLeaveRequestRequest): Promise<SubmitLeaveRequestResponse> {
@@ -168,9 +203,6 @@ export class LeaveRequestsService {
       throw new ForbiddenException("Not permitted to submit a leave request for this employee");
     }
 
-    const daysRequested = inclusiveDayCount(input.startDate, input.endDate);
-    if (daysRequested <= 0) throw new BadRequestException("A leave request must span at least one day");
-
     // `unpaid` (Phase 12 addition — see Decision #14) is deliberately NOT
     // one of `LEAVE_TYPE_TO_POLICY_COLUMN`'s three entries: it has no
     // entitlement, no policy to resolve, and no balance to check or
@@ -201,14 +233,32 @@ export class LeaveRequestsService {
     const year = new Date(input.startDate).getUTCFullYear();
 
     const result = await this.db.withClaims(claims, async (client) => {
+      // Moved inside the transaction (rather than computed up front, as
+      // it was before Holiday Management existed) because it now needs a
+      // `client` to read the company's holiday calendar/weekly pattern —
+      // see `countLeaveDays`'s own doc comment above.
+      const daysRequested = await countLeaveDays(client, this.workSchedule, employee.id, input.startDate, input.endDate);
+      if (daysRequested <= 0) {
+        throw new BadRequestException(
+          "A leave request must span at least one day that isn't a company holiday"
+        );
+      }
+
       if (!isUnpaid) {
+        // Reads the CURRENT version's entitlement figures (effective_to IS
+        // NULL) — see migration 0033's header comment: live decision paths
+        // deliberately keep reading "current" only, not as-of any
+        // historical date, even though the figures now live in a
+        // versioned child table.
         const policyResult = await client.query<{
           annual_leave_days: number;
           casual_leave_days: number;
           sick_leave_days: number;
-        }>(`SELECT annual_leave_days, casual_leave_days, sick_leave_days FROM leave_policies WHERE id = $1`, [
-          resolved?.policyId,
-        ]);
+        }>(
+          `SELECT annual_leave_days, casual_leave_days, sick_leave_days
+           FROM leave_policy_versions WHERE policy_id = $1 AND effective_to IS NULL`,
+          [resolved?.policyId]
+        );
         if (policyResult.rowCount === 0) throw new NotFoundException("Resolved leave policy no longer exists");
         const entitledColumn = LEAVE_TYPE_TO_POLICY_COLUMN[input.leaveType as Exclude<typeof input.leaveType, "unpaid">];
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -250,7 +300,7 @@ export class LeaveRequestsService {
         metadata: { leaveType: input.leaveType, daysRequested, isOnBehalf },
       });
 
-      return { leaveRequestRow, overlapWarnings };
+      return { leaveRequestRow, overlapWarnings, daysRequested };
     });
 
     // A separate transaction — see this class's own doc comment on the
@@ -259,7 +309,7 @@ export class LeaveRequestsService {
       templateKey: WORKFLOW_TEMPLATE_KEY,
       objectKey: WORKFLOW_OBJECT_KEY,
       recordId: result.leaveRequestRow.id,
-      record: { leaveType: input.leaveType, daysRequested, department: employee.department },
+      record: { leaveType: input.leaveType, daysRequested: result.daysRequested, department: employee.department },
       subjectUserAccountId: employee.user_account_id,
     });
 
@@ -434,8 +484,10 @@ export class LeaveRequestsService {
     return this.db.withClaims(claims, async (client) => {
       let entitlements: { annual_leave_days: number; casual_leave_days: number; sick_leave_days: number } | null = null;
       if (resolved.policyId) {
+        // Same "current version only" read as submit() above.
         const policyResult = await client.query(
-          `SELECT annual_leave_days, casual_leave_days, sick_leave_days FROM leave_policies WHERE id = $1`,
+          `SELECT annual_leave_days, casual_leave_days, sick_leave_days
+           FROM leave_policy_versions WHERE policy_id = $1 AND effective_to IS NULL`,
           [resolved.policyId]
         );
         entitlements = policyResult.rows[0] ?? null;

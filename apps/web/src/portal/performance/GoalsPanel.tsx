@@ -1,12 +1,8 @@
 import { useEffect, useState } from "react";
 import type { GoalView } from "@boostfactor/shared-types";
 import { api } from "../../api/client";
-import { useIdentity } from "../../context/AuthContext";
 
 export function GoalsPanel() {
-  const identity = useIdentity();
-  const roleKeys = identity?.roleKeys ?? [];
-
   const [goals, setGoals] = useState<GoalView[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

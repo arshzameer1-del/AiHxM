@@ -11,6 +11,11 @@ import { WorkflowService } from "../workflow/workflow.service";
 import { LocalFileStorageService } from "../file-storage/local-file-storage.service";
 import { LeaveRequestsService } from "./leave-requests.service";
 import { AttendanceService } from "./attendance.service";
+import { ShiftsService } from "../shifts/shifts.service";
+import { WorkScheduleResolutionService } from "../shifts/work-schedule-resolution.service";
+import { HolidaysService } from "../holidays/holidays.service";
+import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
+import { RulesEngine } from "../rules-engine/rules-engine.engine";
 
 const FIXTURE_CLAIMS: RequestClaims = { is_platform_admin: true, company_id: null, sub: "leave-spec-fixtures" };
 
@@ -36,6 +41,8 @@ describe("LeaveRequestsService + AttendanceService", () => {
   let workflow: WorkflowService;
   let leaveRequests: LeaveRequestsService;
   let attendance: AttendanceService;
+  let holidays: HolidaysService;
+  let shiftsService: ShiftsService;
 
   let companyId: string;
   let hrAdminClaims: RequestClaims;
@@ -58,10 +65,13 @@ describe("LeaveRequestsService + AttendanceService", () => {
     entitlements = new EntitlementsService(db);
     audit = new AuditService();
     employees = new EmployeesService(db, rbac, entitlements, audit, new LocalFileStorageService());
-    groups = new EmployeeGroupsService(db, rbac, entitlements);
+    groups = new EmployeeGroupsService(db, rbac, entitlements, new EffectiveDatingEngine(), new RulesEngine());
     workflow = new WorkflowService(db, rbac, audit);
-    leaveRequests = new LeaveRequestsService(db, rbac, entitlements, audit, groups, workflow);
-    attendance = new AttendanceService(db, rbac, entitlements, audit);
+    holidays = new HolidaysService(db, rbac, entitlements, audit);
+    shiftsService = new ShiftsService(db, rbac, entitlements, audit, new EffectiveDatingEngine(), new RulesEngine());
+    const workSchedule = new WorkScheduleResolutionService(db, shiftsService, holidays);
+    leaveRequests = new LeaveRequestsService(db, rbac, entitlements, audit, groups, workflow, workSchedule);
+    attendance = new AttendanceService(db, rbac, entitlements, audit, workSchedule);
 
     const stamp = Date.now();
 
@@ -207,6 +217,105 @@ describe("LeaveRequestsService + AttendanceService", () => {
       const annual = balances.find((b) => b.leaveType === "annual")!;
       expect(annual.entitledDays).toBe(14);
       expect(annual.usedDays).toBe(0); // not yet approved — no decrement until decide()
+    });
+
+    it("excludes mandatory company holidays from the day count, but not optional ones", async () => {
+      // Holiday Management integration: a leave request spanning a
+      // mandatory (non-optional) company holiday shouldn't count that day
+      // — see countLeaveDays()'s own doc comment in leave-requests.service.ts.
+      // An optional holiday in the same range deliberately doesn't reduce
+      // the count (HolidaysService.countMandatoryHolidaysInRange's own
+      // comment on why).
+      await holidays.createHoliday(hrAdminClaims, { name: "Mandatory Test Holiday", holidayDate: "2026-04-08" });
+      await holidays.createHoliday(hrAdminClaims, {
+        name: "Optional Test Holiday",
+        holidayDate: "2026-04-09",
+        isOptional: true,
+      });
+
+      const response = await leaveRequests.submit(staffClaims, {
+        employeeId: staffEmployeeId,
+        leaveType: "annual",
+        startDate: "2026-04-06",
+        endDate: "2026-04-10",
+        reason: "Spans a holiday",
+      });
+
+      // 5 calendar days (Apr 6-10 inclusive), minus the one mandatory
+      // holiday (Apr 8) — the optional one (Apr 9) still counts.
+      expect(response.request.daysRequested).toBe(4);
+    });
+
+    it("rejects a single-day request that lands entirely on a mandatory holiday", async () => {
+      // Boundary case: countLeaveDays clamps at 0 rather than going
+      // negative — a request that is ENTIRELY a mandatory holiday should
+      // surface as the same clear "must span at least one real day" error
+      // a same-day startDate/endDate with zero calendar days would, not a
+      // confusing "0 days requested" success.
+      await holidays.createHoliday(hrAdminClaims, { name: "Whole-Request Holiday", holidayDate: "2026-04-20" });
+      await expect(
+        leaveRequests.submit(staffClaims, {
+          employeeId: staffEmployeeId,
+          leaveType: "annual",
+          startDate: "2026-04-20",
+          endDate: "2026-04-20",
+          reason: "Entirely a holiday",
+        })
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("also excludes days a configured weekly pattern marks off — the Work Schedule architecture's own closing of the weekend/business-day half of this same gap", async () => {
+      // Deliberately a FRESH employee (same manager as Sam, so the
+      // existing manager_of_submitter workflow template still resolves an
+      // approver) rather than reusing staffEmployeeId/staffClaims: this
+      // test's whole point is to assign a real Work Schedule with
+      // Friday/Saturday off, and doing that to Sam's own record would
+      // permanently change what later tests in this file see when THEY
+      // submit leave for Sam on a Friday — a real shared-fixture footgun,
+      // not a hypothetical one.
+      const weekendUserId = await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const result = await client.query(
+          "INSERT INTO user_accounts (email, password_hash) VALUES ($1, 'x') RETURNING id",
+          [`leave-weekend-${Date.now()}@example.com`]
+        );
+        return result.rows[0].id as string;
+      });
+      const weekendEmployee = await employees.create(hrAdminClaims, {
+        firstName: "Weekend",
+        lastName: "Pattern",
+        managerId: managerEmployeeId,
+        userAccountId: weekendUserId,
+      });
+      const schedule = await shiftsService.createShift(hrAdminClaims, {
+        name: "Mon-Thu + Sun",
+        startTime: "09:00",
+        endTime: "17:00",
+      });
+      await shiftsService.setWeeklyPattern(hrAdminClaims, schedule.id, {
+        days: Array.from({ length: 7 }, (_, dayOfWeek) => ({
+          dayOfWeek,
+          isWorking: dayOfWeek !== 5 && dayOfWeek !== 6,
+          startTime: dayOfWeek !== 5 && dayOfWeek !== 6 ? "09:00" : undefined,
+          endTime: dayOfWeek !== 5 && dayOfWeek !== 6 ? "17:00" : undefined,
+        })),
+      });
+      await shiftsService.assignShift(hrAdminClaims, {
+        employeeId: weekendEmployee.id,
+        shiftId: schedule.id,
+        effectiveFrom: "2026-01-01",
+      });
+
+      // 2026-05-04 is a Monday; the week Mon 5/4 - Sun 5/10 has Fri 5/8 and
+      // Sat 5/9 off under this pattern — 5 working days out of 7 calendar
+      // days, with no holiday in range to double-count against.
+      const response = await leaveRequests.submit(hrAdminClaims, {
+        employeeId: weekendEmployee.id,
+        leaveType: "annual",
+        startDate: "2026-05-04",
+        endDate: "2026-05-10",
+        reason: "Spans a scheduled weekend",
+      });
+      expect(response.request.daysRequested).toBe(5);
     });
 
     it("generates a non-blocking overlap notice for a same-manager teammate's overlapping request", async () => {

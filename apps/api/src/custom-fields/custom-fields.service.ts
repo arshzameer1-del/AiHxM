@@ -145,6 +145,25 @@ export class CustomFieldsService {
     });
   }
 
+  /**
+   * Total custom field definitions across every object key for this
+   * tenant — unlike `listDefinitions`, not scoped to one `objectKey`,
+   * because Configuration Center wants a single "how many custom fields
+   * exist" number, not a per-object breakdown. Same open-read posture as
+   * `listDefinitions` (definitions describe form shape, not sensitive
+   * data, so no permission gate here either).
+   */
+  async countAllDefinitions(claims: RequestClaims): Promise<number> {
+    if (!claims.company_id) return 0;
+    return this.db.withClaims(claims, async (client) => {
+      const result = await client.query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count FROM custom_field_definitions WHERE company_id = $1`,
+        [claims.company_id]
+      );
+      return Number(result.rows[0]?.count ?? 0);
+    });
+  }
+
   /** Every custom field value set on one record, keyed by fieldKey — the shape a module merges into its own record view. */
   async getValues(claims: RequestClaims, objectKey: string, recordId: string): Promise<Record<string, unknown>> {
     if (!claims.company_id) return {};

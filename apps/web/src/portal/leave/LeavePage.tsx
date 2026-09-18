@@ -1,9 +1,26 @@
 import { useEffect, useState } from "react";
-import type { AttendanceRecordView, EmployeeView, LeaveBalanceView, LeaveRequestView, OverlapWarning } from "@boostfactor/shared-types";
+import type {
+  AttendanceCorrectionRequestView,
+  AttendanceRecordView,
+  EmployeeView,
+  HolidayView,
+  LeaveBalanceView,
+  LeaveRequestView,
+  OverlapWarning,
+} from "@boostfactor/shared-types";
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
+import { AttendanceCorrectionForm } from "./AttendanceCorrectionForm";
 import { LeaveRequestForm, OverlapNotice } from "./LeaveRequestForm";
-import { LEAVE_TYPE_LABELS, STATUS_LABELS, STATUS_STYLES } from "./leaveLabels";
+import {
+  ATTENDANCE_STATUS_LABELS,
+  ATTENDANCE_STATUS_STYLES,
+  CORRECTION_STATUS_LABELS,
+  CORRECTION_STATUS_STYLES,
+  LEAVE_TYPE_LABELS,
+  STATUS_LABELS,
+  STATUS_STYLES,
+} from "./leaveLabels";
 
 function describeError(err: unknown): string {
   if (err instanceof ApiError) {
@@ -36,8 +53,10 @@ function MyLeaveCard({
   const [employee, setEmployee] = useState<EmployeeView | null>(null);
   const [balances, setBalances] = useState<LeaveBalanceView[] | null>(null);
   const [attendance, setAttendance] = useState<AttendanceRecordView[] | null>(null);
+  const [corrections, setCorrections] = useState<AttendanceCorrectionRequestView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [showCorrectionForm, setShowCorrectionForm] = useState(false);
   const [overlapWarnings, setOverlapWarnings] = useState<OverlapWarning[]>([]);
   const [clockBusy, setClockBusy] = useState(false);
   const [clockError, setClockError] = useState<string | null>(null);
@@ -47,11 +66,13 @@ function MyLeaveCard({
       api.getEmployee(employeeId),
       api.getLeaveBalances(employeeId),
       canClock ? api.listAttendance(employeeId) : Promise.resolve(null),
+      canClock ? api.listAttendanceCorrections(employeeId) : Promise.resolve(null),
     ])
-      .then(([emp, bal, att]) => {
+      .then(([emp, bal, att, corr]) => {
         setEmployee(emp);
         setBalances(bal);
         if (att) setAttendance(att);
+        if (corr) setCorrections(corr);
       })
       .catch((err) => setError(describeError(err)));
   }, [employeeId, refreshKey, canClock]);
@@ -101,14 +122,89 @@ function MyLeaveCard({
               Request Leave
             </button>
           )}
+          {canClock && !showCorrectionForm && (
+            <button
+              onClick={() => setShowCorrectionForm(true)}
+              className="text-sm font-semibold text-accent hover:underline"
+            >
+              Request correction
+            </button>
+          )}
         </div>
       </div>
 
       {clockError && <p className="text-xs text-danger mb-3">{clockError}</p>}
       {clockedIn && attendance && (
-        <p className="text-xs text-label-tertiary mb-3">
-          Clocked in since {new Date(attendance[0].clockInAt).toLocaleString()}
-        </p>
+        <div className="flex items-center gap-2 mb-3 flex-wrap">
+          <p className="text-xs text-label-tertiary">
+            Clocked in since {new Date(attendance[0].clockInAt).toLocaleString()}
+            {attendance[0].shiftName && ` · ${attendance[0].shiftName} shift`}
+          </p>
+          <span
+            className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${
+              ATTENDANCE_STATUS_STYLES[attendance[0].status]
+            }`}
+          >
+            {ATTENDANCE_STATUS_LABELS[attendance[0].status]}
+          </span>
+        </div>
+      )}
+
+      {canClock && attendance && attendance.length > 0 && (
+        <div className="mb-4">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-label-tertiary mb-2">Recent attendance</h3>
+          <div className="space-y-1.5">
+            {attendance.slice(0, 5).map((rec) => (
+              <div key={rec.id} className="flex items-center justify-between gap-3 text-xs">
+                <span className="text-label-secondary">
+                  {new Date(rec.clockInAt).toLocaleDateString()}
+                  {rec.shiftName && <span className="text-label-tertiary"> · {rec.shiftName}</span>}
+                </span>
+                <span
+                  className={`inline-block px-2 py-0.5 rounded-full font-semibold ${ATTENDANCE_STATUS_STYLES[rec.status]}`}
+                >
+                  {ATTENDANCE_STATUS_LABELS[rec.status]}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {showCorrectionForm && (
+        <div className="mb-4">
+          <AttendanceCorrectionForm
+            employeeId={employeeId}
+            onCancel={() => setShowCorrectionForm(false)}
+            onSubmitted={() => {
+              setShowCorrectionForm(false);
+              onChanged();
+            }}
+          />
+        </div>
+      )}
+
+      {canClock && corrections && corrections.length > 0 && (
+        <div className="mb-4">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-label-tertiary mb-2">
+            Correction requests
+          </h3>
+          <div className="space-y-1.5">
+            {corrections.slice(0, 5).map((c) => (
+              <div key={c.id} className="flex items-center justify-between gap-3 text-xs">
+                <span className="text-label-secondary">
+                  {c.requestedDate}
+                  {c.reason && <span className="text-label-tertiary"> · &ldquo;{c.reason}&rdquo;</span>}
+                </span>
+                <span
+                  className={`shrink-0 inline-block px-2 py-0.5 rounded-full font-semibold ${CORRECTION_STATUS_STYLES[c.status]}`}
+                >
+                  {CORRECTION_STATUS_LABELS[c.status]}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       {!balances ? (
@@ -364,6 +460,166 @@ function RequestsSection({
   );
 }
 
+function CorrectionRow({ request, onChanged }: { request: AttendanceCorrectionRequestView; onChanged: () => void }) {
+  const [deciding, setDeciding] = useState<"approved" | "rejected" | null>(null);
+  const [comment, setComment] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submitDecision(decision: "approved" | "rejected") {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.decideAttendanceCorrection(request.id, { decision, comment: comment || undefined });
+      setDeciding(null);
+      setComment("");
+      onChanged();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not record this decision.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="bg-card rounded-card p-4 shadow-sm">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="font-medium text-sm">
+            {request.employeeName}
+            {request.isOnBehalf && <span className="text-xs text-label-tertiary ml-1.5">(submitted by HR)</span>}
+          </div>
+          <div className="text-sm text-label-secondary mt-0.5">
+            {request.requestedDate}
+            {request.requestedClockIn && ` · in ${new Date(request.requestedClockIn).toLocaleTimeString()}`}
+            {request.requestedClockOut && ` · out ${new Date(request.requestedClockOut).toLocaleTimeString()}`}
+          </div>
+          <div className="text-xs text-label-tertiary mt-1">&ldquo;{request.reason}&rdquo;</div>
+        </div>
+      </div>
+
+      <div className="mt-3 pt-3 border-t border-black/5">
+        {deciding ? (
+          <div className="space-y-2">
+            <input
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              placeholder="Comment (optional)"
+              className="w-full rounded-lg border border-black/10 px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-accent"
+            />
+            <div className="flex gap-3 items-center">
+              <button
+                onClick={() => submitDecision(deciding)}
+                disabled={busy}
+                className={`text-xs font-semibold rounded-lg px-3 py-1.5 text-white disabled:opacity-50 ${
+                  deciding === "approved" ? "bg-success" : "bg-danger"
+                }`}
+              >
+                Confirm {deciding === "approved" ? "approval" : "rejection"}
+              </button>
+              <button onClick={() => setDeciding(null)} className="text-xs text-label-tertiary">
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex gap-4 items-center flex-wrap">
+            <button
+              onClick={() => setDeciding("approved")}
+              className="text-xs font-semibold text-green-700 hover:underline"
+            >
+              Approve
+            </button>
+            <button onClick={() => setDeciding("rejected")} className="text-xs font-semibold text-danger hover:underline">
+              Reject
+            </button>
+          </div>
+        )}
+        {error && <p className="text-xs text-danger mt-2">{error}</p>}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Attendance Policies increment 1 — the decider's queue.
+ * `listPendingAttendanceCorrections` already returns only what THIS
+ * caller can decide (their own reports for a line_manager, the whole
+ * company for hr_admin — AttendanceCorrectionsService.listPendingForDecider's
+ * own scoping), so there's no client-side filtering to get wrong here.
+ */
+function PendingCorrectionsSection({ refreshKey, onChanged }: { refreshKey: number; onChanged: () => void }) {
+  const [pending, setPending] = useState<AttendanceCorrectionRequestView[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api
+      .listPendingAttendanceCorrections()
+      .then(setPending)
+      .catch((err) => setError(describeError(err)));
+  }, [refreshKey]);
+
+  if (error || (pending && pending.length === 0)) return null;
+
+  return (
+    <section className="mt-8">
+      <h2 className="text-lg font-semibold mb-4">Pending Attendance Corrections</h2>
+      {!pending ? (
+        <div className="text-label-tertiary text-sm">Loading…</div>
+      ) : (
+        <div className="space-y-3">
+          {pending.map((c) => (
+            <CorrectionRow key={c.id} request={c} onChanged={onChanged} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Holiday Management — `holiday.view.all` is granted broadly to every
+ * real role (0031_holiday_management_seed.sql's own comment on why:
+ * non-sensitive, company-wide data, unlike shift assignments or leave
+ * requests), so this card renders for anyone with a session, not gated
+ * on any role check the way MyLeaveCard/PendingCorrectionsSection are.
+ * Filters client-side to today-or-later since the endpoint itself has no
+ * "upcoming" concept, only an optional ?year= — fine at the scale a
+ * single company's calendar actually reaches.
+ */
+function UpcomingHolidaysCard() {
+  const [holidays, setHolidays] = useState<HolidayView[] | null>(null);
+
+  useEffect(() => {
+    api
+      .listHolidays()
+      .then(setHolidays)
+      .catch(() => setHolidays([]));
+  }, []);
+
+  if (holidays === null) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  const upcoming = holidays.filter((h) => h.holidayDate >= today).slice(0, 5);
+  if (upcoming.length === 0) return null;
+
+  return (
+    <section className="bg-card rounded-card p-5 shadow-sm mb-6">
+      <h2 className="font-semibold text-sm uppercase tracking-wide text-label-tertiary mb-3">Upcoming Holidays</h2>
+      <div className="space-y-1.5">
+        {upcoming.map((h) => (
+          <div key={h.id} className="flex items-center justify-between gap-3 text-sm">
+            <span className="text-label-secondary">
+              {h.name}
+              {h.isOptional && <span className="text-xs text-label-tertiary"> (optional)</span>}
+            </span>
+            <span className="font-mono text-xs text-label-tertiary shrink-0">{h.holidayDate}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 /**
  * Task #50 — Leave & Attendance. Same "server already RBAC-scopes it, the
  * client just renders whatever comes back" design as Employee Core
@@ -408,6 +664,8 @@ export function LeavePage() {
         Request, approve, and track leave — plus clock in/out for your own attendance.
       </p>
 
+      <UpcomingHolidaysCard />
+
       {identity?.employeeId && canViewOwnEmployeeRecord && (
         <MyLeaveCard
           employeeId={identity.employeeId}
@@ -425,6 +683,8 @@ export function LeavePage() {
         refreshKey={refreshKey}
         onChanged={bump}
       />
+
+      {canDecide && <PendingCorrectionsSection refreshKey={refreshKey} onChanged={bump} />}
     </div>
   );
 }

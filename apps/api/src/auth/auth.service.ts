@@ -4,6 +4,7 @@ import { generateSecret, verify as verifyTotp, generateURI } from "otplib";
 import { createHash, randomBytes } from "crypto";
 import { DatabaseService } from "../database/database.service";
 import { EntitlementsService } from "../entitlements/entitlements.service";
+import { MailerService } from "../mailer/mailer.service";
 import type { RequestClaims } from "../database/tenant-context";
 import type { LoginResult, MeResponse, PasswordResetRequestResult, TenantRoleKey } from "@boostfactor/shared-types";
 import { decryptMfaSecret, encryptMfaSecret } from "./mfa-secret-crypto";
@@ -51,7 +52,8 @@ function sha256(input: string): string {
 export class AuthService {
   constructor(
     private readonly db: DatabaseService,
-    private readonly entitlements: EntitlementsService
+    private readonly entitlements: EntitlementsService,
+    private readonly mailer: MailerService
   ) {}
 
   // --- Login ------------------------------------------------------------
@@ -189,9 +191,48 @@ export class AuthService {
       );
     });
 
-    // Phase 6 (WRICEF Interfaces) wires real email/WhatsApp dispatch.
-    // Until then, the only honest way to make this flow testable end to
-    // end is to hand the token back directly — never in production.
+    // 2026-09-18: real delivery, via the shared MailerService, closes what
+    // was previously a genuinely broken production flow — with no SMTP
+    // configured and NODE_ENV=production, `devModeToken` was always
+    // undefined and nothing else ever delivered the token anywhere, so a
+    // real tenant's password reset silently went nowhere. This
+    // deliberately does NOT go through NotificationsService.dispatch():
+    // that method requires a tenant `company_id` to scope its
+    // `notification_log` row against (RLS-enforced), but this method runs
+    // PRE-AUTH under `SERVICE_CLAIMS` for ANY account — including a
+    // Platform Admin, who has no company at all — so it calls
+    // `MailerService` directly, the same "AuthService stays scoped to
+    // pre-authentication identity flows" boundary this class's own
+    // comment above already draws around itself.
+    //
+    // When SMTP isn't configured (still the default for dev/test/CI, and
+    // for any tenant that hasn't set it up), behavior is unchanged from
+    // before this increment: hand the raw token back directly outside
+    // production, exactly as already documented above, so the flow stays
+    // testable end to end without a real mail server. Once SMTP IS
+    // configured, the token now has a real, legitimate delivery path, so
+    // it's no longer echoed in the API response even in non-production —
+    // there's no reason to leak a real reset credential over HTTP once a
+    // real inbox delivers it instead. A delivery failure is logged but
+    // never surfaces to the caller: the response must stay identical
+    // whether or not the account exists (the enumeration-safety property
+    // this method already guarantees above), and a transient mail-provider
+    // outage shouldn't turn into information about which branch failed.
+    if (this.mailer.isConfigured()) {
+      const resetLink = `${process.env.APP_BASE_URL ?? "http://localhost:5173"}/reset-password?token=${rawToken}`;
+      try {
+        await this.mailer.sendMail({
+          to: email,
+          subject: "Reset your BoostFactor password",
+          text: `We received a request to reset your BoostFactor password.\n\nReset it here: ${resetLink}\n\nThis link expires in ${RESET_TOKEN_TTL_MINUTES} minutes. If you didn't request this, you can safely ignore this email — your password hasn't been changed.`,
+        });
+      } catch {
+        // Already logged inside MailerService; swallow here so a
+        // provider outage never changes this method's response shape.
+      }
+      return { message: genericMessage };
+    }
+
     const devModeToken = process.env.NODE_ENV === "production" ? undefined : rawToken;
     return { message: genericMessage, devModeToken };
   }

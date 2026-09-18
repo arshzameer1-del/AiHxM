@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import type { ReviewCycleView } from "@boostfactor/shared-types";
 import { api } from "../../api/client";
-import { useIdentity } from "../../context/AuthContext";
+import { useAuth } from "../../auth/AuthContext";
 import { CreateCycleModal } from "./modals/CreateCycleModal";
 
 export function ReviewCyclesPanel() {
-  const identity = useIdentity();
+  const { identity } = useAuth();
   const roleKeys = identity?.roleKeys ?? [];
 
   const [cycles, setCycles] = useState<ReviewCycleView[]>([]);

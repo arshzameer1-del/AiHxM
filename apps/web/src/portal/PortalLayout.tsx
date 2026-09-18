@@ -32,6 +32,14 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): 
     items.push({ to: "/app/profile", label: "My Profile" });
   }
 
+  // Configuration Center is a read-only index over config domains this
+  // login can already reach some other way (Admin Center, System Admin,
+  // Payroll Settings) — shown to the same roles that see at least one of
+  // those, so it never promises a screen with nothing behind it.
+  if (hasRole("hr_admin", "system_admin")) {
+    items.push({ to: "/app/configuration-center", label: "Configuration Center" });
+  }
+
   if (hasRole("hr_admin")) {
     items.push({ to: "/app/admin", label: "Admin Center" });
   }
@@ -53,6 +61,15 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): 
 
   if (hasModule("performance") && roleKeys.length > 0) {
     items.push({ to: "/app/performance", label: "Performance" });
+  }
+
+  // Phase 12 (Decision #14) — 0023_payroll_seed.sql grants
+  // `payroll.manage.all`/`payroll_review.view.self` only to hr_admin/
+  // employee_self_service respectively (no partial-admin role), so
+  // those are the only two role keys that ever have anything to see on
+  // this route; a line_manager-only session gets no nav entry here.
+  if (hasModule("payroll") && hasRole("hr_admin", "employee_self_service")) {
+    items.push({ to: "/app/payroll", label: "Payroll" });
   }
 
   return items;

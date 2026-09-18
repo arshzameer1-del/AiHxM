@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import QRCode from "qrcode";
 import { useAuth } from "../auth/AuthContext";
 import { api, ApiError } from "../api/client";
@@ -22,6 +22,7 @@ type Step =
 export function LoginPage() {
   const { setSessionToken } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [step, setStep] = useState<Step>({ name: "password" });
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -30,7 +31,12 @@ export function LoginPage() {
   const [newPassword, setNewPassword] = useState("");
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [info, setInfo] = useState<string | null>(null);
+  // Carries SignupPage's "your company is ready" hand-off message — the
+  // only other place besides password reset that lands here with
+  // something to tell the person before they've done anything yet.
+  const [info, setInfo] = useState<string | null>(
+    (location.state as { info?: string } | null)?.info ?? null
+  );
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -186,6 +192,12 @@ export function LoginPage() {
             >
               Forgot your password?
             </button>
+            <p className="text-center text-xs text-label-tertiary mt-3">
+              New to BoostFactor?{" "}
+              <Link to="/signup" className="text-accent font-medium hover:underline">
+                Create your company
+              </Link>
+            </p>
           </form>
         )}
 

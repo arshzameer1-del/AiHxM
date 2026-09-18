@@ -25,6 +25,7 @@ import { Pool } from "pg";
 import { loadEnvFile } from "../load-env";
 import { runInTenantContext, type RequestClaims } from "./tenant-context";
 import { hashPassword } from "../auth/password";
+import { resolveSslConfig } from "./db-connection.util";
 
 const SEED_CLAIMS: RequestClaims = { is_platform_admin: false, is_service: true, sub: "seed-script" };
 
@@ -50,7 +51,7 @@ async function main() {
     throw new Error("PLATFORM_ADMIN_BOOTSTRAP_PASSWORD must be at least 10 characters");
   }
 
-  const pool = new Pool({ connectionString });
+  const pool = new Pool({ connectionString, ssl: resolveSslConfig(connectionString) });
 
   try {
     await runInTenantContext(pool, SEED_CLAIMS, async (client) => {

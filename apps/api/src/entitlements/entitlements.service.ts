@@ -17,6 +17,11 @@ import { MODULE_KEYS, type ModuleKey, type PackageTier } from "@boostfactor/shar
  * Admin "never touches a tenant's HR data," including never getting to
  * skip past its licensing gate). `isModuleEnabled` returns `false`
  * immediately for such a session rather than special-casing it to `true`.
+ *
+ * Phase 14 note: this read runs on nearly every authenticated request, and
+ * was evaluated as a caching candidate. It was deliberately NOT cached —
+ * see `docs/performance-caching-strategy.md` for why an authorization gate
+ * is the wrong place to start, and where Phase 14 caching landed instead.
  */
 @Injectable()
 export class EntitlementsService {

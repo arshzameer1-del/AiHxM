@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import type { PerformanceReviewView } from "@boostfactor/shared-types";
 import { api } from "../../api/client";
-import { useIdentity } from "../../context/AuthContext";
+import { useAuth } from "../../auth/AuthContext";
 
 export function PerformanceReviewsPanel() {
-  const identity = useIdentity();
+  const { identity } = useAuth();
   const roleKeys = identity?.roleKeys ?? [];
 
   const [reviews, setReviews] = useState<PerformanceReviewView[]>([]);
@@ -31,7 +31,7 @@ export function PerformanceReviewsPanel() {
 
   const handleSubmitSelfAssessment = async (reviewId: string, assessment: string) => {
     try {
-      const updated = await api.submitSelfAssessment(reviewId, { assessment });
+      const updated = await api.submitSelfAssessment(reviewId, { selfAssessment: assessment });
       setReviews((prev) => prev.map((r) => (r.id === reviewId ? updated : r)));
       if (selectedReview) setSelectedReview(updated);
     } catch (err) {
@@ -45,7 +45,10 @@ export function PerformanceReviewsPanel() {
     rating: number
   ) => {
     try {
-      const updated = await api.submitManagerAssessment(reviewId, { assessment, rating });
+      const updated = await api.submitManagerAssessment(reviewId, {
+        managerAssessment: assessment,
+        managerRating: rating,
+      });
       setReviews((prev) => prev.map((r) => (r.id === reviewId ? updated : r)));
       if (selectedReview) setSelectedReview(updated);
     } catch (err) {
@@ -199,6 +202,9 @@ function AssessmentForm({
 
   return (
     <div className="space-y-2">
+      <span className="block text-xs font-medium uppercase tracking-wide text-gray-500">
+        {isManager ? "Manager assessment" : "Self assessment"}
+      </span>
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}

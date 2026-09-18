@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { WorkflowTemplatesPanel } from "./WorkflowTemplatesPanel";
 import { RolesAccessPanel } from "./RolesAccessPanel";
 
@@ -9,6 +10,13 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "access", label: "Roles & Access" },
 ];
 
+// Configuration Center links here with ?tab=workflows (0032_configuration_center.sql).
+const VALID_TABS: Tab[] = ["workflows", "access"];
+function initialTabFrom(searchParams: URLSearchParams): Tab {
+  const requested = searchParams.get("tab");
+  return (VALID_TABS as string[]).includes(requested ?? "") ? (requested as Tab) : "workflows";
+}
+
 /**
  * Task #52 (Decision #20) — System Admin, modeled on SAP SuccessFactors'
  * Admin Center: a role separate from hr_admin that configures approval
@@ -18,7 +26,8 @@ const TABS: { key: Tab; label: string }[] = [
  * engine's own user_role_assignments) — nothing here re-implements either.
  */
 export function SystemAdminPage() {
-  const [tab, setTab] = useState<Tab>("workflows");
+  const [searchParams] = useSearchParams();
+  const [tab, setTab] = useState<Tab>(() => initialTabFrom(searchParams));
 
   return (
     <div>

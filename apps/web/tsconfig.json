@@ -17,5 +17,6 @@
     "noFallthroughCasesInSwitch": true
   },
   "include": ["src"],
+  "exclude": ["src/**/*.spec.ts", "src/**/*.e2e.spec.ts"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

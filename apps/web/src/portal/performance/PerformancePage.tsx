@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { ReusableEpisodeBox, ReusableEpisodeTitle } from "../ReusableEpisode";
 import { ReviewCyclesPanel } from "./ReviewCyclesPanel";
 import { GoalsPanel } from "./GoalsPanel";
 import { PerformanceReviewsPanel } from "./PerformanceReviewsPanel";
@@ -12,9 +11,7 @@ export function PerformancePage() {
 
   return (
     <div className="space-y-4">
-      <ReusableEpisodeBox>
-        <ReusableEpisodeTitle>Performance</ReusableEpisodeTitle>
-      </ReusableEpisodeBox>
+      <h1 className="text-2xl font-bold tracking-tight mb-1">Performance</h1>
 
       {/* Tab Navigation */}
       <div className="border-b border-gray-200">

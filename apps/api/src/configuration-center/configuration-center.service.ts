@@ -1,0 +1,113 @@
+import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { DatabaseService } from "../database/database.service";
+import type { RequestClaims } from "../database/tenant-context";
+import { EmployeeGroupsService } from "../employee-groups/employee-groups.service";
+import { ShiftsService } from "../shifts/shifts.service";
+import { HolidaysService } from "../holidays/holidays.service";
+import { WorkflowService } from "../workflow/workflow.service";
+import { PayrollService } from "../payroll/payroll.service";
+import { CustomFieldsService } from "../custom-fields/custom-fields.service";
+import type { ConfigurationDomainSummary } from "@boostfactor/shared-types";
+
+type RegistryRow = {
+  domain_key: string;
+  label: string;
+  description: string;
+  admin_route: string;
+  supports_effective_dating: boolean;
+};
+
+/**
+ * Configuration Center (0032_configuration_center.sql): a single, real
+ * screen that answers "what is configurable in this system" without
+ * already knowing which of six scattered admin screens to open. This is
+ * deliberately NOT a new store of configuration -- every count below comes
+ * from calling that domain's own existing service method with the
+ * caller's real claims, never a duplicated SQL query against that
+ * domain's table. Each of those methods already enforces "entitlement,
+ * then RBAC" internally (Section 20 of the master audit: AI/UI callers
+ * must go through the same Service layer everything else does, never a
+ * parallel data-access path) -- so a ForbiddenException here means
+ * exactly what it would mean calling that module's own endpoint
+ * directly: this caller doesn't currently have access to that domain,
+ * and it silently loses its card rather than failing the whole summary.
+ */
+@Injectable()
+export class ConfigurationCenterService {
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly employeeGroups: EmployeeGroupsService,
+    private readonly shifts: ShiftsService,
+    private readonly holidays: HolidaysService,
+    private readonly workflow: WorkflowService,
+    private readonly payroll: PayrollService,
+    private readonly customFields: CustomFieldsService
+  ) {}
+
+  async getSummary(claims: RequestClaims): Promise<ConfigurationDomainSummary[]> {
+    const registryRows = await this.db.withClaims(claims, async (client) => {
+      const result = await client.query<RegistryRow>(
+        `SELECT domain_key, label, description, admin_route, supports_effective_dating
+         FROM configuration_registry ORDER BY sort_order ASC`
+      );
+      return result.rows;
+    });
+
+    const summaries: ConfigurationDomainSummary[] = [];
+    for (const row of registryRows) {
+      const count = await this.countFor(row.domain_key, claims);
+      if (count === null) continue; // no access to this domain -- omit the card entirely
+      summaries.push({
+        domainKey: row.domain_key,
+        label: row.label,
+        description: row.description,
+        adminRoute: row.admin_route,
+        supportsEffectiveDating: row.supports_effective_dating,
+        count,
+      });
+    }
+    return summaries;
+  }
+
+  /** Returns null (not 0) when the caller has no view/manage access to this domain at all. */
+  private async countFor(domainKey: string, claims: RequestClaims): Promise<number | null> {
+    try {
+      switch (domainKey) {
+        case "leave_policy":
+          return (await this.employeeGroups.listLeavePolicies(claims)).length;
+        case "employee_group":
+          return (await this.employeeGroups.listGroups(claims)).length;
+        case "shift":
+          return (await this.shifts.listShifts(claims)).length;
+        case "holiday":
+          return (await this.holidays.listHolidays(claims)).length;
+        case "workflow_template":
+          return (await this.workflow.listTemplates(claims)).length;
+        case "custom_field":
+          return await this.customFields.countAllDefinitions(claims);
+        case "tax_slab":
+          // listTaxSlabs lazily seeds the default FBR bracket table the
+          // first time a payroll-enabled tenant has none -- an accepted
+          // side effect of reusing the real method rather than forking a
+          // read-only counting path; it's the same seed that would fire
+          // the first time this tenant opens the real Payroll Settings
+          // screen, just possibly a little earlier.
+          return (await this.payroll.listTaxSlabs(claims)).length;
+        default:
+          return null;
+      }
+    } catch (err) {
+      // ForbiddenException: entitled but lacks the permission.
+      // NotFoundException: the module itself isn't entitled for this
+      // tenant at all -- every domain service here deliberately 404s
+      // rather than 403s on a disabled module (Decision #5: "a disabled
+      // module 404s, never 403 or an empty list", so a caller can't
+      // distinguish "not licensed" from "licensed but no rows"). Either
+      // way it means "no card for this caller", never "fail the whole
+      // summary" -- a tenant with Payroll disabled must still see every
+      // OTHER domain's card, not a blanket 404 from one omitted domain.
+      if (err instanceof ForbiddenException || err instanceof NotFoundException) return null;
+      throw err;
+    }
+  }
+}

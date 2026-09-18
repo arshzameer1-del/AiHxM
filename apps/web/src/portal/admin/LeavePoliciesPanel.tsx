@@ -1,6 +1,10 @@
 import { FormEvent, useEffect, useState } from "react";
-import type { LeavePolicyView } from "@boostfactor/shared-types";
+import type { LeavePolicyVersionView, LeavePolicyView } from "@boostfactor/shared-types";
 import { api, ApiError } from "../../api/client";
+
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
 
 function describeError(err: unknown): string {
   if (err instanceof ApiError) {
@@ -145,9 +149,46 @@ function PolicyForm({
   );
 }
 
+/**
+ * Migration 0033's whole reason to exist, surfaced: every entitlement
+ * generation a policy has ever had, oldest first, so an admin can
+ * reconstruct "what were annual leave days set to on date X" for a
+ * dispute without touching the database directly.
+ */
+function PolicyHistory({ policyId }: { policyId: string }) {
+  const [history, setHistory] = useState<LeavePolicyVersionView[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api
+      .getLeavePolicyHistory(policyId)
+      .then(setHistory)
+      .catch((err) => setError(describeError(err)));
+  }, [policyId]);
+
+  if (error) return <p className="text-xs text-danger mt-2">{error}</p>;
+  if (!history) return <p className="text-xs text-label-tertiary mt-2">Loading history…</p>;
+
+  return (
+    <div className="mt-3 border-t border-black/5 pt-3 space-y-2">
+      {[...history].reverse().map((version) => (
+        <div key={version.id} className="flex items-center justify-between text-xs">
+          <span className="font-mono text-label-secondary">
+            {version.annualLeaveDays}A / {version.casualLeaveDays}C / {version.sickLeaveDays}S
+          </span>
+          <span className="text-label-tertiary">
+            {formatDate(version.effectiveFrom)} – {version.effectiveTo ? formatDate(version.effectiveTo) : "present"}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function PolicyRow({ policy, onChanged }: { policy: LeavePolicyView; onChanged: () => void }) {
   const [editing, setEditing] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
 
   async function handleDelete() {
     if (!window.confirm(`Delete the "${policy.name}" policy? This cannot be undone.`)) return;
@@ -192,11 +233,15 @@ function PolicyRow({ policy, onChanged }: { policy: LeavePolicyView; onChanged: 
           <button onClick={() => setEditing(true)} className="text-xs font-semibold text-accent hover:underline">
             Edit
           </button>
+          <button onClick={() => setShowHistory((s) => !s)} className="text-xs font-semibold text-accent hover:underline">
+            {showHistory ? "Hide history" : "History"}
+          </button>
           <button onClick={handleDelete} className="text-xs font-medium text-label-tertiary hover:text-danger">
             Delete
           </button>
         </div>
       </div>
+      <p className="text-xs text-label-tertiary mb-2">In effect since {formatDate(policy.effectiveFrom)}</p>
       <div className="grid grid-cols-3 gap-4 text-sm">
         <div>
           <div className="text-xs uppercase tracking-wide text-label-tertiary mb-0.5">Annual</div>
@@ -212,6 +257,7 @@ function PolicyRow({ policy, onChanged }: { policy: LeavePolicyView; onChanged: 
         </div>
       </div>
       {deleteError && <p className="text-xs text-danger mt-2">{deleteError}</p>}
+      {showHistory && <PolicyHistory policyId={policy.id} />}
     </div>
   );
 }

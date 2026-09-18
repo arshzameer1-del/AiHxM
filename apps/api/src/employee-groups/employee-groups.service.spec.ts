@@ -7,6 +7,8 @@ import { EntitlementsService } from "../entitlements/entitlements.service";
 import { AuditService } from "../audit/audit.service";
 import { EmployeesService } from "../employees/employees.service";
 import { LocalFileStorageService } from "../file-storage/local-file-storage.service";
+import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
+import { RulesEngine } from "../rules-engine/rules-engine.engine";
 import { EmployeeGroupsService } from "./employee-groups.service";
 
 const FIXTURE_CLAIMS: RequestClaims = { is_platform_admin: true, company_id: null, sub: "employee-groups-spec-fixtures" };
@@ -33,7 +35,7 @@ describe("EmployeeGroupsService", () => {
     const rbac = new RbacService(db);
     const entitlements = new EntitlementsService(db);
     const audit = new AuditService();
-    groups = new EmployeeGroupsService(db, rbac, entitlements);
+    groups = new EmployeeGroupsService(db, rbac, entitlements, new EffectiveDatingEngine(), new RulesEngine());
     employees = new EmployeesService(db, rbac, entitlements, audit, new LocalFileStorageService());
   });
 
@@ -374,6 +376,112 @@ describe("EmployeeGroupsService", () => {
       await groups.unassignPolicy(hrAdminClaims, group.id, "leave");
       const afterUnassign = await groups.getGroup(hrAdminClaims, group.id);
       expect(afterUnassign.policyAssignments).toEqual([]);
+    });
+  });
+
+  describe("leave policy versioning (migration 0033 — effective-dating framework)", () => {
+    let companyId: string;
+    let hrAdminClaims: RequestClaims;
+
+    beforeAll(async () => {
+      companyId = await createFixtureCompany("Versioning Co");
+      const hrAdminUserId = await createUser(`versioning-hr-${Date.now()}@example.com`);
+      await assignRole(hrAdminUserId, companyId, "hr_admin");
+      hrAdminClaims = { is_platform_admin: false, company_id: companyId, sub: hrAdminUserId };
+    });
+
+    it("createLeavePolicy opens a v1 version effective today, and it's the only history entry", async () => {
+      const policy = await groups.createLeavePolicy(hrAdminClaims, {
+        name: "Versioned Policy",
+        annualLeaveDays: 12,
+        casualLeaveDays: 6,
+        sickLeaveDays: 6,
+      });
+      const today = new Date().toISOString().slice(0, 10);
+      expect(policy.effectiveFrom).toBe(today);
+
+      const history = await groups.getLeavePolicyHistory(hrAdminClaims, policy.id);
+      expect(history).toHaveLength(1);
+      expect(history[0]).toEqual(
+        expect.objectContaining({
+          policyId: policy.id,
+          annualLeaveDays: 12,
+          casualLeaveDays: 6,
+          sickLeaveDays: 6,
+          effectiveFrom: today,
+          effectiveTo: null,
+        })
+      );
+    });
+
+    it("same-day collapse: two entitlement updates on the same day update the one open version in place, not two", async () => {
+      const policy = await groups.createLeavePolicy(hrAdminClaims, { name: "Same-Day Policy", annualLeaveDays: 10 });
+
+      const afterFirst = await groups.updateLeavePolicy(hrAdminClaims, policy.id, { annualLeaveDays: 15 });
+      expect(afterFirst.annualLeaveDays).toBe(15);
+      const afterSecond = await groups.updateLeavePolicy(hrAdminClaims, policy.id, { annualLeaveDays: 20 });
+      expect(afterSecond.annualLeaveDays).toBe(20);
+
+      const history = await groups.getLeavePolicyHistory(hrAdminClaims, policy.id);
+      // Still exactly one version — both edits collapsed into it — since a
+      // second close-and-reopen on the same day would otherwise require an
+      // invalid effective_to < effective_from range.
+      expect(history).toHaveLength(1);
+      expect(history[0].annualLeaveDays).toBe(20);
+      expect(history[0].effectiveTo).toBeNull();
+    });
+
+    it("an entitlement change on a version opened on a PRIOR day closes it and opens a new one, preserving history", async () => {
+      const policy = await groups.createLeavePolicy(hrAdminClaims, { name: "Backdated Policy", annualLeaveDays: 10 });
+
+      // Simulate "this version has been in effect since before today" by
+      // backdating its effective_from directly — updateLeavePolicy() itself
+      // has no notion of dates other than CURRENT_DATE, so this is the only
+      // way to exercise the "not opened today" branch deterministically.
+      await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query(
+          "UPDATE leave_policy_versions SET effective_from = CURRENT_DATE - INTERVAL '30 days' WHERE policy_id = $1",
+          [policy.id]
+        )
+      );
+
+      const updated = await groups.updateLeavePolicy(hrAdminClaims, policy.id, { annualLeaveDays: 16 });
+      expect(updated.annualLeaveDays).toBe(16);
+      const today = new Date().toISOString().slice(0, 10);
+      expect(updated.effectiveFrom).toBe(today);
+
+      const history = await groups.getLeavePolicyHistory(hrAdminClaims, policy.id);
+      expect(history).toHaveLength(2);
+      // Oldest first.
+      expect(history[0]).toEqual(
+        expect.objectContaining({ annualLeaveDays: 10, effectiveTo: expect.any(String) })
+      );
+      expect(history[1]).toEqual(
+        expect.objectContaining({ annualLeaveDays: 16, effectiveFrom: today, effectiveTo: null })
+      );
+      // The closed version's effective_to is the day immediately before the
+      // new version's effective_from — no gap, no overlap.
+      const closedTo = new Date(history[0].effectiveTo as string);
+      const reopenedFrom = new Date(history[1].effectiveFrom);
+      expect(reopenedFrom.getTime() - closedTo.getTime()).toBe(24 * 60 * 60 * 1000);
+    });
+
+    it("updating only identity fields (name) leaves the open version untouched — no new version, no history growth", async () => {
+      const policy = await groups.createLeavePolicy(hrAdminClaims, { name: "Rename Me", annualLeaveDays: 11 });
+      await groups.updateLeavePolicy(hrAdminClaims, policy.id, { name: "Renamed" });
+
+      const history = await groups.getLeavePolicyHistory(hrAdminClaims, policy.id);
+      expect(history).toHaveLength(1);
+      expect(history[0].annualLeaveDays).toBe(11);
+
+      const fetched = (await groups.listLeavePolicies(hrAdminClaims)).find((p) => p.id === policy.id);
+      expect(fetched?.name).toBe("Renamed");
+    });
+
+    it("getLeavePolicyHistory 404s for a nonexistent policy and is gated by leave_policy.manage", async () => {
+      await expect(groups.getLeavePolicyHistory(hrAdminClaims, "00000000-0000-0000-0000-000000000000")).rejects.toThrow(
+        NotFoundException
+      );
     });
   });
 });
