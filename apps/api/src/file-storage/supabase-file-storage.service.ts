@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { randomUUID } from "node:crypto";
 import * as path from "node:path";
+import WebSocket from "ws";
 import type { FileStorageService, StoredFile } from "./file-storage.interface";
 
 /**
@@ -63,6 +64,22 @@ export class SupabaseFileStorageService implements FileStorageService {
     }
     this.client = createClient(url, serviceRoleKey, {
       auth: { persistSession: false, autoRefreshToken: false },
+      // supabase-js's createClient() unconditionally constructs a
+      // RealtimeClient even though this service never subscribes to
+      // realtime channels — it only uses Storage. On Render (Node 20.x,
+      // no native global WebSocket) that constructor throws synchronously
+      // with "Node.js detected but native WebSocket not found", which
+      // crashed the whole app at boot the moment this class was
+      // instantiated. Node 22+ has a native WebSocket global and wouldn't
+      // need this, but Render's runtime here is 20.20.2 — passing an
+      // explicit implementation (the `ws` package) avoids the throw
+      // regardless of Node version, and since nothing in this service uses
+      // realtime, the transport itself is never actually opened.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- `ws`'s
+      // WebSocket is structurally compatible with the RealtimeClient's
+      // expected WebSocketLikeConstructor, but supabase-js doesn't export
+      // that type from its public entrypoint to name it here.
+      realtime: { transport: WebSocket as any },
     });
     this.bucket = process.env.SUPABASE_STORAGE_BUCKET || "aihxm-files";
   }
