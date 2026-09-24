@@ -6,31 +6,31 @@ version: "3.9"
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: boostfactor_postgres
+    container_name: aihxm_postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: boostfactor
-      POSTGRES_PASSWORD: boostfactor_dev
-      POSTGRES_DB: boostfactor
+      POSTGRES_USER: aihxm
+      POSTGRES_PASSWORD: aihxm_dev
+      POSTGRES_DB: aihxm
     ports:
       - "5432:5432"
     volumes:
-      - boostfactor_postgres_data:/var/lib/postgresql/data
+      - aihxm_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U boostfactor"]
+      test: ["CMD-SHELL", "pg_isready -U aihxm"]
       interval: 5s
       timeout: 5s
       retries: 10
 
   redis:
     image: redis:7-alpine
-    container_name: boostfactor_redis
+    container_name: aihxm_redis
     restart: unless-stopped
     ports:
       - "6379:6379"
     volumes:
-      - boostfactor_redis_data:/data
+      - aihxm_redis_data:/data
 
 volumes:
-  boostfactor_postgres_data:
-  boostfactor_redis_data:
+  aihxm_postgres_data:
+  aihxm_redis_data:

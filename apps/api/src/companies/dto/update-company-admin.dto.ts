@@ -1,5 +1,5 @@
 import { IsIn } from "class-validator";
-import type { CompanyAdminStatus } from "@boostfactor/shared-types";
+import type { CompanyAdminStatus } from "@aihxm/shared-types";
 
 const STATUSES: CompanyAdminStatus[] = ["active", "locked"];
 

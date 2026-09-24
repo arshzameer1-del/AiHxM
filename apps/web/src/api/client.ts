@@ -8,6 +8,7 @@ import type {
   AttendanceCorrectionRequestView,
   AttendanceRecordView,
   AuditLogEntry,
+  BrandingAssetSlot,
   CalculatePayrollRunResponse,
   CalibrateReviewRequest,
   CandidateView,
@@ -18,6 +19,7 @@ import type {
   CompanyConfig,
   CompanyDashboardRow,
   CompanyDetail,
+  CompanyListFilters,
   CompensationView,
   CreateApplicationRequest,
   CreateCandidateRequest,
@@ -48,10 +50,12 @@ import type {
   EmployeeView,
   ExtendOfferRequest,
   GoalView,
+  HealthCheckResult,
   HolidayView,
   ConfigurationDomainSummary,
   ImpersonateResponse,
   InitiateOffboardingRequest,
+  IntegrationProviderKey,
   JobHistoryEntryView,
   JobRequisitionView,
   LeaveBalanceView,
@@ -60,6 +64,7 @@ import type {
   LeaveRequestView,
   LoginResult,
   MeResponse,
+  ModuleCatalogEntry,
   ModuleKey,
   MoveApplicationStageRequest,
   OffboardingChecklistItemView,
@@ -67,12 +72,14 @@ import type {
   OfferView,
   OnboardingChecklistItemView,
   OnboardingItemTemplateView,
+  PackageTier,
   PasswordResetRequestResult,
   PayrollRunView,
   PayrollSettingsView,
   PayslipView,
   PerformanceReviewView,
   PlatformAdmin,
+  PlatformSavedView,
   PolicyType,
   RatingDistributionView,
   ResolvedPolicyView,
@@ -92,9 +99,25 @@ import type {
   SubmitLeaveRequestResponse,
   SubmitManagerAssessmentRequest,
   SubmitSelfAssessmentRequest,
+  SubscriptionSummary,
+  SupportTicket,
+  SupportTicketPriority,
+  SupportTicketStatus,
+  DataExportFormat,
+  DataExportScope,
+  DomainAvailabilityResult,
+  PackageTierSummary,
+  TestInvitationResult,
+  TenantBackup,
+  TenantDataExport,
   SystemAdminRoleAssignmentView,
   TaxSlabSetView,
   TaxSlabView,
+  TenantConfigurationSetting,
+  TenantConfigurationVersion,
+  TenantFeatureEntitlement,
+  TenantIntegration,
+  TenantUsageSummary,
   UpdateChecklistItemRequest,
   UpdateEmployeeGroupRequest,
   UpdateEmployeeRequest,
@@ -106,13 +129,14 @@ import type {
   UpdatePayrollSettingsRequest,
   UpdateShiftRequest,
   UpdateWorkScheduleAssignmentRuleRequest,
+  UserSessionView,
   WorkflowTemplate,
   WorkScheduleAssignmentRuleView,
   WorkScheduleDayView,
   CreateWorkScheduleAssignmentRuleRequest,
-} from "@boostfactor/shared-types";
+} from "@aihxm/shared-types";
 
-const TOKEN_KEY = "boostfactor.platformAdminToken";
+const TOKEN_KEY = "aihxm.platformAdminToken";
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
@@ -238,7 +262,16 @@ export const api = {
   setPlatformAdminStatus: (id: string, status: PlatformAdmin["status"]) =>
     request<PlatformAdmin>(`/platform/admins/${id}`, { method: "PATCH", body: JSON.stringify({ status }) }),
 
-  listCompanies: () => request<CompanyDashboardRow[]>("/platform/companies"),
+  // TM-002/TM-003 — Tenant Directory search + filters.
+  listCompanies: (filters?: CompanyListFilters) => {
+    const params = new URLSearchParams();
+    if (filters?.search) params.set("search", filters.search);
+    if (filters?.status?.length) params.set("status", filters.status.join(","));
+    if (filters?.packageTier?.length) params.set("packageTier", filters.packageTier.join(","));
+    if (filters?.country?.length) params.set("country", filters.country.join(","));
+    const qs = params.toString();
+    return request<CompanyDashboardRow[]>(`/platform/companies${qs ? `?${qs}` : ""}`);
+  },
 
   createCompany: (input: CreateCompanyRequest) =>
     request<CompanyDetail>("/platform/companies", {
@@ -248,16 +281,229 @@ export const api = {
 
   getCompany: (id: string) => request<CompanyDetail>(`/platform/companies/${id}`),
 
-  updateCompanyStatus: (id: string, status: Company["status"]) =>
+  // `reason` is required by the backend for suspend/lock (TM-005/TM-030) —
+  // enforced server-side, not just here.
+  updateCompanyStatus: (id: string, status: Company["status"], reason?: string) =>
     request<Company>(`/platform/companies/${id}`, {
       method: "PATCH",
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ status, reason }),
     }),
+
+  // TM-037/TM-038 — Lifecycle: Danger Zone deletion workflow.
+  requestCompanyDeletion: (id: string, input: { reason: string; graceDays?: number }) =>
+    request<Company>(`/platform/companies/${id}/deletion-request`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  cancelCompanyDeletion: (id: string) =>
+    request<Company>(`/platform/companies/${id}/deletion-request`, { method: "DELETE" }),
+
+  // TM-003 — saved, reusable Tenant Directory filter combinations.
+  listSavedViews: () => request<PlatformSavedView[]>("/platform/saved-views"),
+
+  createSavedView: (name: string, filters: CompanyListFilters) =>
+    request<PlatformSavedView>("/platform/saved-views", {
+      method: "POST",
+      body: JSON.stringify({ name, filters }),
+    }),
+
+  deleteSavedView: (id: string) =>
+    request<{ message: string }>(`/platform/saved-views/${id}`, { method: "DELETE" }),
+
+  // TM-017/TM-029 — Sessions + Force Logout.
+  listSessions: (companyId?: string) =>
+    request<UserSessionView[]>(`/platform/sessions${companyId ? `?companyId=${companyId}` : ""}`),
+
+  revokeSession: (id: string) =>
+    request<{ message: string }>(`/platform/sessions/${id}/revoke`, { method: "POST" }),
+
+  forceLogoutUser: (userAccountId: string) =>
+    request<{ message: string; revokedCount: number }>(`/platform/users/${userAccountId}/sessions/revoke`, {
+      method: "POST",
+    }),
+
+  // TM-018/019/020 — Tenant Configuration (override/inheritance/history/rollback).
+  getTenantConfiguration: (companyId: string) =>
+    request<TenantConfigurationSetting[]>(`/platform/companies/${companyId}/configuration`),
+
+  setConfigurationOverride: (companyId: string, category: string, settingKey: string, value: unknown) =>
+    request<TenantConfigurationSetting>(`/platform/companies/${companyId}/configuration/${category}/${settingKey}`, {
+      method: "POST",
+      body: JSON.stringify({ value }),
+    }),
+
+  resetConfigurationToDefault: (companyId: string, category: string, settingKey: string) =>
+    request<{ message: string }>(`/platform/companies/${companyId}/configuration/${category}/${settingKey}/reset`, {
+      method: "POST",
+    }),
+
+  getConfigurationHistory: (companyId: string, category: string, settingKey: string) =>
+    request<TenantConfigurationVersion[]>(
+      `/platform/companies/${companyId}/configuration/${category}/${settingKey}/history`
+    ),
+
+  rollbackConfiguration: (companyId: string, versionId: string) =>
+    request<TenantConfigurationSetting>(`/platform/companies/${companyId}/configuration/rollback`, {
+      method: "POST",
+      body: JSON.stringify({ versionId }),
+    }),
+
+  // TM-021/022 — Module catalog with dependency.
+  listModuleCatalog: (companyId: string) =>
+    request<ModuleCatalogEntry[]>(`/platform/companies/${companyId}/modules`),
+
+  // TM-023/024 — Feature entitlements.
+  listFeatureEntitlements: (companyId: string) =>
+    request<TenantFeatureEntitlement[]>(`/platform/companies/${companyId}/features`),
+
+  setFeatureEntitlement: (companyId: string, featureKey: string, patch: { enabled?: boolean; usageLimit?: number | null }) =>
+    request<TenantFeatureEntitlement>(`/platform/companies/${companyId}/features/${featureKey}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+
+  // TM-025/026 — Subscription: plan summary, Change Plan, seat management.
+  getSubscription: (companyId: string) => request<SubscriptionSummary>(`/platform/companies/${companyId}/subscription`),
+
+  changeSubscriptionPlan: (companyId: string, toTier: PackageTier) =>
+    request<SubscriptionSummary>(`/platform/companies/${companyId}/subscription/change-plan`, {
+      method: "POST",
+      body: JSON.stringify({ toTier }),
+    }),
+
+  setSubscriptionSeats: (companyId: string, seatsPurchased: number) =>
+    request<SubscriptionSummary>(`/platform/companies/${companyId}/subscription/seats`, {
+      method: "POST",
+      body: JSON.stringify({ seatsPurchased }),
+    }),
+
+  // TM-027/028 — Usage dashboard + Storage quota.
+  getUsage: (companyId: string) => request<TenantUsageSummary>(`/platform/companies/${companyId}/usage`),
+
+  setStorageQuota: (companyId: string, storageQuotaMb: number) =>
+    request<TenantUsageSummary>(`/platform/companies/${companyId}/storage/quota`, {
+      method: "PATCH",
+      body: JSON.stringify({ storageQuotaMb }),
+    }),
+
+  // TM-031 — Integration catalog (SMTP/SSO/biometric device/webhook).
+  listIntegrations: (companyId: string) =>
+    request<TenantIntegration[]>(`/platform/companies/${companyId}/integrations`),
+
+  configureIntegration: (
+    companyId: string,
+    providerKey: IntegrationProviderKey,
+    patch: { enabled?: boolean; config?: Record<string, unknown> }
+  ) =>
+    request<TenantIntegration>(`/platform/companies/${companyId}/integrations/${providerKey}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+
+  // TM-032 — Health dashboard.
+  getHealth: (companyId: string) => request<HealthCheckResult[]>(`/platform/companies/${companyId}/health`),
+
+  runHealthCheck: (companyId: string) =>
+    request<HealthCheckResult[]>(`/platform/companies/${companyId}/health/check`, { method: "POST" }),
+
+  // TM-033 — Support tickets.
+  listSupportTickets: (companyId: string, status?: SupportTicketStatus) =>
+    request<SupportTicket[]>(
+      `/platform/companies/${companyId}/support-tickets${status ? `?status=${status}` : ""}`
+    ),
+
+  createSupportTicket: (
+    companyId: string,
+    dto: { subject: string; description: string; priority?: SupportTicketPriority }
+  ) =>
+    request<SupportTicket>(`/platform/companies/${companyId}/support-tickets`, {
+      method: "POST",
+      body: JSON.stringify(dto),
+    }),
+
+  updateSupportTicket: (
+    companyId: string,
+    ticketId: string,
+    patch: { status?: SupportTicketStatus; priority?: SupportTicketPriority; assignee?: string | null }
+  ) =>
+    request<SupportTicket>(`/platform/companies/${companyId}/support-tickets/${ticketId}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+
+  // TM-035 — Backups.
+  listBackups: (companyId: string) => request<TenantBackup[]>(`/platform/companies/${companyId}/backups`),
+
+  createBackup: (companyId: string) =>
+    request<TenantBackup>(`/platform/companies/${companyId}/backups`, { method: "POST" }),
+
+  // Streams the backup's JSON file — same pattern as downloadDisbursementFile below.
+  async downloadBackup(companyId: string, backupId: string): Promise<void> {
+    const token = getToken();
+    const res = await fetch(`/api/platform/companies/${companyId}/backups/${backupId}/download`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = await res.json();
+        message = body.message ?? message;
+      } catch {
+        // not JSON — keep the generic message
+      }
+      throw new ApiError(res.status, message);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `backup-${backupId}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  },
+
+  // TM-036 — Data export & migration jobs.
+  listDataExports: (companyId: string) => request<TenantDataExport[]>(`/platform/companies/${companyId}/exports`),
+
+  requestDataExport: (companyId: string, dto: { scope: DataExportScope; format: DataExportFormat }) =>
+    request<TenantDataExport>(`/platform/companies/${companyId}/exports`, {
+      method: "POST",
+      body: JSON.stringify(dto),
+    }),
+
+  async downloadDataExport(companyId: string, exportId: string, fileName: string): Promise<void> {
+    const token = getToken();
+    const res = await fetch(`/api/platform/companies/${companyId}/exports/${exportId}/download`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = await res.json();
+        message = body.message ?? message;
+      } catch {
+        // not JSON — keep the generic message
+      }
+      throw new ApiError(res.status, message);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  },
 
   updateCompanyConfig: (
     id: string,
     patch: {
-      branding?: CompanyConfig["branding"];
+      branding?: { primaryColor?: string; secondaryColor?: string };
       enabledModules?: ModuleKey[];
       employeeNumberFormat?: Partial<EmployeeNumberFormat>;
     }
@@ -265,6 +511,83 @@ export const api = {
     request<CompanyConfig>(`/platform/companies/${id}/config`, {
       method: "PATCH",
       body: JSON.stringify(patch),
+    }),
+
+  // TM-014 — Tenant Profile's "Company Information" section.
+  updateCompanyProfile: (
+    id: string,
+    patch: {
+      legalName?: string;
+      companyCode?: string;
+      registrationNumber?: string;
+      industry?: string;
+      country?: string;
+      timezone?: string;
+      currency?: string;
+      fiscalYearStartMonth?: number;
+      customDomain?: string;
+    }
+  ) =>
+    request<Company>(`/platform/companies/${id}/profile`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+
+  // TM-015 — real branding asset uploads (logo/favicon/login background).
+  async uploadBrandingAsset(companyId: string, slot: BrandingAssetSlot, file: File): Promise<CompanyConfig> {
+    const token = getToken();
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch(`/api/platform/companies/${companyId}/branding/${slot}`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    });
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = await res.json();
+        message = body.message ?? message;
+      } catch {
+        // not JSON — keep the generic message
+      }
+      throw new ApiError(res.status, message);
+    }
+    return res.json();
+  },
+
+  // Returns a blob: URL the caller can put directly in an <img src> —
+  // there's no public unauthenticated URL for a branding asset (see
+  // CompaniesController.downloadBranding), so every preview goes through
+  // an authenticated fetch, same pattern as downloadBackup/downloadDataExport.
+  async brandingAssetPreviewUrl(companyId: string, slot: BrandingAssetSlot): Promise<string | null> {
+    const token = getToken();
+    const res = await fetch(`/api/platform/companies/${companyId}/branding/${slot}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    return URL.createObjectURL(blob);
+  },
+
+  // TM-006–012 — Create Tenant wizard support endpoints.
+  listPackageTiers: () => request<PackageTierSummary[]>("/platform/package-tiers"),
+
+  // Catalog-only (no per-tenant `enabled` flag) — for the wizard's Module
+  // Provisioning step, before any tenant/entitlement rows exist.
+  listGlobalModuleCatalog: () =>
+    request<Omit<ModuleCatalogEntry, "enabled">[]>("/platform/module-catalog"),
+
+  checkTenantAvailability: (slug: string, customDomain?: string) =>
+    request<DomainAvailabilityResult>("/platform/tenant-availability", {
+      method: "POST",
+      body: JSON.stringify({ slug, customDomain: customDomain || undefined }),
+    }),
+
+  sendTestInvitation: (input: { fullName: string; email: string; companyName?: string }) =>
+    request<TestInvitationResult>("/platform/test-invitations", {
+      method: "POST",
+      body: JSON.stringify(input),
     }),
 
   addAdmin: (id: string, input: { fullName: string; email: string }) =>

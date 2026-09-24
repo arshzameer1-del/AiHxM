@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { EmployeeView, JobHistoryEntryView } from "@boostfactor/shared-types";
+import type { EmployeeView, JobHistoryEntryView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { EmployeeFields } from "./EmployeeFields";

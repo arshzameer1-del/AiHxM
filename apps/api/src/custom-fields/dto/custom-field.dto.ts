@@ -1,5 +1,5 @@
 import { ArrayMinSize, IsArray, IsBoolean, IsIn, IsOptional, IsString, MinLength } from "class-validator";
-import type { CustomFieldType } from "@boostfactor/shared-types";
+import type { CustomFieldType } from "@aihxm/shared-types";
 
 export class DefineCustomFieldDto {
   @IsString()

@@ -5,7 +5,7 @@ import type { RequestClaims } from "../database/tenant-context";
 import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
-import type { CreateHolidayRequest, HolidayView, UpdateHolidayRequest } from "@boostfactor/shared-types";
+import type { CreateHolidayRequest, HolidayView, UpdateHolidayRequest } from "@aihxm/shared-types";
 
 // Reuses the `leave` module's entitlement, same reasoning as Shift
 // Management (0026) and Attendance Corrections (0028) — see

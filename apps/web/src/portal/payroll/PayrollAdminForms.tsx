@@ -5,7 +5,7 @@ import type {
   PayrollSettingsView,
   SocialSecurityScheme,
   TaxSlabView,
-} from "@boostfactor/shared-types";
+} from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { pkr } from "./payrollLabels";
 

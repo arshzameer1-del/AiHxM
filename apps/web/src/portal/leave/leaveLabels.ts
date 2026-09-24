@@ -1,4 +1,4 @@
-import type { AttendanceCorrectionStatus, AttendanceStatus, LeaveRequestStatus, LeaveType } from "@boostfactor/shared-types";
+import type { AttendanceCorrectionStatus, AttendanceStatus, LeaveRequestStatus, LeaveType } from "@aihxm/shared-types";
 
 /**
  * Matches SubmitLeaveRequestDto's own

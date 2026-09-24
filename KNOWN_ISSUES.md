@@ -600,7 +600,7 @@ somehow held role assignments in more than one company (nothing at the
 database level prevents that; nothing elsewhere in this codebase models
 a person working across multiple tenants either). **Revisit when:** a
 real pilot client actually has someone who needs access to more than one
-of their own companies — cross-company access is not a concept BoostFactor
+of their own companies — cross-company access is not a concept AIHXM
 has anywhere else yet, so this isn't a narrower gap than the rest of the
 product, just the first place it became visible.
 

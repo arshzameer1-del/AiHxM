@@ -2,7 +2,7 @@ import { ForbiddenException, NotFoundException } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import type { RequestClaims } from "../database/tenant-context";
 import type { RbacService } from "../rbac/rbac.service";
-import type { ChecklistResponsibleRole } from "@boostfactor/shared-types";
+import type { ChecklistResponsibleRole } from "@aihxm/shared-types";
 
 /**
  * The exact self/team/all scoped-access resolution `ShiftsService.

@@ -5,7 +5,7 @@ import type { RequestClaims } from "../database/tenant-context";
 import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
 import { ImportExportService } from "../import-export/import-export.service";
-import type { CsvImportResult, DummyRecordView } from "@boostfactor/shared-types";
+import type { CsvImportResult, DummyRecordView } from "@aihxm/shared-types";
 
 const OBJECT_KEY = "dummy_record";
 const VIEW_PERMISSION = "dummy_record.view";

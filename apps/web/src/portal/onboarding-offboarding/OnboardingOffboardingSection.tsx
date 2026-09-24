@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import type { EmployeeOffboardingView, EmployeeOnboardingView, EmploymentStatus, OffboardingReason } from "@boostfactor/shared-types";
+import type { EmployeeOffboardingView, EmployeeOnboardingView, EmploymentStatus, OffboardingReason } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { ChecklistItemsList } from "./ChecklistItems";
 

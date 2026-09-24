@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import type { AssignableUserView, Role, SystemAdminRoleAssignmentView, TenantRoleKey } from "@boostfactor/shared-types";
+import type { AssignableUserView, Role, SystemAdminRoleAssignmentView, TenantRoleKey } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 
 const ROLE_LABELS: Record<TenantRoleKey, string> = {

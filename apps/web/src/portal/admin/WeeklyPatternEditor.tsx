@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { SetWeeklyPatternRequest, WorkScheduleDayView } from "@boostfactor/shared-types";
+import type { SetWeeklyPatternRequest, WorkScheduleDayView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];

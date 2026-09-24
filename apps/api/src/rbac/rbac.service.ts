@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
-import type { FieldAccess } from "@boostfactor/shared-types";
+import type { FieldAccess } from "@aihxm/shared-types";
 
 type FieldCondition = { field: string; equals: unknown };
 

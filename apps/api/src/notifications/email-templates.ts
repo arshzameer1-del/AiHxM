@@ -21,9 +21,9 @@ type TemplateRenderer = (payload: Record<string, unknown>) => RenderedEmail;
 
 const TEMPLATES: Record<string, TemplateRenderer> = {
   password_reset: (payload) => ({
-    subject: "Reset your BoostFactor password",
+    subject: "Reset your AIHXM password",
     text: [
-      "We received a request to reset your BoostFactor password.",
+      "We received a request to reset your AIHXM password.",
       "",
       `Reset it here: ${payload.resetLink ?? ""}`,
       "",
@@ -36,7 +36,7 @@ const TEMPLATES: Record<string, TemplateRenderer> = {
 function renderGeneric(templateKey: string, payload: Record<string, unknown>): RenderedEmail {
   const lines = Object.entries(payload).map(([key, value]) => `${key}: ${String(value)}`);
   return {
-    subject: `BoostFactor notification: ${templateKey}`,
+    subject: `AIHXM notification: ${templateKey}`,
     text: lines.length > 0 ? lines.join("\n") : "(no additional details)",
   };
 }

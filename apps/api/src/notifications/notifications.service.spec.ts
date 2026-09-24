@@ -195,7 +195,7 @@ describe("NotificationsService", () => {
       catcher = await TestSmtpCatcher.start();
       process.env.SMTP_HOST = "127.0.0.1";
       process.env.SMTP_PORT = String(catcher.port);
-      process.env.SMTP_FROM = "no-reply@boostfactor.local";
+      process.env.SMTP_FROM = "no-reply@aihxm.local";
       delete process.env.SMTP_USER;
       delete process.env.SMTP_PASS;
       configuredNotifications = new NotificationsService(db, new MailerService());
@@ -212,15 +212,15 @@ describe("NotificationsService", () => {
         channel: "email",
         recipient: "reset-target@example.com",
         templateKey: "password_reset",
-        payload: { resetLink: "https://app.boostfactor.local/reset-password?token=xyz" },
+        payload: { resetLink: "https://app.aihxm.local/reset-password?token=xyz" },
       });
 
       expect(entry.status).toBe("sent");
       const received = catcher.all();
       const match = received.find((m) => m.to.includes("reset-target@example.com"));
       expect(match).toBeDefined();
-      expect(match?.subject).toBe("Reset your BoostFactor password");
-      expect(match?.text).toContain("https://app.boostfactor.local/reset-password?token=xyz");
+      expect(match?.subject).toBe("Reset your AIHXM password");
+      expect(match?.text).toContain("https://app.aihxm.local/reset-password?token=xyz");
 
       // The final status persisted, not just the returned object — a
       // second read (list()) must see 'sent' too, not the transient
@@ -241,7 +241,7 @@ describe("NotificationsService", () => {
 
       expect(entry.status).toBe("sent");
       const match = catcher.all().find((m) => m.to.includes("generic-target@example.com"));
-      expect(match?.subject).toBe("BoostFactor notification: some.future.template");
+      expect(match?.subject).toBe("AIHXM notification: some.future.template");
       expect(match?.text).toContain("foo: bar");
     });
 

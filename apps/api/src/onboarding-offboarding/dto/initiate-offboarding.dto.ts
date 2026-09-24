@@ -1,5 +1,5 @@
 import { IsDateString, IsIn, IsOptional, IsString } from "class-validator";
-import type { OffboardingReason } from "@boostfactor/shared-types";
+import type { OffboardingReason } from "@aihxm/shared-types";
 
 const REASONS: OffboardingReason[] = ["resignation", "termination", "retirement", "end_of_contract", "other"];
 

@@ -5,8 +5,8 @@ for Pakistan SMBs — an affordable, locally-compliant counterpart to SAP
 SuccessFactors.
 
 This repo is the real product codebase (not the clickable prototype). The
-full architecture and phase plan live in the `BoostFactor` Claude Project
-(the Project container itself is still named `BoostFactor` as of this
+full architecture and phase plan live in the `AIHXM` Claude Project
+(the Project container itself is still named `AIHXM` as of this
 writing — rename it in claude.ai when convenient and this reference can
 be updated to match) as `claude/development-plan.md`; the reasoning
 behind every irreversible

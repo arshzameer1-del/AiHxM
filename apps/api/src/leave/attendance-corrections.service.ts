@@ -9,7 +9,7 @@ import type {
   AttendanceCorrectionRequestView,
   DecideAttendanceCorrectionRequest,
   SubmitAttendanceCorrectionRequest,
-} from "@boostfactor/shared-types";
+} from "@aihxm/shared-types";
 
 const LEAVE_MODULE_KEY = "leave" as const;
 

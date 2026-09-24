@@ -2,7 +2,7 @@ import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/commo
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
 import { RbacService } from "../rbac/rbac.service";
-import type { DocumentTemplate, RenderedDocument } from "@boostfactor/shared-types";
+import type { DocumentTemplate, RenderedDocument } from "@aihxm/shared-types";
 
 const MANAGE_PERMISSION = "document_template.manage.all";
 

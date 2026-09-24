@@ -1,5 +1,5 @@
 import { IsIn, IsUUID } from "class-validator";
-import type { PolicyType } from "@boostfactor/shared-types";
+import type { PolicyType } from "@aihxm/shared-types";
 
 export class AssignGroupPolicyDto {
   @IsIn(["leave"])

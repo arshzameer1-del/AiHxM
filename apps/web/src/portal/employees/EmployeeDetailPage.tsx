@@ -6,7 +6,7 @@ import type {
   EmploymentType,
   JobHistoryEntryView,
   TenantRoleKey,
-} from "@boostfactor/shared-types";
+} from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { EmployeeFields } from "./EmployeeFields";

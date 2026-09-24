@@ -1,6 +1,6 @@
 import { Type } from "class-transformer";
 import { IsArray, IsIn, IsOptional, ValidateNested } from "class-validator";
-import { MODULE_KEYS, type ModuleKey } from "@boostfactor/shared-types";
+import { MODULE_KEYS, type ModuleKey } from "@aihxm/shared-types";
 import { BrandingInputDto, EmployeeNumberFormatInputDto } from "./common.dto";
 
 export class UpdateCompanyConfigDto {

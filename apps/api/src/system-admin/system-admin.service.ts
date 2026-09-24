@@ -3,7 +3,7 @@ import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
 import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
-import type { AssignableUserView, Role, SystemAdminRoleAssignmentView, TenantRoleKey } from "@boostfactor/shared-types";
+import type { AssignableUserView, Role, SystemAdminRoleAssignmentView, TenantRoleKey } from "@aihxm/shared-types";
 
 const ROLE_ASSIGNMENT_PERMISSION = "role_assignment.manage.all";
 // Kept in sync with, but deliberately not imported from, employees.service.ts's

@@ -13,9 +13,9 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_USER: boostfactor
-          POSTGRES_PASSWORD: boostfactor_dev
-          POSTGRES_DB: boostfactor
+          POSTGRES_USER: aihxm
+          POSTGRES_PASSWORD: aihxm_dev
+          POSTGRES_DB: aihxm
         ports:
           - 5432:5432
         options: >-
@@ -30,13 +30,13 @@ jobs:
 
     env:
       # Owner/migration connection — matches docker-compose.yml locally.
-      DATABASE_URL: postgresql://boostfactor:boostfactor_dev@localhost:5432/boostfactor?schema=public
+      DATABASE_URL: postgresql://aihxm:aihxm_dev@localhost:5432/aihxm?schema=public
       # Request-scoped connection the API runs queries through, once the
       # migration below creates the app_role login (Decision #2 / RLS).
-      APP_DATABASE_URL: postgresql://app_role:app_role_dev_password@localhost:5432/boostfactor?schema=public
+      APP_DATABASE_URL: postgresql://app_role:app_role_dev_password@localhost:5432/aihxm?schema=public
       JWT_SECRET: ci-only-jwt-secret
       MFA_ENCRYPTION_KEY: ci-only-mfa-encryption-key-32chars-min
-      PLATFORM_ADMIN_BOOTSTRAP_EMAIL: ci-admin@boostfactor.dev
+      PLATFORM_ADMIN_BOOTSTRAP_EMAIL: ci-admin@aihxm.dev
       PLATFORM_ADMIN_BOOTSTRAP_PASSWORD: ci-only-bootstrap-password
       PLATFORM_ADMIN_BOOTSTRAP_NAME: CI Platform Admin
 

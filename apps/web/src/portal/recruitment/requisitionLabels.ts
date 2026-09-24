@@ -1,4 +1,4 @@
-import type { ApplicationStage, OfferStatus, RequisitionStatus } from "@boostfactor/shared-types";
+import type { ApplicationStage, OfferStatus, RequisitionStatus } from "@aihxm/shared-types";
 
 export const REQUISITION_STATUS_STYLES: Record<RequisitionStatus, string> = {
   draft: "bg-black/5 text-label-tertiary",

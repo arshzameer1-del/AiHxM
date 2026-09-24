@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import type { ConfigurationDomainSummary } from "@boostfactor/shared-types";
+import type { ConfigurationDomainSummary } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 
 function describeError(err: unknown): string {

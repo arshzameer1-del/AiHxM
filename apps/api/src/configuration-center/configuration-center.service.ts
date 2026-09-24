@@ -7,7 +7,7 @@ import { HolidaysService } from "../holidays/holidays.service";
 import { WorkflowService } from "../workflow/workflow.service";
 import { PayrollService } from "../payroll/payroll.service";
 import { CustomFieldsService } from "../custom-fields/custom-fields.service";
-import type { ConfigurationDomainSummary } from "@boostfactor/shared-types";
+import type { ConfigurationDomainSummary } from "@aihxm/shared-types";
 
 type RegistryRow = {
   domain_key: string;

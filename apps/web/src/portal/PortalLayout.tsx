@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
-import type { ModuleKey, TenantRoleKey } from "@boostfactor/shared-types";
+import type { ModuleKey, TenantRoleKey } from "@aihxm/shared-types";
 import { useAuth } from "../auth/AuthContext";
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>

@@ -1,5 +1,5 @@
 import { Module } from "@nestjs/common";
-import { APP_GUARD } from "@nestjs/core";
+import { APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
 import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { ScheduleModule } from "@nestjs/schedule";
 import { AppController } from "./app.controller";
@@ -31,6 +31,8 @@ import { PayrollModule } from "./payroll/payroll.module";
 import { SignupModule } from "./signup/signup.module";
 import { ConfigurationCenterModule } from "./configuration-center/configuration-center.module";
 import { OnboardingOffboardingModule } from "./onboarding-offboarding/onboarding-offboarding.module";
+import { TenantManagementModule } from "./tenant-management/tenant-management.module";
+import { UsageTrackingInterceptor } from "./tenant-management/usage-tracking.interceptor";
 
 /**
  * Phase 2/3/4/5 root module: health check, the Platform Provisioning Panel
@@ -77,8 +79,13 @@ import { OnboardingOffboardingModule } from "./onboarding-offboarding/onboarding
     ConfigurationCenterModule,
     OnboardingOffboardingModule,
     SignupModule,
+    TenantManagementModule,
   ],
   controllers: [AppController],
-  providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
+  providers: [
+    AppService,
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_INTERCEPTOR, useClass: UsageTrackingInterceptor },
+  ],
 })
 export class AppModule {}

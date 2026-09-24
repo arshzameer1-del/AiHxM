@@ -1,8 +1,14 @@
-import { Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
-import { MODULE_KEYS, type ModuleKey, type PackageTier } from "@boostfactor/shared-types";
+import {
+  MODULE_KEYS,
+  type ModuleCatalogEntry,
+  type ModuleKey,
+  type PackageTier,
+  type PackageTierSummary,
+} from "@aihxm/shared-types";
 
 /**
  * Plan doc Section 4's FIRST enforcement gate: "is the module even
@@ -114,6 +120,28 @@ export class EntitlementsService {
    * `updated_at`/history survives a module being disabled and re-enabled.
    */
   async setEnabledModules(client: PoolClient, companyId: string, moduleKeys: ModuleKey[]): Promise<ModuleKey[]> {
+    // TM-022's validation rule: "Cannot disable required dependency."
+    // module_catalog.depends_on (migration 0042) is a real dependency —
+    // every module built so far is layered on Employee Core — so
+    // disabling a module while something still-enabled depends on it
+    // would silently break that dependent module's own requests rather
+    // than failing loudly here.
+    const currentlyEnabled = await this.getEnabledModuleKeys(client, companyId);
+    const beingDisabled = currentlyEnabled.filter((k) => !moduleKeys.includes(k));
+    if (beingDisabled.length > 0) {
+      const dependents = await client.query<{ key: string; depends_on: string }>(
+        `SELECT key, depends_on FROM module_catalog
+         WHERE depends_on = ANY($1::text[]) AND key = ANY($2::text[])`,
+        [beingDisabled, moduleKeys]
+      );
+      if (dependents.rowCount && dependents.rowCount > 0) {
+        const first = dependents.rows[0];
+        throw new BadRequestException(
+          `Cannot disable "${first.depends_on}" — "${first.key}" depends on it and is still enabled. Disable "${first.key}" first.`
+        );
+      }
+    }
+
     await client.query(
       `INSERT INTO tenant_module_entitlement (company_id, module_key, enabled)
        SELECT $1, key, (key = ANY($2::text[])) FROM unnest($3::text[]) AS key
@@ -121,5 +149,74 @@ export class EntitlementsService {
       [companyId, moduleKeys, MODULE_KEYS]
     );
     return this.getEnabledModuleKeys(client, companyId);
+  }
+
+  /**
+   * TM-021 — Module catalog: every module, its dependency, and whether
+   * it's currently enabled for this tenant. Read-only; the write path is
+   * still setEnabledModules via CompaniesService.updateConfig, matching
+   * the rest of this codebase's "no parallel write path" discipline.
+   */
+  /**
+   * TM-010 — Plan selection step of the Create Tenant wizard. Any
+   * authenticated caller can read `package_tier`/`package_tier_modules`
+   * (see migration 0006's `package_tier_select` policy — `app.jwt() ?
+   * 'sub'`), which is why this doesn't need `claims.company_id` at all;
+   * a Platform Admin building a brand-new tenant has no company_id yet.
+   */
+  async listPackageTiers(claims: RequestClaims): Promise<PackageTierSummary[]> {
+    return this.db.withClaims(claims, async (client) => {
+      const tiers = await client.query<{ key: PackageTier; name: string; description: string | null }>(
+        "SELECT key, name, description FROM package_tier ORDER BY key"
+      );
+      const modules = await client.query<{ package_tier: PackageTier; module_key: ModuleKey }>(
+        "SELECT package_tier, module_key FROM package_tier_modules"
+      );
+      const modulesByTier = new Map<PackageTier, ModuleKey[]>();
+      for (const row of modules.rows) {
+        if (!modulesByTier.has(row.package_tier)) modulesByTier.set(row.package_tier, []);
+        modulesByTier.get(row.package_tier)!.push(row.module_key);
+      }
+      return tiers.rows.map((row) => ({
+        key: row.key,
+        name: row.name,
+        description: row.description,
+        includedModuleKeys: modulesByTier.get(row.key) ?? [],
+      }));
+    });
+  }
+
+  /**
+   * The Create Tenant wizard's Module Provisioning step (TM-011) needs
+   * the catalog's dependency graph before any tenant exists to scope an
+   * `enabled` flag against — this is `listCatalogForCompany` minus the
+   * per-tenant join, not a second query design.
+   */
+  async listCatalog(claims: RequestClaims): Promise<Omit<ModuleCatalogEntry, "enabled">[]> {
+    return this.db.withClaims(claims, async (client) => {
+      const result = await client.query<{ key: string; name: string; depends_on: string | null }>(
+        "SELECT key, name, depends_on FROM module_catalog ORDER BY key"
+      );
+      return result.rows.map((row) => ({ key: row.key, label: row.name, category: null, dependsOn: row.depends_on }));
+    });
+  }
+
+  async listCatalogForCompany(claims: RequestClaims, companyId: string): Promise<ModuleCatalogEntry[]> {
+    return this.db.withClaims(claims, async (client) => {
+      const result = await client.query<{ key: string; name: string; depends_on: string | null; enabled: boolean | null }>(
+        `SELECT mc.key, mc.name, mc.depends_on, tme.enabled
+         FROM module_catalog mc
+         LEFT JOIN tenant_module_entitlement tme ON tme.company_id = $1 AND tme.module_key = mc.key
+         ORDER BY mc.key`,
+        [companyId]
+      );
+      return result.rows.map((row) => ({
+        key: row.key,
+        label: row.name,
+        category: null,
+        dependsOn: row.depends_on,
+        enabled: row.enabled === true,
+      }));
+    });
   }
 }

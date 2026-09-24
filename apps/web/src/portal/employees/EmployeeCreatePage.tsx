@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import type { EmployeeView, EmploymentType } from "@boostfactor/shared-types";
+import type { EmployeeView, EmploymentType } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 
 const EMPLOYMENT_TYPES: EmploymentType[] = ["permanent", "contract", "probation", "intern"];

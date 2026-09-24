@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
-import type { Role } from "@boostfactor/shared-types";
+import type { Role } from "@aihxm/shared-types";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function rowToRole(row: any): Role {

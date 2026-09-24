@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { ChecklistItemStatus, ChecklistResponsibleRole } from "@boostfactor/shared-types";
+import type { ChecklistItemStatus, ChecklistResponsibleRole } from "@aihxm/shared-types";
 import { ApiError } from "../../api/client";
 
 const RESPONSIBLE_ROLE_LABELS: Record<ChecklistResponsibleRole, string> = {

@@ -1,9 +1,11 @@
 const TONES: Record<string, string> = {
+  draft: "bg-gray-100 text-gray-600",
   trial: "bg-amber-100 text-amber-800",
   active: "bg-green-100 text-green-800",
   suspended: "bg-red-100 text-red-800",
   churned: "bg-gray-200 text-gray-600",
   locked: "bg-red-100 text-red-800",
+  archived: "bg-gray-300 text-gray-700",
 };
 
 export function StatusPill({ status }: { status: string }) {

@@ -5,7 +5,7 @@ import type {
   CandidateView,
   JobRequisitionView,
   OfferView,
-} from "@boostfactor/shared-types";
+} from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { PIPELINE_STAGES, STAGE_LABELS } from "./requisitionLabels";
 

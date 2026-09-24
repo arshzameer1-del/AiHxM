@@ -1,12 +1,7 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from "@nestjs/common";
 import * as jwt from "jsonwebtoken";
-import type { AuthedRequest } from "./platform-admin.guard";
-
-type SessionTokenPayload = {
-  sub: string;
-  is_platform_admin: boolean;
-  company_id?: string | null;
-};
+import type { AuthedRequest, SessionTokenPayload } from "./platform-admin.guard";
+import { SessionSecurityService } from "./session-security.service";
 
 /**
  * Accepts any real session JWT issued by AuthService — Platform Admin or
@@ -19,10 +14,23 @@ type SessionTokenPayload = {
  *
  * Same field-whitelisting discipline as PlatformAdminGuard, for the same
  * reason: `is_service` must never originate from a client-supplied token.
+ *
+ * Also checks (a) `jti` revocation, same as PlatformAdminGuard, and (b)
+ * the token's own company's lifecycle status via
+ * `SessionSecurityService.companyAccessStatus()` — Tenant Lock (TM-030)
+ * and Suspend (TM-005) are both real gaps otherwise: `companies.status`
+ * could already be set to `suspended` (migration 0001), but nothing in
+ * the request path ever actually checked it, so a "suspended" tenant's
+ * existing logged-in sessions kept working exactly as before. An
+ * impersonation ("Login As") token has no `jti` to revoke individually,
+ * but IS a normal company-scoped token, so it's still blocked the moment
+ * the company it targets is locked/suspended/archived.
  */
 @Injectable()
 export class SessionGuard implements CanActivate {
-  canActivate(context: ExecutionContext): boolean {
+  constructor(private readonly sessionSecurity: SessionSecurityService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest<AuthedRequest>();
     const header = req.headers.authorization;
     if (!header?.startsWith("Bearer ")) {
@@ -40,6 +48,21 @@ export class SessionGuard implements CanActivate {
       payload = jwt.verify(token, secret) as SessionTokenPayload;
     } catch {
       throw new UnauthorizedException("Invalid or expired token");
+    }
+
+    if (await this.sessionSecurity.isRevoked(payload.jti)) {
+      throw new UnauthorizedException("This session has been signed out remotely. Please log in again.");
+    }
+
+    if (payload.company_id) {
+      const status = await this.sessionSecurity.companyAccessStatus(payload.company_id);
+      if (status !== "ok") {
+        throw new UnauthorizedException(
+          status === "not_found"
+            ? "This company no longer exists."
+            : `Access to this company has been ${status}. Contact your Platform Admin.`
+        );
+      }
     }
 
     req.claims = {

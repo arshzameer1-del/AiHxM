@@ -1,4 +1,4 @@
-import type { PayrollRunStatus } from "@boostfactor/shared-types";
+import type { PayrollRunStatus } from "@aihxm/shared-types";
 
 /** Same "en-PK / PKR" formatting DashboardPage already established for
  * platform-level revenue figures — reused here so a payslip's rupee

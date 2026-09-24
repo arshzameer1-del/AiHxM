@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import type { EmployeeView, JobRequisitionView } from "@boostfactor/shared-types";
+import type { EmployeeView, JobRequisitionView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { REQUISITION_STATUS_LABELS, REQUISITION_STATUS_STYLES } from "./requisitionLabels";
 

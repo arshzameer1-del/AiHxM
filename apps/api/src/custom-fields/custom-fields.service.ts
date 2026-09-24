@@ -2,7 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable } from "@nestjs/com
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
 import { RbacService } from "../rbac/rbac.service";
-import type { CustomFieldDefinition, CustomFieldType } from "@boostfactor/shared-types";
+import type { CustomFieldDefinition, CustomFieldType } from "@aihxm/shared-types";
 
 const MANAGE_PERMISSION = "custom_field.manage.all";
 

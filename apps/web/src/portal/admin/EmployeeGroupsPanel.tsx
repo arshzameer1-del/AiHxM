@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import type { EmployeeGroupCondition, EmployeeGroupView, LeavePolicyView } from "@boostfactor/shared-types";
+import type { EmployeeGroupCondition, EmployeeGroupView, LeavePolicyView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { CONDITION_FIELDS, CONDITION_FIELD_LABELS } from "./conditionLabels";
 

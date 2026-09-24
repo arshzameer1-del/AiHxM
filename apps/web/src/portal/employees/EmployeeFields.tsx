@@ -1,4 +1,4 @@
-import type { EmployeeView } from "@boostfactor/shared-types";
+import type { EmployeeView } from "@aihxm/shared-types";
 
 /**
  * Read-only label/value display for an EmployeeView, shared by the HR

@@ -19,7 +19,7 @@ function deriveKey(): Buffer {
   // Fixed salt is acceptable here: this derives one static key from one
   // static secret, not a per-user password hash — the passphrase's own
   // entropy is what matters.
-  return scryptSync(passphrase, "boostfactor-mfa-secret-v1", 32);
+  return scryptSync(passphrase, "aihxm-mfa-secret-v1", 32);
 }
 
 export function encryptMfaSecret(plainSecret: string): string {

@@ -10,7 +10,7 @@
 --
 -- Three tables, matching the plan doc's own naming (Section 7's Phase 5
 -- row) exactly:
---   - module_catalog          — every module BoostFactor can license out.
+--   - module_catalog          — every module AIHXM can license out.
 --   - package_tier            — the four sellable tiers (previously just a
 --                                CHECK-constrained string on `companies`;
 --                                promoted to a real catalog table here so

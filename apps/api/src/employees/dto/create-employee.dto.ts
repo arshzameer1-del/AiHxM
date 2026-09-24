@@ -1,5 +1,5 @@
 import { IsDateString, IsIn, IsOptional, IsString, IsUUID, MinLength } from "class-validator";
-import type { EmploymentType } from "@boostfactor/shared-types";
+import type { EmploymentType } from "@aihxm/shared-types";
 
 export class CreateEmployeeDto {
   @IsString()

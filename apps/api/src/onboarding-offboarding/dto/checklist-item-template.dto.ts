@@ -1,5 +1,5 @@
 import { IsIn, IsInt, IsOptional, IsString, Min, MinLength } from "class-validator";
-import type { ChecklistCategory, ChecklistResponsibleRole } from "@boostfactor/shared-types";
+import type { ChecklistCategory, ChecklistResponsibleRole } from "@aihxm/shared-types";
 
 const CATEGORIES: ChecklistCategory[] = ["it", "hr", "finance", "facilities", "general"];
 const RESPONSIBLE_ROLES: ChecklistResponsibleRole[] = ["self", "team", "all"];

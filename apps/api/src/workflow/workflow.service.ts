@@ -13,7 +13,7 @@ import type {
   WorkflowStepInstanceView,
   WorkflowStepStatus,
   WorkflowTemplate,
-} from "@boostfactor/shared-types";
+} from "@aihxm/shared-types";
 
 const MANAGE_PERMISSION = "workflow_template.manage.all";
 

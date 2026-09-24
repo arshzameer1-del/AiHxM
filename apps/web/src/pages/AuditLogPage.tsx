@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { AuditLogEntry, CompanyDashboardRow } from "@boostfactor/shared-types";
+import type { AuditLogEntry, CompanyDashboardRow } from "@aihxm/shared-types";
 import { api } from "../api/client";
 
 const dateFormat = new Intl.DateTimeFormat("en-PK", {

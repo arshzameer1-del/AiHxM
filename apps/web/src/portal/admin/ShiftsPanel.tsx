@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import type { EmployeeView, ShiftView } from "@boostfactor/shared-types";
+import type { EmployeeView, ShiftView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { WeeklyPatternEditor } from "./WeeklyPatternEditor";
 import { WorkScheduleAssignmentRulesPanel } from "./WorkScheduleAssignmentRulesPanel";

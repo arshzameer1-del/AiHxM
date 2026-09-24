@@ -4,7 +4,7 @@ import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
 import { HolidaysService } from "../holidays/holidays.service";
 import { ShiftsService, computeAttendanceStatus, dayOfWeekForIsoDate } from "./shifts.service";
-import type { AttendanceStatus, ResolvedWorkScheduleView, WorkScheduleBreakView } from "@boostfactor/shared-types";
+import type { AttendanceStatus, ResolvedWorkScheduleView, WorkScheduleBreakView } from "@aihxm/shared-types";
 
 /**
  * The single cross-module schedule-resolution entry point Section 20 of

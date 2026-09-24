@@ -6,7 +6,7 @@ import { DatabaseService } from "../database/database.service";
 import { EntitlementsService } from "../entitlements/entitlements.service";
 import { MailerService } from "../mailer/mailer.service";
 import type { RequestClaims } from "../database/tenant-context";
-import type { LoginResult, MeResponse, PasswordResetRequestResult, TenantRoleKey } from "@boostfactor/shared-types";
+import type { LoginResult, MeResponse, PasswordResetRequestResult, TenantRoleKey } from "@aihxm/shared-types";
 import { decryptMfaSecret, encryptMfaSecret } from "./mfa-secret-crypto";
 import { hashPassword, verifyPassword } from "./password";
 import { signMfaTicket, verifyMfaTicket } from "./tickets";
@@ -98,7 +98,7 @@ export class AuthService {
       return {
         status: "mfa_setup_required",
         mfaTicket: signMfaTicket("mfa_enroll", account.id),
-        otpauthUrl: generateURI({ issuer: "BoostFactor", label: email, secret }),
+        otpauthUrl: generateURI({ issuer: "AIHXM", label: email, secret }),
         secretForManualEntry: secret,
       };
     }
@@ -121,7 +121,7 @@ export class AuthService {
 
     await this.enableMfa(account.id);
     const identity = await this.resolveIdentityForAccount(account.id);
-    return { status: "ok", token: this.issueSessionToken(identity, account.id) };
+    return { status: "ok", token: await this.issueSessionToken(identity, account.id) };
   }
 
   async verifyMfa(mfaTicket: string, code: string): Promise<{ status: "ok"; token: string }> {
@@ -138,7 +138,7 @@ export class AuthService {
     }
 
     const identity = await this.resolveIdentityForAccount(account.id);
-    return { status: "ok", token: this.issueSessionToken(identity, account.id) };
+    return { status: "ok", token: await this.issueSessionToken(identity, account.id) };
   }
 
   private verifyTicket(mfaTicket: string, purpose: "mfa_enroll" | "mfa_verify") {
@@ -149,14 +149,36 @@ export class AuthService {
     }
   }
 
-  private issueSessionToken(identity: SessionIdentity, userAccountId: string): string {
+  /**
+   * Every real session token now carries a `jti` — the `user_sessions` row
+   * this creates — so it can be individually force-revoked later (Tenant
+   * Management's "Force Logout", TM-017/029; see SessionSecurityService).
+   * Tokens issued before this feature shipped, and "Login As" impersonation
+   * tokens (companies.service.ts's `impersonate()`, which intentionally
+   * stays outside normal session tracking — it's already short-lived and
+   * audited on issuance), have no `jti` and simply cannot be individually
+   * revoked; they still expire on their own schedule.
+   */
+  private async issueSessionToken(identity: SessionIdentity, userAccountId: string): Promise<string> {
     const secret = process.env.JWT_SECRET;
     if (!secret) throw new Error("JWT_SECRET is not set");
+
+    const sessionId = await this.db.withClaims(SERVICE_CLAIMS, async (client) => {
+      const result = await client.query<{ id: string }>(
+        `INSERT INTO user_sessions (user_account_id, company_id, is_platform_admin, expires_at)
+         VALUES ($1, $2, $3, now() + interval '12 hours')
+         RETURNING id`,
+        [userAccountId, identity.company_id, identity.is_platform_admin]
+      );
+      return result.rows[0].id;
+    });
+
     return jwt.sign(
       {
         sub: userAccountId,
         is_platform_admin: identity.is_platform_admin,
         company_id: identity.company_id,
+        jti: sessionId,
       },
       secret,
       { expiresIn: "12h" }
@@ -223,8 +245,8 @@ export class AuthService {
       try {
         await this.mailer.sendMail({
           to: email,
-          subject: "Reset your BoostFactor password",
-          text: `We received a request to reset your BoostFactor password.\n\nReset it here: ${resetLink}\n\nThis link expires in ${RESET_TOKEN_TTL_MINUTES} minutes. If you didn't request this, you can safely ignore this email — your password hasn't been changed.`,
+          subject: "Reset your AIHXM password",
+          text: `We received a request to reset your AIHXM password.\n\nReset it here: ${resetLink}\n\nThis link expires in ${RESET_TOKEN_TTL_MINUTES} minutes. If you didn't request this, you can safely ignore this email — your password hasn't been changed.`,
         });
       } catch {
         // Already logged inside MailerService; swallow here so a

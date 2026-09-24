@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { EmployeeView, ResolvedWorkScheduleView } from "@boostfactor/shared-types";
+import type { EmployeeView, ResolvedWorkScheduleView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 
 const ASSIGNMENT_SOURCE_LABELS: Record<NonNullable<ResolvedWorkScheduleView["assignmentSource"]>, string> = {

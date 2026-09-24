@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { ReviewCycleView } from "@boostfactor/shared-types";
+import type { ReviewCycleView } from "@aihxm/shared-types";
 import { api } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { CreateCycleModal } from "./modals/CreateCycleModal";

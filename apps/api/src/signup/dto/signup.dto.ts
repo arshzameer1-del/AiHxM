@@ -1,5 +1,5 @@
 import { IsEmail, IsIn, IsOptional, IsString, Matches, MinLength } from "class-validator";
-import type { PackageTier } from "@boostfactor/shared-types";
+import type { PackageTier } from "@aihxm/shared-types";
 
 const PACKAGE_TIERS: PackageTier[] = ["starter", "growth", "professional", "enterprise"];
 

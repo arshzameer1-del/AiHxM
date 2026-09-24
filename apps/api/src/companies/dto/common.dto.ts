@@ -21,12 +21,15 @@ export class EmployeeNumberFormatInputDto {
   preserveImportedNumbers?: boolean;
 }
 
+// TM-015 — colors only; logo/favicon/login background go through the
+// dedicated upload endpoints (real files via FileStorageService, not a
+// pasted-in URL), see CompaniesService.uploadBrandingAsset.
 export class BrandingInputDto {
   @IsOptional()
   @IsString()
-  logoUrl?: string;
+  primaryColor?: string;
 
   @IsOptional()
   @IsString()
-  primaryColor?: string;
+  secondaryColor?: string;
 }

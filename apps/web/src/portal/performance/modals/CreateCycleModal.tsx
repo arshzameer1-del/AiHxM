@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { CreateReviewCycleRequest } from "@boostfactor/shared-types";
+import type { CreateReviewCycleRequest } from "@aihxm/shared-types";
 import { api } from "../../../api/client";
 
 interface CreateCycleModalProps {

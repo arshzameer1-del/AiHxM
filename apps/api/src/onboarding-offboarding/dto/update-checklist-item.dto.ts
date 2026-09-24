@@ -1,5 +1,5 @@
 import { IsIn, IsOptional, IsString } from "class-validator";
-import type { ChecklistItemStatus } from "@boostfactor/shared-types";
+import type { ChecklistItemStatus } from "@aihxm/shared-types";
 
 const STATUSES: ChecklistItemStatus[] = ["pending", "completed", "skipped"];
 

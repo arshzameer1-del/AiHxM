@@ -145,11 +145,30 @@ describe("Companies HTTP surface (e2e) — Platform Admin company management", (
       .send({
         status: "suspended",
         packageTier: "enterprise",
+        // Suspend/Lock (TM-005/TM-030) require a reason — a real gap this
+        // request body used to be missing entirely before that validation
+        // existed.
+        reason: "Non-payment — 30 days overdue",
       });
 
     expect(res.status).toBe(200);
     expect(res.body.status).toBe("suspended");
     expect(res.body.packageTier).toBe("enterprise");
+    expect(res.body.statusReason).toBe("Non-payment — 30 days overdue");
+  });
+
+  it("rejects Suspend/Lock without a reason", async () => {
+    const createRes = await request(app.getHttpServer())
+      .post("/platform/companies")
+      .set("Authorization", `Bearer ${platformAdminToken}`)
+      .send({ name: "No Reason Co", slug: `no-reason-${Date.now()}` });
+
+    const res = await request(app.getHttpServer())
+      .patch(`/platform/companies/${createRes.body.company.id}`)
+      .set("Authorization", `Bearer ${platformAdminToken}`)
+      .send({ status: "locked" });
+
+    expect(res.status).toBe(400);
   });
 
   it("add company admin via POST /companies/:id/admins", async () => {

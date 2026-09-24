@@ -38,7 +38,7 @@ async function bootstrap() {
 
   const port = process.env.PORT ? Number(process.env.PORT) : 4000;
   await app.listen(port);
-  console.log(`BoostFactor API listening on http://localhost:${port}`);
+  console.log(`AIHXM API listening on http://localhost:${port}`);
 }
 
 bootstrap();

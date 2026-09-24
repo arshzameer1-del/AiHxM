@@ -1,5 +1,5 @@
 import { IsBoolean, IsInt, IsObject, IsOptional, IsString, IsUUID, MinLength } from "class-validator";
-import type { WorkScheduleRuleExpression } from "@boostfactor/shared-types";
+import type { WorkScheduleRuleExpression } from "@aihxm/shared-types";
 
 // `conditionExpression` is validated for SHAPE by RulesEngine.validate()
 // inside ShiftsService.createAssignmentRule/updateAssignmentRule (see

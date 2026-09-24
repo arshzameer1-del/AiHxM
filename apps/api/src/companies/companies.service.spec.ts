@@ -1,9 +1,12 @@
-import { ConflictException, NotFoundException } from "@nestjs/common";
+import { ConflictException, NotFoundException, BadRequestException } from "@nestjs/common";
 import { Pool } from "pg";
 import { CompaniesService } from "./companies.service";
 import { DatabaseService } from "../database/database.service";
 import { AuditService } from "../audit/audit.service";
 import { EntitlementsService } from "../entitlements/entitlements.service";
+import { SessionSecurityService } from "../auth/session-security.service";
+import { CacheService } from "../cache/cache.service";
+import { LocalFileStorageService } from "../file-storage/local-file-storage.service";
 import type { RequestClaims } from "../database/tenant-context";
 
 const FIXTURE_CLAIMS: RequestClaims = {
@@ -16,10 +19,12 @@ describe("CompaniesService", () => {
   let service: CompaniesService;
   let pool: Pool;
   let db: DatabaseService;
+  let sessionSecurity: SessionSecurityService;
 
   beforeAll(() => {
     pool = new Pool({ connectionString: process.env.APP_DATABASE_URL });
     db = new DatabaseService(pool);
+    sessionSecurity = new SessionSecurityService(db, new CacheService());
   });
 
   beforeEach(() => {
@@ -31,7 +36,13 @@ describe("CompaniesService", () => {
     // (recruitment, employees, leave, payroll, performance) already
     // constructs its service under test directly for the same reason —
     // matching that pattern here removes the whole class of bug.
-    service = new CompaniesService(db, new AuditService(), new EntitlementsService(db));
+    service = new CompaniesService(
+      db,
+      new AuditService(),
+      new EntitlementsService(db),
+      sessionSecurity,
+      new LocalFileStorageService()
+    );
   });
 
   afterAll(async () => {
@@ -147,7 +158,7 @@ describe("CompaniesService", () => {
   });
 
   describe("updateCompany", () => {
-    it("updates company status", async () => {
+    it("updates company status with a reason, and records it", async () => {
       const created = await service.create(FIXTURE_CLAIMS, {
         name: "Test Company Update",
         slug: `test-co-update-${Date.now()}`,
@@ -156,10 +167,12 @@ describe("CompaniesService", () => {
       const updated = await service.updateCompany(
         FIXTURE_CLAIMS,
         created.company.id,
-        { status: "suspended" }
+        { status: "suspended", reason: "Non-payment" }
       );
 
       expect(updated.status).toBe("suspended");
+      expect(updated.statusReason).toBe("Non-payment");
+      expect(updated.statusChangedAt).not.toBeNull();
     });
 
     it("updates company package tier", async () => {
@@ -175,6 +188,107 @@ describe("CompaniesService", () => {
       );
 
       expect(updated.packageTier).toBe("professional");
+    });
+
+    it("rejects suspending or locking a company with no reason (TM-005/TM-030)", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company No Reason",
+        slug: `test-co-no-reason-${Date.now()}`,
+      });
+
+      await expect(
+        service.updateCompany(FIXTURE_CLAIMS, created.company.id, { status: "suspended" })
+      ).rejects.toThrow(BadRequestException);
+      await expect(
+        service.updateCompany(FIXTURE_CLAIMS, created.company.id, { status: "locked", reason: "  " })
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("locking a company immediately blocks its own sessions (not just eventually, via cache TTL)", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Lock Enforcement",
+        slug: `test-co-lock-enforce-${Date.now()}`,
+      });
+
+      // Warm the cache the same way SessionGuard would on a real request.
+      expect(await sessionSecurity.companyAccessStatus(created.company.id)).toBe("ok");
+
+      await service.updateCompany(FIXTURE_CLAIMS, created.company.id, {
+        status: "locked",
+        reason: "Fraud review",
+      });
+
+      // If updateCompany didn't invalidate the cache, this would still read
+      // the stale "ok" value for up to 15 seconds.
+      expect(await sessionSecurity.companyAccessStatus(created.company.id)).toBe("locked");
+    });
+  });
+
+  describe("deletion workflow (TM-038 Danger Zone)", () => {
+    it("requestDeletion locks the company and sets a purge date; cancelDeletion restores it", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Deletion",
+        slug: `test-co-deletion-${Date.now()}`,
+      });
+
+      const requested = await service.requestDeletion(FIXTURE_CLAIMS, created.company.id, {
+        reason: "Customer requested closure",
+        graceDays: 7,
+      });
+      expect(requested.status).toBe("locked");
+      expect(requested.deletionRequestedAt).not.toBeNull();
+      expect(requested.deletionPurgeAt).not.toBeNull();
+      expect(await sessionSecurity.companyAccessStatus(created.company.id)).toBe("locked");
+
+      const cancelled = await service.cancelDeletion(FIXTURE_CLAIMS, created.company.id);
+      expect(cancelled.status).toBe("active");
+      expect(cancelled.deletionRequestedAt).toBeNull();
+      expect(await sessionSecurity.companyAccessStatus(created.company.id)).toBe("ok");
+    });
+
+    it("rejects a deletion request with no reason", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Deletion No Reason",
+        slug: `test-co-deletion-no-reason-${Date.now()}`,
+      });
+      await expect(
+        service.requestDeletion(FIXTURE_CLAIMS, created.company.id, { reason: "" })
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("purgeExpiredDeletions archives only companies whose grace period has elapsed", async () => {
+      const expired = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Expired Grace",
+        slug: `test-co-expired-grace-${Date.now()}`,
+      });
+      const notYetExpired = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Grace In Progress",
+        slug: `test-co-grace-progress-${Date.now()}`,
+      });
+
+      await service.requestDeletion(FIXTURE_CLAIMS, expired.company.id, {
+        reason: "Closing",
+        graceDays: 7,
+      });
+      await service.requestDeletion(FIXTURE_CLAIMS, notYetExpired.company.id, {
+        reason: "Closing",
+        graceDays: 7,
+      });
+      // Force the first company's grace period into the past — directly via
+      // SQL, the same way a real 7-day wait would look once elapsed.
+      await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query("UPDATE companies SET deletion_purge_at = now() - interval '1 hour' WHERE id = $1", [
+          expired.company.id,
+        ])
+      );
+
+      const purgedCount = await service.purgeExpiredDeletions(FIXTURE_CLAIMS);
+      expect(purgedCount).toBeGreaterThanOrEqual(1);
+
+      const expiredDetail = await service.getDetail(FIXTURE_CLAIMS, expired.company.id);
+      expect(expiredDetail.company.status).toBe("archived");
+      const notYetExpiredDetail = await service.getDetail(FIXTURE_CLAIMS, notYetExpired.company.id);
+      expect(notYetExpiredDetail.company.status).toBe("locked");
     });
   });
 
@@ -305,6 +419,27 @@ describe("CompaniesService", () => {
       );
 
       expect(withLogin.hasLogin).toBe(true);
+
+      // Real gap found during the Supabase test-deploy pass: this used to
+      // create a login with zero RBAC role attached, and — unlike an
+      // employee login — there was no self-service screen anywhere that
+      // could fix it afterward, leaving the admin locked out of everything
+      // despite a working login. createAdminLogin now grants BOTH
+      // hr_admin (employee HR data) AND system_admin (workflow config +
+      // managing other users' logins/roles) in the same transaction —
+      // this admin is the tenant's Company Super Admin, so they need both
+      // to actually administer their own tenant, not just its HR data.
+      const assignedRoleKeys = await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query<{ key: string }>(
+          `SELECT r.key FROM user_role_assignments ura
+           JOIN roles r ON r.id = ura.role_id
+           WHERE ura.company_id = $1
+             AND ura.user_account_id = (SELECT user_account_id FROM company_admins WHERE id = $2)
+           ORDER BY r.key`,
+          [created.company.id, adminId]
+        )
+      );
+      expect(assignedRoleKeys.rows.map((r) => r.key)).toEqual(["hr_admin", "system_admin"]);
     });
 
     it("prevents duplicate login creation", async () => {

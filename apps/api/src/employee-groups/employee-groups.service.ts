@@ -19,7 +19,7 @@ import type {
   ResolvedPolicyView,
   UpdateEmployeeGroupRequest,
   UpdateLeavePolicyRequest,
-} from "@boostfactor/shared-types";
+} from "@aihxm/shared-types";
 
 const GROUP_MODULE_KEY = "employee" as const;
 const LEAVE_MODULE_KEY = "leave" as const;

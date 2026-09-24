@@ -1,7 +1,7 @@
 # Netlify config for the frontend (apps/web) half of a Supabase + Render +
 # Netlify test/staging deployment. Lives at the repo root (not inside
 # apps/web) because `npm install` needs to run at the monorepo root for
-# npm workspaces to link @boostfactor/shared-types — Netlify's own "base
+# npm workspaces to link @aihxm/shared-types — Netlify's own "base
 # directory" setting doesn't change where the repo is checked out, so
 # root-relative paths here are simpler than fighting that.
 #
@@ -16,12 +16,14 @@
   command = "npm install && npx turbo run build --filter=@ai-hxm/web"
   publish = "apps/web/dist"
 
-# 1) Proxy every /api/* call to the real NestJS backend (Render). This
-#    rule must come BEFORE the catch-all SPA rule below — Netlify uses
-#    the first matching rule.
+# 1) Proxy every /api/* call to the real NestJS backend (Render). Replace
+#    the placeholder host below with your actual Render service URL
+#    (Render dashboard > your service > the URL at the top, no trailing
+#    slash) once it exists. This rule must come BEFORE the catch-all SPA
+#    rule below — Netlify uses the first matching rule.
 [[redirects]]
   from = "/api/*"
-  to = "https://aihxm.onrender.com/:splat"
+  to = "https://REPLACE-WITH-YOUR-RENDER-SERVICE.onrender.com/:splat"
   status = 200
   force = true
 

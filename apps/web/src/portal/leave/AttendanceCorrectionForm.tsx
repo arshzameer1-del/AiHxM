@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { AttendanceCorrectionRequestView } from "@boostfactor/shared-types";
+import type { AttendanceCorrectionRequestView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 
 /**

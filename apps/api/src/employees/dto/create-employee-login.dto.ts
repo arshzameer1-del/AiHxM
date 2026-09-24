@@ -1,5 +1,5 @@
 import { ArrayMinSize, IsArray, IsIn, MinLength } from "class-validator";
-import type { TenantRoleKey } from "@boostfactor/shared-types";
+import type { TenantRoleKey } from "@aihxm/shared-types";
 
 // Decision #20 — widened to include `system_admin`; see
 // employees.service.ts's own TENANT_ROLE_KEYS comment.

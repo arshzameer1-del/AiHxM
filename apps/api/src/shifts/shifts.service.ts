@@ -22,7 +22,7 @@ import type {
   WorkScheduleAssignmentRuleView,
   WorkScheduleBreakView,
   WorkScheduleDayView,
-} from "@boostfactor/shared-types";
+} from "@aihxm/shared-types";
 
 // Reuses the `leave` module's entitlement — see 0026_shift_management.sql's
 // header comment for why this isn't a separately-licensed module key.

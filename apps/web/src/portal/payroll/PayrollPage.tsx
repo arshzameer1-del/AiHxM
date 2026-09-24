@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { PayrollRunView, PayrollSettingsView, PayslipView, TaxSlabSetView, TaxSlabView } from "@boostfactor/shared-types";
+import type { PayrollRunView, PayrollSettingsView, PayslipView, TaxSlabSetView, TaxSlabView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { CompensationForm, CreateRunForm, PayrollSettingsForm, TaxSlabsForm } from "./PayrollAdminForms";

@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import type { EmployeeView, LeaveType, OverlapWarning, SubmitLeaveRequestResponse } from "@boostfactor/shared-types";
+import type { EmployeeView, LeaveType, OverlapWarning, SubmitLeaveRequestResponse } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { LEAVE_TYPES, LEAVE_TYPE_LABELS } from "./leaveLabels";
 

@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import type { PlatformAdmin } from "@boostfactor/shared-types";
+import type { PlatformAdmin } from "@aihxm/shared-types";
 import { api, ApiError } from "../api/client";
 import { StatusPill } from "../components/StatusPill";
 

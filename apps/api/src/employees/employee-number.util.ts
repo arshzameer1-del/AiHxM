@@ -1,4 +1,4 @@
-import type { EmployeeNumberFormat } from "@boostfactor/shared-types";
+import type { EmployeeNumberFormat } from "@aihxm/shared-types";
 
 /**
  * Plan doc Section 5's rules made concrete: `<prefix>-<zero-padded

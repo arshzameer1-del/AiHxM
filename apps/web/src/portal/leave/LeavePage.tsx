@@ -7,7 +7,7 @@ import type {
   LeaveBalanceView,
   LeaveRequestView,
   OverlapWarning,
-} from "@boostfactor/shared-types";
+} from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { AttendanceCorrectionForm } from "./AttendanceCorrectionForm";

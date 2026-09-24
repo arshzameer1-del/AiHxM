@@ -4,7 +4,7 @@ import type { RequestClaims } from "../database/tenant-context";
 import { AuditService } from "../audit/audit.service";
 import { EntitlementsService } from "../entitlements/entitlements.service";
 import { hashPassword } from "../auth/password";
-import type { PackageTier, SignupRequest, SignupResponse } from "@boostfactor/shared-types";
+import type { PackageTier, SignupRequest, SignupResponse } from "@aihxm/shared-types";
 import { SignupDto } from "./dto/signup.dto";
 
 /**

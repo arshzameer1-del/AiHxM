@@ -18,7 +18,7 @@ import type {
   ExtendOfferRequest,
   JobRequisitionView,
   OfferView,
-} from "@boostfactor/shared-types";
+} from "@aihxm/shared-types";
 
 const MODULE_KEY = "recruitment" as const;
 const MANAGE_PERMISSION = "recruitment.manage.all";

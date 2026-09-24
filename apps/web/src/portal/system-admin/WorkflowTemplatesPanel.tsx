@@ -5,7 +5,7 @@ import type {
   WorkflowApproverConfig,
   WorkflowStepConfig,
   WorkflowTemplate,
-} from "@boostfactor/shared-types";
+} from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { APPROVER_TYPE_LABELS, ApproverTypeOption, KNOWN_WORKFLOWS } from "./workflowTemplateOptions";
 

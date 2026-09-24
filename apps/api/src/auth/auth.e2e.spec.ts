@@ -20,8 +20,12 @@ const FIXTURE_CLAIMS: RequestClaims = {
  * POST /auth/password-reset/request, POST /auth/password-reset/confirm,
  * and the guarded GET /auth/me. There is no /auth/refresh,
  * /auth/change-password, /auth/forgot-password, or /auth/logout endpoint
- * anywhere in this app — sessions are stateless JWTs with no server-side
- * revocation, and password changes go through the reset flow. MFA is
+ * anywhere in this app — sessions are stateless JWTs; every real one now
+ * carries a `jti` (Tenant Management's session tracking, see
+ * SessionSecurityService) so it CAN be individually force-revoked via the
+ * Platform Admin API (see tenant-lifecycle-enforcement.e2e.spec.ts and
+ * sessions.e2e.spec.ts), but there is still no self-service `/auth/logout`
+ * — password changes go through the reset flow. MFA is
  * mandatory for every account (auth.service.ts), so login() never returns
  * a bare token: the first login for a fresh account always comes back
  * `mfa_setup_required` with an enrollable TOTP secret.

@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { MeResponse } from "@boostfactor/shared-types";
+import type { MeResponse } from "@aihxm/shared-types";
 import { api, clearToken, getToken, setToken } from "../api/client";
 
 /**

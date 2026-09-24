@@ -41,7 +41,10 @@ export type ModuleKey = (typeof MODULE_KEYS)[number];
 
 export type PackageTier = "starter" | "growth" | "professional" | "enterprise";
 
-export type CompanyStatus = "trial" | "active" | "suspended" | "churned";
+// "locked"/"archived"/"draft" added for the Tenant Management module
+// (TM-030 Tenant Lock, TM-037 Lifecycle). "churned" is kept for existing
+// data; new code should prefer "archived".
+export type CompanyStatus = "draft" | "trial" | "active" | "suspended" | "locked" | "archived" | "churned";
 
 // --- Employee Number format (plan doc Section 5) -------------------------
 export type EmployeeNumberFormat = {
@@ -51,9 +54,19 @@ export type EmployeeNumberFormat = {
   preserveImportedNumbers: boolean;
 };
 
+// TM-015 — asset presence flags rather than raw storage paths (same
+// "never leak the internal reference, only whether it's set" posture
+// TenantIntegration.hasSecrets uses). The actual bytes are fetched
+// through GET /platform/companies/:id/branding/:slot, an authenticated
+// stream — see BrandingAssetSlot.
+export type BrandingAssetSlot = "logo" | "favicon" | "login-background";
+
 export type CompanyBranding = {
-  logoUrl?: string;
   primaryColor?: string;
+  secondaryColor?: string;
+  hasLogo: boolean;
+  hasFavicon: boolean;
+  hasLoginBackground: boolean;
 };
 
 export type Company = {
@@ -64,6 +77,24 @@ export type Company = {
   packageTier: PackageTier;
   createdAt: string;
   updatedAt: string;
+  // Tenant Management additions (migration 0042) — all nullable/defaulted
+  // so every pre-existing company row reads back cleanly.
+  legalName: string | null;
+  companyCode: string | null;
+  registrationNumber: string | null;
+  industry: string | null;
+  country: string;
+  timezone: string;
+  currency: string;
+  fiscalYearStartMonth: number;
+  customDomain: string | null;
+  seatsPurchased: number;
+  storageQuotaMb: number;
+  statusReason: string | null;
+  statusChangedAt: string | null;
+  deletionRequestedAt: string | null;
+  deletionReason: string | null;
+  deletionPurgeAt: string | null;
 };
 
 /** Dashboard row — a Company plus display-only figures that aren't real billing data yet. */
@@ -103,6 +134,16 @@ export type CompanyAdmin = {
   createdAt: string;
   /** Whether a real login (Phase 3 user_accounts row) exists for this admin yet. */
   hasLogin: boolean;
+  /** Null until a login exists (hasLogin). Used to target Force Logout (TM-017). */
+  userAccountId: string | null;
+};
+
+/** TM-002/TM-003 — Tenant Directory search + filters (GET /platform/companies). */
+export type CompanyListFilters = {
+  search?: string;
+  status?: CompanyStatus[];
+  packageTier?: PackageTier[];
+  country?: string[];
 };
 
 export type CompanyDetail = {
@@ -121,6 +162,50 @@ export type CreateCompanyRequest = {
     fullName: string;
     email: string;
   };
+  // TM-006/007/008 — the Create Tenant wizard's Company/Business/Domain
+  // steps. All optional so `CreateCompanyRequest` stays backward
+  // compatible with every existing caller (SignupService's own request
+  // shape, tests) that only ever set name/slug/packageTier.
+  legalName?: string;
+  companyCode?: string;
+  registrationNumber?: string;
+  industry?: string;
+  country?: string;
+  timezone?: string;
+  currency?: string;
+  fiscalYearStartMonth?: number;
+  customDomain?: string;
+  seatsPurchased?: number;
+};
+
+// TM-008 — Domain step's "Check Availability" action.
+export type DomainAvailabilityResult = {
+  slug: string;
+  slugAvailable: boolean;
+  customDomain: string | null;
+  customDomainAvailable: boolean | null;
+};
+
+// TM-010 — Plan selection step. No fabricated pricing: this platform has
+// no billing/pricing table yet (see CompanyDashboardRow's mockMrrFor
+// comment for the one place a placeholder number is used, and why), so
+// this reflects only what's real — the tier's name/description and the
+// modules it actually includes by default.
+export type PackageTierSummary = {
+  key: PackageTier;
+  name: string;
+  description: string | null;
+  includedModuleKeys: ModuleKey[];
+};
+
+// TM-009 — "Send Test Invitation": a real email through MailerService
+// with no persisted tenant/admin record (there is no tenant yet at this
+// point in the wizard). `sent: false` with a reason mirrors
+// NotificationsService's own honest "logged, not delivered" behavior
+// when SMTP isn't configured, rather than pretending success.
+export type TestInvitationResult = {
+  sent: boolean;
+  reason?: string;
 };
 
 /**
@@ -163,6 +248,209 @@ export type ImpersonateResponse = {
   expiresIn: string;
   companyId: string;
   note: string;
+};
+
+// --- Tenant Management: Sessions (TM-017/029) ----------------------------
+// A row in `user_sessions` — see auth/session-security.service.ts for how
+// this is actually enforced (jti-based revocation checked in
+// PlatformAdminGuard/SessionGuard), not merely stored.
+export type UserSessionView = {
+  id: string;
+  userAccountId: string;
+  companyId: string | null;
+  isPlatformAdmin: boolean;
+  email: string | null;
+  displayName: string | null;
+  createdAt: string;
+  expiresAt: string;
+  revokedAt: string | null;
+};
+
+// --- Tenant Management: Saved Views (TM-003) ------------------------------
+// A named, reusable Tenant Directory filter combination. Platform-wide
+// (not per-admin) — `createdBy` is attribution only, matching the spec's
+// "Save as reusable view" note with no per-user scoping requirement.
+export type PlatformSavedView = {
+  id: string;
+  name: string;
+  filters: CompanyListFilters;
+  createdBy: string;
+  createdAt: string;
+};
+
+// --- Tenant Management: Configuration (TM-018/019/020) --------------------
+// A generic Platform-Admin-facing settings store with real inheritance —
+// distinct from configuration-center's `ConfigurationDomainSummary`, which
+// is a tenant-facing INDEX of existing per-module screens (leave policy,
+// shifts, ...). This is a new key/value override system: `defaultValue`
+// is the product default; `overrideValue` is this tenant's row in
+// `tenant_configuration` if one exists; `effectiveValue` is what actually
+// applies (override, falling back to default) — the "effective value"
+// column the spec calls for.
+export type TenantConfigurationCategory =
+  | "general"
+  | "organization"
+  | "attendance"
+  | "leave"
+  | "payroll"
+  | "security";
+
+export type TenantConfigurationValueType = "boolean" | "integer" | "text";
+
+export type TenantConfigurationSetting = {
+  category: TenantConfigurationCategory;
+  settingKey: string;
+  label: string;
+  description: string | null;
+  valueType: TenantConfigurationValueType;
+  defaultValue: unknown;
+  overrideValue: unknown | null;
+  effectiveValue: unknown;
+  isOverridden: boolean;
+  updatedAt: string | null;
+  updatedBy: string | null;
+};
+
+export type TenantConfigurationVersion = {
+  id: string;
+  companyId: string;
+  category: string;
+  settingKey: string;
+  oldValue: unknown;
+  newValue: unknown;
+  changedBy: string;
+  changedAt: string;
+};
+
+// --- Tenant Management: Modules & Feature Entitlements (TM-021–024) -------
+export type ModuleCatalogEntry = {
+  key: string;
+  label: string;
+  category: string | null;
+  dependsOn: string | null;
+  enabled: boolean;
+};
+
+export type TenantFeatureEntitlement = {
+  featureKey: string;
+  moduleKey: string;
+  name: string;
+  description: string | null;
+  defaultLimit: number | null;
+  enabled: boolean;
+  usageLimit: number | null;
+  effectiveLimit: number | null;
+};
+
+// --- Tenant Management: Subscription (TM-025/026) --------------------------
+export type SubscriptionHistoryEntry = {
+  id: string;
+  fromTier: string | null;
+  toTier: string;
+  seatsPurchased: number | null;
+  changedBy: string;
+  changedAt: string;
+};
+
+export type SubscriptionSummary = {
+  companyId: string;
+  packageTier: PackageTier;
+  seatsPurchased: number;
+  seatsUsed: number;
+  seatsAvailable: number;
+  history: SubscriptionHistoryEntry[];
+};
+
+// --- Tenant Management: Usage & Storage (TM-027/028) -----------------------
+export type TenantDailyUsagePoint = {
+  date: string;
+  apiRequestCount: number;
+  emailSentCount: number;
+};
+
+export type TenantUsageSummary = {
+  companyId: string;
+  employeeCount: number;
+  userCount: number;
+  storageUsedMb: number;
+  storageQuotaMb: number;
+  apiRequestsLast30Days: number;
+  emailsSentLast30Days: number;
+  dailyUsage: TenantDailyUsagePoint[];
+};
+
+// --- Tenant Management: Integrations (TM-031) ------------------------------
+export type IntegrationProviderKey = "smtp" | "sso" | "biometric_device" | "webhook";
+
+export type TenantIntegration = {
+  companyId: string;
+  providerKey: IntegrationProviderKey;
+  enabled: boolean;
+  // Secrets in `config` are never returned by GET — see tenant-integrations
+  // service. Reflects only non-secret fields plus a `hasSecrets` flag.
+  config: Record<string, unknown>;
+  hasSecrets: boolean;
+  updatedAt: string;
+  updatedBy: string;
+};
+
+// --- Tenant Management: Health (TM-032) ------------------------------------
+export type HealthCheckStatus = "ok" | "degraded" | "down";
+
+export type HealthCheckResult = {
+  checkKey: string;
+  status: HealthCheckStatus;
+  detail: string | null;
+  checkedAt: string;
+};
+
+// --- Tenant Management: Support Tickets (TM-033) ---------------------------
+export type SupportTicketPriority = "low" | "normal" | "high" | "urgent";
+export type SupportTicketStatus = "open" | "in_progress" | "resolved" | "closed";
+
+export type SupportTicket = {
+  id: string;
+  companyId: string;
+  subject: string;
+  description: string;
+  priority: SupportTicketPriority;
+  status: SupportTicketStatus;
+  createdBy: string;
+  assignee: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+// --- Tenant Management: Backups (TM-035) -----------------------------------
+export type TenantBackup = {
+  id: string;
+  companyId: string;
+  status: "queued" | "running" | "completed" | "failed";
+  sizeBytes: number | null;
+  fileKey: string | null;
+  requestedBy: string;
+  createdAt: string;
+  completedAt: string | null;
+  error: string | null;
+};
+
+// --- Tenant Management: Data Export (TM-036) --------------------------------
+export type DataExportScope = "full" | "employees" | "payroll" | "attendance";
+export type DataExportFormat = "json" | "csv";
+
+export type TenantDataExport = {
+  id: string;
+  companyId: string;
+  scope: DataExportScope;
+  format: DataExportFormat;
+  status: "queued" | "running" | "completed" | "failed";
+  sizeBytes: number | null;
+  fileKey: string | null;
+  requestedBy: string;
+  createdAt: string;
+  completedAt: string | null;
+  expiresAt: string | null;
+  error: string | null;
 };
 
 // --- Phase 3: Auth & Identity --------------------------------------------

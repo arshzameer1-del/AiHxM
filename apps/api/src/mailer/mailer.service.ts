@@ -51,7 +51,7 @@ export class MailerService {
       secure,
       auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
     });
-    const from = process.env.SMTP_FROM ?? "no-reply@boostfactor.local";
+    const from = process.env.SMTP_FROM ?? "no-reply@aihxm.local";
     try {
       await transport.sendMail({ from, to: input.to, subject: input.subject, text: input.text, html: input.html });
     } catch (err) {

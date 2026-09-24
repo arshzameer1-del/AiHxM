@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import type { RequestClaims } from "../database/tenant-context";
-import type { AuditLogEntry } from "@boostfactor/shared-types";
+import type { AuditLogEntry } from "@aihxm/shared-types";
 
 type RecordInput = {
   companyId: string | null;

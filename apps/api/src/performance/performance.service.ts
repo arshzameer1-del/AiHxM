@@ -17,7 +17,7 @@ import type {
   SubmitManagerAssessmentRequest,
   SubmitSelfAssessmentRequest,
   UpdateGoalRequest,
-} from "@boostfactor/shared-types";
+} from "@aihxm/shared-types";
 
 const MODULE_KEY = "performance" as const;
 const OBJECT_KEY = "performance_review";

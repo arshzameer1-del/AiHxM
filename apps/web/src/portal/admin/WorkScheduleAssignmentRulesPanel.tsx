@@ -5,7 +5,7 @@ import type {
   WorkScheduleRuleCondition,
   WorkScheduleRuleExpression,
   WorkScheduleRuleOperator,
-} from "@boostfactor/shared-types";
+} from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { CONDITION_FIELDS, CONDITION_FIELD_LABELS } from "./conditionLabels";
 

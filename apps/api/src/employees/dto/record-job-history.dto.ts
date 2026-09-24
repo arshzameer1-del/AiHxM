@@ -1,5 +1,5 @@
 import { IsDateString, IsIn, IsOptional, IsString } from "class-validator";
-import type { JobHistoryEventType } from "@boostfactor/shared-types";
+import type { JobHistoryEventType } from "@aihxm/shared-types";
 
 export class RecordJobHistoryDto {
   @IsIn(["hire", "promotion", "transfer", "salary_change", "termination", "rehire", "other"])

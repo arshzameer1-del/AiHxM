@@ -6,7 +6,7 @@ import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
 import { WorkScheduleResolutionService } from "../shifts/work-schedule-resolution.service";
-import type { AttendanceRecordView, ClockInRequest, ClockOutRequest } from "@boostfactor/shared-types";
+import type { AttendanceRecordView, ClockInRequest, ClockOutRequest } from "@aihxm/shared-types";
 
 const LEAVE_MODULE_KEY = "leave" as const;
 

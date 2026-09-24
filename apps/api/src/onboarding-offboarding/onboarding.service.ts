@@ -13,7 +13,7 @@ import type {
   OnboardingItemTemplateView,
   UpdateChecklistItemRequest,
   UpdateOnboardingItemTemplateRequest,
-} from "@boostfactor/shared-types";
+} from "@aihxm/shared-types";
 
 // Gated on the existing `recruitment` module_catalog entry — see
 // 0035_onboarding_offboarding.sql's header comment for why this reuses

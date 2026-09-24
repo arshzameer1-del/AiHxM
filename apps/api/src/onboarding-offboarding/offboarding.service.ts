@@ -15,7 +15,7 @@ import type {
   OffboardingItemTemplateView,
   UpdateChecklistItemRequest,
   UpdateOffboardingItemTemplateRequest,
-} from "@boostfactor/shared-types";
+} from "@aihxm/shared-types";
 
 // Gated on the existing `exit` module_catalog entry ("Exit &
 // Offboarding") — see 0035_onboarding_offboarding.sql's header comment

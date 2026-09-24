@@ -1,4 +1,4 @@
-# BoostFactor — Decisions Log
+# AIHXM — Decisions Log
 
 Every architecture-level decision that would be expensive to reverse gets
 recorded here: what was decided, why, and what alternatives were rejected.
@@ -93,7 +93,7 @@ cloud. Supabase Auth and Supabase Storage are the only genuinely
 Supabase-specific surfaces anywhere in the plan; both are thin, swappable
 edges (self-hosted Supabase on the client's own AWS account, or a full
 native-AWS re-platform to Cognito/RDS/S3), not load-bearing walls. Full
-reasoning: `claude/development-plan.md`, Section 9, in the BoostFactor
+reasoning: `claude/development-plan.md`, Section 9, in the AIHXM
 project.
 
 ### What this unblocks
@@ -518,7 +518,7 @@ nothing downstream would notice.
 Three tables, named to match the plan doc's own Section 7 phase row
 exactly (`apps/api/migrations/0006_module_entitlement.sql`):
 
-- **`module_catalog`** — every module BoostFactor can license, including
+- **`module_catalog`** — every module AIHXM can license, including
   `dummy` (see "What this reuses," below).
 - **`package_tier`** — the four sellable tiers, promoted from a bare
   CHECK-constrained string on `companies.package_tier` to a real catalog
@@ -1283,7 +1283,7 @@ Every other object built since Phase 7 (`employees`, `leave_requests`,
 `attendance_records`) has, at minimum, a plausible self-service caller —
 the record is ABOUT a `user_accounts` row that can also act on it. A
 candidate breaks that pattern entirely: they are a real person the system
-tracks, but they never authenticate into BoostFactor, so there is no
+tracks, but they never authenticate into AIHXM, so there is no
 `candidate.view.self` to build, and `candidates` deliberately has no
 `user_account_id` column at all (unlike `employees`, which has a
 nullable one for exactly the "not every record has a login" case Phase 9
@@ -1410,7 +1410,7 @@ Phase 11's exit criterion is verified two ways, both against real Postgres with 
 
 ## Decision #12 — MVP Gate Audit: real tenant-user login didn't exist, and closing it (`AuthService`'s third identity tier, `EmployeesService.createLogin()`)
 
-**Context.** Updated project instructions (uploaded 2026-09-14, tracked as `claude/mvp-gate-audit.md`) reframed the project's priority: Phase 12 (Payroll) work already in progress was paused, and the immediate objective became auditing what actually exists before building anything further, specifically whether "one pilot company can use BoostFactor through the real UI for the core HR workflows." That audit's dominant finding was that no tenant-facing UI exists at all (only the Phase 2 Platform Admin Panel) — but investigating what building one would actually require surfaced a deeper, previously-unflagged problem underneath it: **there was no way, through any real API call, for an `hr_admin`/`line_manager`/`employee_self_service` user to end up with a working login.**
+**Context.** Updated project instructions (uploaded 2026-09-14, tracked as `claude/mvp-gate-audit.md`) reframed the project's priority: Phase 12 (Payroll) work already in progress was paused, and the immediate objective became auditing what actually exists before building anything further, specifically whether "one pilot company can use AIHXM through the real UI for the core HR workflows." That audit's dominant finding was that no tenant-facing UI exists at all (only the Phase 2 Platform Admin Panel) — but investigating what building one would actually require surfaced a deeper, previously-unflagged problem underneath it: **there was no way, through any real API call, for an `hr_admin`/`line_manager`/`employee_self_service` user to end up with a working login.**
 
 `AuthService.resolveIdentityForAccount()` — the function every login, MFA-enrollment-confirm, and MFA-verify call routes through to decide what token to issue — only ever checked two tables: `platform_admins` and `company_admins`. Every one of Phases 4 through 11's own test suites exercises the `hr_admin`/`line_manager`/`employee_self_service` role population constantly (127 tests, all real Postgres, no mocks) — but every single one of them creates that population by inserting directly into `user_accounts` and `user_role_assignments` via raw SQL in fixture setup, never through `AuthService`. Nothing in the real login flow ever looked at `user_role_assignments` at all. A Company (Super) Admin's own login — the one tenant-facing login path that DOES exist, created via the Platform Admin Panel's `createAdminLogin` — authenticates fine (password + mandatory MFA both work) but carries `company_id` and nothing else: `RbacService.hasPermission()` queries `user_role_assignments` by `(user_account_id, company_id)` and finds zero rows for a Company Admin who was never separately granted a role, so that session has zero permissions against every Phase 4+ module. This was real, but not a bug in the sense of broken code — it was simply never finished, because nothing before this session's audit ever tried to actually log in as a real HR Admin/Manager/Employee through the product surface rather than through fixture SQL or a hand-signed JWT.
 
@@ -1567,15 +1567,15 @@ Routing: Phase 2's existing Platform Admin routes (`/`, `/companies/...`, `/audi
 
 ---
 
-## Decision #21 — Product renamed BoostFactor → AI HXM: what changed, what deliberately didn't
+## Decision #21 — Product renamed AIHXM → AI HXM: what changed, what deliberately didn't
 
-**Context.** The user renamed the product ("boostfactor name already available on dev" — a naming collision elsewhere, not this repo). "AI HXM" was chosen (HXM = Human Experience Management, the same term SAP itself now uses for SuccessFactors — a deliberate echo of the "affordable local counterpart to SAP SuccessFactors" positioning), styled as `AI HXM` for display text and `ai-hxm` / `@ai-hxm/*` for code identifiers.
+**Context.** The user renamed the product ("aihxm name already available on dev" — a naming collision elsewhere, not this repo). "AI HXM" was chosen (HXM = Human Experience Management, the same term SAP itself now uses for SuccessFactors — a deliberate echo of the "affordable local counterpart to SAP SuccessFactors" positioning), styled as `AI HXM` for display text and `ai-hxm` / `@ai-hxm/*` for code identifiers.
 
 **Changed.** Every user-visible mention of the old name: the sidebar/header brand mark and browser tab title (`Layout.tsx`, `PortalLayout.tsx`, `LoginPage.tsx`, `index.html`), the "no role assigned yet" copy on `PortalHomePage.tsx`, and the health-check endpoint's own `service` field (`app.service.ts`). The two deployable app packages' identities: `apps/api/package.json` and `apps/web/package.json` renamed to `@ai-hxm/api`/`@ai-hxm/web`, the workspace root `package.json`'s name/description, `.github/workflows/ci.yml`'s `--workspace=@ai-hxm/api` filters (3 call sites), and `README.md`'s title and workspace-command examples. Verified after the rename: full backend suite **142/142** passing under the new package name, `npx tsc -b`/`eslint` clean on `apps/web` (same one pre-existing, expected `leaveLabels.ts` Payroll-`LeaveType` error as always), both dev servers boot cleanly under `npm run dev --workspace=@ai-hxm/api`/`@ai-hxm/web`, and a live screenshot of the real login page confirms the rendered brand mark.
 
-**Deliberately NOT changed, and why.** `packages/shared-types`'s own package name stays `@boostfactor/shared-types` for now — it's the one identifier over 130 files import (`import type {...} from "@boostfactor/shared-types"`), including the still-paused Phase 12 Payroll module (`apps/api/src/payroll/**`) and two already-tracked-but-uncommitted paused Leave files (`leave-requests.service.ts`, `dto/submit-leave-request.dto.ts`, both carrying the paused `LeaveType` "unpaid" usage). Renaming it would mean either touching those paused files' import lines too (a real, if purely mechanical, edit to files the standing instruction says must stay untouched and never committed) or leaving the repo in a broken, inconsistent state where `AppModule`'s already-registered (uncommitted) `PayrollModule` import fails to resolve — a real regression risk to the whole test suite for zero user-facing benefit, since this identifier is a TypeScript compile-time-only label (`import type`, erased at build, never shipped to a browser or visible to any user). Revisit this one specific rename together with Payroll itself, once the MVP gate clears and those files get real attention anyway — at that point it's a five-minute find-replace, not a standalone risk. Also deliberately left alone: the local Postgres/Redis container names, database name, and role/password in `docker-compose.yml` and CI (`boostfactor`/`boostfactor_dev`) — pure internal infrastructure, invisible to any user, and renaming a live database name mid-project is real disruptive churn (every fixture, every `.env`, every running dev instance) for a string nobody outside this container ever sees.
+**Deliberately NOT changed, and why.** `packages/shared-types`'s own package name stays `@aihxm/shared-types` for now — it's the one identifier over 130 files import (`import type {...} from "@aihxm/shared-types"`), including the still-paused Phase 12 Payroll module (`apps/api/src/payroll/**`) and two already-tracked-but-uncommitted paused Leave files (`leave-requests.service.ts`, `dto/submit-leave-request.dto.ts`, both carrying the paused `LeaveType` "unpaid" usage). Renaming it would mean either touching those paused files' import lines too (a real, if purely mechanical, edit to files the standing instruction says must stay untouched and never committed) or leaving the repo in a broken, inconsistent state where `AppModule`'s already-registered (uncommitted) `PayrollModule` import fails to resolve — a real regression risk to the whole test suite for zero user-facing benefit, since this identifier is a TypeScript compile-time-only label (`import type`, erased at build, never shipped to a browser or visible to any user). Revisit this one specific rename together with Payroll itself, once the MVP gate clears and those files get real attention anyway — at that point it's a five-minute find-replace, not a standalone risk. Also deliberately left alone: the local Postgres/Redis container names, database name, and role/password in `docker-compose.yml` and CI (`aihxm`/`aihxm_dev`) — pure internal infrastructure, invisible to any user, and renaming a live database name mid-project is real disruptive churn (every fixture, every `.env`, every running dev instance) for a string nobody outside this container ever sees.
 
-**Still open.** The actual claude.ai Project this repository's docs live in is still named "BoostFactor" — no tool available in this environment can rename a Claude Project container; the user needs to do that themselves in claude.ai, at which point `README.md`'s explicit note about it (left in place, not silently glossed over) should be updated to match.
+**Still open.** The actual claude.ai Project this repository's docs live in is still named "AIHXM" — no tool available in this environment can rename a Claude Project container; the user needs to do that themselves in claude.ai, at which point `README.md`'s explicit note about it (left in place, not silently glossed over) should be updated to match.
 
 ---
 

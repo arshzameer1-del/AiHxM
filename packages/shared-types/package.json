@@ -1,5 +1,5 @@
 {
-  "name": "@boostfactor/shared-types",
+  "name": "@aihxm/shared-types",
   "version": "0.1.0",
   "private": true,
   "main": "src/index.ts",

@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import type { CandidateView } from "@boostfactor/shared-types";
+import type { CandidateView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 
 function describeError(err: unknown): string {

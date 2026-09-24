@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import type { LeavePolicyVersionView, LeavePolicyView } from "@boostfactor/shared-types";
+import type { LeavePolicyVersionView, LeavePolicyView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 
 function formatDate(iso: string): string {

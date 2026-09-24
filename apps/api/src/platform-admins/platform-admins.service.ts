@@ -3,7 +3,7 @@ import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
 import { AuditService } from "../audit/audit.service";
 import { hashPassword } from "../auth/password";
-import type { CompanyAdminStatus, PlatformAdmin } from "@boostfactor/shared-types";
+import type { CompanyAdminStatus, PlatformAdmin } from "@aihxm/shared-types";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function rowToPlatformAdmin(row: any): PlatformAdmin {

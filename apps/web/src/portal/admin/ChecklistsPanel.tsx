@@ -7,7 +7,7 @@ import type {
   EmployeeOnboardingView,
   OffboardingItemTemplateView,
   OnboardingItemTemplateView,
-} from "@boostfactor/shared-types";
+} from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 
 const CATEGORIES: ChecklistCategory[] = ["it", "hr", "finance", "facilities", "general"];

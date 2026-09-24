@@ -1,6 +1,6 @@
 import { FormEvent, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import type { PackageTier } from "@boostfactor/shared-types";
+import type { PackageTier } from "@aihxm/shared-types";
 import { api, ApiError } from "../api/client";
 
 const TIERS: Array<{ key: PackageTier; name: string; description: string }> = [
@@ -9,7 +9,7 @@ const TIERS: Array<{ key: PackageTier; name: string; description: string }> = [
   {
     key: "professional",
     name: "Professional",
-    description: "Growth plus payroll and BI/analytics for a company running real payroll through BoostFactor.",
+    description: "Growth plus payroll and BI/analytics for a company running real payroll through AIHXM.",
   },
   { key: "enterprise", name: "Enterprise", description: "Every module, including succession, learning, and exit/offboarding." },
 ];
@@ -55,7 +55,7 @@ export function SignupPage() {
       <div className="w-full max-w-md bg-card rounded-card p-6 shadow-sm">
         <h1 className="text-2xl font-bold mb-1">Create your company</h1>
         <p className="text-sm text-label-tertiary mb-6">
-          Set up BoostFactor for your team in a couple of minutes — no sales call required.
+          Set up AIHXM for your team in a couple of minutes — no sales call required.
         </p>
 
         {error && <div className="text-danger text-sm mb-4">{error}</div>}

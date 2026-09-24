@@ -2,7 +2,7 @@ import { ConflictException, Injectable, NotFoundException } from "@nestjs/common
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
 import { AuditService } from "../audit/audit.service";
-import type { UserRoleAssignment } from "@boostfactor/shared-types";
+import type { UserRoleAssignment } from "@aihxm/shared-types";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function rowToAssignment(row: any): UserRoleAssignment {

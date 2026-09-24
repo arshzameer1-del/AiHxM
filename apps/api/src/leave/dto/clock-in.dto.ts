@@ -1,5 +1,5 @@
 import { IsIn, IsLatitude, IsLongitude, IsOptional, IsString, MinLength } from "class-validator";
-import type { AttendanceSource } from "@boostfactor/shared-types";
+import type { AttendanceSource } from "@aihxm/shared-types";
 
 export class ClockInDto {
   // employee_number, deliberately not the internal UUID — plan doc

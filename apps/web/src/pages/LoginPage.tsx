@@ -193,7 +193,7 @@ export function LoginPage() {
               Forgot your password?
             </button>
             <p className="text-center text-xs text-label-tertiary mt-3">
-              New to BoostFactor?{" "}
+              New to AIHXM?{" "}
               <Link to="/signup" className="text-accent font-medium hover:underline">
                 Create your company
               </Link>

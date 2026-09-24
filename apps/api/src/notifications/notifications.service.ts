@@ -2,8 +2,9 @@ import { ForbiddenException, Injectable, Logger } from "@nestjs/common";
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
 import { MailerService } from "../mailer/mailer.service";
+import { incrementDailyUsage } from "../tenant-management/usage-tracking.util";
 import { renderEmailTemplate } from "./email-templates";
-import type { DispatchNotificationRequest, NotificationLogEntry } from "@boostfactor/shared-types";
+import type { DispatchNotificationRequest, NotificationLogEntry } from "@aihxm/shared-types";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toEntry(row: any): NotificationLogEntry {
@@ -75,6 +76,8 @@ export class NotificationsService {
     try {
       await this.mailer.sendMail({ to: entry.recipient, subject: rendered.subject, text: rendered.text });
       status = "sent";
+      // TM-027 Usage dashboard's real email counter.
+      await incrementDailyUsage(this.db, entry.companyId, "email_sent_count");
     } catch (err) {
       this.logger.warn(`Notification ${entry.id} (${entry.templateKey} -> ${entry.recipient}) failed to send: ${(err as Error).message}`);
       status = "failed";

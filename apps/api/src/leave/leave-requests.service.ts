@@ -15,7 +15,7 @@ import type {
   OverlapWarning,
   SubmitLeaveRequestRequest,
   SubmitLeaveRequestResponse,
-} from "@boostfactor/shared-types";
+} from "@aihxm/shared-types";
 
 const LEAVE_MODULE_KEY = "leave" as const;
 const WORKFLOW_TEMPLATE_KEY = "leave_request";

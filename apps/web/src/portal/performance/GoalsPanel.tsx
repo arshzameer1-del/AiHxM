@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { GoalView } from "@boostfactor/shared-types";
+import type { GoalView } from "@aihxm/shared-types";
 import { api } from "../../api/client";
 
 export function GoalsPanel() {

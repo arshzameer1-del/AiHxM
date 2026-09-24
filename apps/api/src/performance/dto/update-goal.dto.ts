@@ -1,5 +1,5 @@
 import { IsIn, IsNumber, IsOptional, IsString, Max, Min, MinLength } from "class-validator";
-import type { GoalStatus } from "@boostfactor/shared-types";
+import type { GoalStatus } from "@aihxm/shared-types";
 
 export class UpdateGoalDto {
   @IsOptional()

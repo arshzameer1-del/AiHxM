@@ -7,7 +7,7 @@
 --
 -- Four real objects: `job_requisitions` (the thing that gets approved),
 -- `candidates` (a person, deliberately NOT a `user_accounts` row — a
--- candidate never logs into BoostFactor, so there is no login/session
+-- candidate never logs into AIHXM, so there is no login/session
 -- concept for them at all, unlike every other object built so far),
 -- `applications` (one candidate applying to one requisition — the
 -- Kanban card), and `offers` (an application's terminal decision point).

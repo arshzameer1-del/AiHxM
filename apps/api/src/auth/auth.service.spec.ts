@@ -293,7 +293,7 @@ describe("AuthService", () => {
       beforeEach(() => {
         process.env.SMTP_HOST = "127.0.0.1";
         process.env.SMTP_PORT = String(catcher.port);
-        process.env.SMTP_FROM = "no-reply@boostfactor.local";
+        process.env.SMTP_FROM = "no-reply@aihxm.local";
         delete process.env.SMTP_USER;
         delete process.env.SMTP_PASS;
         catcher.clear();
@@ -313,7 +313,7 @@ describe("AuthService", () => {
         const received = catcher.all();
         const match = received.find((m) => m.to.includes(email));
         expect(match).toBeDefined();
-        expect(match?.subject).toBe("Reset your BoostFactor password");
+        expect(match?.subject).toBe("Reset your AIHXM password");
         expect(match?.text).toContain("/reset-password?token=");
       });
 

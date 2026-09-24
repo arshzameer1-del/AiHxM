@@ -1,5 +1,5 @@
 import { IsIn, IsUUID } from "class-validator";
-import type { TenantRoleKey } from "@boostfactor/shared-types";
+import type { TenantRoleKey } from "@aihxm/shared-types";
 
 // The full four-role catalog (0011_employee_seed.sql + 0024_system_admin.sql)
 // — a System Admin may grant/revoke ANY real tenant role, including

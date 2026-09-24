@@ -1,4 +1,4 @@
-import type { EmployeeGroupConditionField } from "@boostfactor/shared-types";
+import type { EmployeeGroupConditionField } from "@aihxm/shared-types";
 
 /**
  * The fixed condition-field set EmployeeGroupConditionDto validates

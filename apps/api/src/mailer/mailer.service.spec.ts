@@ -40,22 +40,22 @@ describe("MailerService", () => {
       try {
         process.env.SMTP_HOST = "127.0.0.1";
         process.env.SMTP_PORT = String(catcher.port);
-        process.env.SMTP_FROM = "no-reply@boostfactor.local";
+        process.env.SMTP_FROM = "no-reply@aihxm.local";
         delete process.env.SMTP_USER;
         delete process.env.SMTP_PASS;
         const mailer = new MailerService();
 
         await mailer.sendMail({
           to: "recipient@example.com",
-          subject: "Reset your BoostFactor password",
+          subject: "Reset your AIHXM password",
           text: "Reset it here: https://example.com/reset?token=abc123",
         });
 
         const received = catcher.all();
         expect(received).toHaveLength(1);
-        expect(received[0].from).toBe("no-reply@boostfactor.local");
+        expect(received[0].from).toBe("no-reply@aihxm.local");
         expect(received[0].to).toEqual(["recipient@example.com"]);
-        expect(received[0].subject).toBe("Reset your BoostFactor password");
+        expect(received[0].subject).toBe("Reset your AIHXM password");
         expect(received[0].text).toContain("https://example.com/reset?token=abc123");
       } finally {
         await catcher.stop();

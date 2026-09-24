@@ -1,5 +1,5 @@
 import { IsIn, IsString, MinLength } from "class-validator";
-import type { EmployeeGroupConditionField } from "@boostfactor/shared-types";
+import type { EmployeeGroupConditionField } from "@aihxm/shared-types";
 
 const CONDITION_FIELDS: EmployeeGroupConditionField[] = [
   "department",

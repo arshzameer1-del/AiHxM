@@ -16,7 +16,7 @@
 # Supabase project and generated secrets (see apps/api/.env.production.example).
 services:
   - type: web
-    name: boostfactor-api
+    name: aihxm-api
     runtime: node
     plan: free
     buildCommand: npm install && npx turbo run build --filter=@ai-hxm/api

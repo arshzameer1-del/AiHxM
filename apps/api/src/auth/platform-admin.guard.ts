@@ -7,13 +7,18 @@ import {
 import type { Request } from "express";
 import * as jwt from "jsonwebtoken";
 import type { RequestClaims } from "../database/tenant-context";
+import { SessionSecurityService } from "./session-security.service";
 
 export type AuthedRequest = Request & { claims: RequestClaims };
 
-type SessionTokenPayload = {
+export type SessionTokenPayload = {
   sub: string;
   is_platform_admin: boolean;
   company_id?: string | null;
+  /** Session id (also `user_sessions.id`) — absent on tokens minted before
+   *  sessions existed and on "Login As" impersonation tokens; see
+   *  SessionSecurityService's doc comment. */
+  jti?: string;
 };
 
 /**
@@ -27,10 +32,18 @@ type SessionTokenPayload = {
  * whitelisting fields here is what makes that true by construction, not
  * just by the fact that forging a JWT without JWT_SECRET is already
  * impossible.
+ *
+ * Also checks `jti` against `SessionSecurityService.isRevoked()` — the
+ * Tenant Management "Force Logout" feature revokes a `user_sessions` row,
+ * and without this check that revocation had no actual effect on a token
+ * already in someone's browser (it would just keep working until its own
+ * 12h expiry).
  */
 @Injectable()
 export class PlatformAdminGuard implements CanActivate {
-  canActivate(context: ExecutionContext): boolean {
+  constructor(private readonly sessionSecurity: SessionSecurityService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest<AuthedRequest>();
     const header = req.headers.authorization;
     if (!header?.startsWith("Bearer ")) {
@@ -52,6 +65,10 @@ export class PlatformAdminGuard implements CanActivate {
 
     if (!payload.is_platform_admin) {
       throw new UnauthorizedException("Platform admin access required");
+    }
+
+    if (await this.sessionSecurity.isRevoked(payload.jti)) {
+      throw new UnauthorizedException("This session has been signed out remotely. Please log in again.");
     }
 
     req.claims = {

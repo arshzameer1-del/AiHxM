@@ -18,7 +18,7 @@ import type {
   OrgChartNode,
   RecordJobHistoryRequest,
   UpdateEmployeeRequest,
-} from "@boostfactor/shared-types";
+} from "@aihxm/shared-types";
 
 const MODULE_KEY = "employee" as const;
 const OBJECT_KEY = "employee";

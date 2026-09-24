@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import type { CsvImportRowError } from "@boostfactor/shared-types";
+import type { CsvImportRowError } from "@aihxm/shared-types";
 
 /**
  * Plan doc Section 6's "Conversions" WRICEF pillar: bulk import/export for

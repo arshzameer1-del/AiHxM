@@ -21,7 +21,7 @@ import type {
   TaxSlabSetView,
   TaxSlabView,
   UpdatePayrollSettingsRequest,
-} from "@boostfactor/shared-types";
+} from "@aihxm/shared-types";
 
 const MODULE_KEY = "payroll" as const;
 const HR_MANAGE_PERMISSION = "payroll.manage.all";

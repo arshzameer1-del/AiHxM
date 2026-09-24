@@ -1,5 +1,5 @@
 import { IsIn, IsNumber, IsOptional, Min } from "class-validator";
-import type { SocialSecurityScheme } from "@boostfactor/shared-types";
+import type { SocialSecurityScheme } from "@aihxm/shared-types";
 
 const SCHEMES: SocialSecurityScheme[] = ["none", "pessi", "sessi"];
 

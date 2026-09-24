@@ -5,7 +5,7 @@ import type { RequestClaims } from "../database/tenant-context";
 import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
-import type { DecideOnDutyRequestRequest, OnDutyRequestView, SubmitOnDutyRequestRequest } from "@boostfactor/shared-types";
+import type { DecideOnDutyRequestRequest, OnDutyRequestView, SubmitOnDutyRequestRequest } from "@aihxm/shared-types";
 
 const LEAVE_MODULE_KEY = "leave" as const;
 

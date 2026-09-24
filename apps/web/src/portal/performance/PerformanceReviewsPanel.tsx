@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { PerformanceReviewView } from "@boostfactor/shared-types";
+import type { PerformanceReviewView } from "@aihxm/shared-types";
 import { api } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 

@@ -15,7 +15,7 @@ import type {
   ResolvedWorkScheduleView,
   SetOvertimePolicyRequest,
   SubmitOvertimeClaimRequest,
-} from "@boostfactor/shared-types";
+} from "@aihxm/shared-types";
 
 const LEAVE_MODULE_KEY = "leave" as const;
 
