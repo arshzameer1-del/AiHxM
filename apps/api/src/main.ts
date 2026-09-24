@@ -23,11 +23,28 @@ async function bootstrap() {
   // exists" — Phase 3 built real auth and this was never revisited until
   // now. CORS_ORIGIN is a comma-separated allowlist; unset defaults to
   // the local Vite dev server only, never to "allow everything."
+  //
+  // Per-company login URLs (aihxm.com/leadhcm/login) are a PATH on this
+  // same frontend origin, not a separate tenant subdomain (an earlier
+  // version of this used leadhcm.aihxm.com and needed a dynamic
+  // origin-validator here for that — dropped once Netlify's wildcard
+  // custom domain requirement, a paid plan support has to enable by hand,
+  // ruled subdomains out; see LoginPage.tsx's doc comment). So every
+  // tenant's login page is served from the exact same origin as
+  // everything else, and this plain static allowlist covers it.
   const corsOrigins = (process.env.CORS_ORIGIN ?? "http://localhost:5173")
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean);
-  app.enableCors({ origin: corsOrigins });
+
+  app.enableCors({
+    origin(origin, callback) {
+      // No Origin header at all (server-to-server, curl, health checks) —
+      // never a browser CORS concern in the first place.
+      if (!origin || corsOrigins.includes(origin)) return callback(null, true);
+      callback(new Error(`Origin "${origin}" is not allowed`), false);
+    },
+  });
 
   // Strip unknown fields and reject bad ones at the edge, before any
   // handler runs. DTOs (CreateCompanyDto etc.) are the single source of

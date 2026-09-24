@@ -2,6 +2,7 @@ import { ConflictException, Injectable, NotFoundException } from "@nestjs/common
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
 import { AuditService } from "../audit/audit.service";
+import { normalizeEmail } from "../auth/email.util";
 import { hashPassword } from "../auth/password";
 import type { CompanyAdminStatus, PlatformAdmin } from "@aihxm/shared-types";
 
@@ -43,8 +44,9 @@ export class PlatformAdminsService {
     input: { fullName: string; email: string; initialPassword: string }
   ): Promise<PlatformAdmin> {
     return this.db.withClaims(claims, async (client) => {
+      const email = normalizeEmail(input.email);
       const existing = await client.query("SELECT 1 FROM platform_admins WHERE email = $1", [
-        input.email,
+        email,
       ]);
       if ((existing.rowCount ?? 0) > 0) {
         throw new ConflictException(`${input.email} is already a Platform Admin`);
@@ -53,12 +55,12 @@ export class PlatformAdminsService {
       const passwordHash = await hashPassword(input.initialPassword);
       const account = await client.query(
         "INSERT INTO user_accounts (email, password_hash) VALUES ($1, $2) RETURNING id",
-        [input.email, passwordHash]
+        [email, passwordHash]
       );
 
       const result = await client.query(
         `INSERT INTO platform_admins (full_name, email, user_account_id) VALUES ($1, $2, $3) RETURNING *`,
-        [input.fullName, input.email, account.rows[0].id]
+        [input.fullName, email, account.rows[0].id]
       );
 
       await this.audit.record(client, claims, {

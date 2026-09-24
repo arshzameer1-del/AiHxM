@@ -173,6 +173,86 @@ describe("AuthService", () => {
     });
   });
 
+  /** A company + an Employee Core row with a known employee_number, linked to a fresh user_accounts login. */
+  async function createEmployeeLogin(overrides?: {
+    employeeNumber?: string;
+    password?: string;
+  }): Promise<{ companySlug: string; employeeNumber: string; password: string }> {
+    const { id: userAccountId, password } = await createUserAccount({ password: overrides?.password });
+    const employeeNumber = overrides?.employeeNumber ?? `EMP-${Math.floor(Math.random() * 100000)}`;
+
+    const companySlug = await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+      const slug = `auth-emp-spec-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const companyResult = await client.query(
+        "INSERT INTO companies (name, slug, status, package_tier) VALUES ($1, $2, 'active', 'starter') RETURNING id",
+        [`Auth Employee Spec Co ${Date.now()}`, slug]
+      );
+      const companyId = companyResult.rows[0].id as string;
+      await client.query(
+        `INSERT INTO employees (company_id, employee_number, first_name, last_name, user_account_id)
+         VALUES ($1, $2, 'Test', 'Employee', $3)`,
+        [companyId, employeeNumber, userAccountId]
+      );
+      // resolveIdentityForAccount's Tier 3 (see its own doc comment) needs
+      // a real role assignment, same as EmployeesService.createLogin
+      // grants for a real employee login — without one, AuthService
+      // itself throws "not linked to any admin profile or role" before
+      // ever reaching MFA, regardless of which lookup found the account.
+      const roleResult = await client.query("SELECT id FROM roles WHERE key = 'employee_self_service' LIMIT 1");
+      await client.query(
+        "INSERT INTO user_role_assignments (user_account_id, company_id, role_id) VALUES ($1, $2, $3)",
+        [userAccountId, companyId, roleResult.rows[0].id]
+      );
+      return slug;
+    });
+
+    return { companySlug, employeeNumber, password };
+  }
+
+  describe("loginWithEmployeeNumber", () => {
+    it("authenticates a real employee by employee number scoped to their own company", async () => {
+      const { companySlug, employeeNumber, password } = await createEmployeeLogin();
+
+      const result = await service.loginWithEmployeeNumber(companySlug, employeeNumber, password);
+
+      expect(result.status).toBe("mfa_setup_required");
+    });
+
+    it("matches the employee number case-insensitively", async () => {
+      const { companySlug, employeeNumber, password } = await createEmployeeLogin({
+        employeeNumber: "EMP-0042",
+      });
+
+      const result = await service.loginWithEmployeeNumber(companySlug, "emp-0042", password);
+
+      expect(result.status).toBe("mfa_setup_required");
+    });
+
+    it("rejects the right employee number under the WRONG company with a generic message", async () => {
+      const { employeeNumber, password } = await createEmployeeLogin();
+      const otherSlug = await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const slug = `auth-emp-spec-other-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        await client.query(
+          "INSERT INTO companies (name, slug, status, package_tier) VALUES ($1, $2, 'active', 'starter')",
+          [`Auth Employee Spec Other Co ${Date.now()}`, slug]
+        );
+        return slug;
+      });
+
+      await expect(
+        service.loginWithEmployeeNumber(otherSlug, employeeNumber, password)
+      ).rejects.toThrow("Invalid login ID or password");
+    });
+
+    it("rejects an unknown employee number with a generic message distinct from the email path's", async () => {
+      const { companySlug } = await createEmployeeLogin();
+
+      await expect(
+        service.loginWithEmployeeNumber(companySlug, "EMP-DOES-NOT-EXIST", "whatever")
+      ).rejects.toThrow("Invalid login ID or password");
+    });
+  });
+
   describe("confirmMfaEnrollment", () => {
     it("issues a real session token for a valid enrollment code", async () => {
       const { id, email, password } = await createUserAccount();

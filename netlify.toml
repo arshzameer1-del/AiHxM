@@ -11,6 +11,15 @@
 # proxy to the real backend, so the browser never sees a cross-origin
 # request and CORS_ORIGIN on the API only ever needs to allow this one
 # Netlify origin, not itself.
+#
+# Per-company login URLs (aihxm.com/leadhcm/login, not just one shared
+# /login) are a PATH on this one site, not a tenant subdomain — an earlier
+# version tried leadhcm.aihxm.com, but Netlify only supports wildcard
+# custom domains on a paid Team plan that Netlify Support has to enable by
+# hand, so that approach was dropped (see LoginPage.tsx's doc comment).
+# Nothing below needed to change for this: redirect #2's SPA catch-all
+# already sends any path, including /:companySlug/login, to index.html,
+# same as every other client-side route.
 
 [build]
   command = "npm install && npx turbo run build --filter=@ai-hxm/web"

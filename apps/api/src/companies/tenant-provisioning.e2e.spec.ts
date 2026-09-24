@@ -108,6 +108,28 @@ describe("Tenant provisioning: wizard support, profile, branding (e2e)", () => {
     expect(nowTaken.body.slugAvailable).toBe(false);
   });
 
+  /**
+   * A company's slug is now also a path segment in the frontend's own
+   * router (aihxm.com/<slug>/login) — CompaniesService's RESERVED_SLUGS
+   * blocklist is what stops a company from ever claiming a slug that
+   * collides with a real top-level route like /login or /app. Checked at
+   * both the availability-check endpoint (fast UI feedback) and creation
+   * itself (the real enforcement).
+   */
+  it("reports a reserved slug as unavailable and refuses to create it, even though it's not taken by another company", async () => {
+    const availability = await request(app.getHttpServer())
+      .post("/platform/tenant-availability")
+      .set("Authorization", `Bearer ${platformAdminToken}`)
+      .send({ slug: "login" });
+    expect(availability.body.slugAvailable).toBe(false);
+
+    const createRes = await request(app.getHttpServer())
+      .post("/platform/companies")
+      .set("Authorization", `Bearer ${platformAdminToken}`)
+      .send({ name: "Reserved Slug Co", slug: "login" });
+    expect(createRes.status).toBe(409);
+  });
+
   it("reports a test invitation as not sent when SMTP isn't configured, never fakes success", async () => {
     const res = await request(app.getHttpServer())
       .post("/platform/test-invitations")

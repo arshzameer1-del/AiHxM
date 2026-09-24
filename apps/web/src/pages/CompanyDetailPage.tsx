@@ -90,19 +90,28 @@ export function CompanyDetailPage() {
   const { company, config, admins } = detail;
 
   return (
-    <div className="max-w-3xl">
+    <div className="max-w-5xl">
       <div className="flex items-center gap-3 mb-1">
         <h1 className="text-2xl font-bold tracking-tight">{company.name}</h1>
         <StatusPill status={company.status} />
       </div>
       <p className="text-label-tertiary text-sm mb-6 font-mono">{company.slug}</p>
 
-      <div className="flex gap-1 mb-6 border-b border-black/10">
+      {/* 18 tabs never fit one row at any real viewport width — flex-wrap
+          (the same pattern this file already uses for every other row that
+          can overflow, e.g. the support-ticket header) lets the bar wrap
+          onto a second line instead of running off the page edge. Previously
+          this had neither wrap nor scroll, so tabs past the container's
+          width were simply clipped/overflowing — the bug reported against
+          this exact page. whitespace-nowrap keeps a two-word label like
+          "Employee Number" from breaking mid-tab, which would misalign the
+          active-tab underline. */}
+      <div className="flex flex-wrap gap-1 mb-6 border-b border-black/10">
         {TABS.map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap ${
               tab === t ? "border-accent text-accent" : "border-transparent text-label-tertiary"
             }`}
           >

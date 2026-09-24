@@ -5,6 +5,7 @@ import type { RequestClaims } from "../database/tenant-context";
 import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
+import { normalizeEmail } from "../auth/email.util";
 import { hashPassword } from "../auth/password";
 import { FILE_STORAGE, type FileStorageService } from "../file-storage/file-storage.interface";
 import { formatEmployeeNumber, parseEmployeeNumberSequence } from "./employee-number.util";
@@ -552,12 +553,17 @@ export class EmployeesService {
         throw new BadRequestException("Employee must have an email address before a login can be created");
       }
 
+      // normalizeEmail() here for the same reason companies.service.ts's
+      // createAdminLogin does it: employee.email was typed independently
+      // (at hire/import time) from whatever the employee later types at
+      // /login, and user_accounts.email is compared byte-for-byte — see
+      // auth/email.util.ts.
       const passwordHash = await hashPassword(input.initialPassword);
       let userAccountId: string;
       try {
         const account = await client.query(
           "INSERT INTO user_accounts (email, password_hash) VALUES ($1, $2) RETURNING id",
-          [employee.email, passwordHash]
+          [normalizeEmail(employee.email), passwordHash]
         );
         userAccountId = account.rows[0].id;
       } catch (err) {

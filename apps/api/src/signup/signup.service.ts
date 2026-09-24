@@ -3,6 +3,7 @@ import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
 import { AuditService } from "../audit/audit.service";
 import { EntitlementsService } from "../entitlements/entitlements.service";
+import { normalizeEmail } from "../auth/email.util";
 import { hashPassword } from "../auth/password";
 import type { PackageTier, SignupRequest, SignupResponse } from "@aihxm/shared-types";
 import { SignupDto } from "./dto/signup.dto";
@@ -52,7 +53,8 @@ export class SignupService {
     const packageTier: PackageTier = dto.packageTier ?? "starter";
 
     return this.db.withClaims(SIGNUP_CLAIMS, async (client) => {
-      const existingEmail = await client.query("SELECT 1 FROM user_accounts WHERE email = $1", [dto.adminEmail]);
+      const adminEmail = normalizeEmail(dto.adminEmail);
+      const existingEmail = await client.query("SELECT 1 FROM user_accounts WHERE email = $1", [adminEmail]);
       if ((existingEmail.rowCount ?? 0) > 0) {
         throw new ConflictException("An account with this email already exists. Try logging in instead.");
       }
@@ -89,14 +91,14 @@ export class SignupService {
       const passwordHash = await hashPassword(dto.adminPassword);
       const userAccountResult = await client.query(
         "INSERT INTO user_accounts (email, password_hash) VALUES ($1, $2) RETURNING id",
-        [dto.adminEmail, passwordHash]
+        [adminEmail, passwordHash]
       );
       const userAccountId = userAccountResult.rows[0].id as string;
 
       await client.query(
         `INSERT INTO company_admins (company_id, full_name, email, status, user_account_id)
          VALUES ($1, $2, $3, 'active', $4)`,
-        [companyId, dto.adminFullName, dto.adminEmail, userAccountId]
+        [companyId, dto.adminFullName, adminEmail, userAccountId]
       );
 
       // The step Decision #12 deliberately left Platform-Admin-gated for

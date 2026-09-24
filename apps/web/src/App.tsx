@@ -51,6 +51,11 @@ const PlatformAdminsPage = lazy(() =>
     default: m.PlatformAdminsPage,
   })),
 );
+const PlatformBrandingPage = lazy(() =>
+  import("./pages/PlatformBrandingPage").then((m) => ({
+    default: m.PlatformBrandingPage,
+  })),
+);
 const EmployeeListPage = lazy(() =>
   import("./portal/employees/EmployeeListPage").then((m) => ({
     default: m.EmployeeListPage,
@@ -140,6 +145,15 @@ export default function App() {
         <Suspense fallback={<RouteFallback />}>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
+            {/* Per-company login URL (aihxm.com/leadhcm/login) — path-based
+              rather than a tenant subdomain, since Netlify only supports
+              wildcard custom domains on a paid plan it can't self-serve
+              (see LoginPage.tsx's own doc comment). Reuses the exact same
+              component; :companySlug is what switches it into tenant mode.
+              A company's slug can never collide with "login", "signup",
+              "app", etc. — CompaniesService.create()'s RESERVED_SLUGS
+              blocklist enforces that at creation time, not here. */}
+            <Route path="/:companySlug/login" element={<LoginPage />} />
             {/* Self-service signup (signup.controller.ts) — public, no
               ProtectedRoute, same tree level as /login. */}
             <Route path="/signup" element={<SignupPage />} />
@@ -160,6 +174,10 @@ export default function App() {
                   <Route
                     path="/platform-admins"
                     element={<PlatformAdminsPage />}
+                  />
+                  <Route
+                    path="/platform-branding"
+                    element={<PlatformBrandingPage />}
                   />
                 </Route>
               </Route>

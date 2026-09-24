@@ -69,6 +69,36 @@ export type CompanyBranding = {
   hasLoginBackground: boolean;
 };
 
+/**
+ * What a tenant's OWN login page (leadhcm.aihxm.com/login, not the shared
+ * /login every company used to hit) shows before anyone has a session —
+ * the public, no-auth counterpart to CompanyBranding above. Deliberately a
+ * narrower shape than CompanyBranding: no `hasFavicon` (not consumed by
+ * the login page yet) and it carries `companyName`/`slug` since a public
+ * visitor has no other way to know which tenant they're looking at.
+ */
+export type PublicTenantBranding = {
+  slug: string;
+  companyName: string;
+  primaryColor?: string;
+  secondaryColor?: string;
+  hasLogo: boolean;
+  hasLoginBackground: boolean;
+};
+
+/**
+ * The platform's OWN logo (migration 0046) — what Layout.tsx's sidebar and
+ * the default (non-tenant) login page show instead of a hardcoded mark,
+ * and what the small "Powered by AIHXM" credit on a tenant's own
+ * subdomain login page renders when present. One row, ever — there is
+ * exactly one platform. `GET /public/platform-branding` (no auth) returns
+ * this same shape for the public, pre-auth read.
+ */
+export type PlatformBranding = {
+  hasLogo: boolean;
+  updatedAt: string;
+};
+
 export type Company = {
   id: string;
   name: string;
@@ -460,6 +490,21 @@ export type TenantDataExport = {
 
 export type LoginRequest = {
   email: string;
+  password: string;
+};
+
+/**
+ * A tenant's own login page (leadhcm.aihxm.com/login) authenticates by
+ * Employee Number, not email — the company is already known from the
+ * subdomain, and `employees.employee_number` is only unique WITHIN a
+ * company (migration 0010's `UNIQUE (company_id, employee_number)`), which
+ * is exactly why `companySlug` has to travel alongside it here. Password
+ * reset still goes through email regardless of how someone logs in — see
+ * PasswordResetRequestBody — this only changes the login identifier.
+ */
+export type LoginWithEmployeeNumberRequest = {
+  companySlug: string;
+  employeeNumber: string;
   password: string;
 };
 

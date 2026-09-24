@@ -3,6 +3,7 @@ import { Throttle } from "@nestjs/throttler";
 import { AuthService } from "./auth.service";
 import { CurrentClaims } from "./current-claims.decorator";
 import { LoginDto } from "./dto/login.dto";
+import { LoginWithEmployeeNumberDto } from "./dto/login-with-employee-number.dto";
 import { MfaEnrollConfirmDto, MfaVerifyDto } from "./dto/mfa.dto";
 import { PasswordResetConfirmDto, PasswordResetRequestDto } from "./dto/password-reset.dto";
 import { SessionGuard } from "./session.guard";
@@ -36,6 +37,14 @@ export class AuthController {
   @Post("login")
   login(@Body() dto: LoginDto) {
     return this.auth.login(dto.email, dto.password);
+  }
+
+  // A tenant's own login page (leadhcm.aihxm.com/login) — see
+  // AuthService.loginWithEmployeeNumber's doc comment.
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Post("login/employee")
+  loginWithEmployeeNumber(@Body() dto: LoginWithEmployeeNumberDto) {
+    return this.auth.loginWithEmployeeNumber(dto.companySlug, dto.employeeNumber, dto.password);
   }
 
   @Throttle({ default: { limit: 10, ttl: 60_000 } })

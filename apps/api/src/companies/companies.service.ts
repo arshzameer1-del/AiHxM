@@ -5,6 +5,7 @@ import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
 import { AuditService } from "../audit/audit.service";
 import { EntitlementsService } from "../entitlements/entitlements.service";
+import { normalizeEmail } from "../auth/email.util";
 import { hashPassword } from "../auth/password";
 import { SessionSecurityService } from "../auth/session-security.service";
 import { FILE_STORAGE, type FileStorageService } from "../file-storage/file-storage.interface";
@@ -108,6 +109,36 @@ function rowToAdmin(row: any): CompanyAdmin {
   };
 }
 
+/**
+ * A company's slug is now also a URL PATH SEGMENT in the frontend's own
+ * router (aihxm.com/<slug>/login — see LoginPage.tsx/App.tsx, the
+ * path-based replacement for the subdomain approach Netlify's plan
+ * couldn't support), sitting in the exact same router as every other
+ * top-level route. A company slug matching one of those literal routes
+ * would make /login, /signup, /app, etc. themselves ambiguous — react-
+ * router would have to guess whether "/login" means the reserved login
+ * page or a company literally named "login". CreateCompanyDto's slug
+ * format check (lowercase/hyphen only) doesn't catch this since "login"
+ * is itself a perfectly valid slug shape; this is a distinct, explicit
+ * blocklist checked before the normal uniqueness check.
+ */
+const RESERVED_SLUGS = new Set([
+  "login",
+  "signup",
+  "app",
+  "companies",
+  "audit-log",
+  "platform-admins",
+  "platform-branding",
+  "api",
+  "www",
+  "admin",
+  "platform",
+  "public",
+  "assets",
+  "static",
+]);
+
 @Injectable()
 export class CompaniesService {
   constructor(
@@ -142,7 +173,11 @@ export class CompaniesService {
       }
       return {
         slug: input.slug,
-        slugAvailable: (slugResult.rowCount ?? 0) === 0,
+        // Reported the same as "already taken" — the wizard's UI doesn't
+        // need a third state, and the real reason (reserved by the
+        // frontend's own router, not a database row) doesn't change what
+        // the admin needs to do: pick a different slug.
+        slugAvailable: !RESERVED_SLUGS.has(input.slug) && (slugResult.rowCount ?? 0) === 0,
         customDomain: input.customDomain ?? null,
         customDomainAvailable,
       };
@@ -151,6 +186,9 @@ export class CompaniesService {
 
   async create(claims: RequestClaims, input: CreateCompanyRequest): Promise<CompanyDetail> {
     return this.db.withClaims(claims, async (client) => {
+      if (RESERVED_SLUGS.has(input.slug)) {
+        throw new ConflictException(`slug "${input.slug}" is reserved and can't be used for a company`);
+      }
       const existing = await client.query("SELECT 1 FROM companies WHERE slug = $1", [input.slug]);
       if ((existing.rowCount ?? 0) > 0) {
         throw new ConflictException(`slug "${input.slug}" is already in use`);
@@ -227,7 +265,7 @@ export class CompaniesService {
       if (input.initialAdmin) {
         const adminResult = await client.query(
           `INSERT INTO company_admins (company_id, full_name, email) VALUES ($1, $2, $3) RETURNING *`,
-          [company.id, input.initialAdmin.fullName, input.initialAdmin.email]
+          [company.id, input.initialAdmin.fullName, normalizeEmail(input.initialAdmin.email)]
         );
         admins = [rowToAdmin(adminResult.rows[0])];
       }
@@ -709,9 +747,10 @@ export class CompaniesService {
         throw new NotFoundException("Company not found");
       }
 
+      const email = normalizeEmail(input.email);
       const existingAdmin = await client.query(
         "SELECT 1 FROM company_admins WHERE company_id = $1 AND email = $2",
-        [companyId, input.email]
+        [companyId, email]
       );
       if ((existingAdmin.rowCount ?? 0) > 0) {
         throw new ConflictException(`${input.email} is already an admin on this company`);
@@ -719,7 +758,7 @@ export class CompaniesService {
 
       const result = await client.query(
         `INSERT INTO company_admins (company_id, full_name, email) VALUES ($1, $2, $3) RETURNING *`,
-        [companyId, input.fullName, input.email]
+        [companyId, input.fullName, email]
       );
 
       await this.audit.record(client, claims, {
@@ -820,10 +859,14 @@ export class CompaniesService {
         throw new ConflictException("This admin already has a login");
       }
 
+      // normalizeEmail() here is defense in depth: migration
+      // 0044_normalize_emails.sql backfills company_admins.email to
+      // lowercase, but this covers any row written between that backfill
+      // and this deploy, or a source that bypasses addAdmin() entirely.
       const passwordHash = await hashPassword(initialPassword);
       const account = await client.query(
         "INSERT INTO user_accounts (email, password_hash) VALUES ($1, $2) RETURNING id",
-        [existing.rows[0].email, passwordHash]
+        [normalizeEmail(existing.rows[0].email), passwordHash]
       );
       const userAccountId = account.rows[0].id as string;
 

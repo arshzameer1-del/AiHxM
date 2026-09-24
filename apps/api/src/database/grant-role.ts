@@ -34,6 +34,7 @@ import { join } from "path";
 import { Pool } from "pg";
 import { loadEnvFile } from "../load-env";
 import { runInTenantContext, type RequestClaims } from "./tenant-context";
+import { normalizeEmail } from "../auth/email.util";
 import { resolveSslConfig } from "./db-connection.util";
 
 const GRANT_ROLE_CLAIMS: RequestClaims = { is_platform_admin: false, is_service: true, sub: "grant-role-script" };
@@ -46,14 +47,18 @@ async function main() {
     throw new Error("APP_DATABASE_URL is not set (checked env and apps/api/.env)");
   }
 
-  const email = process.env.GRANT_ROLE_EMAIL;
   const roleKey = process.env.GRANT_ROLE_KEY || "hr_admin";
 
-  if (!email) {
+  if (!process.env.GRANT_ROLE_EMAIL) {
     throw new Error(
       'GRANT_ROLE_EMAIL must be set — e.g. GRANT_ROLE_EMAIL="admin@example.com" npm run grant-role'
     );
   }
+  // normalizeEmail() means this no longer needs the "case-sensitive" caveat
+  // this script's lookup error used to carry — every write path now stores
+  // emails lowercased (see email.util.ts), so this comparison stays valid
+  // regardless of how the email is typed here.
+  const email = normalizeEmail(process.env.GRANT_ROLE_EMAIL);
 
   const pool = new Pool({ connectionString, ssl: resolveSslConfig(connectionString) });
 
@@ -61,7 +66,7 @@ async function main() {
     await runInTenantContext(pool, GRANT_ROLE_CLAIMS, async (client) => {
       const account = await client.query("SELECT id FROM user_accounts WHERE email = $1", [email]);
       if (account.rowCount === 0) {
-        throw new Error(`No user_accounts row for ${email} — check the email is exactly right (case-sensitive).`);
+        throw new Error(`No user_accounts row for ${email} — check the email is exactly right.`);
       }
       const userAccountId = account.rows[0].id as string;
 

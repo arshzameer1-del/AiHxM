@@ -33,6 +33,8 @@ import { ConfigurationCenterModule } from "./configuration-center/configuration-
 import { OnboardingOffboardingModule } from "./onboarding-offboarding/onboarding-offboarding.module";
 import { TenantManagementModule } from "./tenant-management/tenant-management.module";
 import { UsageTrackingInterceptor } from "./tenant-management/usage-tracking.interceptor";
+import { PublicBrandingModule } from "./public-branding/public-branding.module";
+import { PlatformBrandingModule } from "./platform-branding/platform-branding.module";
 
 /**
  * Phase 2/3/4/5 root module: health check, the Platform Provisioning Panel
@@ -80,6 +82,8 @@ import { UsageTrackingInterceptor } from "./tenant-management/usage-tracking.int
     OnboardingOffboardingModule,
     SignupModule,
     TenantManagementModule,
+    PublicBrandingModule,
+    PlatformBrandingModule,
   ],
   controllers: [AppController],
   providers: [

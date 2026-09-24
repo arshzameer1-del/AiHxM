@@ -1,8 +1,10 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import QRCode from "qrcode";
+import type { PublicTenantBranding } from "@aihxm/shared-types";
 import { useAuth } from "../auth/AuthContext";
-import { api, ApiError } from "../api/client";
+import { api, ApiError, publicTenantBrandingAssetUrl } from "../api/client";
+import { AihxmLogo } from "../components/AihxmLogo";
 
 /**
  * Phase 3 real login is a multi-step exchange, not a single request:
@@ -11,6 +13,24 @@ import { api, ApiError } from "../api/client";
  * machine directly rather than pushing it into AuthContext, since nothing
  * outside this screen needs to know the intermediate states — see
  * AuthContext's doc comment.
+ *
+ * Per-company login URLs: originally built as tenant SUBDOMAINS
+ * (leadhcm.aihxm.com/login), but Netlify only supports wildcard custom
+ * domains on a paid Team plan with support manually enabling it — not
+ * something this app can rely on. Switched to a PATH segment instead
+ * (aihxm.com/leadhcm/login), routed here via App.tsx's `/:companySlug/login`
+ * — same Netlify site, same SPA catch-all redirect, no DNS/cert
+ * requirements at all. This one route param is what changes two things
+ * about this same component: the identifier field becomes Employee
+ * Number instead of email (AuthService.loginWithEmployeeNumber), and the
+ * page shows that tenant's own branding (logo/colors/background, TM-015)
+ * fetched from the public, no-auth branding endpoint. A company's slug is
+ * blocked from ever colliding with a real top-level route (companies.service.ts's
+ * RESERVED_SLUGS) — "/login" and "/:companySlug/login" can never mean the
+ * same thing to the router. "Forgot password" always asks for an email
+ * regardless — a login ID (employee number) was never a place to send a
+ * reset link — so it's tracked as its own field, never reusing the
+ * identifier state.
  */
 type Step =
   | { name: "password" }
@@ -23,10 +43,14 @@ export function LoginPage() {
   const { setSessionToken } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const { companySlug } = useParams<{ companySlug?: string }>();
   const [step, setStep] = useState<Step>({ name: "password" });
-  const [email, setEmail] = useState("");
+  // "identifier" is an email on the shared /login, or an Employee Number
+  // on a tenant's own /:companySlug/login — see tenantSlug below.
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
+  const [resetEmail, setResetEmail] = useState("");
   const [resetToken, setResetToken] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
@@ -38,6 +62,28 @@ export function LoginPage() {
     (location.state as { info?: string } | null)?.info ?? null
   );
   const [loading, setLoading] = useState(false);
+
+  // undefined on the shared "/login" route, a real slug on "/:companySlug/login".
+  const tenantSlug = companySlug ?? null;
+  const [tenantBranding, setTenantBranding] = useState<PublicTenantBranding | null>(null);
+
+  useEffect(() => {
+    if (!tenantSlug) return;
+    let cancelled = false;
+    api
+      .getPublicTenantBranding(tenantSlug)
+      .then((branding) => {
+        if (!cancelled) setTenantBranding(branding);
+      })
+      .catch(() => {
+        // No branding for this slug (unknown/suspended company, or none
+        // uploaded) — fall back to the default AIHXM look silently. This
+        // page still works either way; branding is cosmetic.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantSlug]);
 
   useEffect(() => {
     if (step.name === "mfaSetup") {
@@ -51,12 +97,8 @@ export function LoginPage() {
     setError(err instanceof ApiError ? err.message : fallback);
   }
 
-  async function handlePasswordSubmit(e: FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setLoading(true);
-    try {
-      const result = await api.login(email, password);
+  function applyLoginResult(result: Awaited<ReturnType<typeof api.login>>) {
+    return (async () => {
       if (result.status === "ok") {
         const identity = await setSessionToken(result.token);
         navigate(identity.isPlatformAdmin ? "/" : "/app", { replace: true });
@@ -70,6 +112,18 @@ export function LoginPage() {
       } else {
         setStep({ name: "mfaVerify", mfaTicket: result.mfaTicket });
       }
+    })();
+  }
+
+  async function handlePasswordSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      const result = tenantSlug
+        ? await api.loginWithEmployeeNumber(tenantSlug, identifier, password)
+        : await api.login(identifier, password);
+      await applyLoginResult(result);
     } catch (err) {
       fail(err, "Could not reach the API.");
     } finally {
@@ -113,7 +167,7 @@ export function LoginPage() {
     setInfo(null);
     setLoading(true);
     try {
-      const result = await api.requestPasswordReset(email);
+      const result = await api.requestPasswordReset(resetEmail);
       setInfo(result.message);
       setStep({ name: "resetConfirm", devModeToken: result.devModeToken });
       if (result.devModeToken) {
@@ -144,10 +198,33 @@ export function LoginPage() {
     }
   }
 
+  const accentColor = tenantBranding?.primaryColor;
+  const accentButtonStyle = accentColor ? { backgroundColor: accentColor } : undefined;
+  const accentTextStyle = accentColor ? { color: accentColor } : undefined;
+  const pageStyle = tenantBranding?.hasLoginBackground
+    ? {
+        backgroundImage: `url(${publicTenantBrandingAssetUrl(tenantBranding.slug, "login-background")})`,
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+      }
+    : undefined;
+
   return (
-    <div className="min-h-screen flex items-center justify-center px-4">
+    <div className="min-h-screen flex flex-col items-center justify-center px-4" style={pageStyle}>
       <div className="w-full max-w-sm bg-card rounded-card p-6 shadow-sm">
-        <h1 className="text-2xl font-bold mb-1">AI HXM</h1>
+        <div className="mb-1">
+          {tenantBranding?.hasLogo ? (
+            <img
+              src={publicTenantBrandingAssetUrl(tenantBranding.slug, "logo")}
+              alt={tenantBranding.companyName}
+              className="h-8 max-w-full object-contain"
+            />
+          ) : tenantBranding ? (
+            <h1 className="text-2xl font-bold">{tenantBranding.companyName}</h1>
+          ) : (
+            <AihxmLogo size={28} />
+          )}
+        </div>
         <p className="text-sm text-label-tertiary mb-6">Sign in</p>
 
         {error && <div className="text-danger text-sm mb-4">{error}</div>}
@@ -156,13 +233,14 @@ export function LoginPage() {
         {step.name === "password" && (
           <form onSubmit={handlePasswordSubmit}>
             <label className="block text-xs font-semibold uppercase tracking-wide text-label-tertiary mb-1">
-              Email
+              {tenantSlug ? "Employee ID" : "Email"}
             </label>
             <input
-              type="email"
+              type={tenantSlug ? "text" : "email"}
               autoFocus
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              value={identifier}
+              onChange={(e) => setIdentifier(e.target.value)}
+              placeholder={tenantSlug ? "e.g. EMP-0001" : undefined}
               className="w-full rounded-lg border border-black/10 px-3 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-accent"
             />
             <label className="block text-xs font-semibold uppercase tracking-wide text-label-tertiary mb-1">
@@ -176,7 +254,8 @@ export function LoginPage() {
             />
             <button
               type="submit"
-              disabled={loading || !email || !password}
+              disabled={loading || !identifier || !password}
+              style={accentButtonStyle}
               className="w-full bg-accent text-white rounded-lg py-2 font-semibold disabled:opacity-50"
             >
               {loading ? "Signing in…" : "Sign in"}
@@ -186,18 +265,22 @@ export function LoginPage() {
               onClick={() => {
                 setError(null);
                 setInfo(null);
+                setResetEmail("");
                 setStep({ name: "resetRequest" });
               }}
+              style={accentTextStyle}
               className="w-full text-center text-xs text-label-tertiary hover:text-accent mt-3"
             >
               Forgot your password?
             </button>
-            <p className="text-center text-xs text-label-tertiary mt-3">
-              New to AIHXM?{" "}
-              <Link to="/signup" className="text-accent font-medium hover:underline">
-                Create your company
-              </Link>
-            </p>
+            {!tenantSlug && (
+              <p className="text-center text-xs text-label-tertiary mt-3">
+                New to AIHXM?{" "}
+                <Link to="/signup" className="text-accent font-medium hover:underline">
+                  Create your company
+                </Link>
+              </p>
+            )}
           </form>
         )}
 
@@ -227,6 +310,7 @@ export function LoginPage() {
             <button
               type="submit"
               disabled={loading || code.length < 6}
+              style={accentButtonStyle}
               className="w-full bg-accent text-white rounded-lg py-2 font-semibold disabled:opacity-50"
             >
               {loading ? "Verifying…" : "Confirm & sign in"}
@@ -247,6 +331,7 @@ export function LoginPage() {
             <button
               type="submit"
               disabled={loading || code.length < 6}
+              style={accentButtonStyle}
               className="w-full bg-accent text-white rounded-lg py-2 font-semibold disabled:opacity-50"
             >
               {loading ? "Verifying…" : "Sign in"}
@@ -256,19 +341,25 @@ export function LoginPage() {
 
         {step.name === "resetRequest" && (
           <form onSubmit={handleResetRequestSubmit}>
+            <p className="text-xs text-label-tertiary mb-3">
+              {tenantSlug
+                ? "Your Employee ID isn't used for password resets — enter the email on file for your account instead."
+                : "Enter your account email and we'll send a reset link."}
+            </p>
             <label className="block text-xs font-semibold uppercase tracking-wide text-label-tertiary mb-1">
               Email
             </label>
             <input
               type="email"
               autoFocus
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              value={resetEmail}
+              onChange={(e) => setResetEmail(e.target.value)}
               className="w-full rounded-lg border border-black/10 px-3 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-accent"
             />
             <button
               type="submit"
-              disabled={loading || !email}
+              disabled={loading || !resetEmail}
+              style={accentButtonStyle}
               className="w-full bg-accent text-white rounded-lg py-2 font-semibold disabled:opacity-50"
             >
               {loading ? "Sending…" : "Send reset link"}
@@ -280,6 +371,7 @@ export function LoginPage() {
                 setInfo(null);
                 setStep({ name: "password" });
               }}
+              style={accentTextStyle}
               className="w-full text-center text-xs text-label-tertiary hover:text-accent mt-3"
             >
               Back to sign in
@@ -315,6 +407,7 @@ export function LoginPage() {
             <button
               type="submit"
               disabled={loading || !resetToken || newPassword.length < 10}
+              style={accentButtonStyle}
               className="w-full bg-accent text-white rounded-lg py-2 font-semibold disabled:opacity-50"
             >
               {loading ? "Updating…" : "Update password"}
@@ -326,6 +419,7 @@ export function LoginPage() {
                 setInfo(null);
                 setStep({ name: "password" });
               }}
+              style={accentTextStyle}
               className="w-full text-center text-xs text-label-tertiary hover:text-accent mt-3"
             >
               Back to sign in
@@ -333,6 +427,20 @@ export function LoginPage() {
           </form>
         )}
       </div>
+
+      {/* Per the platform's "SAP strategy" branding direction: on a
+        tenant's own subdomain (where the card above shows THEIR logo/
+        colors), still surface AIHXM as the platform underneath — but as a
+        small, unobtrusive credit, not co-branding. Never shown on the
+        default /login (no tenantSlug), since that page already IS the
+        AIHXM mark. */}
+      {tenantSlug && (
+        <div className="mt-5 flex items-center gap-1.5 text-xs text-label-tertiary">
+          <span>Powered by</span>
+          <AihxmLogo size={14} withWordmark={false} />
+          <span className="font-semibold tracking-tight">AIHXM</span>
+        </div>
+      )}
     </div>
   );
 }

@@ -24,6 +24,7 @@ import { join } from "path";
 import { Pool } from "pg";
 import { loadEnvFile } from "../load-env";
 import { runInTenantContext, type RequestClaims } from "./tenant-context";
+import { normalizeEmail } from "../auth/email.util";
 import { hashPassword } from "../auth/password";
 import { resolveSslConfig } from "./db-connection.util";
 
@@ -37,7 +38,9 @@ async function main() {
     throw new Error("APP_DATABASE_URL is not set (checked env and apps/api/.env)");
   }
 
-  const email = process.env.PLATFORM_ADMIN_BOOTSTRAP_EMAIL;
+  const email = process.env.PLATFORM_ADMIN_BOOTSTRAP_EMAIL
+    ? normalizeEmail(process.env.PLATFORM_ADMIN_BOOTSTRAP_EMAIL)
+    : undefined;
   const password = process.env.PLATFORM_ADMIN_BOOTSTRAP_PASSWORD;
   const fullName = process.env.PLATFORM_ADMIN_BOOTSTRAP_NAME || "Platform Admin";
 

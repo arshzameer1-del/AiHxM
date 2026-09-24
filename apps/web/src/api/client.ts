@@ -79,8 +79,10 @@ import type {
   PayslipView,
   PerformanceReviewView,
   PlatformAdmin,
+  PlatformBranding,
   PlatformSavedView,
   PolicyType,
+  PublicTenantBranding,
   RatingDistributionView,
   ResolvedPolicyView,
   ResolvedWorkScheduleView,
@@ -156,6 +158,36 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Not a `request()` call — this is consumed as an `<img src>`, which needs
+ * a plain URL string the browser fetches itself, not a JSON response this
+ * client parses. Same `/api` same-origin prefix as everything else here
+ * (netlify.toml proxies it to the real backend regardless of which
+ * tenant subdomain served the page), and no auth token: public-branding
+ * assets are the whole point of public/public-branding.controller.ts.
+ */
+export function publicTenantBrandingAssetUrl(
+  companySlug: string,
+  slot: "logo" | "login-background"
+): string {
+  return `/api/public/tenants/${companySlug}/branding/${slot}/asset`;
+}
+
+/**
+ * Same "plain URL for an <img src>" shape as publicTenantBrandingAssetUrl
+ * above, for the platform's OWN logo (migration 0046_platform_branding.sql)
+ * instead of a tenant's — public/platform-branding.controller.ts, no auth.
+ * A cache-busting query param matters here in a way it doesn't for the
+ * per-tenant asset: AihxmLogo mounts on every portal page (sidebar, login),
+ * so without one, a just-changed platform logo would keep showing the
+ * browser's cached previous image until a hard refresh. `updatedAt` is
+ * exactly the signal that changed, so it's the natural cache key.
+ */
+export function platformBrandingAssetUrl(updatedAt?: string): string {
+  const version = updatedAt ? encodeURIComponent(updatedAt) : "";
+  return `/api/public/platform-branding/logo/asset${version ? `?v=${version}` : ""}`;
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
@@ -215,6 +247,22 @@ export const api = {
   login: (email: string, password: string) =>
     request<LoginResult>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
 
+  // A tenant's own login page (leadhcm.aihxm.com/login) — see
+  // AuthService.loginWithEmployeeNumber's doc comment.
+  loginWithEmployeeNumber: (companySlug: string, employeeNumber: string, password: string) =>
+    request<LoginResult>("/auth/login/employee", {
+      method: "POST",
+      body: JSON.stringify({ companySlug, employeeNumber, password }),
+    }),
+
+  // No auth token needed (and none may exist yet — this loads before
+  // anyone has signed in) — public/public-branding.controller.ts. A 404
+  // just means this slug has no custom branding (or isn't a real tenant),
+  // which the login page treats as "use the default AIHXM look," not an
+  // error to surface.
+  getPublicTenantBranding: (companySlug: string) =>
+    request<PublicTenantBranding>(`/public/tenants/${companySlug}/branding`),
+
   confirmMfaEnrollment: (mfaTicket: string, code: string) =>
     request<SessionResult>("/auth/mfa/enroll/confirm", {
       method: "POST",
@@ -261,6 +309,37 @@ export const api = {
 
   setPlatformAdminStatus: (id: string, status: PlatformAdmin["status"]) =>
     request<PlatformAdmin>(`/platform/admins/${id}`, { method: "PATCH", body: JSON.stringify({ status }) }),
+
+  // --- Platform Branding (the platform's own logo, migration 0046) --------
+  // No auth needed for the read — same public/no-guard posture as
+  // getPublicTenantBranding above, since the default /login page and every
+  // tenant subdomain's "Powered by AIHXM" credit need this before (or
+  // without) any session existing.
+  getPlatformBranding: () => request<PlatformBranding>("/public/platform-branding"),
+
+  async uploadPlatformLogo(file: File): Promise<PlatformBranding> {
+    const token = getToken();
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch("/api/platform/branding/logo", {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    });
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = await res.json();
+        message = body.message ?? message;
+      } catch {
+        // not JSON — keep the generic message
+      }
+      throw new ApiError(res.status, message);
+    }
+    return res.json();
+  },
+
+  removePlatformLogo: () => request<PlatformBranding>("/platform/branding/logo", { method: "DELETE" }),
 
   // TM-002/TM-003 — Tenant Directory search + filters.
   listCompanies: (filters?: CompanyListFilters) => {

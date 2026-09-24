@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import { AihxmLogo } from "./AihxmLogo";
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   `block px-3 py-2 rounded-lg text-sm font-medium ${
@@ -13,8 +14,8 @@ export function Layout() {
     <div className="min-h-screen flex">
       <aside className="w-56 shrink-0 border-r border-black/5 bg-card px-3 py-6 flex flex-col">
         <div className="px-3 mb-8">
-          <div className="text-lg font-bold tracking-tight">AI HXM</div>
-          <div className="text-xs text-label-tertiary">Platform Admin</div>
+          <AihxmLogo size={28} />
+          <div className="text-xs text-label-tertiary mt-1">Platform Admin</div>
         </div>
 
         <nav className="flex flex-col gap-1">
@@ -26,6 +27,9 @@ export function Layout() {
           </NavLink>
           <NavLink to="/platform-admins" className={navLinkClass}>
             Platform Admins
+          </NavLink>
+          <NavLink to="/platform-branding" className={navLinkClass}>
+            Platform Branding
           </NavLink>
         </nav>
 
