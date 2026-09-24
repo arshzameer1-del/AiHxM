@@ -4,7 +4,19 @@
     "skipLibCheck": true,
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "allowSyntheticDefaultImports": true
+    "allowSyntheticDefaultImports": true,
+    // A composite project must emit somewhere (project references need
+    // real output to check against) — without this, `tsc -b` had nowhere
+    // to put it but right next to vite.config.ts, producing a checked-in
+    // vite.config.js/.d.ts (see .gitignore's note) that's regenerated
+    // fresh on every `npm run build` (that script runs `tsc -b` before
+    // `vite build`) but goes stale the moment anyone runs `vite build`
+    // directly without it — and because Vite's own config loader prefers
+    // a same-directory .js config over .ts, a stale one silently wins
+    // over real edits to vite.config.ts with no error at all. This is
+    // exactly the bug that made an actual vite.config.ts fix (the
+    // @aihxm/shared-types alias below it) appear to do nothing.
+    "outDir": "./.tsbuild-node"
   },
   "include": ["vite.config.ts"]
 }

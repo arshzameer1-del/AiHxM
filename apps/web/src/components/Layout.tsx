@@ -14,8 +14,8 @@ export function Layout() {
     <div className="min-h-screen flex">
       <aside className="w-56 shrink-0 border-r border-black/5 bg-card px-3 py-6 flex flex-col">
         <div className="px-3 mb-8">
-          <AihxmLogo size={28} />
-          <div className="text-xs text-label-tertiary mt-1">Platform Admin</div>
+          <AihxmLogo size={40} />
+          <div className="text-xs text-label-tertiary mt-1.5">Platform Admin</div>
         </div>
 
         <nav className="flex flex-col gap-1">

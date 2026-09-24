@@ -106,6 +106,7 @@ function rowToAdmin(row: any): CompanyAdmin {
     // Logout action needs it to target the right user's sessions from the
     // Tenant Users / Admins screen.
     userAccountId: row.user_account_id ?? null,
+    loginId: row.login_id ?? null,
   };
 }
 
@@ -840,12 +841,21 @@ export class CompaniesService {
    * `npm run grant-role` once per missing role (see `grant-role.ts`)
    * since this method refuses to run twice for the same admin (the
    * "already has a login" check above).
+   *
+   * `loginId` (migration 0048) is what lets this admin actually sign in
+   * through their own company's tenant-path login
+   * (aihxm.com/<slug>/login) — without it they still get a working
+   * account, just one only reachable via the shared, email-based /login.
+   * Optional and settable only here (once), since it's meant to be a
+   * short-lived hand-off value a Platform Admin picks and tells the admin
+   * directly, the same moment as the initial password.
    */
   async createAdminLogin(
     claims: RequestClaims,
     companyId: string,
     adminId: string,
-    initialPassword: string
+    initialPassword: string,
+    loginId?: string
   ): Promise<CompanyAdmin> {
     return this.db.withClaims(claims, async (client) => {
       const existing = await client.query(
@@ -870,10 +880,22 @@ export class CompaniesService {
       );
       const userAccountId = account.rows[0].id as string;
 
-      const updated = await client.query(
-        "UPDATE company_admins SET user_account_id = $1 WHERE id = $2 RETURNING *",
-        [userAccountId, adminId]
-      );
+      const normalizedLoginId = loginId?.trim() || null;
+      let updated;
+      try {
+        updated = await client.query(
+          "UPDATE company_admins SET user_account_id = $1, login_id = $2 WHERE id = $3 RETURNING *",
+          [userAccountId, normalizedLoginId, adminId]
+        );
+      } catch (err) {
+        // company_admins_company_id_login_id_ci_key (migration 0048) — a
+        // friendly 409 instead of a raw constraint-violation 500, same
+        // posture as EmployeesService.createLogin()'s own email collision.
+        if ((err as { code?: string }).code === "23505") {
+          throw new ConflictException(`Login ID "${normalizedLoginId}" is already used by another admin on this company`);
+        }
+        throw err;
+      }
 
       const bootstrapRoles = await client.query<{ key: string; id: string }>(
         "SELECT key, id FROM roles WHERE key IN ('hr_admin', 'system_admin')"
@@ -897,7 +919,7 @@ export class CompaniesService {
         companyId,
         action: "company.admin.login_created",
         target: existing.rows[0].email,
-        metadata: { rolesGranted: ["hr_admin", "system_admin"] },
+        metadata: { rolesGranted: ["hr_admin", "system_admin"], loginId: normalizedLoginId },
       });
 
       return rowToAdmin(updated.rows[0]);

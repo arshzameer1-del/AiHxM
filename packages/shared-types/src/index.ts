@@ -166,6 +166,16 @@ export type CompanyAdmin = {
   hasLogin: boolean;
   /** Null until a login exists (hasLogin). Used to target Force Logout (TM-017). */
   userAccountId: string | null;
+  /**
+   * Platform Admin-chosen identifier (e.g. "LHM_Admin1"), set once when
+   * this admin's login is created — see CreateLoginRequest.loginId. Null
+   * for admins with no login yet, and for admins whose login predates
+   * this field (they still sign in via email on the shared /login page).
+   * The SAME value is what that admin types into the identifier field on
+   * their company's own /:companySlug/login (AuthService matches it
+   * alongside employees.employee_number there).
+   */
+  loginId: string | null;
 };
 
 /** TM-002/TM-003 — Tenant Directory search + filters (GET /platform/companies). */
@@ -494,13 +504,21 @@ export type LoginRequest = {
 };
 
 /**
- * A tenant's own login page (leadhcm.aihxm.com/login) authenticates by
- * Employee Number, not email — the company is already known from the
- * subdomain, and `employees.employee_number` is only unique WITHIN a
- * company (migration 0010's `UNIQUE (company_id, employee_number)`), which
- * is exactly why `companySlug` has to travel alongside it here. Password
- * reset still goes through email regardless of how someone logs in — see
- * PasswordResetRequestBody — this only changes the login identifier.
+ * A tenant's own login page (aihxm.com/<slug>/login) authenticates by a
+ * typed identifier, not email — the company is already known from the
+ * path, and both identifier namespaces below are only unique WITHIN a
+ * company (`employees.employee_number`: migration 0010's `UNIQUE
+ * (company_id, employee_number)`; `company_admins.login_id`: migration
+ * 0048's case-insensitive unique index), which is exactly why
+ * `companySlug` has to travel alongside it here. `employeeNumber` is kept
+ * as the field name for API/DTO stability, but the backend
+ * (AuthService.findAccountByEmployeeNumber) matches it against EITHER an
+ * Employee Core row's employee_number OR a Company (Super) Admin's own
+ * login_id — the same field on the login page works for both, since a
+ * Company Admin has no Employee Core record to have an employee number
+ * in the first place. Password reset still goes through email regardless
+ * of how someone logs in — see PasswordResetRequestBody — this only
+ * changes the login identifier.
  */
 export type LoginWithEmployeeNumberRequest = {
   companySlug: string;
@@ -582,6 +600,15 @@ export type PasswordResetConfirmRequest = {
 
 export type CreateLoginRequest = {
   initialPassword: string;
+  /**
+   * Only meaningful for a Company (Super) Admin's login
+   * (CompaniesService.createAdminLogin) — a Company Admin has no Employee
+   * Core record, so without this they have no identifier for their own
+   * company's own /:companySlug/login page at all. Optional: omit it and
+   * the admin can still sign in via email on the shared /login page, just
+   * not through their company's own tenant-path login.
+   */
+  loginId?: string;
 };
 
 /**

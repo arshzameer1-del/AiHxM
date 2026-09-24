@@ -178,7 +178,7 @@ export class CompaniesController {
     @Param("adminId") adminId: string,
     @Body() dto: CreateLoginDto
   ) {
-    return this.companies.createAdminLogin(claims, id, adminId, dto.initialPassword);
+    return this.companies.createAdminLogin(claims, id, adminId, dto.initialPassword, dto.loginId);
   }
 
   @Post(":id/impersonate")

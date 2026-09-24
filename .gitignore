@@ -20,3 +20,10 @@ coverage
 *.tsbuildinfo
 storage-data
 apps/api/storage-data
+
+# tsconfig.node.json's composite build output for vite.config.ts (see that
+# file's own comment) — was previously un-set and emitted vite.config.js/
+# .d.ts checked into git right beside vite.config.ts, which is what made a
+# real edit to vite.config.ts silently do nothing (Vite prefers a
+# same-directory .js config over .ts).
+apps/web/.tsbuild-node

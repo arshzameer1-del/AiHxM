@@ -251,6 +251,64 @@ describe("AuthService", () => {
         service.loginWithEmployeeNumber(companySlug, "EMP-DOES-NOT-EXIST", "whatever")
       ).rejects.toThrow("Invalid login ID or password");
     });
+
+    /**
+     * A Company (Super) Admin has no `employees` row at all — this is the
+     * OTHER identifier namespace `findAccountByEmployeeNumber` matches
+     * (migration 0048's `company_admins.login_id`), proving the same
+     * tenant-path field genuinely works for both kinds of account, not
+     * just employees.
+     */
+    it("also authenticates a Company Admin by their own login_id, scoped to their company", async () => {
+      const { id: userAccountId, password } = await createUserAccount();
+      const loginId = `LHM_Admin_${Math.floor(Math.random() * 100000)}`;
+      const companySlug = await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const slug = `auth-admin-loginid-spec-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const companyResult = await client.query(
+          "INSERT INTO companies (name, slug, status, package_tier) VALUES ($1, $2, 'active', 'starter') RETURNING id",
+          [`Auth Admin LoginId Spec Co ${Date.now()}`, slug]
+        );
+        await client.query(
+          `INSERT INTO company_admins (company_id, full_name, email, user_account_id, login_id)
+           VALUES ($1, 'Login Id Admin', $2, $3, $4)`,
+          [companyResult.rows[0].id, `admin-loginid-${Date.now()}@example.com`, userAccountId, loginId]
+        );
+        return slug;
+      });
+
+      const result = await service.loginWithEmployeeNumber(companySlug, loginId, password);
+
+      expect(result.status).toBe("mfa_setup_required");
+    });
+
+    it("does not let an admin's login_id from one company authenticate under a different company's slug", async () => {
+      const { id: userAccountId, password } = await createUserAccount();
+      const loginId = `Scoped_Admin_${Math.floor(Math.random() * 100000)}`;
+      await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const slug = `auth-admin-loginid-scope-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const companyResult = await client.query(
+          "INSERT INTO companies (name, slug, status, package_tier) VALUES ($1, $2, 'active', 'starter') RETURNING id",
+          [`Auth Admin LoginId Scope Co ${Date.now()}`, slug]
+        );
+        await client.query(
+          `INSERT INTO company_admins (company_id, full_name, email, user_account_id, login_id)
+           VALUES ($1, 'Scoped Admin', $2, $3, $4)`,
+          [companyResult.rows[0].id, `admin-loginid-scope-${Date.now()}@example.com`, userAccountId, loginId]
+        );
+      });
+      const otherSlug = await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const slug = `auth-admin-loginid-other-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        await client.query(
+          "INSERT INTO companies (name, slug, status, package_tier) VALUES ($1, $2, 'active', 'starter')",
+          [`Auth Admin LoginId Other Co ${Date.now()}`, slug]
+        );
+        return slug;
+      });
+
+      await expect(
+        service.loginWithEmployeeNumber(otherSlug, loginId, password)
+      ).rejects.toThrow("Invalid login ID or password");
+    });
   });
 
   describe("confirmMfaEnrollment", () => {

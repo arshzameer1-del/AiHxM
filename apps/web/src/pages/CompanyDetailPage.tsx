@@ -1,6 +1,27 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import {
+  Archive,
+  BarChart3,
+  Building2,
+  CreditCard,
+  Download,
+  Grid3x3,
+  HeartPulse,
+  IdCard,
+  LayoutDashboard,
+  LifeBuoy,
+  Lock,
+  Palette,
+  Plug,
+  RefreshCw,
+  ScrollText,
+  Settings,
+  ShieldCheck,
+  Sparkles,
+  type LucideIcon,
+} from "lucide-react";
+import {
   MODULE_KEYS,
   type AuditLogEntry,
   type BrandingAssetSlot,
@@ -59,6 +80,33 @@ const TABS = [
 ] as const;
 type Tab = (typeof TABS)[number];
 
+// 18 sections is too many for a plain text tab strip to read well at any
+// width (it used to wrap into two visually noisy rows of underlined
+// labels) — a tile/card grid gives each section its own visual weight, an
+// icon to recognize it by at a glance, and reflows naturally instead of
+// wrapping mid-row. One icon per section, chosen for what it actually
+// does rather than decoratively.
+const TAB_ICONS: Record<Tab, LucideIcon> = {
+  Overview: LayoutDashboard,
+  Profile: Building2,
+  Branding: Palette,
+  Lifecycle: RefreshCw,
+  Subscription: CreditCard,
+  Usage: BarChart3,
+  Modules: Grid3x3,
+  Features: Sparkles,
+  Integrations: Plug,
+  Health: HeartPulse,
+  Support: LifeBuoy,
+  Audit: ScrollText,
+  Backups: Archive,
+  Exports: Download,
+  Configuration: Settings,
+  "Employee Number": IdCard,
+  Admins: ShieldCheck,
+  Security: Lock,
+};
+
 export function CompanyDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [detail, setDetail] = useState<CompanyDetail | null>(null);
@@ -97,27 +145,31 @@ export function CompanyDetailPage() {
       </div>
       <p className="text-label-tertiary text-sm mb-6 font-mono">{company.slug}</p>
 
-      {/* 18 tabs never fit one row at any real viewport width — flex-wrap
-          (the same pattern this file already uses for every other row that
-          can overflow, e.g. the support-ticket header) lets the bar wrap
-          onto a second line instead of running off the page edge. Previously
-          this had neither wrap nor scroll, so tabs past the container's
-          width were simply clipped/overflowing — the bug reported against
-          this exact page. whitespace-nowrap keeps a two-word label like
-          "Employee Number" from breaking mid-tab, which would misalign the
-          active-tab underline. */}
-      <div className="flex flex-wrap gap-1 mb-6 border-b border-black/10">
-        {TABS.map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap ${
-              tab === t ? "border-accent text-accent" : "border-transparent text-label-tertiary"
-            }`}
-          >
-            {t}
-          </button>
-        ))}
+      {/* 18 sections as a tile grid instead of a text tab strip — this
+          used to be a flex-wrap row of underlined labels that wrapped
+          into two visually noisy rows at every real viewport width.
+          Each tile carries an icon (TAB_ICONS) so a section is
+          recognizable at a glance, not just readable; the grid reflows
+          by column count instead of wrapping mid-row. */}
+      <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2 mb-6">
+        {TABS.map((t) => {
+          const Icon = TAB_ICONS[t];
+          const active = tab === t;
+          return (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`flex flex-col items-center justify-center gap-1.5 rounded-card border px-2 py-3 text-center transition-colors ${
+                active
+                  ? "border-accent bg-accent/10 text-accent shadow-sm"
+                  : "border-black/10 bg-card text-label-secondary hover:border-accent/40 hover:bg-accent/5"
+              }`}
+            >
+              <Icon size={20} strokeWidth={active ? 2.25 : 1.75} />
+              <span className="text-xs font-medium leading-tight">{t}</span>
+            </button>
+          );
+        })}
       </div>
 
       {saved && <div className="text-success text-sm mb-4">Saved.</div>}
@@ -2571,9 +2623,12 @@ function AdminsTab({
   const [adding, setAdding] = useState(false);
   const [creatingLoginFor, setCreatingLoginFor] = useState<string | null>(null);
   const [initialPassword, setInitialPassword] = useState("");
-  const [createdCredential, setCreatedCredential] = useState<{ email: string; password: string } | null>(
-    null
-  );
+  const [loginIdInput, setLoginIdInput] = useState("");
+  const [createdCredential, setCreatedCredential] = useState<{
+    email: string;
+    password: string;
+    loginId: string | null;
+  } | null>(null);
 
   async function handleAdd(e: FormEvent) {
     e.preventDefault();
@@ -2612,11 +2667,22 @@ function AdminsTab({
     e.preventDefault();
     setError(null);
     try {
-      const updated = await api.createAdminLogin(companyId, admin.id, initialPassword);
+      const trimmedLoginId = loginIdInput.trim();
+      const updated = await api.createAdminLogin(
+        companyId,
+        admin.id,
+        initialPassword,
+        trimmedLoginId || undefined
+      );
       onChanged(admins.map((a) => (a.id === admin.id ? updated : a)));
-      setCreatedCredential({ email: admin.email, password: initialPassword });
+      setCreatedCredential({
+        email: admin.email,
+        password: initialPassword,
+        loginId: trimmedLoginId || null,
+      });
       setCreatingLoginFor(null);
       setInitialPassword("");
+      setLoginIdInput("");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not create a login for this admin.");
     }
@@ -2637,9 +2703,22 @@ function AdminsTab({
       {createdCredential && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs space-y-1">
           <div className="font-semibold text-amber-900">
-            Login created for {createdCredential.email} — share this password now, it won't be shown again:
+            Login created for {createdCredential.email} — share these now, they won't be shown again:
           </div>
-          <code className="block bg-white rounded px-2 py-1">{createdCredential.password}</code>
+          {createdCredential.loginId && (
+            <div>
+              Login ID (for their company's own sign-in page):{" "}
+              <code className="bg-white rounded px-2 py-1">{createdCredential.loginId}</code>
+            </div>
+          )}
+          <div>
+            Password: <code className="bg-white rounded px-2 py-1">{createdCredential.password}</code>
+          </div>
+          {!createdCredential.loginId && (
+            <div className="text-amber-800">
+              No Login ID was set — this admin can only sign in via email on the shared /login page.
+            </div>
+          )}
           <button
             onClick={() => setCreatedCredential(null)}
             className="text-amber-800 hover:underline font-medium"
@@ -2656,6 +2735,11 @@ function AdminsTab({
               <div>
                 <div className="font-medium text-sm">{admin.fullName}</div>
                 <div className="text-xs text-label-tertiary">{admin.email}</div>
+                {admin.loginId && (
+                  <div className="text-xs text-label-tertiary">
+                    Login ID: <span className="font-mono">{admin.loginId}</span>
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-3">
                 {admin.hasLogin ? (
@@ -2665,6 +2749,7 @@ function AdminsTab({
                     onClick={() => {
                       setCreatingLoginFor(creatingLoginFor === admin.id ? null : admin.id);
                       setInitialPassword("");
+                      setLoginIdInput("");
                     }}
                     className="text-xs font-semibold text-accent hover:underline"
                   >
@@ -2693,25 +2778,45 @@ function AdminsTab({
             {creatingLoginFor === admin.id && (
               <form
                 onSubmit={(e) => handleCreateLogin(e, admin)}
-                className="flex items-end gap-2 bg-black/5 rounded-lg p-3"
+                className="flex flex-col gap-2 bg-black/5 rounded-lg p-3"
               >
-                <div className="flex-1">
-                  <label className="block text-xs font-medium mb-1">Initial password (10+ chars)</label>
-                  <input
-                    required
-                    minLength={10}
-                    type="text"
-                    value={initialPassword}
-                    onChange={(e) => setInitialPassword(e.target.value)}
-                    className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-accent"
-                  />
+                <p className="text-xs text-label-tertiary">
+                  Login ID is what this admin types on their own company's sign-in page (e.g.
+                  aihxm.com/{" "}
+                  <span className="font-mono">&lt;slug&gt;</span>/login) instead of an employee number —
+                  leave it blank and they'll only be able to sign in via email on the shared /login page.
+                </p>
+                <div className="flex items-end gap-2">
+                  <div className="flex-1">
+                    <label className="block text-xs font-medium mb-1">Login ID (optional, e.g. LHM_Admin1)</label>
+                    <input
+                      minLength={3}
+                      pattern="[A-Za-z0-9_.\-]+"
+                      title="Letters, digits, underscore, hyphen, and dot only"
+                      type="text"
+                      value={loginIdInput}
+                      onChange={(e) => setLoginIdInput(e.target.value)}
+                      className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-accent"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-xs font-medium mb-1">Initial password (10+ chars)</label>
+                    <input
+                      required
+                      minLength={10}
+                      type="text"
+                      value={initialPassword}
+                      onChange={(e) => setInitialPassword(e.target.value)}
+                      className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-accent"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    className="bg-accent text-white rounded-lg px-4 py-2 text-sm font-semibold"
+                  >
+                    Create
+                  </button>
                 </div>
-                <button
-                  type="submit"
-                  className="bg-accent text-white rounded-lg px-4 py-2 text-sm font-semibold"
-                >
-                  Create
-                </button>
               </form>
             )}
           </div>

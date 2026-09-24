@@ -233,14 +233,14 @@ export function LoginPage() {
         {step.name === "password" && (
           <form onSubmit={handlePasswordSubmit}>
             <label className="block text-xs font-semibold uppercase tracking-wide text-label-tertiary mb-1">
-              {tenantSlug ? "Employee ID" : "Email"}
+              {tenantSlug ? "Employee ID / Login ID" : "Email"}
             </label>
             <input
               type={tenantSlug ? "text" : "email"}
               autoFocus
               value={identifier}
               onChange={(e) => setIdentifier(e.target.value)}
-              placeholder={tenantSlug ? "e.g. EMP-0001" : undefined}
+              placeholder={tenantSlug ? "e.g. EMP-0001 or LHM_Admin1" : undefined}
               className="w-full rounded-lg border border-black/10 px-3 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-accent"
             />
             <label className="block text-xs font-semibold uppercase tracking-wide text-label-tertiary mb-1">
@@ -343,7 +343,7 @@ export function LoginPage() {
           <form onSubmit={handleResetRequestSubmit}>
             <p className="text-xs text-label-tertiary mb-3">
               {tenantSlug
-                ? "Your Employee ID isn't used for password resets — enter the email on file for your account instead."
+                ? "Your Employee ID / Login ID isn't used for password resets — enter the email on file for your account instead."
                 : "Enter your account email and we'll send a reset link."}
             </p>
             <label className="block text-xs font-semibold uppercase tracking-wide text-label-tertiary mb-1">
@@ -435,9 +435,9 @@ export function LoginPage() {
         default /login (no tenantSlug), since that page already IS the
         AIHXM mark. */}
       {tenantSlug && (
-        <div className="mt-5 flex items-center gap-1.5 text-xs text-label-tertiary">
+        <div className="mt-5 flex items-center gap-2 text-sm text-label-tertiary">
           <span>Powered by</span>
-          <AihxmLogo size={14} withWordmark={false} />
+          <AihxmLogo size={22} withWordmark={false} />
           <span className="font-semibold tracking-tight">AIHXM</span>
         </div>
       )}

@@ -469,6 +469,61 @@ describe("CompaniesService", () => {
         )
       ).rejects.toThrow(ConflictException);
     });
+
+    it("stores a Platform-Admin-chosen loginId, so this admin can sign in through their own tenant-path login too", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Login ID",
+        slug: `test-co-login-id-${Date.now()}`,
+        initialAdmin: {
+          fullName: "Login ID Test",
+          email: `login-id-${Date.now()}@example.com`,
+        },
+      });
+
+      const adminId = created.admins[0].id;
+      const withLogin = await service.createAdminLogin(
+        FIXTURE_CLAIMS,
+        created.company.id,
+        adminId,
+        "SecurePassword123!",
+        "LHM_Admin1"
+      );
+
+      expect(withLogin.loginId).toBe("LHM_Admin1");
+    });
+
+    it("rejects a loginId already used by another admin on the same company, case-insensitively", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Login ID Clash",
+        slug: `test-co-login-id-clash-${Date.now()}`,
+        initialAdmin: {
+          fullName: "First Admin",
+          email: `first-admin-${Date.now()}@example.com`,
+        },
+      });
+      const secondAdmin = await service.addAdmin(FIXTURE_CLAIMS, created.company.id, {
+        fullName: "Second Admin",
+        email: `second-admin-${Date.now()}@example.com`,
+      });
+
+      await service.createAdminLogin(
+        FIXTURE_CLAIMS,
+        created.company.id,
+        created.admins[0].id,
+        "SecurePassword123!",
+        "Shared_Login"
+      );
+
+      await expect(
+        service.createAdminLogin(
+          FIXTURE_CLAIMS,
+          created.company.id,
+          secondAdmin.id,
+          "AnotherPassword123!",
+          "shared_login"
+        )
+      ).rejects.toThrow(ConflictException);
+    });
   });
 
   describe("impersonate", () => {

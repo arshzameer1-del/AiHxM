@@ -68,19 +68,20 @@ export class AuthService {
   }
 
   /**
-   * A tenant's own login page (leadhcm.aihxm.com/login) authenticates by
-   * Employee Number, never email — see LoginWithEmployeeNumberRequest's
+   * A tenant's own login page (aihxm.com/<slug>/login) authenticates by
+   * a typed identifier, never email — see LoginWithEmployeeNumberRequest's
    * doc comment in shared-types for why `companySlug` has to come along
-   * with it (employee_number is only unique WITHIN a company, migration
-   * 0010). Everything past "which user_accounts row is this" — lockout,
-   * password check, mandatory MFA — is identical to email login, so it
-   * shares `authenticate()` rather than re-implementing it.
+   * with it (both identifier namespaces below are only unique WITHIN a
+   * company). Everything past "which user_accounts row is this" —
+   * lockout, password check, mandatory MFA — is identical to email login,
+   * so it shares `authenticate()` rather than re-implementing it.
    *
-   * Only reaches accounts with an Employee Core row (`employees`) — a
-   * Company (Super) Admin created via CompaniesService.createAdminLogin
-   * has no `employees` row and therefore no employee number, and still
-   * signs in via the email-based `/auth/login` on the shared login page
-   * until/unless they're also given an Employee Core record.
+   * Despite the name (kept for API/DTO stability), this now matches EITHER
+   * an Employee Core row's `employee_number` OR a Company (Super) Admin's
+   * `company_admins.login_id` (migration 0048) — see
+   * `findAccountByEmployeeNumber`'s doc comment. An admin with no
+   * `login_id` set still signs in via the email-based `/auth/login` on
+   * the shared login page instead.
    */
   async loginWithEmployeeNumber(
     companySlug: string,
@@ -456,26 +457,46 @@ export class AuthService {
    * `employee_number` is only unique WITHIN a company (migration 0010's
    * `UNIQUE (company_id, employee_number)`), hence the join through
    * `companies` on `companySlug` rather than a bare lookup — this is what
-   * makes the tenant subdomain a real part of the login identity, not just
+   * makes the tenant path a real part of the login identity, not just
    * cosmetic. `upper(trim(...))` on both sides for the same reason
    * email.util.ts's normalizeEmail exists: a tenant's own configured
    * number-format prefix (EmployeeNumberFormat.prefix) is free text they
    * typed once, and a login attempt shouldn't fail over a case mismatch
    * between how it was configured and how someone types it.
+   *
+   * A Company (Super) Admin has no `employees` row at all — created via
+   * CompaniesService.createAdminLogin, which can set `company_admins
+   * .login_id` (migration 0048) as that admin's own equivalent identifier.
+   * The SAME identifier field on `/:companySlug/login` (LoginPage.tsx —
+   * still labelled "Employee ID" in the DTO/param names below for that
+   * historical reason) has to accept either kind of value, so this tries
+   * both tables for the given slug via UNION rather than picking one —
+   * `employee_number` and `login_id` are independent namespaces (an admin
+   * could theoretically be given both, on two different rows), so this
+   * simply matches whichever one exists and is correct, exactly one
+   * `user_accounts` row for the pair (slug, typed identifier).
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async findAccountByEmployeeNumber(companySlug: string, employeeNumber: string): Promise<any | undefined> {
     return this.db.withClaims(SERVICE_CLAIMS, async (client) => {
+      // Slugs are already stored lowercase (slugify() at creation time) —
+      // trim/lowercase here only guards against how the frontend derives
+      // it from the route param, not a second source of truth.
+      const slug = companySlug.trim().toLowerCase();
       const result = await client.query(
         `SELECT ua.*
          FROM user_accounts ua
          JOIN employees e ON e.user_account_id = ua.id
          JOIN companies c ON c.id = e.company_id
-         WHERE c.slug = $1 AND upper(trim(e.employee_number)) = upper(trim($2))`,
-        // Slugs are already stored lowercase (slugify() at creation time) —
-        // trim/lowercase here only guards against how the frontend derives
-        // it from window.location.hostname, not a second source of truth.
-        [companySlug.trim().toLowerCase(), employeeNumber]
+         WHERE c.slug = $1 AND upper(trim(e.employee_number)) = upper(trim($2))
+         UNION ALL
+         SELECT ua.*
+         FROM user_accounts ua
+         JOIN company_admins ca ON ca.user_account_id = ua.id
+         JOIN companies c ON c.id = ca.company_id
+         WHERE c.slug = $1 AND ca.login_id IS NOT NULL AND upper(trim(ca.login_id)) = upper(trim($2))
+         LIMIT 1`,
+        [slug, employeeNumber]
       );
       return result.rows[0];
     });

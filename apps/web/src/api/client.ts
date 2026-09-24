@@ -681,10 +681,10 @@ export const api = {
       body: JSON.stringify({ status }),
     }),
 
-  createAdminLogin: (id: string, adminId: string, initialPassword: string) =>
+  createAdminLogin: (id: string, adminId: string, initialPassword: string, loginId?: string) =>
     request<CompanyAdmin>(`/platform/companies/${id}/admins/${adminId}/account`, {
       method: "POST",
-      body: JSON.stringify({ initialPassword }),
+      body: JSON.stringify({ initialPassword, ...(loginId ? { loginId } : {}) }),
     }),
 
   impersonate: (id: string) =>

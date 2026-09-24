@@ -1,5 +1,34 @@
 import { useEffect, useState } from "react";
+import type { PlatformBranding } from "@aihxm/shared-types";
 import { api, platformBrandingAssetUrl } from "../api/client";
+
+/**
+ * Every AihxmLogo instance used to fire its own /public/platform-branding
+ * fetch on mount and render the hand-drawn fallback mark *while that
+ * request was in flight*, then swap to the uploaded logo once it
+ * resolved. With several instances on one page (sidebar + login card +
+ * "Powered by" badge) that meant the same request fired 2-3x AND every
+ * one of them visibly flashed "default mark -> real logo" a moment
+ * later — reported as "first it is loading your added logo in code
+ * after a second it is loading platform logo". Fixed two ways: (1) one
+ * shared in-flight/resolved promise for the whole page load, so mounting
+ * three of these costs one network request, not three; (2) nothing is
+ * rendered until that promise settles, so there is exactly one visible
+ * paint (the real answer), never a flash of one mark being replaced by
+ * another.
+ */
+let platformBrandingRequest: Promise<PlatformBranding> | null = null;
+function fetchPlatformBrandingOnce(): Promise<PlatformBranding> {
+  if (!platformBrandingRequest) {
+    platformBrandingRequest = api.getPlatformBranding().catch((err) => {
+      // Let a failed request be retried by the next mount instead of
+      // permanently caching a failure for the rest of the session.
+      platformBrandingRequest = null;
+      throw err;
+    });
+  }
+  return platformBrandingRequest;
+}
 
 /**
  * The AIHXM platform's own mark — shown wherever there's no tenant to
@@ -9,20 +38,21 @@ import { api, platformBrandingAssetUrl } from "../api/client";
  * the small "Powered by AIHXM" credit LoginPage shows on every tenant's
  * OWN branded subdomain (see that component's badge).
  *
- * Checks once on mount whether the Platform Admin has uploaded a real
- * logo (platform-branding module, migration 0046) via the public,
+ * Checks once per page load whether the Platform Admin has uploaded a
+ * real logo (platform-branding module, migration 0046) via the public,
  * no-auth /public/platform-branding endpoint — the same endpoint has to
  * work here before any session exists, so this component never sends a
  * token. When one exists, it's rendered as-is (a real uploaded mark is
  * assumed to already carry whatever wordmark/branding the platform owner
  * wants — this component doesn't overlay its own text on top of it).
- * Until one is uploaded, or if the fetch fails for any reason (offline,
- * blocked, etc.), this silently falls back to the original hand-drawn
- * hexagonal node-lattice mark it always used to render unconditionally —
- * a simple hexagonal node-lattice: three connected nodes reading as both
- * "network/AI" and the letterforms this stands for, in the app's existing
- * accent blue (tailwind.config.js) rather than inventing a second
- * palette just for this mark.
+ * Until that check resolves, this renders nothing (a same-size empty
+ * box) rather than a placeholder mark, specifically so there's never a
+ * "wrong logo, then right logo" flash. Once resolved — no logo uploaded,
+ * or the fetch failed for any reason (offline, blocked, etc.) — it falls
+ * back to the original hand-drawn hexagonal node-lattice mark: three
+ * connected nodes reading as both "network/AI" and the letterforms this
+ * stands for, in the app's existing accent blue (tailwind.config.js)
+ * rather than inventing a second palette just for this mark.
  */
 export function AihxmLogo({
   size = 32,
@@ -34,25 +64,33 @@ export function AihxmLogo({
   className?: string;
 }) {
   const [uploadedLogoUrl, setUploadedLogoUrl] = useState<string | null>(null);
+  const [checked, setChecked] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    api
-      .getPlatformBranding()
+    fetchPlatformBrandingOnce()
       .then((branding) => {
-        if (!cancelled && branding.hasLogo) {
-          setUploadedLogoUrl(platformBrandingAssetUrl(branding.updatedAt));
-        }
+        if (cancelled) return;
+        if (branding.hasLogo) setUploadedLogoUrl(platformBrandingAssetUrl(branding.updatedAt));
       })
       .catch(() => {
         // No platform logo yet, or the endpoint couldn't be reached —
         // fall back to the built-in mark silently, same posture as
         // LoginPage's tenant-branding fetch. Cosmetic only.
+      })
+      .finally(() => {
+        if (!cancelled) setChecked(true);
       });
     return () => {
       cancelled = true;
     };
   }, []);
+
+  if (!checked) {
+    // Reserve the same footprint so nothing else on the page jumps once
+    // the real mark appears, but paint nothing yet.
+    return <span aria-hidden="true" style={{ display: "inline-block", width: size, height: size }} />;
+  }
 
   if (uploadedLogoUrl) {
     return (
