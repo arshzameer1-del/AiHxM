@@ -23,7 +23,7 @@
 #    rule below — Netlify uses the first matching rule.
 [[redirects]]
   from = "/api/*"
-  to = "https://REPLACE-WITH-YOUR-RENDER-SERVICE.onrender.com/:splat"
+  to = "https://aihxm.onrender.com/:splat"
   status = 200
   force = true
 
