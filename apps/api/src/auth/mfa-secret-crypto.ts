@@ -19,7 +19,17 @@ function deriveKey(): Buffer {
   // Fixed salt is acceptable here: this derives one static key from one
   // static secret, not a per-user password hash — the passphrase's own
   // entropy is what matters.
-  return scryptSync(passphrase, "aihxm-mfa-secret-v1", 32);
+  //
+  // DO NOT rename this string during the BoostFactor -> AIHXM rebrand (or
+  // any future rebrand). It is a key-derivation input, not user-facing
+  // branding text — every MFA secret already encrypted in a real database
+  // was sealed with the key this exact string produces. Changing it changes
+  // the derived key, which makes every existing encrypted secret
+  // permanently undecryptable ("Unsupported state or unable to authenticate
+  // data" from Decipheriv.final()) even though MFA_ENCRYPTION_KEY itself
+  // never changed. A blanket "boostfactor" -> "aihxm" find-and-replace hit
+  // this literal once already — that's the whole reason this comment exists.
+  return scryptSync(passphrase, "boostfactor-mfa-secret-v1", 32);
 }
 
 export function encryptMfaSecret(plainSecret: string): string {
