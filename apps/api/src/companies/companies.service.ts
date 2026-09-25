@@ -874,11 +874,28 @@ export class CompaniesService {
       // lowercase, but this covers any row written between that backfill
       // and this deploy, or a source that bypasses addAdmin() entirely.
       const passwordHash = await hashPassword(initialPassword);
-      const account = await client.query(
-        "INSERT INTO user_accounts (email, password_hash) VALUES ($1, $2) RETURNING id",
-        [normalizeEmail(existing.rows[0].email), passwordHash]
-      );
-      const userAccountId = account.rows[0].id as string;
+      let userAccountId: string;
+      try {
+        const account = await client.query(
+          "INSERT INTO user_accounts (email, password_hash) VALUES ($1, $2) RETURNING id",
+          [normalizeEmail(existing.rows[0].email), passwordHash]
+        );
+        userAccountId = account.rows[0].id as string;
+      } catch (err) {
+        // user_accounts.email is globally UNIQUE (Section 5) — this admin's
+        // email is already attached to a login somewhere else (another
+        // company's admin or employee, or this same admin re-added under a
+        // second company). Same friendly-409 posture as
+        // EmployeesService.createLogin()'s own email collision, which this
+        // path had been missing until now (it only guarded the login_id
+        // update below, not this insert).
+        if ((err as { code?: string }).code === "23505") {
+          throw new ConflictException(
+            `A login already exists for ${existing.rows[0].email} — it may belong to another company or employee record.`
+          );
+        }
+        throw err;
+      }
 
       const normalizedLoginId = loginId?.trim() || null;
       let updated;
@@ -923,6 +940,60 @@ export class CompaniesService {
       });
 
       return rowToAdmin(updated.rows[0]);
+    });
+  }
+
+  /**
+   * The other half of "Create login" (above): a Platform Admin picks a new
+   * password for an admin who already has a login but forgot it — the
+   * account-recovery gap that surfaced once real Company Admin logins
+   * existed with no self-service reset path that reaches a Platform Admin
+   * (the tenant-scoped `/auth/password-reset/*` flow needs a working
+   * inbox and SMTP configured, neither of which every pilot company has
+   * yet). Overwriting `password_hash` directly (never reading the old one
+   * back) and clearing `failed_login_attempts`/`locked_until` mirrors
+   * AuthService.confirmPasswordReset()'s own self-service path exactly —
+   * this is the same operation with a Platform Admin's authority standing
+   * in for the emailed token.
+   */
+  async resetAdminPassword(
+    claims: RequestClaims,
+    companyId: string,
+    adminId: string,
+    newPassword: string
+  ): Promise<CompanyAdmin> {
+    return this.db.withClaims(claims, async (client) => {
+      const existing = await client.query(
+        "SELECT * FROM company_admins WHERE id = $1 AND company_id = $2",
+        [adminId, companyId]
+      );
+      if (existing.rowCount === 0) {
+        throw new NotFoundException("Admin not found for this company");
+      }
+      const userAccountId = existing.rows[0].user_account_id as string | null;
+      if (!userAccountId) {
+        throw new BadRequestException("This admin has no login yet — use Create login instead");
+      }
+
+      const passwordHash = await hashPassword(newPassword);
+      await client.query(
+        `UPDATE user_accounts SET
+           password_hash = $2,
+           failed_login_attempts = 0,
+           locked_until = NULL,
+           updated_at = now()
+         WHERE id = $1`,
+        [userAccountId, passwordHash]
+      );
+
+      await this.audit.record(client, claims, {
+        companyId,
+        action: "company.admin.password_reset",
+        target: existing.rows[0].email,
+        metadata: {},
+      });
+
+      return rowToAdmin(existing.rows[0]);
     });
   }
 

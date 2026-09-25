@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import QRCode from "qrcode";
 import type { PublicTenantBranding } from "@aihxm/shared-types";
 import { useAuth } from "../auth/AuthContext";
-import { api, ApiError, publicTenantBrandingAssetUrl } from "../api/client";
+import { api, ApiError, consumeSessionExpiredNotice, publicTenantBrandingAssetUrl } from "../api/client";
 import { AihxmLogo } from "../components/AihxmLogo";
 
 /**
@@ -55,11 +55,15 @@ export function LoginPage() {
   const [newPassword, setNewPassword] = useState("");
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Carries SignupPage's "your company is ready" hand-off message — the
-  // only other place besides password reset that lands here with
-  // something to tell the person before they've done anything yet.
+  // Carries SignupPage's "your company is ready" hand-off message, or —
+  // via consumeSessionExpiredNotice() — the one-shot flag AuthContext's
+  // SESSION_EXPIRED_EVENT listener leaves behind when it logs someone out
+  // after a 401. Without this, a session expiring mid-use bounced the
+  // person here with zero explanation, right after they'd been staring at
+  // a raw "Missing bearer token" error with no obvious next step.
   const [info, setInfo] = useState<string | null>(
-    (location.state as { info?: string } | null)?.info ?? null
+    (location.state as { info?: string } | null)?.info ??
+      (consumeSessionExpiredNotice() ? "Your session expired. Please log in again." : null)
   );
   const [loading, setLoading] = useState(false);
 

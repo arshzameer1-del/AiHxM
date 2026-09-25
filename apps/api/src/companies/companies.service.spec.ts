@@ -7,6 +7,7 @@ import { EntitlementsService } from "../entitlements/entitlements.service";
 import { SessionSecurityService } from "../auth/session-security.service";
 import { CacheService } from "../cache/cache.service";
 import { LocalFileStorageService } from "../file-storage/local-file-storage.service";
+import { verifyPassword } from "../auth/password";
 import type { RequestClaims } from "../database/tenant-context";
 
 const FIXTURE_CLAIMS: RequestClaims = {
@@ -552,6 +553,67 @@ describe("CompaniesService", () => {
           "shared_login"
         )
       ).rejects.toThrow(ConflictException);
+    });
+  });
+
+  describe("resetAdminPassword", () => {
+    it("overwrites the password for an admin who already has a login", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Reset Password",
+        slug: `test-co-reset-pw-${Date.now()}`,
+        initialAdmin: {
+          fullName: "Reset Password Test",
+          email: `reset-pw-${Date.now()}@example.com`,
+        },
+      });
+      const adminId = created.admins[0].id;
+      await service.createAdminLogin(FIXTURE_CLAIMS, created.company.id, adminId, "OriginalPassword123!");
+
+      const updated = await service.resetAdminPassword(
+        FIXTURE_CLAIMS,
+        created.company.id,
+        adminId,
+        "BrandNewPassword456!"
+      );
+      expect(updated.hasLogin).toBe(true);
+
+      const row = await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query<{ password_hash: string }>(
+          `SELECT ua.password_hash FROM user_accounts ua
+           JOIN company_admins ca ON ca.user_account_id = ua.id
+           WHERE ca.id = $1`,
+          [adminId]
+        )
+      );
+      const passwordHash = row.rows[0].password_hash;
+      await expect(verifyPassword("BrandNewPassword456!", passwordHash)).resolves.toBe(true);
+      await expect(verifyPassword("OriginalPassword123!", passwordHash)).resolves.toBe(false);
+    });
+
+    it("refuses to reset a password for an admin with no login yet", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Reset No Login",
+        slug: `test-co-reset-no-login-${Date.now()}`,
+        initialAdmin: {
+          fullName: "No Login Yet",
+          email: `no-login-${Date.now()}@example.com`,
+        },
+      });
+
+      await expect(
+        service.resetAdminPassword(FIXTURE_CLAIMS, created.company.id, created.admins[0].id, "SomePassword123!")
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("404s for an admin that doesn't belong to this company", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Reset Wrong Company",
+        slug: `test-co-reset-wrong-co-${Date.now()}`,
+      });
+
+      await expect(
+        service.resetAdminPassword(FIXTURE_CLAIMS, created.company.id, "00000000-0000-0000-0000-000000000000", "SomePassword123!")
+      ).rejects.toThrow(NotFoundException);
     });
   });
 

@@ -2629,6 +2629,9 @@ function AdminsTab({
     password: string;
     loginId: string | null;
   } | null>(null);
+  const [resettingPasswordFor, setResettingPasswordFor] = useState<string | null>(null);
+  const [newPasswordInput, setNewPasswordInput] = useState("");
+  const [resetCredential, setResetCredential] = useState<{ email: string; password: string } | null>(null);
 
   async function handleAdd(e: FormEvent) {
     e.preventDefault();
@@ -2688,6 +2691,20 @@ function AdminsTab({
     }
   }
 
+  async function handleResetPassword(e: FormEvent, admin: CompanyAdmin) {
+    e.preventDefault();
+    setError(null);
+    try {
+      const updated = await api.resetAdminPassword(companyId, admin.id, newPasswordInput);
+      onChanged(admins.map((a) => (a.id === admin.id ? updated : a)));
+      setResetCredential({ email: admin.email, password: newPasswordInput });
+      setResettingPasswordFor(null);
+      setNewPasswordInput("");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not reset this admin's password.");
+    }
+  }
+
   return (
     <section className="bg-card rounded-card p-5 shadow-sm space-y-5">
       <div>
@@ -2721,6 +2738,23 @@ function AdminsTab({
           )}
           <button
             onClick={() => setCreatedCredential(null)}
+            className="text-amber-800 hover:underline font-medium"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {resetCredential && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs space-y-1">
+          <div className="font-semibold text-amber-900">
+            Password reset for {resetCredential.email} — share this now, it won't be shown again:
+          </div>
+          <div>
+            New password: <code className="bg-white rounded px-2 py-1">{resetCredential.password}</code>
+          </div>
+          <button
+            onClick={() => setResetCredential(null)}
             className="text-amber-800 hover:underline font-medium"
           >
             Dismiss
@@ -2765,6 +2799,18 @@ function AdminsTab({
                 </button>
                 {admin.hasLogin && (
                   <button
+                    onClick={() => {
+                      setResettingPasswordFor(resettingPasswordFor === admin.id ? null : admin.id);
+                      setNewPasswordInput("");
+                    }}
+                    className="text-xs font-semibold text-accent hover:underline"
+                    title="Set a new password for this admin — use if they forgot theirs"
+                  >
+                    Reset password
+                  </button>
+                )}
+                {admin.hasLogin && (
+                  <button
                     onClick={() => handleForceLogout(admin)}
                     className="text-xs font-semibold text-danger hover:underline"
                     title="Sign this admin out of every device immediately"
@@ -2774,6 +2820,37 @@ function AdminsTab({
                 )}
               </div>
             </div>
+
+            {resettingPasswordFor === admin.id && (
+              <form
+                onSubmit={(e) => handleResetPassword(e, admin)}
+                className="flex flex-col gap-2 bg-black/5 rounded-lg p-3"
+              >
+                <p className="text-xs text-label-tertiary">
+                  Use this if {admin.fullName} forgot their password. Pick a new one and share it with
+                  them directly — it won't be shown again after this.
+                </p>
+                <div className="flex items-end gap-2">
+                  <div className="flex-1">
+                    <label className="block text-xs font-medium mb-1">New password (10+ chars)</label>
+                    <input
+                      required
+                      minLength={10}
+                      type="text"
+                      value={newPasswordInput}
+                      onChange={(e) => setNewPasswordInput(e.target.value)}
+                      className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-accent"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    className="bg-accent text-white rounded-lg px-4 py-2 text-sm font-semibold"
+                  >
+                    Reset
+                  </button>
+                </div>
+              </form>
+            )}
 
             {creatingLoginFor === admin.id && (
               <form

@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { MeResponse } from "@aihxm/shared-types";
-import { api, clearToken, getToken, setToken } from "../api/client";
+import { api, clearToken, getToken, setToken, SESSION_EXPIRED_EVENT } from "../api/client";
 
 /**
  * Phase 3: real password + mandatory-MFA login is a multi-step exchange
@@ -75,6 +75,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // setSessionToken() is what drives every later identity fetch (a
     // fresh login), not a dependency-array re-run of this effect.
   }, []);
+
+  // The other half of client.ts's SESSION_EXPIRED_EVENT — a 401 from ANY
+  // API call (not just this context's own getMe()) already clears the
+  // stored token; this is what makes that fact reach `isAuthenticated` no
+  // matter which screen or component made the call, so the route guard
+  // (App.tsx's RequireAuth) actually redirects to /login instead of
+  // leaving the user stuck on a page whose every action now silently fails.
+  useEffect(() => {
+    function handleSessionExpired() {
+      logout();
+    }
+    window.addEventListener(SESSION_EXPIRED_EVENT, handleSessionExpired);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, handleSessionExpired);
+  }, [logout]);
 
   const setSessionToken = useCallback(
     async (token: string): Promise<MeResponse> => {

@@ -27,6 +27,7 @@ import { UpdateCompanyProfileDto } from "./dto/update-company-profile.dto";
 import { CreateCompanyAdminDto } from "./dto/create-company-admin.dto";
 import { UpdateCompanyAdminDto } from "./dto/update-company-admin.dto";
 import { CreateLoginDto } from "../auth/dto/create-login.dto";
+import { ResetAdminPasswordDto } from "./dto/reset-admin-password.dto";
 import type { BrandingAssetSlot, CompanyStatus, PackageTier } from "@aihxm/shared-types";
 
 const BRANDING_SLOTS: BrandingAssetSlot[] = ["logo", "favicon", "login-background"];
@@ -179,6 +180,16 @@ export class CompaniesController {
     @Body() dto: CreateLoginDto
   ) {
     return this.companies.createAdminLogin(claims, id, adminId, dto.initialPassword, dto.loginId);
+  }
+
+  @Post(":id/admins/:adminId/account/reset-password")
+  resetAdminPassword(
+    @CurrentClaims() claims: RequestClaims,
+    @Param("id") id: string,
+    @Param("adminId") adminId: string,
+    @Body() dto: ResetAdminPasswordDto
+  ) {
+    return this.companies.resetAdminPassword(claims, id, adminId, dto.newPassword);
   }
 
   @Post(":id/impersonate")

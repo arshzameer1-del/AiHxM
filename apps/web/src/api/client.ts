@@ -152,6 +152,34 @@ export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
 }
 
+// Real bug found from a production screenshot: a 401 from ANY call, not
+// just AuthContext's own getMe(), already cleared the stored token below —
+// but nothing told the rest of the app that had happened. AuthContext's
+// `isAuthenticated` stayed stuck at `true` (nothing re-derives it outside
+// its own fetchIdentity() call path), so the route guard never redirected
+// to /login, and the user was left on the same page clicking "Save" into a
+// wall of raw, confusing backend error text ("Missing bearer token" —
+// exactly what a request with no Authorization header at all looks like
+// once the token is gone). This event is how a plain function (this file
+// has no React context of its own) tells AuthContext "the session just
+// died," so it can flip isAuthenticated and let the existing route guard
+// do its job. SESSION_EXPIRED_KEY is the accompanying one-shot flag
+// LoginPage reads once to show a human explanation instead of a silent
+// bounce — sessionStorage (not localStorage) so it can't linger across an
+// unrelated future visit if it's ever read out of order.
+export const SESSION_EXPIRED_EVENT = "aihxm:session-expired";
+const SESSION_EXPIRED_KEY = "aihxm.sessionExpiredNotice";
+
+export function consumeSessionExpiredNotice(): boolean {
+  try {
+    if (sessionStorage.getItem(SESSION_EXPIRED_KEY) !== "1") return false;
+    sessionStorage.removeItem(SESSION_EXPIRED_KEY);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -202,6 +230,13 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   if (res.status === 401) {
     clearToken();
+    try {
+      sessionStorage.setItem(SESSION_EXPIRED_KEY, "1");
+    } catch {
+      // Best-effort — a missed "your session expired" banner on the next
+      // login screen isn't worth failing this request over.
+    }
+    window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
   }
 
   if (!res.ok) {
@@ -685,6 +720,12 @@ export const api = {
     request<CompanyAdmin>(`/platform/companies/${id}/admins/${adminId}/account`, {
       method: "POST",
       body: JSON.stringify({ initialPassword, ...(loginId ? { loginId } : {}) }),
+    }),
+
+  resetAdminPassword: (id: string, adminId: string, newPassword: string) =>
+    request<CompanyAdmin>(`/platform/companies/${id}/admins/${adminId}/account/reset-password`, {
+      method: "POST",
+      body: JSON.stringify({ newPassword }),
     }),
 
   impersonate: (id: string) =>
