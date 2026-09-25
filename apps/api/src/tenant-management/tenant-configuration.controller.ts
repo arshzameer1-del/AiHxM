@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
 import { IsNotEmpty, IsString } from "class-validator";
 import { PlatformAdminGuard } from "../auth/platform-admin.guard";
+import { ScopedCompanyParam } from "../auth/scoped-company-param.decorator";
 import { CurrentClaims } from "../auth/current-claims.decorator";
 import type { RequestClaims } from "../database/tenant-context";
 import { TenantConfigurationService } from "./tenant-configuration.service";
@@ -21,6 +22,7 @@ class RollbackDto {
 // "tenant" and "company" are the same row, see companies.controller.ts).
 @Controller("platform/companies/:companyId/configuration")
 @UseGuards(PlatformAdminGuard)
+@ScopedCompanyParam("companyId")
 export class TenantConfigurationController {
   constructor(private readonly config: TenantConfigurationService) {}
 

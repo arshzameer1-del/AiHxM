@@ -666,6 +666,20 @@ export type TenantDataExport = {
   completedAt: string | null;
   expiresAt: string | null;
   error: string | null;
+  /** Phase 2 gap-fill item #6 — true when a download password was set at
+   * request time. The password itself is never stored or returned
+   * anywhere; the UI uses this only to know whether to prompt for one
+   * before calling download. */
+  isPasswordProtected: boolean;
+};
+
+export type RequestDataExportRequest = {
+  scope: DataExportScope;
+  format: DataExportFormat;
+  /** Optional — when set, the export is encrypted at rest under THIS
+   * password instead of the server's own key, and the same password must
+   * be supplied again to download it. Never persisted anywhere. */
+  password?: string;
 };
 
 // --- Phase 3: Auth & Identity --------------------------------------------
@@ -730,6 +744,28 @@ export type MfaVerifyRequest = {
 export type MfaRecoveryCodeVerifyRequest = {
   mfaTicket: string;
   code: string;
+};
+
+/**
+ * Phase 2 gap-fill item #2 — step-up re-authentication. Re-proves an
+ * already-logged-in session's second factor immediately before a
+ * particularly sensitive action (granting/changing Platform Admin
+ * access, resetting a tenant admin's password, "Login As" impersonation,
+ * rotating an integration secret) — the same mandatory-MFA credential
+ * every session already enrolled at login, via `POST /auth/step-up`,
+ * never a new/separate one. Exactly one of totpCode/recoveryCode must be
+ * present (the same either-credential shape as the login-time MFA step).
+ */
+export type StepUpVerifyRequest = {
+  totpCode?: string;
+  recoveryCode?: string;
+};
+
+/** `verifiedForSeconds` is how long the resulting step-up grant lasts —
+ *  purely informational for the frontend (e.g. a countdown); the server
+ *  is the sole source of truth for whether it's still valid. */
+export type StepUpVerifyResponse = {
+  verifiedForSeconds: number;
 };
 
 export type SessionResult = {
@@ -818,11 +854,20 @@ export type CreateLoginRequest = {
  * then create login" flow, since a Platform Admin with no login is never
  * a useful intermediate state the way a freshly-imported CompanyAdmin is.
  */
+/** Phase 2 gap-fill item #7 — Platform Admin delegation. "scoped" replaces
+ *  the roadmap's original "regional" wording: this schema has no real
+ *  geographic region concept, so scoping by an explicit tenant list is the
+ *  honest, useful version of the idea instead. */
+export type PlatformAdminAccessLevel = "full" | "read_only" | "scoped";
+
 export type PlatformAdmin = {
   id: string;
   fullName: string;
   email: string;
   status: CompanyAdminStatus;
+  accessLevel: PlatformAdminAccessLevel;
+  /** Only non-empty (and only meaningful) when accessLevel === "scoped". */
+  scopedCompanyIds: string[];
   createdAt: string;
 };
 
@@ -830,6 +875,14 @@ export type CreatePlatformAdminRequest = {
   fullName: string;
   email: string;
   initialPassword: string;
+  /** Defaults to "full" when omitted — every admin created before this existed keeps that behavior. */
+  accessLevel?: PlatformAdminAccessLevel;
+  scopedCompanyIds?: string[];
+};
+
+export type SetPlatformAdminAccessRequest = {
+  accessLevel: PlatformAdminAccessLevel;
+  scopedCompanyIds?: string[];
 };
 
 // --- Phase 4: RBAC + Field-Level Permission Engine -----------------------
@@ -2449,6 +2502,55 @@ export type SubmitOnDutyRequestRequest = {
   endDate: string;
   location?: string;
   reason?: string;
+};
+
+// --- Phase 2 gap-fill item #5: data subject request queue --------------
+// See 0057_data_subject_requests.sql. Routed through the generic
+// WorkflowService multi-step approval engine (like leave_requests),
+// deliberately NOT the single-decider pattern
+// AttendanceCorrectionRequestView/OnDutyRequestView use — a privacy
+// request plausibly needs a real review chain (HR, then a compliance
+// officer), which is exactly what the workflow engine is for.
+// "Fulfilled" is a distinct, explicit step from "approved": approval
+// decides whether the request is legitimate, fulfillment records that
+// someone actually carried it out (exported the data, corrected the
+// record, or completed the deletion) and how.
+export type DataSubjectRequestType = "access" | "correction" | "deletion";
+export type DataSubjectRequestStatus = "pending" | "approved" | "rejected" | "fulfilled";
+
+export type DataSubjectRequestView = {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  employeeNumber: string;
+  employeeName: string;
+  requestType: DataSubjectRequestType;
+  description: string;
+  status: DataSubjectRequestStatus;
+  submittedByUserAccountId: string;
+  isOnBehalf: boolean;
+  workflowInstanceId: string | null;
+  decisionComment: string | null;
+  fulfilledByUserAccountId: string | null;
+  fulfilledAt: string | null;
+  fulfillmentNote: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SubmitDataSubjectRequestRequest = {
+  employeeId: string;
+  requestType: DataSubjectRequestType;
+  description: string;
+};
+
+export type DecideDataSubjectRequestRequest = {
+  decision: "approved" | "rejected";
+  comment?: string;
+};
+
+export type FulfillDataSubjectRequestRequest = {
+  fulfillmentNote: string;
 };
 
 export type DecideOnDutyRequestRequest = {

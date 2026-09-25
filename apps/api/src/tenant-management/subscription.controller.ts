@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
 import { IsIn, IsInt, Min } from "class-validator";
 import { PlatformAdminGuard } from "../auth/platform-admin.guard";
+import { ScopedCompanyParam } from "../auth/scoped-company-param.decorator";
 import { CurrentClaims } from "../auth/current-claims.decorator";
 import type { RequestClaims } from "../database/tenant-context";
 import type { PackageTier } from "@aihxm/shared-types";
@@ -22,6 +23,7 @@ class SetSeatsDto {
 // TM-025/026.
 @Controller("platform/companies/:companyId/subscription")
 @UseGuards(PlatformAdminGuard)
+@ScopedCompanyParam("companyId")
 export class SubscriptionController {
   constructor(private readonly subscription: SubscriptionService) {}
 

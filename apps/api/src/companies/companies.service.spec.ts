@@ -160,6 +160,43 @@ describe("CompaniesService", () => {
       const found = result.find((c) => c.slug === slug);
       expect(found).toBeDefined();
     });
+
+    // Phase 2 gap-fill item #7 — a 'scoped' Platform Admin's Tenant
+    // Directory list, at the service level (the HTTP path through this
+    // same filter is already covered by
+    // platform-admin-delegation.e2e.spec.ts).
+    it("filters to only the scoped company ids when claims carry a 'scoped' platform admin access level", async () => {
+      const inScope = await service.create(FIXTURE_CLAIMS, {
+        name: "Scoped List In-Scope Co",
+        slug: `scoped-list-in-${Date.now()}`,
+      });
+      const outOfScope = await service.create(FIXTURE_CLAIMS, {
+        name: "Scoped List Out-Of-Scope Co",
+        slug: `scoped-list-out-${Date.now()}`,
+      });
+
+      const scopedClaims: RequestClaims = {
+        ...FIXTURE_CLAIMS,
+        platformAdminAccessLevel: "scoped",
+        platformAdminScopedCompanyIds: [inScope.company.id],
+      };
+
+      const result = await service.list(scopedClaims);
+      const ids = result.map((c) => c.id);
+      expect(ids).toContain(inScope.company.id);
+      expect(ids).not.toContain(outOfScope.company.id);
+    });
+
+    it("returns every company when claims carry 'full' (or no) platform admin access level", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Full Access List Co",
+        slug: `full-list-${Date.now()}`,
+      });
+
+      const fullClaims: RequestClaims = { ...FIXTURE_CLAIMS, platformAdminAccessLevel: "full" };
+      const result = await service.list(fullClaims);
+      expect(result.map((c) => c.id)).toContain(created.company.id);
+    });
   });
 
   describe("getDetail", () => {

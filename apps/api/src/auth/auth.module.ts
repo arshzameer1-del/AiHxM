@@ -5,12 +5,14 @@ import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
 import { PlatformAdminGuard } from "./platform-admin.guard";
 import { SessionGuard } from "./session.guard";
+import { StepUpGuard } from "./step-up.guard";
+import { StepUpService } from "./step-up.service";
 import { SessionSecurityModule } from "./session-security.module";
 
 @Module({
   imports: [EntitlementsModule, MailerModule, SessionSecurityModule],
   controllers: [AuthController],
-  providers: [AuthService, PlatformAdminGuard, SessionGuard],
-  exports: [AuthService, PlatformAdminGuard, SessionGuard, SessionSecurityModule],
+  providers: [AuthService, PlatformAdminGuard, SessionGuard, StepUpGuard, StepUpService],
+  exports: [AuthService, PlatformAdminGuard, SessionGuard, StepUpGuard, SessionSecurityModule],
 })
 export class AuthModule {}

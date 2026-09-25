@@ -57,6 +57,8 @@ import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { StatusPill } from "../components/StatusPill";
 import { ReasonModal } from "../components/ReasonModal";
+import { ExportPasswordModal } from "../components/ExportPasswordModal";
+import { useStepUp } from "../hooks/useStepUp";
 
 const STATUSES: CompanyStatus[] = ["draft", "trial", "active", "suspended", "locked", "archived", "churned"];
 // Reasons are required server-side for these two (TM-005 Suspend, TM-030
@@ -1878,6 +1880,9 @@ function IntegrationsTab({ companyId }: { companyId: string }) {
     newSecretValue: string;
     previousSecretExpiresAt: string;
   } | null>(null);
+  // Phase 2 gap-fill item #2 — rotating an integration secret is a
+  // @RequireStepUp() route.
+  const { runWithStepUp, stepUpModal } = useStepUp();
 
   async function load() {
     try {
@@ -1956,7 +1961,7 @@ function IntegrationsTab({ companyId }: { companyId: string }) {
     setRotating(integration.providerKey);
     setError(null);
     try {
-      const response = await api.rotateIntegrationSecret(companyId, integration.providerKey);
+      const response = await runWithStepUp(() => api.rotateIntegrationSecret(companyId, integration.providerKey));
       setIntegrations((prev) => prev?.map((x) => (x.providerKey === response.integration.providerKey ? response.integration : x)) ?? prev);
       setDrafts((prev) => ({
         ...prev,
@@ -1978,6 +1983,7 @@ function IntegrationsTab({ companyId }: { companyId: string }) {
 
   return (
     <section className="bg-card rounded-card p-5 shadow-sm space-y-5">
+      {stepUpModal}
       <div>
         <h2 className="font-semibold text-sm uppercase tracking-wide text-label-tertiary mb-1">Integrations</h2>
         <p className="text-xs text-label-tertiary">
@@ -2677,9 +2683,14 @@ function DataExportsTab({ companyId }: { companyId: string }) {
   const [exportsList, setExportsList] = useState<TenantDataExport[] | null>(null);
   const [scope, setScope] = useState<DataExportScope>("employees");
   const [format, setFormat] = useState<DataExportFormat>("csv");
+  const [passwordProtect, setPasswordProtect] = useState(false);
+  const [requestPassword, setRequestPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [requesting, setRequesting] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  // Phase 2 gap-fill item #6 — the export whose download password we're
+  // currently collecting, if any.
+  const [passwordPromptFor, setPasswordPromptFor] = useState<TenantDataExport | null>(null);
 
   async function load() {
     try {
@@ -2695,10 +2706,20 @@ function DataExportsTab({ companyId }: { companyId: string }) {
   }, [companyId]);
 
   async function requestExport() {
+    if (passwordProtect && requestPassword.trim().length < 8) {
+      setError("A download password must be at least 8 characters.");
+      return;
+    }
     setRequesting(true);
     setError(null);
     try {
-      await api.requestDataExport(companyId, { scope, format });
+      await api.requestDataExport(companyId, {
+        scope,
+        format,
+        password: passwordProtect ? requestPassword.trim() : undefined,
+      });
+      setRequestPassword("");
+      setPasswordProtect(false);
       await load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not start this export.");
@@ -2707,16 +2728,28 @@ function DataExportsTab({ companyId }: { companyId: string }) {
     }
   }
 
-  async function download(item: TenantDataExport) {
+  // `surfaceError` is false when called from ExportPasswordModal, which
+  // shows a wrong-password/decrypt failure inline itself — the tab-level
+  // banner is only for the plain, non-password download path.
+  async function download(item: TenantDataExport, password?: string, surfaceError = true): Promise<void> {
     setDownloadingId(item.id);
-    setError(null);
+    if (surfaceError) setError(null);
     try {
-      await api.downloadDataExport(companyId, item.id, `export-${item.scope}-${item.id}.${item.format}`);
+      await api.downloadDataExport(companyId, item.id, `export-${item.scope}-${item.id}.${item.format}`, password);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not download this export.");
+      if (surfaceError) setError(err instanceof ApiError ? err.message : "Could not download this export.");
+      throw err;
     } finally {
       setDownloadingId(null);
     }
+  }
+
+  function startDownload(item: TenantDataExport) {
+    if (item.isPasswordProtected) {
+      setPasswordPromptFor(item);
+      return;
+    }
+    download(item).catch(() => undefined);
   }
 
   const isExpired = (item: TenantDataExport) => item.expiresAt !== null && new Date(item.expiresAt).getTime() < Date.now();
@@ -2726,8 +2759,8 @@ function DataExportsTab({ companyId }: { companyId: string }) {
       <div>
         <h2 className="font-semibold text-sm uppercase tracking-wide text-label-tertiary mb-1">Data export</h2>
         <p className="text-xs text-label-tertiary">
-          TM-036 — controlled export jobs against this tenant's real data. Downloads expire 72 hours
-          after the export completes.
+          TM-036 — controlled export jobs against this tenant's real data. Every export is encrypted at
+          rest and downloads expire 72 hours after the export completes.
         </p>
       </div>
 
@@ -2762,6 +2795,30 @@ function DataExportsTab({ companyId }: { companyId: string }) {
             ))}
           </select>
         </label>
+        <label className="text-xs text-label-tertiary flex items-center gap-1.5 pb-1.5">
+          <input
+            type="checkbox"
+            checked={passwordProtect}
+            onChange={(e) => {
+              setPasswordProtect(e.target.checked);
+              if (!e.target.checked) setRequestPassword("");
+            }}
+          />
+          Password-protect
+        </label>
+        {passwordProtect && (
+          <label className="text-xs text-label-tertiary">
+            Download password
+            <input
+              type="password"
+              value={requestPassword}
+              onChange={(e) => setRequestPassword(e.target.value)}
+              minLength={8}
+              placeholder="At least 8 characters"
+              className="mt-1 block rounded-lg border border-black/10 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+            />
+          </label>
+        )}
         <button
           onClick={requestExport}
           disabled={requesting}
@@ -2770,6 +2827,12 @@ function DataExportsTab({ companyId }: { companyId: string }) {
           {requesting ? "Requesting…" : "Request Export"}
         </button>
       </div>
+      {passwordProtect && (
+        <p className="text-xs text-label-tertiary -mt-2">
+          This password is never stored — write it down. Without it, this export can't be decrypted by
+          anyone, including AIHXM.
+        </p>
+      )}
 
       <div className="overflow-hidden rounded-lg border border-black/10">
         <table className="w-full text-sm">
@@ -2791,7 +2854,17 @@ function DataExportsTab({ companyId }: { companyId: string }) {
                   <td className="px-3 py-2 whitespace-nowrap text-xs text-label-tertiary">
                     {new Date(item.createdAt).toLocaleString()}
                   </td>
-                  <td className="px-3 py-2 text-xs capitalize">{item.scope}</td>
+                  <td className="px-3 py-2 text-xs capitalize">
+                    {item.scope}
+                    {item.isPasswordProtected && (
+                      <span
+                        title="Password-protected — a download password is required"
+                        className="ml-1.5 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-black/[0.06] text-label-tertiary normal-case"
+                      >
+                        Protected
+                      </span>
+                    )}
+                  </td>
                   <td className="px-3 py-2 text-xs uppercase">{item.format}</td>
                   <td className="px-3 py-2">
                     <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${EXPORT_STATUS_STYLES[item.status]}`}>
@@ -2804,7 +2877,7 @@ function DataExportsTab({ companyId }: { companyId: string }) {
                   <td className="px-3 py-2 text-right">
                     {item.status === "completed" && !expired && (
                       <button
-                        onClick={() => download(item)}
+                        onClick={() => startDownload(item)}
                         disabled={downloadingId === item.id}
                         className="text-xs font-semibold text-accent hover:underline disabled:opacity-50"
                       >
@@ -2825,6 +2898,16 @@ function DataExportsTab({ companyId }: { companyId: string }) {
           </tbody>
         </table>
       </div>
+
+      {passwordPromptFor && (
+        <ExportPasswordModal
+          onCancel={() => setPasswordPromptFor(null)}
+          onSubmit={async (password) => {
+            await download(passwordPromptFor, password, false);
+            setPasswordPromptFor(null);
+          }}
+        />
+      )}
     </section>
   );
 }
@@ -3157,6 +3240,9 @@ function AdminsTab({
   const [reviewingFor, setReviewingFor] = useState<string | null>(null);
   // Tenant Management gap-fill Phase 1 item #8 — login/invitation lifecycle.
   const [revokingFor, setRevokingFor] = useState<string | null>(null);
+  // Phase 2 gap-fill item #2 — resetting an admin's password is a
+  // @RequireStepUp() route.
+  const { runWithStepUp, stepUpModal } = useStepUp();
 
   async function handleAdd(e: FormEvent) {
     e.preventDefault();
@@ -3220,7 +3306,7 @@ function AdminsTab({
     e.preventDefault();
     setError(null);
     try {
-      const updated = await api.resetAdminPassword(companyId, admin.id, newPasswordInput);
+      const updated = await runWithStepUp(() => api.resetAdminPassword(companyId, admin.id, newPasswordInput));
       onChanged(admins.map((a) => (a.id === admin.id ? updated : a)));
       setResetCredential({ email: admin.email, password: newPasswordInput });
       setResettingPasswordFor(null);
@@ -3293,6 +3379,7 @@ function AdminsTab({
 
   return (
     <section className="bg-card rounded-card p-5 shadow-sm space-y-5">
+      {stepUpModal}
       <div>
         <h2 className="font-semibold text-sm uppercase tracking-wide text-label-tertiary mb-1">
           Company Super Admins

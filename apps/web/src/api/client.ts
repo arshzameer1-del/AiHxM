@@ -110,8 +110,7 @@ import type {
   SupportTicket,
   SupportTicketPriority,
   SupportTicketStatus,
-  DataExportFormat,
-  DataExportScope,
+  RequestDataExportRequest,
   DomainAvailabilityResult,
   PackageTierSummary,
   TestInvitationResult,
@@ -125,6 +124,9 @@ import type {
   TenantFeatureEntitlement,
   TenantIntegration,
   RotateIntegrationSecretResponse,
+  SetPlatformAdminAccessRequest,
+  StepUpVerifyRequest,
+  StepUpVerifyResponse,
   TenantUsageSummary,
   UpdateChecklistItemRequest,
   UpdateEmployeeGroupRequest,
@@ -254,7 +256,19 @@ export function consumeSessionExpiredNotice(): boolean {
 }
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(
+    public status: number,
+    message: string,
+    /**
+     * Phase 2 gap-fill item #2 — step-up re-authentication. Only ever
+     * present for StepUpGuard's own 403 shape
+     * (`{ code: "step_up_required", ... }`, see step-up.guard.ts) — every
+     * other error response in this app has no `code` field, so this is
+     * `undefined` for them. Lets a caller distinguish "needs step-up" from
+     * an ordinary 403 without string-matching the message.
+     */
+    public code?: string
+  ) {
     super(message);
   }
 }
@@ -314,13 +328,15 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   if (!res.ok) {
     let message = `Request failed (${res.status})`;
+    let code: string | undefined;
     try {
       const body = await res.json();
       message = body.message ?? message;
+      code = typeof body.code === "string" ? body.code : undefined;
     } catch {
       // response body wasn't JSON — keep the generic message
     }
-    throw new ApiError(res.status, Array.isArray(message) ? message.join(", ") : message);
+    throw new ApiError(res.status, Array.isArray(message) ? message.join(", ") : message, code);
   }
 
   // A void-returning Nest handler (every DELETE/unassign this project has —
@@ -418,6 +434,14 @@ export const api = {
   // it's read back after a session already exists.
   getMe: () => request<MeResponse>("/auth/me"),
 
+  // Phase 2 gap-fill item #2 — step-up re-authentication. Re-proves this
+  // session's own second factor immediately before a particularly
+  // sensitive action; see StepUpGuard/StepUpService and useStepUp.tsx,
+  // which is what actually drives this in response to an ApiError whose
+  // `code` is "step_up_required".
+  verifyStepUp: (input: StepUpVerifyRequest) =>
+    request<StepUpVerifyResponse>("/auth/step-up", { method: "POST", body: JSON.stringify(input) }),
+
   // --- Platform Admins ------------------------------------------------------
   listPlatformAdmins: () => request<PlatformAdmin[]>("/platform/admins"),
 
@@ -426,6 +450,10 @@ export const api = {
 
   setPlatformAdminStatus: (id: string, status: PlatformAdmin["status"]) =>
     request<PlatformAdmin>(`/platform/admins/${id}`, { method: "PATCH", body: JSON.stringify({ status }) }),
+
+  // Phase 2 gap-fill item #7 — Platform Admin delegation.
+  setPlatformAdminAccess: (id: string, input: SetPlatformAdminAccessRequest) =>
+    request<PlatformAdmin>(`/platform/admins/${id}/access`, { method: "PATCH", body: JSON.stringify(input) }),
 
   // --- Platform Branding (the platform's own logo, migration 0046) --------
   // No auth needed for the read — same public/no-guard posture as
@@ -683,15 +711,20 @@ export const api = {
   // TM-036 — Data export & migration jobs.
   listDataExports: (companyId: string) => request<TenantDataExport[]>(`/platform/companies/${companyId}/exports`),
 
-  requestDataExport: (companyId: string, dto: { scope: DataExportScope; format: DataExportFormat }) =>
+  requestDataExport: (companyId: string, dto: RequestDataExportRequest) =>
     request<TenantDataExport>(`/platform/companies/${companyId}/exports`, {
       method: "POST",
       body: JSON.stringify(dto),
     }),
 
-  async downloadDataExport(companyId: string, exportId: string, fileName: string): Promise<void> {
+  // `password` (Phase 2 gap-fill item #6) is appended as a query param,
+  // not a request body — this stays a plain GET so the browser download
+  // (blob + <a download>) flow below keeps working as one request. Never
+  // logged or stored client-side beyond this one call.
+  async downloadDataExport(companyId: string, exportId: string, fileName: string, password?: string): Promise<void> {
     const token = getToken();
-    const res = await fetch(`/api/platform/companies/${companyId}/exports/${exportId}/download`, {
+    const query = password ? `?password=${encodeURIComponent(password)}` : "";
+    const res = await fetch(`/api/platform/companies/${companyId}/exports/${exportId}/download${query}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
     if (!res.ok) {

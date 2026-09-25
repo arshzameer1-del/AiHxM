@@ -6,7 +6,8 @@ import { NotificationsService } from "../notifications/notifications.service";
 import { ImportExportService } from "../import-export/import-export.service";
 import { FILE_STORAGE, type FileStorageService } from "../file-storage/file-storage.interface";
 import type { RequestClaims } from "../database/tenant-context";
-import type { DataExportFormat, DataExportScope, TenantDataExport } from "@aihxm/shared-types";
+import type { DataExportFormat, DataExportScope, RequestDataExportRequest, TenantDataExport } from "@aihxm/shared-types";
+import { decryptExportPayload, encryptExportPayload } from "./export-crypto";
 
 const EXPORT_TTL_HOURS = 72;
 
@@ -25,6 +26,7 @@ function toExport(row: any): TenantDataExport {
     completedAt: row.completed_at?.toISOString() ?? null,
     expiresAt: row.expires_at?.toISOString() ?? null,
     error: row.error,
+    isPasswordProtected: row.is_password_protected,
   };
 }
 
@@ -32,13 +34,20 @@ function toExport(row: any): TenantDataExport {
  * TM-036 — Data export & migration jobs. Every scope pulls REAL rows for
  * this tenant (never a stub); CSV rendering reuses the same
  * `ImportExportService.toCsv()` the Payroll bank-disbursement export
- * already uses, rather than a second CSV writer. "Encrypted time-limited
- * download" (spec Notes): this codebase has no at-rest encryption layer
- * to hang a real "encrypted" claim on yet (see FileStorageService's own
- * doc comment on Supabase Storage being the pending replacement) — what's
- * genuinely implemented today is the time-limited half: every export
- * expires after `EXPORT_TTL_HOURS` and `download()` enforces it
- * server-side, not just in the UI.
+ * already uses, rather than a second CSV writer. Every export expires
+ * after `EXPORT_TTL_HOURS` and `download()` enforces it server-side, not
+ * just in the UI.
+ *
+ * "Encrypted... password-protection" (Phase 2 gap-fill item #6): the
+ * rendered payload is ALWAYS encrypted (AES-256-GCM, via
+ * `export-crypto.ts`) before it ever reaches `FileStorageService` — this
+ * used to be an honest gap (this class's own former comment: "no at-rest
+ * encryption layer to hang a real 'encrypted' claim on yet"), now closed.
+ * A requester can additionally supply a `password` at request time, which
+ * re-keys the encryption to that password instead of the server's own
+ * key — see export-crypto.ts's own doc comment for exactly what that
+ * does and does not protect against, and why the password itself is
+ * never persisted anywhere.
  */
 @Injectable()
 export class DataExportsService {
@@ -62,26 +71,27 @@ export class DataExportsService {
     });
   }
 
-  async request(
-    claims: RequestClaims,
-    companyId: string,
-    dto: { scope: DataExportScope; format: DataExportFormat }
-  ): Promise<TenantDataExport> {
+  async request(claims: RequestClaims, companyId: string, dto: RequestDataExportRequest): Promise<TenantDataExport> {
     return this.db.withClaims(claims, async (client) => {
       const companyRes = await client.query("SELECT id, name FROM companies WHERE id = $1", [companyId]);
       if (companyRes.rowCount === 0) throw new NotFoundException("Company not found");
 
+      const isPasswordProtected = Boolean(dto.password);
       const queuedRow = await client.query(
-        `INSERT INTO tenant_data_exports (company_id, scope, format, status, requested_by)
-         VALUES ($1, $2, $3, 'running', $4) RETURNING *`,
-        [companyId, dto.scope, dto.format, claims.sub]
+        `INSERT INTO tenant_data_exports (company_id, scope, format, status, requested_by, is_password_protected)
+         VALUES ($1, $2, $3, 'running', $4, $5) RETURNING *`,
+        [companyId, dto.scope, dto.format, claims.sub, isPasswordProtected]
       );
       const exportId = queuedRow.rows[0].id;
 
       let dataExport: TenantDataExport;
       try {
         const { fileName, buffer } = await this.buildPayload(client, companyId, dto.scope, dto.format, exportId);
-        const stored = await this.fileStorage.save(companyId, "exports", fileName, buffer);
+        // Real data never touches storage in plaintext, regardless of
+        // whether the requester set a password — see this class's own
+        // doc comment and export-crypto.ts.
+        const encrypted = encryptExportPayload(buffer, dto.password);
+        const stored = await this.fileStorage.save(companyId, "exports", fileName, encrypted);
         const expiresAt = new Date(Date.now() + EXPORT_TTL_HOURS * 60 * 60 * 1000);
         const completed = await client.query(
           `UPDATE tenant_data_exports
@@ -121,7 +131,12 @@ export class DataExportsService {
     });
   }
 
-  async download(claims: RequestClaims, companyId: string, exportId: string): Promise<{ fileName: string; buffer: Buffer }> {
+  async download(
+    claims: RequestClaims,
+    companyId: string,
+    exportId: string,
+    password?: string
+  ): Promise<{ fileName: string; buffer: Buffer }> {
     return this.db.withClaims(claims, async (client) => {
       const result = await client.query("SELECT * FROM tenant_data_exports WHERE id = $1 AND company_id = $2", [
         exportId,
@@ -135,7 +150,20 @@ export class DataExportsService {
       if (dataExport.expiresAt && new Date(dataExport.expiresAt).getTime() < Date.now()) {
         throw new BadRequestException("This export has expired. Request a new one.");
       }
-      const buffer = await this.fileStorage.read(dataExport.fileKey);
+      const encrypted = await this.fileStorage.read(dataExport.fileKey);
+      let buffer: Buffer;
+      try {
+        buffer = decryptExportPayload(encrypted, password);
+      } catch (err) {
+        const code = (err as Error).message;
+        if (code === "PASSWORD_REQUIRED") {
+          throw new BadRequestException("This export is password-protected — supply the password to download it.");
+        }
+        if (code === "INCORRECT_PASSWORD") {
+          throw new BadRequestException("Incorrect password.");
+        }
+        throw new BadRequestException("This export could not be decrypted.");
+      }
       await this.audit.record(client, claims, {
         companyId,
         action: "tenant_data_export.downloaded",

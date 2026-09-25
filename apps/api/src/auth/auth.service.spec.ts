@@ -4,6 +4,8 @@ import { generate as generateTotp } from "otplib";
 import * as bcrypt from "bcryptjs";
 import { Pool } from "pg";
 import { AuthService } from "./auth.service";
+import { SessionSecurityService } from "./session-security.service";
+import { CacheService } from "../cache/cache.service";
 import { DatabaseService } from "../database/database.service";
 import { EntitlementsService } from "../entitlements/entitlements.service";
 import { MailerService } from "../mailer/mailer.service";
@@ -40,6 +42,8 @@ describe("AuthService", () => {
         DatabaseService,
         EntitlementsService,
         MailerService,
+        SessionSecurityService,
+        CacheService,
         {
           provide: PG_POOL,
           useValue: pool,
@@ -697,4 +701,113 @@ describe("AuthService", () => {
       expect(token.split(".")).toHaveLength(3); // a real signed JWT
     });
   });
+
+  /** Sets one 'security'-category tenant_configuration override directly, the same shape session-security.service.spec.ts's own helper uses. */
+  async function setSecurityOverride(companyId: string, settingKey: string, value: unknown): Promise<void> {
+    await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+      await client.query(
+        `INSERT INTO tenant_configuration (company_id, category, setting_key, value, updated_by)
+         VALUES ($1, 'security', $2, $3::jsonb, 'test-fixture')
+         ON CONFLICT (company_id, category, setting_key) DO UPDATE SET value = EXCLUDED.value`,
+        [companyId, settingKey, JSON.stringify(value)]
+      );
+    });
+  }
+
+  // Phase 2 gap-fill items #1/#4 — proving SessionSecurityService's
+  // per-tenant policy (already unit-tested in isolation in
+  // session-security.service.spec.ts) actually changes AuthService's real
+  // behavior, not just that the lookup itself works.
+  describe("per-tenant security policy (Phase 2 gap-fill items #1/#4)", () => {
+    it("locks the account after the tenant's own (lower) max_login_attempts override, not the global default of 5", async () => {
+      const { id, email, password } = await createUserAccount();
+      const { companyId } = await grantRoleAssignment(id);
+      await setSecurityOverride(companyId, "max_login_attempts", 2);
+
+      // Two wrong attempts reach the override's threshold (each still
+      // reports "invalid email or password" — the lock is only surfaced
+      // on the NEXT attempt, same as the flat-constant behavior already
+      // covered by the "locks out after 5" test above).
+      await expect(service.login(email, "WrongPassword123!")).rejects.toThrow("Invalid email or password");
+      await expect(service.login(email, "WrongPassword123!")).rejects.toThrow("Invalid email or password");
+
+      // A third attempt — even with the CORRECT password — is now blocked
+      // by the lockout the override triggered two attempts early.
+      await expect(service.login(email, password)).rejects.toThrow("Too many failed attempts");
+    });
+
+    it("locks for the tenant's own (shorter) lockout_duration_minutes override, not the global default of 15", async () => {
+      const { id, email, password } = await createUserAccount();
+      const { companyId } = await grantRoleAssignment(id);
+      await setSecurityOverride(companyId, "max_login_attempts", 1);
+      await setSecurityOverride(companyId, "lockout_duration_minutes", 1);
+
+      await expect(service.login(email, "WrongPassword123!")).rejects.toThrow("Invalid email or password");
+
+      const row = await db.withClaims(FIXTURE_CLAIMS, (c) =>
+        c.query<{ locked_until: string }>("SELECT locked_until FROM user_accounts WHERE id = $1", [id])
+      );
+      const lockedUntil = new Date(row.rows[0].locked_until).getTime();
+      const minutesFromNow = (lockedUntil - Date.now()) / 60_000;
+      // Comfortably inside the 1-minute override's window and nowhere
+      // near the 15-minute default, allowing for normal test-run jitter.
+      expect(minutesFromNow).toBeGreaterThan(0);
+      expect(minutesFromNow).toBeLessThan(5);
+
+      // The correct password is rejected as a lockout, not as "wrong
+      // password" — proving the shorter window is actually enforced, not
+      // just recorded.
+      await expect(service.login(email, password)).rejects.toThrow("Too many failed attempts");
+    });
+
+    it("issues a session token whose lifetime matches the tenant's own session_timeout_minutes override", async () => {
+      const { id, email, password } = await createUserAccount();
+      const { companyId } = await grantRoleAssignment(id);
+      await setSecurityOverride(companyId, "session_timeout_minutes", 5);
+
+      const token = await loginToSessionToken(email, password);
+      const decoded = jwtDecode(token);
+
+      expect(decoded.exp - decoded.iat).toBe(5 * 60);
+    });
+
+    it("revokes the oldest session once a new login exceeds the tenant's own max_concurrent_sessions override", async () => {
+      const { id, email, password } = await createUserAccount();
+      const { companyId } = await grantRoleAssignment(id);
+      await setSecurityOverride(companyId, "max_concurrent_sessions", 1);
+
+      // First login: enrollment round, issues the first session token.
+      const enroll = await service.login(email, password);
+      if (enroll.status !== "mfa_setup_required") throw new Error("expected mfa_setup_required");
+      const enrollCode = await generateTotp({ secret: enroll.secretForManualEntry });
+      const first = await service.confirmMfaEnrollment(enroll.mfaTicket, enrollCode);
+      const firstJti = jwtDecode(first.token).jti;
+
+      // Second login: MFA is now enabled, so this is a plain verify — a
+      // second full session for the SAME account, which is what should
+      // push it over the override's limit of 1 and evict the first.
+      const login = await service.login(email, password);
+      if (login.status !== "mfa_required") throw new Error("expected mfa_required on second login");
+      const verifyCode = await generateTotp({ secret: enroll.secretForManualEntry });
+      const second = await service.verifyMfa(login.mfaTicket, verifyCode);
+      const secondJti = jwtDecode(second.token).jti;
+
+      const sessions = await db.withClaims(FIXTURE_CLAIMS, (c) =>
+        c.query<{ id: string; revoked_at: string | null }>(
+          "SELECT id, revoked_at FROM user_sessions WHERE user_account_id = $1 ORDER BY created_at ASC",
+          [id]
+        )
+      );
+      expect(sessions.rows).toHaveLength(2);
+      const firstRow = sessions.rows.find((r) => r.id === firstJti);
+      const secondRow = sessions.rows.find((r) => r.id === secondJti);
+      expect(firstRow?.revoked_at).not.toBeNull();
+      expect(secondRow?.revoked_at).toBeNull();
+    });
+  });
 });
+
+function jwtDecode(token: string): { iat: number; exp: number; jti: string } {
+  const payload = token.split(".")[1];
+  return JSON.parse(Buffer.from(payload, "base64").toString("utf8"));
+}

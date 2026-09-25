@@ -166,5 +166,58 @@ describe("AuditService", () => {
 
       expect(entry.metadata).toEqual({ before: { salary: 50000 }, after: { salary: 60000 } });
     });
+
+    // Tenant Management gap-fill Phase 1 item #6 — actor/action/date-range
+    // filters.
+    it("filters by a partial (case-insensitive) actor match", async () => {
+      const actingClaims: RequestClaims = {
+        is_platform_admin: false,
+        company_id: companyAId,
+        sub: "PhaseSixActor-42",
+      };
+      await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        audit.record(client, actingClaims, { companyId: companyAId, action: "phase6.actor.match" })
+      );
+
+      const entries = await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        audit.list(client, { companyId: companyAId, actor: "phasesixactor" })
+      );
+
+      expect(entries.some((e) => e.action === "phase6.actor.match")).toBe(true);
+    });
+
+    it("filters by a partial action match", async () => {
+      await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        audit.record(client, FIXTURE_CLAIMS, { companyId: companyAId, action: "company.deletion_approved" })
+      );
+      await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        audit.record(client, FIXTURE_CLAIMS, { companyId: companyAId, action: "company.impersonate" })
+      );
+
+      const entries = await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        audit.list(client, { companyId: companyAId, action: "deletion" })
+      );
+
+      expect(entries.every((e) => e.action.includes("deletion"))).toBe(true);
+      expect(entries.some((e) => e.action === "company.deletion_approved")).toBe(true);
+    });
+
+    it("filters by a from/to date range", async () => {
+      await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        audit.record(client, FIXTURE_CLAIMS, { companyId: companyAId, action: "date.range.check" })
+      );
+
+      const farFuture = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      const noneYet = await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        audit.list(client, { companyId: companyAId, action: "date.range.check", from: farFuture })
+      );
+      expect(noneYet.length).toBe(0);
+
+      const farPast = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const found = await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        audit.list(client, { companyId: companyAId, action: "date.range.check", from: farPast, to: farFuture })
+      );
+      expect(found.some((e) => e.action === "date.range.check")).toBe(true);
+    });
   });
 });

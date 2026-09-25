@@ -421,6 +421,18 @@ export class CompaniesService {
         params.push(filters.country);
         conditions.push(`c.country = ANY($${params.length}::text[])`);
       }
+      // Phase 2 gap-fill item #7 — a 'scoped' Platform Admin's Tenant
+      // Directory only ever shows the tenants they were explicitly granted.
+      // PlatformAdminGuard's own per-route check (via @ScopedCompanyParam)
+      // covers a company DETAIL/action route; this is what covers the
+      // LIST route, which has no single company id in its path to check.
+      // An empty scope list means "granted access to zero tenants," which
+      // correctly returns zero rows here rather than falling through to
+      // "no filter" (that would defeat the whole feature).
+      if (claims.platformAdminAccessLevel === "scoped") {
+        params.push(claims.platformAdminScopedCompanyIds ?? []);
+        conditions.push(`c.id = ANY($${params.length}::uuid[])`);
+      }
 
       const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
       const result = await client.query(

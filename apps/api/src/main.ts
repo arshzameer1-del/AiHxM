@@ -14,6 +14,16 @@ import { AppModule } from "./app.module";
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  // Render (and Netlify's proxying to it) sits in front of this API as a
+  // single reverse-proxy hop, so `req.ip` is the proxy's own address
+  // unless Express is told to trust the one hop of X-Forwarded-For it
+  // adds — without this, Phase 2 gap-fill item #3's IP allow/denylist
+  // would check the platform's own IP on every request, not the tenant's.
+  // INestApplication doesn't expose Express's own `.set()`, so this reaches
+  // through to the underlying Express instance, same as any Express-only
+  // config Nest itself doesn't wrap.
+  app.getHttpAdapter().getInstance().set("trust proxy", 1);
+
   // Standard security headers (HSTS, no-sniff, frame-deny, etc.) — cheap,
   // framework-agnostic, and there was previously nothing here at all.
   app.use(helmet());

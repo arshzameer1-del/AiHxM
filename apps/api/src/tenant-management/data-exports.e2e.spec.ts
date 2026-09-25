@@ -148,4 +148,78 @@ describe("Data exports (e2e)", () => {
     expect(res.status).toBe(200);
     expect(res.body.length).toBeGreaterThanOrEqual(3);
   });
+
+  it("flags a non-password-protected export as such", async () => {
+    const res = await request(app.getHttpServer())
+      .post(`/platform/companies/${companyId}/exports`)
+      .set("Authorization", `Bearer ${platformAdminToken}`)
+      .send({ scope: "employees", format: "json" });
+    expect(res.body.isPasswordProtected).toBe(false);
+  });
+
+  it("rejects a password shorter than 8 characters", async () => {
+    const res = await request(app.getHttpServer())
+      .post(`/platform/companies/${companyId}/exports`)
+      .set("Authorization", `Bearer ${platformAdminToken}`)
+      .send({ scope: "employees", format: "json", password: "short" });
+    expect(res.status).toBe(400);
+  });
+
+  describe("Phase 2 gap-fill item #6 — password-protected export", () => {
+    let exportId: string;
+
+    it("accepts a password at request time and reports the export as protected", async () => {
+      const res = await request(app.getHttpServer())
+        .post(`/platform/companies/${companyId}/exports`)
+        .set("Authorization", `Bearer ${platformAdminToken}`)
+        .send({ scope: "employees", format: "csv", password: "correct-horse-battery" });
+      expect(res.status).toBe(201);
+      expect(res.body.status).toBe("completed");
+      expect(res.body.isPasswordProtected).toBe(true);
+      exportId = res.body.id;
+    });
+
+    it("refuses to download it with no password at all", async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/platform/companies/${companyId}/exports/${exportId}/download`)
+        .set("Authorization", `Bearer ${platformAdminToken}`);
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/password-protected/i);
+    });
+
+    it("refuses to download it with the wrong password", async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/platform/companies/${companyId}/exports/${exportId}/download`)
+        .query({ password: "definitely-not-it" })
+        .set("Authorization", `Bearer ${platformAdminToken}`);
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/incorrect password/i);
+    });
+
+    it("downloads real, correct plaintext once the right password is supplied", async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/platform/companies/${companyId}/exports/${exportId}/download`)
+        .query({ password: "correct-horse-battery" })
+        .set("Authorization", `Bearer ${platformAdminToken}`);
+      expect(res.status).toBe(200);
+      expect(res.text.split("\n")[0]).toBe("id,employee_number,first_name,last_name,employment_status,hire_date");
+    });
+
+    it("was genuinely stored encrypted, not as plaintext CSV, in the underlying file storage", async () => {
+      const row = await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query("SELECT file_key FROM tenant_data_exports WHERE id = $1", [exportId])
+      );
+      const fileKey = row.rows[0].file_key as string;
+      // Read the raw stored bytes directly via LocalFileStorageService's
+      // own on-disk layout rather than going through DataExportsService
+      // (which would decrypt it for us) — proves the plaintext genuinely
+      // never touched storage.
+      const fs = await import("fs/promises");
+      const path = await import("path");
+      const storageRoot = path.resolve(process.env.FILE_STORAGE_LOCAL_DIR ?? "./storage-data");
+      const raw = await fs.readFile(path.join(storageRoot, fileKey));
+      expect(raw.toString("utf8")).not.toContain("employee_number");
+      expect(raw[0]).toBe(1); // envelope mode byte: 1 = password-keyed
+    });
+  });
 });

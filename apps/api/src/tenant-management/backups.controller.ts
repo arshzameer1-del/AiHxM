@@ -1,6 +1,7 @@
 import { Controller, Get, Param, Post, Res, UseGuards } from "@nestjs/common";
 import type { Response } from "express";
 import { PlatformAdminGuard } from "../auth/platform-admin.guard";
+import { ScopedCompanyParam } from "../auth/scoped-company-param.decorator";
 import { CurrentClaims } from "../auth/current-claims.decorator";
 import type { RequestClaims } from "../database/tenant-context";
 import { BackupsService } from "./backups.service";
@@ -8,6 +9,7 @@ import { BackupsService } from "./backups.service";
 // TM-035 — Backups.
 @Controller("platform/companies/:companyId/backups")
 @UseGuards(PlatformAdminGuard)
+@ScopedCompanyParam("companyId")
 export class BackupsController {
   constructor(private readonly backups: BackupsService) {}
 

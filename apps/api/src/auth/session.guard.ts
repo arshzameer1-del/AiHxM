@@ -1,7 +1,8 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from "@nestjs/common";
+import { CanActivate, ExecutionContext, ForbiddenException, Injectable, UnauthorizedException } from "@nestjs/common";
 import * as jwt from "jsonwebtoken";
 import type { AuthedRequest, SessionTokenPayload } from "./platform-admin.guard";
 import { SessionSecurityService } from "./session-security.service";
+import { isIpAllowed } from "./ip-match.util";
 
 /**
  * Accepts any real session JWT issued by AuthService — Platform Admin or
@@ -64,12 +65,32 @@ export class SessionGuard implements CanActivate {
             : `Access to this company has been ${status}. Contact your Platform Admin.`
         );
       }
+
+      // Phase 2 gap-fill item #3 — IP allow/denylist. Deliberately not
+      // checked at login (authenticate() has no company_id to work with
+      // until identity resolution, and companyAccessStatus above has the
+      // same "enforced on every request, not just at login" shape already
+      // for locked/suspended tenants) — every authenticated request from a
+      // blocked network is rejected here, which is what actually matters.
+      const clientIp = req.ip;
+      if (clientIp) {
+        const policy = await this.sessionSecurity.getEffectiveSecurityPolicy(payload.company_id);
+        if (!isIpAllowed(clientIp, policy.ipAllowlist, policy.ipDenylist)) {
+          throw new ForbiddenException(
+            "Access from this network is not permitted for your organization. Contact your administrator."
+          );
+        }
+      }
     }
 
     req.claims = {
       sub: payload.sub,
       is_platform_admin: payload.is_platform_admin,
       company_id: payload.company_id ?? null,
+      // Phase 2 gap-fill item #2 — lets StepUpGuard key a step-up grant to
+      // this exact session, same `jti` the revocation check above already
+      // trusts.
+      sessionId: payload.jti,
     };
     return true;
   }

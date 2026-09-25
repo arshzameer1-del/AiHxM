@@ -11,6 +11,7 @@ import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { StatusPill } from "../components/StatusPill";
 import { ReasonModal } from "../components/ReasonModal";
+import { useStepUp } from "../hooks/useStepUp";
 
 const pkr = new Intl.NumberFormat("en-PK", { style: "currency", currency: "PKR", maximumFractionDigits: 0 });
 
@@ -27,6 +28,8 @@ const TIER_OPTIONS: PackageTier[] = ["starter", "growth", "professional", "enter
 export function DashboardPage() {
   const navigate = useNavigate();
   const { beginImpersonation } = useAuth();
+  // Phase 2 gap-fill item #2 — "Login As" is a @RequireStepUp() route.
+  const { runWithStepUp, stepUpModal } = useStepUp();
   const [companies, setCompanies] = useState<CompanyDashboardRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loginAsTarget, setLoginAsTarget] = useState<CompanyDashboardRow | null>(null);
@@ -133,7 +136,7 @@ export function DashboardPage() {
   // back out again.
   async function confirmLoginAs(reason: string) {
     if (!loginAsTarget) return;
-    const response = await api.impersonate(loginAsTarget.id, reason);
+    const response = await runWithStepUp(() => api.impersonate(loginAsTarget.id, reason));
     await beginImpersonation(response);
     setLoginAsTarget(null);
     navigate("/app");
@@ -150,6 +153,7 @@ export function DashboardPage() {
 
   return (
     <div>
+      {stepUpModal}
       <div className="flex items-start justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Tenant Directory</h1>

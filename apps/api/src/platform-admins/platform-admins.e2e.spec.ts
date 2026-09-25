@@ -6,6 +6,7 @@ import request from "supertest";
 import { AppModule } from "../app.module";
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
+import { enableMfaForTestAccount, performStepUpForTest, testSessionId } from "../auth/step-up-test-support";
 
 /**
  * The real HTTP surface for platform admins (platform-admins.controller.ts)
@@ -25,6 +26,7 @@ function signSession(payload: {
   sub: string;
   is_platform_admin: boolean;
   company_id: string | null;
+  jti?: string;
 }): string {
   return jwt.sign(payload, process.env.JWT_SECRET as string, {
     expiresIn: "10m",
@@ -62,11 +64,18 @@ describe("Platform Admins HTTP surface (e2e)", () => {
       return account.rows[0].id as string;
     });
 
+    // Phase 2 gap-fill item #2 — every route this file exercises (POST
+    // /platform/admins, PATCH /platform/admins/:id/access is covered by
+    // platform-admin-delegation.e2e.spec.ts instead) now requires a recent
+    // step-up grant. See step-up-test-support.ts's doc comment.
+    const mfaSecret = await enableMfaForTestAccount(db, platformAdminId);
     platformAdminToken = signSession({
       sub: platformAdminId,
       is_platform_admin: true,
       company_id: null,
+      jti: testSessionId(),
     });
+    await performStepUpForTest(app, platformAdminToken, mfaSecret);
   });
 
   afterAll(async () => {

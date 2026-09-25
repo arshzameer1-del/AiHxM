@@ -5,6 +5,7 @@ import { createHash, randomBytes } from "crypto";
 import { DatabaseService } from "../database/database.service";
 import { EntitlementsService } from "../entitlements/entitlements.service";
 import { MailerService } from "../mailer/mailer.service";
+import { SessionSecurityService } from "./session-security.service";
 import type { RequestClaims } from "../database/tenant-context";
 import type { LoginResult, MeResponse, PasswordResetRequestResult, TenantRoleKey } from "@aihxm/shared-types";
 import { normalizeEmail } from "./email.util";
@@ -13,8 +14,11 @@ import { decryptMfaSecret, encryptMfaSecret } from "./mfa-secret-crypto";
 import { hashPassword, verifyPassword } from "./password";
 import { signMfaTicket, verifyMfaTicket } from "./tickets";
 
-const MAX_FAILED_ATTEMPTS = 5;
-const LOCKOUT_MINUTES = 15;
+// Phase 2 gap-fill items #1/#4 replaced these two flat constants with
+// SessionSecurityService.getEffectiveSecurityPolicy()'s per-tenant values
+// — kept here only as the type's own defensive fallback (see that
+// service's FALLBACK_SECURITY_POLICY), never read directly by this file
+// anymore.
 const RESET_TOKEN_TTL_MINUTES = 30;
 
 /** Never carries a real user's claims — see tenant-context.ts's doc comment on `is_service`. */
@@ -55,7 +59,8 @@ export class AuthService {
   constructor(
     private readonly db: DatabaseService,
     private readonly entitlements: EntitlementsService,
-    private readonly mailer: MailerService
+    private readonly mailer: MailerService,
+    private readonly sessionSecurity: SessionSecurityService
   ) {}
 
   // --- Login ------------------------------------------------------------
@@ -120,7 +125,11 @@ export class AuthService {
 
     const validPassword = await verifyPassword(password, account.password_hash);
     if (!validPassword) {
-      await this.incrementFailedAttempts(account.id);
+      // Phase 2 gap-fill item #1 — the lockout threshold/duration are now
+      // per-tenant (see incrementFailedAttempts's doc comment); a Platform
+      // Admin account (no company) always gets the global fallback.
+      const companyId = await this.resolveCompanyIdForAccount(account.id);
+      await this.incrementFailedAttempts(account.id, companyId);
       throw invalidCredentials();
     }
 
@@ -253,12 +262,20 @@ export class AuthService {
     const secret = process.env.JWT_SECRET;
     if (!secret) throw new Error("JWT_SECRET is not set");
 
+    // Phase 2 gap-fill item #1 — session length is now this tenant's own
+    // 'security'.'session_timeout_minutes' override (default 720 = the
+    // flat 12h every tenant got before this existed), closing the exact
+    // gap that setting's own seed comment (migration 0042) flagged:
+    // "informational until wired into token expiry per tenant."
+    const policy = await this.sessionSecurity.getEffectiveSecurityPolicy(identity.company_id);
+    const expiryMinutes = policy.sessionTimeoutMinutes > 0 ? policy.sessionTimeoutMinutes : 720;
+
     const sessionId = await this.db.withClaims(SERVICE_CLAIMS, async (client) => {
       const result = await client.query<{ id: string }>(
         `INSERT INTO user_sessions (user_account_id, company_id, is_platform_admin, expires_at)
-         VALUES ($1, $2, $3, now() + interval '12 hours')
+         VALUES ($1, $2, $3, now() + ($4 || ' minutes')::interval)
          RETURNING id`,
-        [userAccountId, identity.company_id, identity.is_platform_admin]
+        [userAccountId, identity.company_id, identity.is_platform_admin, expiryMinutes]
       );
       // Tenant Management gap-fill Phase 1 item #8 — the one signal that
       // turns a "pending" (or "expired") admin login into "active" on the
@@ -270,6 +287,31 @@ export class AuthService {
       // Platform Admin's "Login As" never counts as the real admin having
       // accepted their login.
       await client.query("UPDATE user_accounts SET last_login_at = now() WHERE id = $1", [userAccountId]);
+
+      // Phase 2 gap-fill item #4 — concurrent session limit. Only a
+      // tenant-scoped policy can set this (getEffectiveSecurityPolicy
+      // returns 0/unlimited for Platform Admins), and 0 always means
+      // unlimited — the common case does one extra cheap indexed SELECT
+      // and nothing else. When over the limit, the OLDEST active sessions
+      // are revoked to make room for the one just issued, same "oldest
+      // first" rule a browser's own "too many tabs" eviction would use.
+      if (policy.maxConcurrentSessions > 0) {
+        const active = await client.query<{ id: string }>(
+          `SELECT id FROM user_sessions
+           WHERE user_account_id = $1 AND revoked_at IS NULL AND expires_at > now()
+           ORDER BY created_at ASC`,
+          [userAccountId]
+        );
+        const overBy = (active.rowCount ?? 0) - policy.maxConcurrentSessions;
+        if (overBy > 0) {
+          const toRevoke = active.rows.slice(0, overBy).map((r) => r.id);
+          await client.query("UPDATE user_sessions SET revoked_at = now() WHERE id = ANY($1::uuid[])", [toRevoke]);
+          for (const id of toRevoke) {
+            await this.sessionSecurity.invalidateSessionCache(id);
+          }
+        }
+      }
+
       return result.rows[0].id;
     });
 
@@ -281,7 +323,7 @@ export class AuthService {
         jti: sessionId,
       },
       secret,
-      { expiresIn: "12h" }
+      { expiresIn: `${expiryMinutes}m` }
     );
   }
 
@@ -618,7 +660,47 @@ export class AuthService {
     });
   }
 
-  private async incrementFailedAttempts(userAccountId: string): Promise<void> {
+  /**
+   * A non-throwing sibling of `resolveIdentityForAccount()` — same
+   * three-tier lookup, but a wrong password is handled before we know or
+   * care whether the account is even fully set up, so "no admin profile
+   * or role" here just means "no per-tenant policy applies" (null),
+   * never an error. Only the company id is needed by the failed-attempt
+   * path, not the rest of SessionIdentity.
+   */
+  private async resolveCompanyIdForAccount(userAccountId: string): Promise<string | null> {
+    return this.db.withClaims(SERVICE_CLAIMS, async (client) => {
+      const platformAdmin = await client.query("SELECT 1 FROM platform_admins WHERE user_account_id = $1", [
+        userAccountId,
+      ]);
+      if ((platformAdmin.rowCount ?? 0) > 0) return null;
+
+      const companyAdmin = await client.query<{ company_id: string }>(
+        "SELECT company_id FROM company_admins WHERE user_account_id = $1",
+        [userAccountId]
+      );
+      if ((companyAdmin.rowCount ?? 0) > 0) return companyAdmin.rows[0].company_id;
+
+      const rbacUser = await client.query<{ company_id: string }>(
+        "SELECT DISTINCT company_id FROM user_role_assignments WHERE user_account_id = $1 LIMIT 1",
+        [userAccountId]
+      );
+      return (rbacUser.rowCount ?? 0) > 0 ? rbacUser.rows[0].company_id : null;
+    });
+  }
+
+  /**
+   * Phase 2 gap-fill item #1 — the attempt threshold and lockout duration
+   * are now this account's tenant's own 'security' policy overrides
+   * (default 5 attempts / 15 minutes, identical to the flat constants this
+   * replaced), closing the gap 'max_login_attempts' seed comment (migration
+   * 0042) flagged directly: "Mirrors AuthService's existing lockout
+   * threshold; overridable per tenant" — until now, nothing ever actually
+   * read that override. `companyId` is null for a Platform Admin account,
+   * which always gets the global fallback (no tenant to override it).
+   */
+  private async incrementFailedAttempts(userAccountId: string, companyId: string | null): Promise<void> {
+    const policy = await this.sessionSecurity.getEffectiveSecurityPolicy(companyId);
     await this.db.withClaims(SERVICE_CLAIMS, async (client) => {
       await client.query(
         `UPDATE user_accounts SET
@@ -630,7 +712,7 @@ export class AuthService {
            END,
            updated_at = now()
          WHERE id = $1`,
-        [userAccountId, MAX_FAILED_ATTEMPTS, LOCKOUT_MINUTES]
+        [userAccountId, policy.maxLoginAttempts, policy.lockoutDurationMinutes]
       );
     });
   }

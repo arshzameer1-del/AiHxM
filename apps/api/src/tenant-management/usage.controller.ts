@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Patch, UseGuards } from "@nestjs/common";
 import { IsInt, Min } from "class-validator";
 import { PlatformAdminGuard } from "../auth/platform-admin.guard";
+import { ScopedCompanyParam } from "../auth/scoped-company-param.decorator";
 import { CurrentClaims } from "../auth/current-claims.decorator";
 import type { RequestClaims } from "../database/tenant-context";
 import { UsageService } from "./usage.service";
@@ -14,6 +15,7 @@ class SetStorageQuotaDto {
 // TM-027/028.
 @Controller("platform/companies/:companyId")
 @UseGuards(PlatformAdminGuard)
+@ScopedCompanyParam("companyId")
 export class UsageController {
   constructor(private readonly usage: UsageService) {}
 

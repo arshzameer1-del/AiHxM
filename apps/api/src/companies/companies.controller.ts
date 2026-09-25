@@ -17,6 +17,9 @@ import { FileInterceptor } from "@nestjs/platform-express";
 import { IsInt, IsOptional, IsString, Max, MaxLength, Min } from "class-validator";
 import type { Response } from "express";
 import { PlatformAdminGuard } from "../auth/platform-admin.guard";
+import { StepUpGuard } from "../auth/step-up.guard";
+import { RequireStepUp } from "../auth/step-up.decorator";
+import { ScopedCompanyParam } from "../auth/scoped-company-param.decorator";
 import { CurrentClaims } from "../auth/current-claims.decorator";
 import type { RequestClaims } from "../database/tenant-context";
 import { CompaniesService } from "./companies.service";
@@ -68,7 +71,8 @@ class ImpersonateRequestDto {
 }
 
 @Controller("platform/companies")
-@UseGuards(PlatformAdminGuard)
+@UseGuards(PlatformAdminGuard, StepUpGuard)
+@ScopedCompanyParam("id")
 export class CompaniesController {
   constructor(private readonly companies: CompaniesService) {}
 
@@ -191,6 +195,10 @@ export class CompaniesController {
     return this.companies.createAdminLogin(claims, id, adminId, dto.initialPassword, dto.loginId);
   }
 
+  // Phase 2 gap-fill item #2 — resetting a tenant admin's password is a
+  // real account-takeover primitive if a Platform Admin session is ever
+  // hijacked; step-up requires a fresh second factor immediately before it.
+  @RequireStepUp()
   @Post(":id/admins/:adminId/account/reset-password")
   resetAdminPassword(
     @CurrentClaims() claims: RequestClaims,
@@ -248,6 +256,10 @@ export class CompaniesController {
     return this.companies.markAdminAccessReviewed(claims, id, adminId);
   }
 
+  // Phase 2 gap-fill item #2 — "Login As" hands out a real, working
+  // session for a tenant admin's own account; step-up gates it the same
+  // way as the other standing-access-granting actions above.
+  @RequireStepUp()
   @Post(":id/impersonate")
   impersonate(
     @CurrentClaims() claims: RequestClaims,

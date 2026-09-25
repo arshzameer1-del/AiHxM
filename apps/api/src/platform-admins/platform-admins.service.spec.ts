@@ -1,8 +1,10 @@
-import { ConflictException, NotFoundException } from "@nestjs/common";
+import { ConflictException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import { Pool } from "pg";
 import { PlatformAdminsService } from "./platform-admins.service";
 import { DatabaseService } from "../database/database.service";
 import { AuditService } from "../audit/audit.service";
+import { SessionSecurityService } from "../auth/session-security.service";
+import { CacheService } from "../cache/cache.service";
 import type { RequestClaims } from "../database/tenant-context";
 
 const FIXTURE_CLAIMS: RequestClaims = {
@@ -36,7 +38,7 @@ describe("PlatformAdminsService", () => {
     // provider list here previously supplied the wrong token for
     // DatabaseService's Pool dependency, which only failed at test-run
     // time. Matching the rest of this codebase's service-level specs.
-    service = new PlatformAdminsService(db, new AuditService());
+    service = new PlatformAdminsService(db, new AuditService(), new SessionSecurityService(db, new CacheService()));
   });
 
   afterAll(async () => {
@@ -114,6 +116,175 @@ describe("PlatformAdminsService", () => {
       await expect(
         service.setStatus(FIXTURE_CLAIMS, "00000000-0000-0000-0000-000000000000", "locked")
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  /** A company row, only needed here as a valid id for a 'scoped' admin's scope list. */
+  async function createCompany(): Promise<string> {
+    return db.withClaims(FIXTURE_CLAIMS, async (client) => {
+      const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const result = await client.query("INSERT INTO companies (name, slug) VALUES ($1, $2) RETURNING id", [
+        `Platform Admins Spec Co ${stamp}`,
+        `platform-admins-spec-${stamp}`,
+      ]);
+      return result.rows[0].id as string;
+    });
+  }
+
+  // Phase 2 gap-fill item #7 — Platform Admin delegation. The e2e file
+  // (platform-admin-delegation.e2e.spec.ts) already proves the HTTP-level
+  // enforcement end to end; these cover create()/setAccess()'s own
+  // CRUD shape and requireFullAccess() directly at the service level.
+  describe("create with accessLevel/scopedCompanyIds", () => {
+    it("defaults to 'full' access with no scope when accessLevel is omitted", async () => {
+      const result = await service.create(FIXTURE_CLAIMS, {
+        fullName: "Default Access Admin",
+        email: `platform-admin-default-access-${Date.now()}@example.com`,
+        initialPassword: "SecurePassword123!",
+      });
+
+      expect(result.accessLevel).toBe("full");
+      expect(result.scopedCompanyIds).toEqual([]);
+    });
+
+    it("creates a 'read_only' admin", async () => {
+      const result = await service.create(FIXTURE_CLAIMS, {
+        fullName: "Read Only Admin",
+        email: `platform-admin-read-only-${Date.now()}@example.com`,
+        initialPassword: "SecurePassword123!",
+        accessLevel: "read_only",
+      });
+
+      expect(result.accessLevel).toBe("read_only");
+      expect(result.scopedCompanyIds).toEqual([]);
+    });
+
+    it("creates a 'scoped' admin with the given scoped company ids", async () => {
+      const companyA = await createCompany();
+      const companyB = await createCompany();
+
+      const result = await service.create(FIXTURE_CLAIMS, {
+        fullName: "Scoped Admin",
+        email: `platform-admin-scoped-${Date.now()}@example.com`,
+        initialPassword: "SecurePassword123!",
+        accessLevel: "scoped",
+        scopedCompanyIds: [companyA, companyB],
+      });
+
+      expect(result.accessLevel).toBe("scoped");
+      expect(result.scopedCompanyIds.sort()).toEqual([companyA, companyB].sort());
+    });
+
+    it("ignores scopedCompanyIds when accessLevel is not 'scoped'", async () => {
+      const companyA = await createCompany();
+
+      const result = await service.create(FIXTURE_CLAIMS, {
+        fullName: "Full Admin With Stray Scope",
+        email: `platform-admin-stray-scope-${Date.now()}@example.com`,
+        initialPassword: "SecurePassword123!",
+        accessLevel: "full",
+        scopedCompanyIds: [companyA],
+      });
+
+      expect(result.accessLevel).toBe("full");
+      expect(result.scopedCompanyIds).toEqual([]);
+    });
+
+    it("rejects an unknown access level", async () => {
+      await expect(
+        service.create(FIXTURE_CLAIMS, {
+          fullName: "Bad Access Level Admin",
+          email: `platform-admin-bad-access-${Date.now()}@example.com`,
+          initialPassword: "SecurePassword123!",
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          accessLevel: "super_admin" as any,
+        })
+      ).rejects.toThrow('Unknown access level "super_admin"');
+    });
+
+    it("rejects a non-full caller (privilege-escalation guard)", async () => {
+      const scopedCallerClaims: RequestClaims = {
+        ...FIXTURE_CLAIMS,
+        sub: "scoped-caller",
+        platformAdminAccessLevel: "scoped",
+        platformAdminScopedCompanyIds: [],
+      };
+
+      await expect(
+        service.create(scopedCallerClaims, {
+          fullName: "Should Not Be Created",
+          email: `platform-admin-escalation-${Date.now()}@example.com`,
+          initialPassword: "SecurePassword123!",
+        })
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it("allows a service-role caller (no platformAdminAccessLevel at all — the bootstrap seed script)", async () => {
+      const serviceClaims: RequestClaims = { is_platform_admin: false, is_service: true, sub: "bootstrap-seed" };
+
+      const result = await service.create(serviceClaims, {
+        fullName: "Bootstrap Seeded Admin",
+        email: `platform-admin-bootstrap-${Date.now()}@example.com`,
+        initialPassword: "SecurePassword123!",
+      });
+
+      expect(result.accessLevel).toBe("full");
+    });
+  });
+
+  describe("setAccess", () => {
+    it("changes an existing admin's access level and scope together", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        fullName: "Set Access Admin",
+        email: `platform-admin-set-access-${Date.now()}@example.com`,
+        initialPassword: "SecurePassword123!",
+      });
+      const companyA = await createCompany();
+
+      const updated = await service.setAccess(FIXTURE_CLAIMS, created.id, "scoped", [companyA]);
+
+      expect(updated.accessLevel).toBe("scoped");
+      expect(updated.scopedCompanyIds).toEqual([companyA]);
+    });
+
+    it("clears the scope list when switching an admin back to 'full'", async () => {
+      const companyA = await createCompany();
+      const created = await service.create(FIXTURE_CLAIMS, {
+        fullName: "Set Access Back To Full Admin",
+        email: `platform-admin-set-access-full-${Date.now()}@example.com`,
+        initialPassword: "SecurePassword123!",
+        accessLevel: "scoped",
+        scopedCompanyIds: [companyA],
+      });
+
+      const updated = await service.setAccess(FIXTURE_CLAIMS, created.id, "full", undefined);
+
+      expect(updated.accessLevel).toBe("full");
+      expect(updated.scopedCompanyIds).toEqual([]);
+    });
+
+    it("throws NotFoundException for a non-existent admin id", async () => {
+      await expect(
+        service.setAccess(FIXTURE_CLAIMS, "00000000-0000-0000-0000-000000000000", "read_only", undefined)
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it("rejects a non-full caller (privilege-escalation guard)", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        fullName: "Target Admin",
+        email: `platform-admin-setaccess-target-${Date.now()}@example.com`,
+        initialPassword: "SecurePassword123!",
+      });
+      const readOnlyCallerClaims: RequestClaims = {
+        ...FIXTURE_CLAIMS,
+        sub: "read-only-caller",
+        platformAdminAccessLevel: "read_only",
+        platformAdminScopedCompanyIds: [],
+      };
+
+      await expect(
+        service.setAccess(readOnlyCallerClaims, created.id, "full", undefined)
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 });

@@ -88,8 +88,30 @@ describe("Security & Compliance (e2e)", () => {
       { expiresIn: "24h" }
     );
 
+    // Phase 2 gap-fill item #7 — PlatformAdminGuard now looks up this
+    // token's `sub` against a real `platform_admins` row (for delegation
+    // access level/scope), instead of trusting a bare JWT claim as it did
+    // before. A hand-picked, non-UUID `sub` (this fixture's previous
+    // shape) is something a real signed token can never carry — AuthService
+    // only ever signs a real user_accounts.id — so it made that lookup
+    // itself error rather than exercising the guard's real behavior; a
+    // proper backing row is what every other e2e fixture in this codebase
+    // already does for a platform admin token.
+    const platformAdminId = await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+      const result = await client.query(
+        "INSERT INTO user_accounts (email, password_hash) VALUES ($1, $2) RETURNING id",
+        [`security-platform-admin-${stamp}@example.com`, "hashed"]
+      );
+      const userAccountId = result.rows[0].id as string;
+      await client.query(
+        "INSERT INTO platform_admins (full_name, email, user_account_id, status) VALUES ($1, $2, $3, 'active')",
+        ["Security E2E Platform Admin", `security-platform-admin-${stamp}@example.com`, userAccountId]
+      );
+      return userAccountId;
+    });
+
     platformAdminToken = jwt.sign(
-      { sub: "security-e2e-platform-admin", company_id: null, is_platform_admin: true },
+      { sub: platformAdminId, company_id: null, is_platform_admin: true },
       process.env.JWT_SECRET as string,
       { expiresIn: "24h" }
     );

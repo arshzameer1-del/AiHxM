@@ -1,6 +1,9 @@
 import { Body, Controller, Get, Param, Patch, Post, UseGuards } from "@nestjs/common";
 import { IsBoolean, IsObject, IsOptional } from "class-validator";
 import { PlatformAdminGuard } from "../auth/platform-admin.guard";
+import { StepUpGuard } from "../auth/step-up.guard";
+import { RequireStepUp } from "../auth/step-up.decorator";
+import { ScopedCompanyParam } from "../auth/scoped-company-param.decorator";
 import { CurrentClaims } from "../auth/current-claims.decorator";
 import type { RequestClaims } from "../database/tenant-context";
 import type { IntegrationProviderKey } from "@aihxm/shared-types";
@@ -18,7 +21,8 @@ class ConfigureIntegrationDto {
 
 // TM-031 — Integration catalog (SMTP, SSO, biometric device, webhook).
 @Controller("platform/companies/:companyId/integrations")
-@UseGuards(PlatformAdminGuard)
+@UseGuards(PlatformAdminGuard, StepUpGuard)
+@ScopedCompanyParam("companyId")
 export class IntegrationsController {
   constructor(private readonly integrations: IntegrationsService) {}
 
@@ -39,7 +43,11 @@ export class IntegrationsController {
 
   // Tenant Management gap-fill Phase 1 item #12 — rotate a
   // AIHXM-issued secret (biometric_device apiKey, webhook signingSecret)
-  // with a grace period for the old value.
+  // with a grace period for the old value. Phase 2 item #2 — also
+  // requires step-up: a rotated secret is handed back in the response
+  // body once, so this is exactly the kind of credential-issuing action
+  // step-up exists to gate.
+  @RequireStepUp()
   @Post(":providerKey/rotate")
   rotateSecret(
     @CurrentClaims() claims: RequestClaims,

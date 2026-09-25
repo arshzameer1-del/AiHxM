@@ -1,10 +1,12 @@
 import { Body, Controller, Get, Post, UseGuards } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 import { AuthService } from "./auth.service";
+import { StepUpService } from "./step-up.service";
 import { CurrentClaims } from "./current-claims.decorator";
 import { LoginDto } from "./dto/login.dto";
 import { LoginWithEmployeeNumberDto } from "./dto/login-with-employee-number.dto";
 import { MfaEnrollConfirmDto, MfaRecoveryCodeVerifyDto, MfaVerifyDto } from "./dto/mfa.dto";
+import { StepUpVerifyDto } from "./dto/step-up-verify.dto";
 import { PasswordResetConfirmDto, PasswordResetRequestDto } from "./dto/password-reset.dto";
 import { SessionGuard } from "./session.guard";
 import type { RequestClaims } from "../database/tenant-context";
@@ -31,7 +33,10 @@ import type { RequestClaims } from "../database/tenant-context";
  */
 @Controller("auth")
 export class AuthController {
-  constructor(private readonly auth: AuthService) {}
+  constructor(
+    private readonly auth: AuthService,
+    private readonly stepUp: StepUpService
+  ) {}
 
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post("login")
@@ -92,5 +97,19 @@ export class AuthController {
   @Get("me")
   me(@CurrentClaims() claims: RequestClaims) {
     return this.auth.me(claims);
+  }
+
+  // Phase 2 gap-fill item #2 — step-up re-authentication. Any real
+  // session (SessionGuard, not just Platform Admin — the mechanism is
+  // generic even though today's @RequireStepUp() routes are all
+  // Platform-Admin-only) can call this to (re-)verify its own second
+  // factor; StepUpGuard is what actually gates a sensitive route on
+  // having done so recently. Same throttle as the other MFA-code routes,
+  // for the same reason (a 6-digit TOTP code is a small guessing space).
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @UseGuards(SessionGuard)
+  @Post("step-up")
+  verifyStepUp(@CurrentClaims() claims: RequestClaims, @Body() dto: StepUpVerifyDto) {
+    return this.stepUp.verify(claims, dto);
   }
 }

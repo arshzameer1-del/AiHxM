@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from "@nestjs/comm
 import type { PoolClient } from "pg";
 import { DatabaseService } from "../database/database.service";
 import { AuditService } from "../audit/audit.service";
+import { SessionSecurityService } from "../auth/session-security.service";
 import type { RequestClaims } from "../database/tenant-context";
 import type {
   TenantConfigurationSetting,
@@ -51,7 +52,8 @@ function validateValue(valueType: TenantConfigurationValueType, value: unknown):
 export class TenantConfigurationService {
   constructor(
     private readonly db: DatabaseService,
-    private readonly audit: AuditService
+    private readonly audit: AuditService,
+    private readonly sessionSecurity: SessionSecurityService
   ) {}
 
   async getEffective(claims: RequestClaims, companyId: string): Promise<TenantConfigurationSetting[]> {
@@ -146,6 +148,12 @@ export class TenantConfigurationService {
         target: `${category}.${settingKey}`,
         metadata: {},
       });
+
+      // Phase 2 gap-fill items #1/#3/#4 — a 'security' setting reverting
+      // to default must take effect immediately, not up to 15s later.
+      if (category === "security") {
+        await this.sessionSecurity.invalidateSecurityPolicyCache(companyId);
+      }
     });
   }
 
@@ -252,6 +260,13 @@ export class TenantConfigurationService {
       target: `${category}.${settingKey}`,
       metadata: { newValue: value },
     });
+
+    // Phase 2 gap-fill items #1/#3/#4 — same immediacy reasoning as
+    // resetToDefault: a 'security' override (or a rollback to one) must be
+    // enforced on the very next login/request, not up to 15s later.
+    if (category === "security") {
+      await this.sessionSecurity.invalidateSecurityPolicyCache(companyId);
+    }
 
     const row = upserted.rows[0];
     return {

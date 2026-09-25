@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
 import { IsIn, IsNotEmpty, IsOptional, IsString, MaxLength } from "class-validator";
 import { PlatformAdminGuard } from "../auth/platform-admin.guard";
+import { ScopedCompanyParam } from "../auth/scoped-company-param.decorator";
 import { CurrentClaims } from "../auth/current-claims.decorator";
 import type { RequestClaims } from "../database/tenant-context";
 import type { SupportTicketPriority, SupportTicketStatus } from "@aihxm/shared-types";
@@ -41,6 +42,7 @@ class UpdateTicketDto {
 // TM-033 — Support tickets.
 @Controller("platform/companies/:companyId/support-tickets")
 @UseGuards(PlatformAdminGuard)
+@ScopedCompanyParam("companyId")
 export class SupportTicketsController {
   constructor(private readonly tickets: SupportTicketsService) {}
 

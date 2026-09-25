@@ -1,13 +1,16 @@
 import {
   CanActivate,
   ExecutionContext,
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from "@nestjs/common";
+import { Reflector } from "@nestjs/core";
 import type { Request } from "express";
 import * as jwt from "jsonwebtoken";
 import type { RequestClaims } from "../database/tenant-context";
 import { SessionSecurityService } from "./session-security.service";
+import { SCOPED_COMPANY_PARAM } from "./scoped-company-param.decorator";
 
 export type AuthedRequest = Request & { claims: RequestClaims };
 
@@ -42,7 +45,10 @@ export type SessionTokenPayload = {
  */
 @Injectable()
 export class PlatformAdminGuard implements CanActivate {
-  constructor(private readonly sessionSecurity: SessionSecurityService) {}
+  constructor(
+    private readonly sessionSecurity: SessionSecurityService,
+    private readonly reflector: Reflector
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest<AuthedRequest>();
@@ -72,10 +78,42 @@ export class PlatformAdminGuard implements CanActivate {
       throw new UnauthorizedException("This session has been signed out remotely. Please log in again.");
     }
 
+    // Phase 2 gap-fill item #7 — Platform Admin delegation. A 'read_only'
+    // admin can reach every route a 'full' admin can (GET), but anything
+    // that mutates state is rejected here, uniformly, before any handler
+    // runs — no per-route opt-in needed for this half of the feature.
+    // 'scoped' additionally requires the target company (read off the
+    // route param the controller class named via @ScopedCompanyParam) to
+    // be one this admin was explicitly granted.
+    const access = await this.sessionSecurity.getPlatformAdminAccess(payload.sub);
+
+    if (access.accessLevel === "read_only" && req.method !== "GET") {
+      throw new ForbiddenException(
+        "Your Platform Admin access is read-only — this action requires full access."
+      );
+    }
+
+    if (access.accessLevel === "scoped") {
+      const paramName = this.reflector.getAllAndOverride<string | undefined>(SCOPED_COMPANY_PARAM, [
+        context.getHandler(),
+        context.getClass(),
+      ]);
+      const targetCompanyId = paramName ? req.params[paramName] : undefined;
+      if (targetCompanyId && !access.scopedCompanyIds.includes(targetCompanyId)) {
+        throw new ForbiddenException("This tenant is outside your assigned access scope.");
+      }
+    }
+
     req.claims = {
       sub: payload.sub,
       is_platform_admin: payload.is_platform_admin,
       company_id: payload.company_id ?? null,
+      platformAdminAccessLevel: access.accessLevel,
+      platformAdminScopedCompanyIds: access.scopedCompanyIds,
+      // Phase 2 gap-fill item #2 — lets StepUpGuard key a step-up grant to
+      // this exact session, same `jti` the revocation check above already
+      // trusts.
+      sessionId: payload.jti,
     };
     return true;
   }

@@ -17,6 +17,27 @@ export type RequestClaims = {
   company_id?: string | null;
   sub: string;
   is_service?: boolean;
+  /**
+   * Phase 2 gap-fill item #7 — Platform Admin delegation. Set by
+   * PlatformAdminGuard from PLATFORM_ADMINS.access_level, never present on
+   * a tenant-side session. Optional and additive: every RLS policy written
+   * before this feature existed ignores unknown JSON keys, so carrying
+   * these through `request.jwt.claims` changes nothing for them.
+   */
+  platformAdminAccessLevel?: "full" | "read_only" | "scoped";
+  /** Only meaningful (and only ever non-empty) when accessLevel === "scoped". */
+  platformAdminScopedCompanyIds?: string[];
+  /**
+   * Phase 2 gap-fill item #2 — step-up re-authentication. The session's own
+   * `user_sessions.id` (the JWT's `jti`), set by SessionGuard/PlatformAdminGuard
+   * from the verified token — never client-supplied on its own. Absent for a
+   * token minted before sessions existed (no `jti` at all); StepUpGuard
+   * treats that as "cannot be step-up verified" rather than guessing.
+   * Not sent to Postgres via `request.jwt.claims` for any RLS purpose (no
+   * policy reads it) — it exists purely for StepUpGuard/StepUpService to
+   * key SessionSecurityService's step-up cache by.
+   */
+  sessionId?: string;
 };
 
 /**
