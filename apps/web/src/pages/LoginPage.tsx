@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import QRCode from "qrcode";
 import type { PublicTenantBranding } from "@aihxm/shared-types";
 import { useAuth } from "../auth/AuthContext";
-import { api, ApiError, consumeSessionExpiredNotice, publicTenantBrandingAssetUrl } from "../api/client";
+import { api, ApiError, consumeSessionExpiredNotice, publicTenantBrandingAssetUrl, ssoLoginUrl } from "../api/client";
 import { AihxmLogo } from "../components/AihxmLogo";
 
 /**
@@ -109,6 +109,33 @@ export function LoginPage() {
   const [tenantSlugState, setTenantSlugState] = useState<"n/a" | "checking" | "valid" | "not-found">(
     tenantSlug ? "checking" : "n/a"
   );
+  // Phase 3 item #1 (OIDC slice) — whether to show "Sign in with SSO"
+  // below the password form on THIS tenant's own login page. Only ever
+  // relevant when tenantSlug is set (there's no company to check SSO for
+  // on the shared /login) — defaults to false and fails closed on any
+  // error, same "cosmetic, not a security boundary" posture as the rest of
+  // this page's branding fetches: worst case a real SSO tenant's admin
+  // sees one extra "Sign in with SSO" link missing, not a security gap.
+  const [ssoEnabled, setSsoEnabled] = useState(false);
+
+  useEffect(() => {
+    if (!tenantSlug) {
+      setSsoEnabled(false);
+      return;
+    }
+    let cancelled = false;
+    api
+      .getPublicSsoStatus(tenantSlug)
+      .then((status) => {
+        if (!cancelled) setSsoEnabled(status.enabled);
+      })
+      .catch(() => {
+        if (!cancelled) setSsoEnabled(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantSlug]);
 
   useEffect(() => {
     if (!tenantSlug) {
@@ -444,6 +471,18 @@ export function LoginPage() {
             >
               Forgot your password?
             </button>
+            {tenantSlug && ssoEnabled && (
+              // A real browser navigation, not a fetch — SsoController.login
+              // 302s straight to the tenant's own IdP, and this page has
+              // nothing left to do once the browser leaves it.
+              <a
+                href={ssoLoginUrl(tenantSlug)}
+                style={accentTextStyle}
+                className="mt-3 block w-full rounded-lg border border-black/10 py-2 text-center text-sm font-semibold hover:bg-black/5"
+              >
+                Sign in with SSO
+              </a>
+            )}
             {!tenantSlug && (
               <p className="text-center text-xs text-label-tertiary mt-3">
                 New to AIHXM?{" "}

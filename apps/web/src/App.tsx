@@ -107,6 +107,14 @@ const PerformancePage = lazy(() =>
 const PayrollPage = lazy(() =>
   import("./portal/payroll/PayrollPage").then((m) => ({ default: m.PayrollPage })),
 );
+// Phase 3 item #1 (OIDC slice) — reached only once, right after an IdP
+// redirect (SsoService.handleCallback's fixed `/sso/complete#...` landing
+// point), never on a cold first visit like LoginPage — so unlike LoginPage
+// this one follows the same lazy-chunk pattern as every other post-login
+// route above.
+const SsoCompletePage = lazy(() =>
+  import("./pages/SsoCompletePage").then((m) => ({ default: m.SsoCompletePage })),
+);
 
 /** A route chunk is typically <50KB over a fast connection — a blank
  * beat, not a spinner-worthy wait — but Suspense requires a fallback,
@@ -157,6 +165,12 @@ export default function App() {
             {/* Self-service signup (signup.controller.ts) — public, no
               ProtectedRoute, same tree level as /login. */}
             <Route path="/signup" element={<SignupPage />} />
+            {/* Phase 3 item #1 (OIDC slice) — the fixed landing point every
+              tenant's IdP redirect reaches (SsoService.handleCallback);
+              public/no ProtectedRoute for the same reason /login is: a
+              session doesn't exist yet when this renders, it's what
+              CREATES one. */}
+            <Route path="/sso/complete" element={<SsoCompletePage />} />
 
             <Route element={<ProtectedRoute />}>
               <Route element={<RequirePlatformAdmin />}>

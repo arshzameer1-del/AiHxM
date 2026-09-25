@@ -36,6 +36,7 @@ import { UsageTrackingInterceptor } from "./tenant-management/usage-tracking.int
 import { PublicBrandingModule } from "./public-branding/public-branding.module";
 import { PlatformBrandingModule } from "./platform-branding/platform-branding.module";
 import { DataSubjectRequestsModule } from "./data-subject-requests/data-subject-requests.module";
+import { SsoModule } from "./sso/sso.module";
 
 /**
  * Phase 2/3/4/5 root module: health check, the Platform Provisioning Panel
@@ -76,6 +77,7 @@ import { DataSubjectRequestsModule } from "./data-subject-requests/data-subject-
     HolidaysModule,
     LeaveModule,
     DataSubjectRequestsModule,
+    SsoModule,
     RecruitmentModule,
     PerformanceModule,
     SystemAdminModule,

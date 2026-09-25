@@ -1937,6 +1937,15 @@ function IntegrationsTab({ companyId }: { companyId: string }) {
       if (!f.secret) config[f.key] = value;
       else config[f.key] = value;
     }
+    // SsoService (Phase 3 item #1) requires `protocol: "oidc"` on the
+    // stored config before it will treat an "sso" integration as usable
+    // (`loadEnabledOidcConfig` rejects anything else as "incomplete") —
+    // OIDC is the only protocol this form supports today (SAML is a
+    // later slice), so this is set here rather than exposing a
+    // single-option dropdown for a choice that isn't really a choice yet.
+    if (integration.providerKey === "sso") {
+      config.protocol = "oidc";
+    }
     setBusyKey(integration.providerKey);
     setError(null);
     try {

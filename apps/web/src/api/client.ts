@@ -87,6 +87,7 @@ import type {
   PlatformSavedView,
   PlatformSavedViewType,
   PolicyType,
+  PublicSsoStatus,
   PublicTenantBranding,
   RatingDistributionView,
   ResolvedPolicyView,
@@ -303,6 +304,17 @@ export function platformBrandingAssetUrl(updatedAt?: string): string {
   return `/api/public/platform-branding/logo/asset${version ? `?v=${version}` : ""}`;
 }
 
+/**
+ * Same "plain URL, not a `request()` call" shape as the two asset-URL
+ * builders above, for the same reason: this is consumed as a real browser
+ * navigation (an `<a href>`), not a `fetch()` — `SsoController.login`
+ * 302s straight to the tenant's IdP, so there's no JSON response for this
+ * client to parse.
+ */
+export function ssoLoginUrl(companySlug: string): string {
+  return `/api/auth/sso/${companySlug}/login`;
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
@@ -386,6 +398,12 @@ export const api = {
   // error to surface.
   getPublicTenantBranding: (companySlug: string) =>
     request<PublicTenantBranding>(`/public/tenants/${companySlug}/branding`),
+
+  // Phase 3 item #1 (OIDC slice) — whether to show a "Sign in with SSO"
+  // link on this tenant's own login page at all. Same no-auth, 404-means-
+  // "no custom config" posture as getPublicTenantBranding above.
+  getPublicSsoStatus: (companySlug: string) =>
+    request<PublicSsoStatus>(`/public/tenants/${companySlug}/sso`),
 
   confirmMfaEnrollment: (mfaTicket: string, code: string) =>
     request<SessionResult>("/auth/mfa/enroll/confirm", {

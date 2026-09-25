@@ -40,3 +40,48 @@ export function verifyMfaTicket(token: string, expectedPurpose: MfaTicketPurpose
   }
   return decoded;
 }
+
+/**
+ * Phase 3 item #1 — carries an in-progress OIDC login's PKCE/nonce state
+ * across the redirect to the IdP and back, without a server-side session
+ * table. This ticket's own signed, compact JWT string doubles as the
+ * OAuth `state` parameter sent to the IdP — the IdP is required to echo
+ * `state` back unchanged on the callback, so verifying it here both
+ * confirms the callback wasn't forged (a stranger can't produce a validly
+ * signed ticket) AND recovers the exact PKCE code_verifier/nonce this
+ * login attempt started with, in one step. Same "short-lived, single-
+ * purpose, no DB row needed" shape as an MfaTicket, deliberately kept as
+ * a separate type rather than overloading MfaTicketPurpose — a step-up or
+ * MFA ticket accidentally accepted here (or vice versa) should fail
+ * closed on `typ` alone, before ever reaching field-shape assumptions.
+ */
+export type SsoStateTicketPayload = {
+  typ: "sso_state_ticket";
+  companyId: string;
+  companySlug: string;
+  codeVerifier: string;
+  nonce: string;
+  /** Where the browser should land after a successful/failed login. */
+  returnOrigin: string;
+};
+
+export function signSsoStateTicket(payload: Omit<SsoStateTicketPayload, "typ">): string {
+  const full: SsoStateTicketPayload = { typ: "sso_state_ticket", ...payload };
+  // 10 minutes — generous enough for a real IdP login prompt (a password
+  // + their own MFA), short enough that a state value intercepted from
+  // browser history is worthless shortly after.
+  return jwt.sign(full, secret(), { expiresIn: "10m" });
+}
+
+export function verifySsoStateTicket(token: string): SsoStateTicketPayload {
+  let decoded: SsoStateTicketPayload;
+  try {
+    decoded = jwt.verify(token, secret()) as SsoStateTicketPayload;
+  } catch {
+    throw new Error("Login session expired or invalid. Please try signing in again.");
+  }
+  if (decoded.typ !== "sso_state_ticket") {
+    throw new Error("Ticket is not valid for this operation");
+  }
+  return decoded;
+}

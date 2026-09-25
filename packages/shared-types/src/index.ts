@@ -595,6 +595,51 @@ export type RotateIntegrationSecretResponse = {
   previousSecretExpiresAt: string;
 };
 
+// --- Phase 3 item #1: SSO & Identity Federation (OpenID Connect) ----------
+
+/**
+ * The shape of `tenant_integrations.config` for `providerKey: "sso"` once
+ * `protocol` is `"oidc"` — read directly by `SsoService`, configured by a
+ * Platform Admin the same way every other integration is (TM-031's own
+ * `IntegrationsController`, Platform-Admin + step-up gated). `clientSecret`
+ * is one of `SECRET_FIELDS.sso` (integrations.service.ts) — never returned
+ * by a GET, exactly like every other provider's secret. Only OIDC exists
+ * today; a future SAML slice adds `protocol: "saml"` with its own sibling
+ * fields, never repurposing these.
+ */
+export type OidcSsoConfig = {
+  protocol: "oidc";
+  /** The IdP's issuer URL — `${issuerUrl}/.well-known/openid-configuration` must resolve. */
+  issuerUrl: string;
+  clientId: string;
+  clientSecret: string;
+  /** Space-separated OAuth scopes. Defaults to "openid email profile" if unset. */
+  scopes?: string;
+  /**
+   * Which ID-token claim (if any) carries the IdP's group/role names for
+   * JIT role mapping — e.g. "groups" (Okta/Azure AD common default), or
+   * unset to skip mapping and always fall back to `defaultRoleKey`.
+   */
+  groupsClaim?: string;
+  /** IdP group name -> this tenant's `roles.key` (e.g. "hr_admin"). First match wins. */
+  roleMapping?: Record<string, string>;
+  /** The role a brand-new SSO-provisioned user gets when no group mapping matches. */
+  defaultRoleKey?: string;
+};
+
+/**
+ * The public, no-session answer to "does this tenant's login page need a
+ * 'Sign in with SSO' button" — reachable the same way branding is
+ * (`public/tenants/:slug/...`), since a login page has to know this
+ * before anyone has a session. Deliberately carries nothing else: no
+ * issuer URL, no client ID — a stranger probing this route learns only
+ * whether SSO exists for a real, non-archived tenant, nothing about how
+ * it's configured.
+ */
+export type PublicSsoStatus = {
+  enabled: boolean;
+};
+
 // --- Tenant Management: Health (TM-032) ------------------------------------
 export type HealthCheckStatus = "ok" | "degraded" | "down";
 

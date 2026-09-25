@@ -123,6 +123,20 @@ export class AuthService {
       );
     }
 
+    // Phase 3 item #1 — an 'sso' account's password_hash is a random,
+    // never-derivable placeholder (see sso.service.ts's
+    // provisionAccount()), so this must be rejected explicitly with a
+    // correct, actionable message rather than falling through to
+    // verifyPassword() and failing for the confusing reason "the password
+    // is wrong" when the real issue is "this account has no password at
+    // all." Checked before the password comparison so it never even
+    // touches the placeholder hash.
+    if (account.auth_provider === "sso") {
+      throw new UnauthorizedException(
+        "This account signs in through your organization's single sign-on. Use the \"Sign in with SSO\" option on your company's login page instead."
+      );
+    }
+
     const validPassword = await verifyPassword(password, account.password_hash);
     if (!validPassword) {
       // Phase 2 gap-fill item #1 — the lockout threshold/duration are now
@@ -325,6 +339,33 @@ export class AuthService {
       secret,
       { expiresIn: `${expiryMinutes}m` }
     );
+  }
+
+  /**
+   * Phase 3 item #1 — the one thing `SsoService.handleCallback()` needs
+   * from this file after it has already verified an ID token and
+   * resolved (or just JIT-provisioned) a real `user_accounts` row: a
+   * genuine session, issued exactly the same way every other login
+   * issues one (tenant security policy's session length/concurrent-
+   * session limit, `last_login_at` stamped, a real revocable `jti`) —
+   * this just does the tier resolution (`resolveIdentityForAccount`) an
+   * SSO login skips by construction (there's no password step to hang it
+   * off of) and hands the rest to the same private `issueSessionToken`
+   * every password-based login already goes through. Deliberately public
+   * — `SsoService` lives in its own module and has no other way to reach
+   * this file's private session-issuance internals, the same reason
+   * `CompaniesService.impersonate()` builds its own session shape rather
+   * than reaching into this class at all; this one case earns a real
+   * shared method instead, since an SSO login IS meant to be a normal,
+   * fully-privileged session for that account — not a separate,
+   * intentionally-limited kind the way impersonation is.
+   */
+  async issueSessionTokenForFederatedLogin(userAccountId: string): Promise<string> {
+    const identity = await this.resolveIdentityForAccount(userAccountId);
+    if (identity.adminStatus === "locked") {
+      throw new UnauthorizedException("This account has been locked. Contact your Platform Admin.");
+    }
+    return this.issueSessionToken(identity, userAccountId);
   }
 
   // --- Password reset -----------------------------------------------------
