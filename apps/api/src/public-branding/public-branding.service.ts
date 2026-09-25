@@ -68,6 +68,12 @@ export class PublicBrandingService {
         logoAlignment: branding.logoAlignment ?? "left",
         logoHeightPx: branding.logoHeightPx ?? 32,
         logoBackgroundColor: branding.logoBackgroundColor ?? undefined,
+        loginBackgroundPositionX: branding.loginBackgroundPositionX ?? "center",
+        loginBackgroundPositionY: branding.loginBackgroundPositionY ?? "center",
+        loginCardWidthPx: branding.loginCardWidthPx ?? 384,
+        loginCardPosition: branding.loginCardPosition ?? "center",
+        loginCardBackgroundColor: branding.loginCardBackgroundColor ?? "#FFFFFF",
+        loginCardOpacity: branding.loginCardOpacity ?? 100,
       };
     });
   }

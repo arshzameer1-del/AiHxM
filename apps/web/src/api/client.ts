@@ -52,6 +52,7 @@ import type {
   GoalView,
   HealthCheckResult,
   HolidayView,
+  HorizontalPosition,
   ConfigurationDomainSummary,
   ImpersonateResponse,
   InitiateOffboardingRequest,
@@ -133,6 +134,7 @@ import type {
   UpdateShiftRequest,
   UpdateWorkScheduleAssignmentRuleRequest,
   UserSessionView,
+  VerticalPosition,
   WorkflowTemplate,
   WorkScheduleAssignmentRuleView,
   WorkScheduleDayView,
@@ -649,6 +651,12 @@ export const api = {
         logoAlignment?: LogoAlignment;
         logoHeightPx?: number;
         logoBackgroundColor?: string;
+        loginBackgroundPositionX?: HorizontalPosition;
+        loginBackgroundPositionY?: VerticalPosition;
+        loginCardWidthPx?: number;
+        loginCardPosition?: HorizontalPosition;
+        loginCardBackgroundColor?: string;
+        loginCardOpacity?: number;
       };
       enabledModules?: ModuleKey[];
       employeeNumberFormat?: Partial<EmployeeNumberFormat>;

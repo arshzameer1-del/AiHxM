@@ -63,6 +63,8 @@ export type BrandingAssetSlot = "logo" | "favicon" | "login-background";
 
 /** Where the logo sits within its own header strip — see `logoBackgroundColor` below. */
 export type LogoAlignment = "left" | "center" | "right";
+export type HorizontalPosition = "left" | "center" | "right";
+export type VerticalPosition = "top" | "center" | "bottom";
 
 export type CompanyBranding = {
   primaryColor?: string;
@@ -76,6 +78,22 @@ export type CompanyBranding = {
   logoHeightPx?: number;
   /** Background color of the strip the logo sits in (distinct from `primaryColor`, which colors buttons/links) — undefined/omitted means "match the card" (white), the previous look. */
   logoBackgroundColor?: string;
+  // --- Login page layout (full-page background photo + the sign-in card
+  // itself) — distinct from the logo strip settings above. All default to
+  // the fixed values the login page always used before these existed
+  // (centered background, a 384px/max-w-sm white card, dead center).
+  /** CSS object-position X for the uploaded login-background photo. Default "center". */
+  loginBackgroundPositionX?: HorizontalPosition;
+  /** CSS object-position Y for the uploaded login-background photo. Default "center". */
+  loginBackgroundPositionY?: VerticalPosition;
+  /** Sign-in card's rendered width in px. Default 384 (the previous hardcoded max-w-sm). */
+  loginCardWidthPx?: number;
+  /** Where the sign-in card sits horizontally on screen. Default "center". */
+  loginCardPosition?: HorizontalPosition;
+  /** Sign-in card's background color (before opacity is applied). Default "#FFFFFF". */
+  loginCardBackgroundColor?: string;
+  /** Sign-in card's background opacity, 0-100. Default 100 (fully solid, the previous look). */
+  loginCardOpacity?: number;
 };
 
 /**
@@ -96,6 +114,12 @@ export type PublicTenantBranding = {
   logoAlignment?: LogoAlignment;
   logoHeightPx?: number;
   logoBackgroundColor?: string;
+  loginBackgroundPositionX?: HorizontalPosition;
+  loginBackgroundPositionY?: VerticalPosition;
+  loginCardWidthPx?: number;
+  loginCardPosition?: HorizontalPosition;
+  loginCardBackgroundColor?: string;
+  loginCardOpacity?: number;
 };
 
 /**

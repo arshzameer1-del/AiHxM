@@ -89,6 +89,12 @@ function rowToConfig(row: any): CompanyConfig {
       logoAlignment: branding.logoAlignment ?? "left",
       logoHeightPx: branding.logoHeightPx ?? 32,
       logoBackgroundColor: branding.logoBackgroundColor ?? undefined,
+      loginBackgroundPositionX: branding.loginBackgroundPositionX ?? "center",
+      loginBackgroundPositionY: branding.loginBackgroundPositionY ?? "center",
+      loginCardWidthPx: branding.loginCardWidthPx ?? 384,
+      loginCardPosition: branding.loginCardPosition ?? "center",
+      loginCardBackgroundColor: branding.loginCardBackgroundColor ?? "#FFFFFF",
+      loginCardOpacity: branding.loginCardOpacity ?? 100,
     },
     enabledModules: row.enabled_modules ?? [],
     employeeNumberFormat: row.employee_number_format,
@@ -613,6 +619,12 @@ export class CompaniesService {
         logoAlignment?: CompanyBranding["logoAlignment"];
         logoHeightPx?: number;
         logoBackgroundColor?: string;
+        loginBackgroundPositionX?: CompanyBranding["loginBackgroundPositionX"];
+        loginBackgroundPositionY?: CompanyBranding["loginBackgroundPositionY"];
+        loginCardWidthPx?: number;
+        loginCardPosition?: CompanyBranding["loginCardPosition"];
+        loginCardBackgroundColor?: string;
+        loginCardOpacity?: number;
       };
       enabledModules?: ModuleKey[];
       employeeNumberFormat?: Partial<EmployeeNumberFormat>;

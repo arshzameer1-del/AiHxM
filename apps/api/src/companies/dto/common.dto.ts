@@ -1,5 +1,5 @@
 import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, Min } from "class-validator";
-import type { LogoAlignment } from "@aihxm/shared-types";
+import type { HorizontalPosition, LogoAlignment, VerticalPosition } from "@aihxm/shared-types";
 
 /** Partial, validated input for CompanyConfig.employeeNumberFormat (plan doc Section 5). */
 export class EmployeeNumberFormatInputDto {
@@ -50,4 +50,34 @@ export class BrandingInputDto {
   @IsOptional()
   @IsString()
   logoBackgroundColor?: string;
+
+  // --- Login page layout — the full-page background photo and the
+  // sign-in card itself. Same merge path as everything above.
+  @IsOptional()
+  @IsIn(["left", "center", "right"])
+  loginBackgroundPositionX?: HorizontalPosition;
+
+  @IsOptional()
+  @IsIn(["top", "center", "bottom"])
+  loginBackgroundPositionY?: VerticalPosition;
+
+  @IsOptional()
+  @IsInt()
+  @Min(280)
+  @Max(720)
+  loginCardWidthPx?: number;
+
+  @IsOptional()
+  @IsIn(["left", "center", "right"])
+  loginCardPosition?: HorizontalPosition;
+
+  @IsOptional()
+  @IsString()
+  loginCardBackgroundColor?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(100)
+  loginCardOpacity?: number;
 }

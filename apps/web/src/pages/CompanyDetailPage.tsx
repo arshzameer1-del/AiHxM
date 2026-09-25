@@ -31,6 +31,7 @@ import {
   type CompanyDetail,
   type CompanyStatus,
   type HealthCheckResult,
+  type HorizontalPosition,
   type IntegrationProviderKey,
   type LogoAlignment,
   type SupportTicket,
@@ -49,6 +50,7 @@ import {
   type TenantIntegration,
   type TenantUsageSummary,
   type UserSessionView,
+  type VerticalPosition,
 } from "@aihxm/shared-types";
 import { api, ApiError } from "../api/client";
 import { StatusPill } from "../components/StatusPill";
@@ -644,6 +646,20 @@ const BRANDING_SLOTS: { slot: BrandingAssetSlot; label: string; hasKey: keyof Co
   { slot: "login-background", label: "Login background", hasKey: "hasLoginBackground" },
 ];
 
+/** "#RRGGBB" (or "#RGB") + a 0-100 opacity -> "rgba(r, g, b, a)", for the
+ * sign-in card preview/render — a plain <input type="color"> has no alpha
+ * channel, so opacity is tracked as its own 0-100 slider and composed here. */
+function hexToRgba(hex: string, opacityPercent: number): string {
+  const clean = hex.replace("#", "");
+  const full = clean.length === 3 ? clean.split("").map((c) => c + c).join("") : clean;
+  const value = parseInt(full, 16);
+  if (Number.isNaN(value)) return `rgba(255, 255, 255, ${opacityPercent / 100})`;
+  const r = (value >> 16) & 255;
+  const g = (value >> 8) & 255;
+  const b = value & 255;
+  return `rgba(${r}, ${g}, ${b}, ${opacityPercent / 100})`;
+}
+
 /**
  * TM-015 — real uploads through FileStorageService (see
  * CompaniesService.uploadBrandingAsset), previewed via an authenticated
@@ -674,6 +690,22 @@ function BrandingTab({
   const [logoHeightPx, setLogoHeightPx] = useState(branding.logoHeightPx ?? 32);
   const [logoBackgroundColor, setLogoBackgroundColor] = useState(branding.logoBackgroundColor ?? "#FFFFFF");
   const [savingLogoLayout, setSavingLogoLayout] = useState(false);
+  // Login page layout — the full-page background photo's position, and the
+  // sign-in card itself (width, screen position, background color/opacity).
+  // Reported straight from a real tenant: the background photo was always
+  // centered and the card was always a fixed-size solid-white box dead
+  // center, with no way to adjust either.
+  const [loginBackgroundPositionX, setLoginBackgroundPositionX] = useState<HorizontalPosition>(
+    branding.loginBackgroundPositionX ?? "center"
+  );
+  const [loginBackgroundPositionY, setLoginBackgroundPositionY] = useState<VerticalPosition>(
+    branding.loginBackgroundPositionY ?? "center"
+  );
+  const [loginCardWidthPx, setLoginCardWidthPx] = useState(branding.loginCardWidthPx ?? 384);
+  const [loginCardPosition, setLoginCardPosition] = useState<HorizontalPosition>(branding.loginCardPosition ?? "center");
+  const [loginCardBackgroundColor, setLoginCardBackgroundColor] = useState(branding.loginCardBackgroundColor ?? "#FFFFFF");
+  const [loginCardOpacity, setLoginCardOpacity] = useState(branding.loginCardOpacity ?? 100);
+  const [savingLoginLayout, setSavingLoginLayout] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -731,6 +763,28 @@ function BrandingTab({
       setError(err instanceof ApiError ? err.message : "Could not save logo layout.");
     } finally {
       setSavingLogoLayout(false);
+    }
+  }
+
+  async function saveLoginLayout() {
+    setSavingLoginLayout(true);
+    setError(null);
+    try {
+      const config = await api.updateCompanyConfig(companyId, {
+        branding: {
+          loginBackgroundPositionX,
+          loginBackgroundPositionY,
+          loginCardWidthPx,
+          loginCardPosition,
+          loginCardBackgroundColor,
+          loginCardOpacity,
+        },
+      });
+      onSaved(config.branding);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not save login page layout.");
+    } finally {
+      setSavingLoginLayout(false);
     }
   }
 
@@ -886,6 +940,149 @@ function BrandingTab({
             className="bg-accent text-white rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-50"
           >
             {savingLogoLayout ? "Saving…" : "Save logo layout"}
+          </button>
+        </div>
+      </section>
+
+      <section className="bg-card rounded-card p-5 shadow-sm space-y-4">
+        <div>
+          <h2 className="font-semibold text-sm uppercase tracking-wide text-label-tertiary mb-1">Login page layout</h2>
+          <p className="text-xs text-label-tertiary">
+            Where the uploaded background photo sits, and the sign-in card's own width, screen position, and
+            background.
+          </p>
+        </div>
+
+        {/* Live preview — same combination LoginPage.tsx renders for real. */}
+        <div className="relative rounded-lg border border-black/10 overflow-hidden bg-black/10" style={{ height: 160 }}>
+          {previews["login-background"] && (
+            <img
+              src={previews["login-background"]}
+              alt=""
+              className="absolute inset-0 w-full h-full object-cover"
+              style={{ objectPosition: `${loginBackgroundPositionX} ${loginBackgroundPositionY}` }}
+            />
+          )}
+          <div
+            className="absolute inset-0 flex items-center p-3"
+            style={{
+              justifyContent:
+                loginCardPosition === "center" ? "center" : loginCardPosition === "right" ? "flex-end" : "flex-start",
+            }}
+          >
+            <div
+              className="rounded shadow"
+              style={{
+                width: Math.max(60, Math.min(loginCardWidthPx / 3, 160)),
+                height: 90,
+                backgroundColor: hexToRgba(loginCardBackgroundColor, loginCardOpacity),
+              }}
+            />
+          </div>
+        </div>
+
+        <div>
+          <div className="text-xs font-medium text-label-tertiary mb-1.5">Background photo position</div>
+          <div className="flex flex-wrap gap-3">
+            <div className="inline-flex rounded-lg border border-black/10 overflow-hidden">
+              {(["left", "center", "right"] as HorizontalPosition[]).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => setLoginBackgroundPositionX(option)}
+                  className={`px-3 py-1.5 text-xs font-medium capitalize ${
+                    loginBackgroundPositionX === option ? "bg-accent text-white" : "bg-transparent hover:bg-black/5"
+                  }`}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+            <div className="inline-flex rounded-lg border border-black/10 overflow-hidden">
+              {(["top", "center", "bottom"] as VerticalPosition[]).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => setLoginBackgroundPositionY(option)}
+                  className={`px-3 py-1.5 text-xs font-medium capitalize ${
+                    loginBackgroundPositionY === option ? "bg-accent text-white" : "bg-transparent hover:bg-black/5"
+                  }`}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+          </div>
+          {!branding.hasLoginBackground && (
+            <p className="text-[11px] text-label-tertiary mt-1.5">
+              Upload a login background photo above for this to take effect.
+            </p>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-end gap-6">
+          <div>
+            <div className="text-xs font-medium text-label-tertiary mb-1.5">Card position</div>
+            <div className="inline-flex rounded-lg border border-black/10 overflow-hidden">
+              {(["left", "center", "right"] as HorizontalPosition[]).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => setLoginCardPosition(option)}
+                  className={`px-3 py-1.5 text-xs font-medium capitalize ${
+                    loginCardPosition === option ? "bg-accent text-white" : "bg-transparent hover:bg-black/5"
+                  }`}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-label-tertiary mb-1.5">
+              Card width — {loginCardWidthPx}px
+            </label>
+            <input
+              type="range"
+              min={280}
+              max={720}
+              value={loginCardWidthPx}
+              onChange={(e) => setLoginCardWidthPx(Number(e.target.value))}
+              className="w-40 align-middle"
+            />
+          </div>
+
+          <label className="text-sm flex items-center gap-2">
+            Card background
+            <input
+              type="color"
+              value={loginCardBackgroundColor}
+              onChange={(e) => setLoginCardBackgroundColor(e.target.value)}
+              className="h-8 w-12 rounded border border-black/10"
+            />
+          </label>
+
+          <div>
+            <label className="block text-xs font-medium text-label-tertiary mb-1.5">
+              Card opacity — {loginCardOpacity}%
+            </label>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={loginCardOpacity}
+              onChange={(e) => setLoginCardOpacity(Number(e.target.value))}
+              className="w-32 align-middle"
+            />
+          </div>
+
+          <button
+            onClick={saveLoginLayout}
+            disabled={savingLoginLayout}
+            className="bg-accent text-white rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-50"
+          >
+            {savingLoginLayout ? "Saving…" : "Save login page layout"}
           </button>
         </div>
       </section>

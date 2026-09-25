@@ -39,6 +39,21 @@ type Step =
   | { name: "resetRequest" }
   | { name: "resetConfirm"; devModeToken?: string };
 
+/** "#RRGGBB" (or "#RGB") + a 0-100 opacity -> "rgba(r, g, b, a)" — the
+ * sign-in card's background (CompanyDetailPage's "Login page layout" panel).
+ * A plain <input type="color"> has no alpha channel, so opacity travels as
+ * its own 0-100 field and gets composed with the color here at render time. */
+function hexToRgba(hex: string, opacityPercent: number): string {
+  const clean = hex.replace("#", "");
+  const full = clean.length === 3 ? clean.split("").map((c) => c + c).join("") : clean;
+  const value = parseInt(full, 16);
+  if (Number.isNaN(value)) return `rgba(255, 255, 255, ${opacityPercent / 100})`;
+  const r = (value >> 16) & 255;
+  const g = (value >> 8) & 255;
+  const b = value & 255;
+  return `rgba(${r}, ${g}, ${b}, ${opacityPercent / 100})`;
+}
+
 export function LoginPage() {
   const { setSessionToken } = useAuth();
   const navigate = useNavigate();
@@ -238,7 +253,9 @@ export function LoginPage() {
     ? {
         backgroundImage: `url(${publicTenantBrandingAssetUrl(tenantBranding.slug, "login-background")})`,
         backgroundSize: "cover",
-        backgroundPosition: "center",
+        backgroundPosition: `${tenantBranding.loginBackgroundPositionX ?? "center"} ${
+          tenantBranding.loginBackgroundPositionY ?? "center"
+        }`,
       }
     : undefined;
 
@@ -251,18 +268,28 @@ export function LoginPage() {
   const logoHeightPx = tenantBranding?.logoHeightPx ?? 32;
   const logoJustifyContent = logoAlignment === "center" ? "center" : logoAlignment === "right" ? "flex-end" : "flex-start";
 
+  // Login page layout (CompanyDetailPage's "Login page layout" panel) — the
+  // sign-in card's own width, its position on screen, and its background
+  // color/opacity. Same "defaults match the old fixed layout" posture as
+  // the logo settings above: 384px (the old max-w-sm), dead center, solid
+  // white — a company that's never touched this looks exactly as before.
+  const cardPosition = tenantBranding?.loginCardPosition ?? "center";
+  const cardAlignItems = cardPosition === "center" ? "center" : cardPosition === "right" ? "flex-end" : "flex-start";
+  const cardWidthPx = tenantBranding?.loginCardWidthPx ?? 384;
+  const cardBackgroundColor = hexToRgba(tenantBranding?.loginCardBackgroundColor ?? "#FFFFFF", tenantBranding?.loginCardOpacity ?? 100);
+
   const showForm = !tenantSlug || tenantSlugState === "valid";
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-4" style={pageStyle}>
+    <div className="min-h-screen flex flex-col justify-center px-4" style={{ ...pageStyle, alignItems: cardAlignItems }}>
       {tenantSlug && tenantSlugState === "checking" && (
         // Same footprint as the real card, painted empty — never show the
         // form, then yank it away a moment later once the 404 comes back.
-        <div className="w-full max-w-sm bg-card rounded-card p-6 shadow-sm" style={{ height: 260 }} aria-hidden="true" />
+        <div className="bg-card rounded-card p-6 shadow-sm" style={{ height: 260, width: cardWidthPx, maxWidth: "100%" }} aria-hidden="true" />
       )}
 
       {tenantSlug && tenantSlugState === "not-found" && (
-        <div className="w-full max-w-sm bg-card rounded-card p-6 shadow-sm text-center">
+        <div className="bg-card rounded-card p-6 shadow-sm text-center" style={{ width: cardWidthPx, maxWidth: "100%" }}>
           <AihxmLogo size={28} className="mx-auto mb-4" />
           <h1 className="text-lg font-semibold mb-2">This company page doesn't exist</h1>
           <p className="text-sm text-label-tertiary">
@@ -273,7 +300,7 @@ export function LoginPage() {
       )}
 
       {showForm && (
-      <div className="w-full max-w-sm bg-card rounded-card shadow-sm overflow-hidden">
+      <div className="rounded-card shadow-sm overflow-hidden" style={{ width: cardWidthPx, maxWidth: "100%", backgroundColor: cardBackgroundColor }}>
         <div
           className="flex items-center px-6 py-4"
           style={{ backgroundColor: tenantBranding?.logoBackgroundColor, justifyContent: logoJustifyContent }}

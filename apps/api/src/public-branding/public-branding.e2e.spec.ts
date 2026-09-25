@@ -73,6 +73,12 @@ describe("Public tenant branding HTTP surface (e2e) — no auth, per-company log
       hasLoginBackground: false,
       logoAlignment: "left",
       logoHeightPx: 32,
+      loginBackgroundPositionX: "center",
+      loginBackgroundPositionY: "center",
+      loginCardWidthPx: 384,
+      loginCardPosition: "center",
+      loginCardBackgroundColor: "#FFFFFF",
+      loginCardOpacity: 100,
     });
   });
 
