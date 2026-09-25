@@ -125,6 +125,8 @@ import type {
   TenantFeatureEntitlement,
   TenantIntegration,
   RotateIntegrationSecretResponse,
+  ScimProvisioningStatus,
+  GenerateScimTokenResponse,
   SetPlatformAdminAccessRequest,
   StepUpVerifyRequest,
   StepUpVerifyResponse,
@@ -661,6 +663,19 @@ export const api = {
     request<RotateIntegrationSecretResponse>(`/platform/companies/${companyId}/integrations/${providerKey}/rotate`, {
       method: "POST",
     }),
+
+  // Phase 3 item #1, slice 3 — SCIM 2.0 inbound provisioning. A separate
+  // small surface from the `sso` integration's own config/rotate routes
+  // above: this token isn't a `tenant_integrations.config` jsonb field,
+  // it's a dedicated, hashed, one-time-reveal credential (see
+  // ScimAdminController's own doc comment).
+  getScimStatus: (companyId: string) => request<ScimProvisioningStatus>(`/platform/companies/${companyId}/scim/status`),
+
+  generateScimToken: (companyId: string) =>
+    request<GenerateScimTokenResponse>(`/platform/companies/${companyId}/scim/token`, { method: "POST" }),
+
+  disableScim: (companyId: string) =>
+    request<{ enabled: boolean }>(`/platform/companies/${companyId}/scim/disable`, { method: "POST" }),
 
   // TM-032 — Health dashboard.
   getHealth: (companyId: string) => request<HealthCheckResult[]>(`/platform/companies/${companyId}/health`),

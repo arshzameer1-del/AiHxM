@@ -602,9 +602,14 @@ export type RotateIntegrationSecretResponse = {
  * `SsoService.resolveRoleKey()` reads only these two, regardless of
  * whether the login came in over OIDC or SAML, so they live in one place
  * both `OidcSsoConfig` and `SamlSsoConfig` extend rather than being
- * redeclared (and risking drift) on each.
+ * redeclared (and risking drift) on each. Exported (not just used
+ * internally) as of slice 3 (SCIM) — `SsoService.resolveRoleKey()` takes
+ * this base type rather than the full `SsoIntegrationConfig` union so
+ * SCIM's provisioning path (which has no `protocol` at all when a tenant
+ * configures SCIM without ever configuring OIDC/SAML login) can call the
+ * exact same role-resolution logic without fabricating a fake protocol.
  */
-type SsoRoleResolutionConfig = {
+export type SsoRoleResolutionConfig = {
   /** IdP group/role name -> this tenant's `roles.key` (e.g. "hr_admin"). First match wins. */
   roleMapping?: Record<string, string>;
   /** The role a brand-new SSO-provisioned user gets when no group mapping matches. */
@@ -692,6 +697,35 @@ export type SsoIntegrationConfig = OidcSsoConfig | SamlSsoConfig;
  */
 export type PublicSsoStatus = {
   enabled: boolean;
+};
+
+// --- Phase 3 item #1, slice 3: SCIM 2.0 inbound provisioning ---------------
+
+/**
+ * Admin-facing status of a tenant's SCIM provisioning configuration —
+ * `GET /platform/companies/:id/scim/status`. Never carries the bearer
+ * token itself (only whether one exists), same "never returned by a GET"
+ * discipline every other integration secret in this codebase follows.
+ */
+export type ScimProvisioningStatus = {
+  enabled: boolean;
+  hasToken: boolean;
+  /** The exact SCIM base URL to hand this tenant's IdP admin — always ends "/scim/v2/<slug>". */
+  baseUrl: string;
+};
+
+/**
+ * The one-time plaintext response from generating or rotating a tenant's
+ * SCIM bearer token — same "show plaintext exactly once" pattern as
+ * `RotateIntegrationSecretResponse` above. Rotating immediately invalidates
+ * the previous token (no grace period, unlike `biometric_device`/`webhook`
+ * secret rotation): this credential controls provisioning of tenant portal
+ * access, and an overlapping-validity window is a real risk here in a way
+ * it isn't for a device API key or a webhook signature.
+ */
+export type GenerateScimTokenResponse = {
+  token: string;
+  baseUrl: string;
 };
 
 // --- Tenant Management: Health (TM-032) ------------------------------------

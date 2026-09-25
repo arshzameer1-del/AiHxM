@@ -5,7 +5,13 @@ import { AuthService } from "../auth/auth.service";
 import { AuditService } from "../audit/audit.service";
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
-import type { OidcSsoConfig, SamlSsoConfig, SsoIntegrationConfig, PublicSsoStatus } from "@aihxm/shared-types";
+import type {
+  OidcSsoConfig,
+  SamlSsoConfig,
+  SsoIntegrationConfig,
+  SsoRoleResolutionConfig,
+  PublicSsoStatus,
+} from "@aihxm/shared-types";
 import { normalizeEmail } from "../auth/email.util";
 import {
   signSsoStateTicket,
@@ -25,7 +31,7 @@ const SERVICE_CLAIMS: RequestClaims = { is_platform_admin: false, is_service: tr
 // migration 0059's header comment — over making the column nullable and
 // touching every existing read of it), so an 'sso' account needs SOME
 // value here that can never validate against ANY real password.
-function unusablePasswordPlaceholder(): string {
+export function unusablePasswordPlaceholder(): string {
   return `sso-only:${randomBytes(32).toString("hex")}`;
 }
 
@@ -37,8 +43,11 @@ function unusablePasswordPlaceholder(): string {
 // external address). `RENDER_EXTERNAL_URL` is set automatically by Render
 // for every deployed service — zero configuration needed in the common
 // case; `API_BASE_URL` is the explicit override for local dev, tests, or
-// a non-Render host.
-function apiBaseUrl(): string {
+// a non-Render host. Exported as of slice 3 (SCIM) — a tenant's SCIM base
+// URL is built from the exact same "this API's own public address"
+// concept the SAML ACS URL already uses, and there's no reason for
+// scim.service.ts to reconstruct it separately.
+export function apiBaseUrl(): string {
   const base = process.env.RENDER_EXTERNAL_URL ?? process.env.API_BASE_URL ?? "http://localhost:4000";
   return base.replace(/\/+$/, "");
 }
@@ -601,7 +610,19 @@ export class SsoService {
     return this.authService.issueSessionTokenForFederatedLogin(userAccountId);
   }
 
-  private resolveRoleKey(groups: string[], config: SsoIntegrationConfig): string {
+  /**
+   * Public as of slice 3 (SCIM) — `ScimService` calls this exact method
+   * (always with an empty `groups` array, since Groups-resource push is
+   * out of this slice's scope) so a SCIM-provisioned user's default role
+   * is resolved by the identical logic an OIDC/SAML JIT-provisioned one
+   * already uses, rather than a second, drift-prone copy. Takes the base
+   * `SsoRoleResolutionConfig` rather than the full `SsoIntegrationConfig`
+   * union — this method only ever reads `roleMapping`/`defaultRoleKey`,
+   * and a tenant can configure SCIM without ever configuring OIDC/SAML
+   * login at all, in which case there is no `protocol` to satisfy the
+   * wider type.
+   */
+  resolveRoleKey(groups: string[], config: SsoRoleResolutionConfig): string {
     if (config.roleMapping) {
       for (const group of groups) {
         const mapped = config.roleMapping[group];

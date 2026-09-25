@@ -49,6 +49,7 @@ import {
   type TenantConfigurationVersion,
   type TenantFeatureEntitlement,
   type TenantIntegration,
+  type ScimProvisioningStatus,
   type TenantUsageSummary,
   type UserSessionView,
   type VerticalPosition,
@@ -1910,6 +1911,13 @@ function IntegrationsTab({ companyId }: { companyId: string }) {
   // Phase 2 gap-fill item #2 — rotating an integration secret is a
   // @RequireStepUp() route.
   const { runWithStepUp, stepUpModal } = useStepUp();
+  // Phase 3 item #1, slice 3 — SCIM provisioning status/token, loaded and
+  // managed separately from the `sso` card's own config fields above (see
+  // ScimAdminController's doc comment on why this is a dedicated surface).
+  const [scimStatus, setScimStatus] = useState<ScimProvisioningStatus | null>(null);
+  const [scimToken, setScimToken] = useState<string | null>(null);
+  const [scimBusy, setScimBusy] = useState(false);
+  const [scimError, setScimError] = useState<string | null>(null);
 
   /** `INTEGRATION_FIELDS[key]` for every provider except `sso`, whose field set depends on `ssoProtocol` instead of being fixed. */
   function fieldsFor(providerKey: IntegrationProviderKey): IntegrationField[] {
@@ -1937,10 +1945,47 @@ function IntegrationsTab({ companyId }: { companyId: string }) {
     }
   }
 
+  async function loadScimStatus() {
+    try {
+      setScimStatus(await api.getScimStatus(companyId));
+    } catch {
+      setScimError("Could not load SCIM provisioning status.");
+    }
+  }
+
   useEffect(() => {
     load();
+    loadScimStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId]);
+
+  async function generateScimToken() {
+    setScimBusy(true);
+    setScimError(null);
+    try {
+      const response = await runWithStepUp(() => api.generateScimToken(companyId));
+      setScimToken(response.token);
+      await loadScimStatus();
+    } catch (err) {
+      setScimError(err instanceof ApiError ? err.message : "Could not generate a SCIM token.");
+    } finally {
+      setScimBusy(false);
+    }
+  }
+
+  async function disableScim() {
+    setScimBusy(true);
+    setScimError(null);
+    try {
+      await runWithStepUp(() => api.disableScim(companyId));
+      setScimToken(null);
+      await loadScimStatus();
+    } catch (err) {
+      setScimError(err instanceof ApiError ? err.message : "Could not disable SCIM provisioning.");
+    } finally {
+      setScimBusy(false);
+    }
+  }
 
   function setDraftField(providerKey: string, fieldKey: string, value: string) {
     setDrafts((prev) => ({ ...prev, [providerKey]: { ...prev[providerKey], [fieldKey]: value } }));
@@ -2085,6 +2130,66 @@ function IntegrationsTab({ companyId }: { companyId: string }) {
                     {p === "oidc" ? "OpenID Connect" : "SAML 2.0"}
                   </label>
                 ))}
+              </div>
+            )}
+            {integration.providerKey === "sso" && (
+              <div className="rounded-lg border border-black/10 bg-black/[0.02] p-3 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-xs font-semibold">
+                    SCIM provisioning{" "}
+                    <span
+                      className={`ml-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+                        scimStatus?.enabled ? "bg-green-100 text-green-800" : "bg-gray-200 text-gray-600"
+                      }`}
+                    >
+                      {scimStatus?.enabled ? "Enabled" : "Disabled"}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={generateScimToken}
+                      disabled={scimBusy}
+                      className="text-xs font-semibold px-2.5 py-1 rounded-lg border border-black/10 disabled:opacity-50"
+                    >
+                      {scimStatus?.hasToken ? "Rotate token" : "Generate token"}
+                    </button>
+                    {scimStatus?.enabled && (
+                      <button
+                        onClick={disableScim}
+                        disabled={scimBusy}
+                        className="text-xs font-semibold px-2.5 py-1 rounded-lg border border-black/10 text-danger disabled:opacity-50"
+                      >
+                        Disable
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <p className="text-xs text-label-tertiary">
+                  Lets this tenant's identity provider automatically create and disable portal logins,
+                  independently of the sign-in protocol above. Give your IdP's SCIM app config the base
+                  URL below and, when you generate a token, the token shown once beneath it.
+                </p>
+                {scimStatus && (
+                  <code className="block text-xs break-all bg-white rounded px-2 py-1.5 border border-black/10">
+                    {scimStatus.baseUrl}
+                  </code>
+                )}
+                {scimToken && (
+                  <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 space-y-1.5">
+                    <p className="text-xs font-semibold text-amber-900">New SCIM token — shown once, copy it now:</p>
+                    <code className="block text-xs break-all bg-white rounded px-2 py-1.5 border border-amber-200">
+                      {scimToken}
+                    </code>
+                    <p className="text-xs text-amber-800">
+                      Rotating or disabling invalidates this token immediately — there is no grace period,
+                      since it controls provisioning of portal access.
+                    </p>
+                    <button onClick={() => setScimToken(null)} className="text-xs font-semibold text-amber-900 underline">
+                      Dismiss
+                    </button>
+                  </div>
+                )}
+                {scimError && <p className="text-xs text-danger">{scimError}</p>}
               </div>
             )}
             <div className="space-y-2">
