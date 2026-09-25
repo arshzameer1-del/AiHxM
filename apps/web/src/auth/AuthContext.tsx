@@ -1,6 +1,15 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
 import type { MeResponse } from "@aihxm/shared-types";
-import { api, clearToken, getToken, setToken, SESSION_EXPIRED_EVENT } from "../api/client";
+import {
+  api,
+  clearToken,
+  getLastTenantSlug,
+  getToken,
+  setLastTenantSlug,
+  setToken,
+  SESSION_EXPIRED_EVENT,
+} from "../api/client";
 
 /**
  * Phase 3: real password + mandatory-MFA login is a multi-step exchange
@@ -31,22 +40,35 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const navigate = useNavigate();
   const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(getToken()));
   const [identity, setIdentity] = useState<MeResponse | null>(null);
   const [identityLoading, setIdentityLoading] = useState(() => Boolean(getToken()));
 
+  // Real bug reported straight from production: every "Log out" (and every
+  // auto-logout after a 401) sent EVERYONE to the shared /login page, even
+  // a tenant admin/employee who signed in at their own /:companySlug/login
+  // and never uses that shared page at all. `identity?.companySlug` is this
+  // tab's live answer; `getLastTenantSlug()` is the fallback for the case
+  // this logout fires before identity ever loaded this session (a stale tab
+  // whose token was already expired) — set from a PRIOR successful load,
+  // by fetchIdentity below.
   const logout = useCallback(() => {
+    const tenantSlug = identity?.companySlug ?? getLastTenantSlug();
     clearToken();
+    setLastTenantSlug(null);
     setIsAuthenticated(false);
     setIdentity(null);
     setIdentityLoading(false);
-  }, []);
+    navigate(tenantSlug ? `/${tenantSlug}/login` : "/login", { replace: true });
+  }, [identity, navigate]);
 
   const fetchIdentity = useCallback(async (): Promise<MeResponse> => {
     setIdentityLoading(true);
     try {
       const me = await api.getMe();
       setIdentity(me);
+      setLastTenantSlug(me.companySlug);
       return me;
     } catch (err) {
       // api/client's `request()` already clears the stored token on a 401

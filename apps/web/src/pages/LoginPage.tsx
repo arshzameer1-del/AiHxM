@@ -70,19 +70,48 @@ export function LoginPage() {
   // undefined on the shared "/login" route, a real slug on "/:companySlug/login".
   const tenantSlug = companySlug ?? null;
   const [tenantBranding, setTenantBranding] = useState<PublicTenantBranding | null>(null);
+  // Real complaint from production: aihxm.com/<anything>/login rendered a
+  // fully working-looking sign-in form for a slug that isn't any company at
+  // all — this used to be deliberate (avoid telling a stranger which slugs
+  // are real), but the platform owner wants the opposite: a company URL
+  // that isn't one Platform Admin actually provisioned should say so, not
+  // quietly act like a normal login page. GET /public/tenants/:slug/branding
+  // already 404s for a slug with no matching, non-archived/churned company
+  // (PublicBrandingService.findVisibleCompany) — this just now acts on that
+  // instead of swallowing it. "checking" (not "valid") is the default state
+  // for a tenant URL so the form never flashes into view before the slug is
+  // confirmed real, matching AihxmLogo's "don't paint, then repaint" rule.
+  const [tenantSlugState, setTenantSlugState] = useState<"n/a" | "checking" | "valid" | "not-found">(
+    tenantSlug ? "checking" : "n/a"
+  );
 
   useEffect(() => {
-    if (!tenantSlug) return;
+    if (!tenantSlug) {
+      setTenantSlugState("n/a");
+      return;
+    }
+    setTenantSlugState("checking");
     let cancelled = false;
     api
       .getPublicTenantBranding(tenantSlug)
       .then((branding) => {
-        if (!cancelled) setTenantBranding(branding);
+        if (cancelled) return;
+        setTenantBranding(branding);
+        setTenantSlugState("valid");
       })
-      .catch(() => {
-        // No branding for this slug (unknown/suspended company, or none
-        // uploaded) — fall back to the default AIHXM look silently. This
-        // page still works either way; branding is cosmetic.
+      .catch((err) => {
+        if (cancelled) return;
+        if (err instanceof ApiError && err.status === 404) {
+          // Confirmed: no such company (or it's archived/churned) — this is
+          // the case to actually block, not just leave undecorated.
+          setTenantSlugState("not-found");
+          return;
+        }
+        // Any other failure (offline, 500, etc.) is a reachability problem,
+        // not proof the slug is wrong — fail open so a real tenant isn't
+        // locked out of their own login page by a network hiccup. Branding
+        // itself stays cosmetic-only in this case, same as before.
+        setTenantSlugState("valid");
       });
     return () => {
       cancelled = true;
@@ -213,8 +242,28 @@ export function LoginPage() {
       }
     : undefined;
 
+  const showForm = !tenantSlug || tenantSlugState === "valid";
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-4" style={pageStyle}>
+      {tenantSlug && tenantSlugState === "checking" && (
+        // Same footprint as the real card, painted empty — never show the
+        // form, then yank it away a moment later once the 404 comes back.
+        <div className="w-full max-w-sm bg-card rounded-card p-6 shadow-sm" style={{ height: 260 }} aria-hidden="true" />
+      )}
+
+      {tenantSlug && tenantSlugState === "not-found" && (
+        <div className="w-full max-w-sm bg-card rounded-card p-6 shadow-sm text-center">
+          <AihxmLogo size={28} className="mx-auto mb-4" />
+          <h1 className="text-lg font-semibold mb-2">This company page doesn't exist</h1>
+          <p className="text-sm text-label-tertiary">
+            &ldquo;{tenantSlug}&rdquo; isn&apos;t a company set up on AIHXM. Check the link your employer gave you,
+            or ask your HR team for the correct sign-in address.
+          </p>
+        </div>
+      )}
+
+      {showForm && (
       <div className="w-full max-w-sm bg-card rounded-card p-6 shadow-sm">
         <div className="mb-1">
           {tenantBranding?.hasLogo ? (
@@ -431,14 +480,17 @@ export function LoginPage() {
           </form>
         )}
       </div>
+      )}
 
       {/* Per the platform's "SAP strategy" branding direction: on a
         tenant's own subdomain (where the card above shows THEIR logo/
         colors), still surface AIHXM as the platform underneath — but as a
         small, unobtrusive credit, not co-branding. Never shown on the
         default /login (no tenantSlug), since that page already IS the
-        AIHXM mark. */}
-      {tenantSlug && (
+        AIHXM mark. Also withheld while "checking"/"not-found" — this credit
+        belongs to a real sign-in page, not a loading placeholder or an
+        error card. */}
+      {showForm && tenantSlug && (
         <div className="mt-5 flex items-center gap-2 text-sm text-label-tertiary">
           <span>Powered by</span>
           <AihxmLogo size={22} withWordmark={false} />

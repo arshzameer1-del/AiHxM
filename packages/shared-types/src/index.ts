@@ -571,6 +571,12 @@ export type MeResponse = {
   isPlatformAdmin: boolean;
   companyId: string | null;
   companyName: string | null;
+  /** The company's slug (companies.slug) — null for Platform Admin. Lets the
+   * authenticated portal shell fetch this tenant's own uploaded branding
+   * (logo/colors) from the same public, no-auth /public/tenants/:slug/branding
+   * endpoint the tenant login page already uses, instead of hardcoding the
+   * plain "AI HXM" wordmark once a session exists. */
+  companySlug: string | null;
   email: string;
   fullName: string;
   roleKeys: TenantRoleKey[];

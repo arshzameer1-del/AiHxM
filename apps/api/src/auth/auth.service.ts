@@ -373,6 +373,7 @@ export class AuthService {
         isPlatformAdmin: true,
         companyId: null,
         companyName: null,
+        companySlug: null,
         email: admin?.email ?? "",
         fullName: admin?.full_name ?? "",
         roleKeys: [],
@@ -400,9 +401,10 @@ export class AuthService {
         "SELECT email FROM user_accounts WHERE id = $1",
         [claims.sub]
       );
-      const company = await client.query<{ name: string }>("SELECT name FROM companies WHERE id = $1", [
-        companyId,
-      ]);
+      const company = await client.query<{ name: string; slug: string }>(
+        "SELECT name, slug FROM companies WHERE id = $1",
+        [companyId]
+      );
       const employee = await client.query<{ id: string; first_name: string; last_name: string }>(
         "SELECT id, first_name, last_name FROM employees WHERE user_account_id = $1 AND company_id = $2",
         [claims.sub, companyId]
@@ -432,6 +434,7 @@ export class AuthService {
         isPlatformAdmin: false,
         companyId,
         companyName: company.rows[0]?.name ?? null,
+        companySlug: company.rows[0]?.slug ?? null,
         email: account.rows[0]?.email ?? "",
         fullName: fullName ?? account.rows[0]?.email ?? "",
         roleKeys: roles.rows.map((r) => r.key),

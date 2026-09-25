@@ -152,6 +152,31 @@ export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
 }
 
+// Which tenant's own /:companySlug/login this session's identity last
+// resolved to (MeResponse.companySlug), null for a Platform Admin session.
+// AuthContext writes this every time GET /auth/me succeeds and reads it
+// back on logout, so "Log out" (and a 401-driven auto-logout) can send a
+// tenant's admin/employee back to THEIR OWN login page instead of the
+// shared /login the Platform Admin uses — before this, every logout landed
+// on /login regardless of which URL the session actually signed in from.
+// Kept in localStorage (not the React state that's about to be cleared)
+// specifically so it also survives the case where the token is already
+// expired before this tab ever re-fetched identity (e.g. a stale tab
+// resumed after the JWT's 12-hour window lapsed).
+const LAST_TENANT_SLUG_KEY = "aihxm.lastTenantSlug";
+
+export function getLastTenantSlug(): string | null {
+  return localStorage.getItem(LAST_TENANT_SLUG_KEY);
+}
+
+export function setLastTenantSlug(slug: string | null): void {
+  if (slug) {
+    localStorage.setItem(LAST_TENANT_SLUG_KEY, slug);
+  } else {
+    localStorage.removeItem(LAST_TENANT_SLUG_KEY);
+  }
+}
+
 // Real bug found from a production screenshot: a 401 from ANY call, not
 // just AuthContext's own getMe(), already cleared the stored token below —
 // but nothing told the rest of the app that had happened. AuthContext's
