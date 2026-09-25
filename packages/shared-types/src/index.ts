@@ -61,12 +61,21 @@ export type EmployeeNumberFormat = {
 // stream — see BrandingAssetSlot.
 export type BrandingAssetSlot = "logo" | "favicon" | "login-background";
 
+/** Where the logo sits within its own header strip — see `logoBackgroundColor` below. */
+export type LogoAlignment = "left" | "center" | "right";
+
 export type CompanyBranding = {
   primaryColor?: string;
   secondaryColor?: string;
   hasLogo: boolean;
   hasFavicon: boolean;
   hasLoginBackground: boolean;
+  /** Defaults to "left" (the layout every company had before this existed). */
+  logoAlignment?: LogoAlignment;
+  /** Logo's rendered height in px, both here and on the public login page. Defaults to 32 (the previous hardcoded size). */
+  logoHeightPx?: number;
+  /** Background color of the strip the logo sits in (distinct from `primaryColor`, which colors buttons/links) — undefined/omitted means "match the card" (white), the previous look. */
+  logoBackgroundColor?: string;
 };
 
 /**
@@ -84,6 +93,9 @@ export type PublicTenantBranding = {
   secondaryColor?: string;
   hasLogo: boolean;
   hasLoginBackground: boolean;
+  logoAlignment?: LogoAlignment;
+  logoHeightPx?: number;
+  logoBackgroundColor?: string;
 };
 
 /**

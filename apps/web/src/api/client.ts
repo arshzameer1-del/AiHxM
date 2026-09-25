@@ -63,6 +63,7 @@ import type {
   LeavePolicyView,
   LeaveRequestView,
   LoginResult,
+  LogoAlignment,
   MeResponse,
   ModuleCatalogEntry,
   ModuleKey,
@@ -642,7 +643,13 @@ export const api = {
   updateCompanyConfig: (
     id: string,
     patch: {
-      branding?: { primaryColor?: string; secondaryColor?: string };
+      branding?: {
+        primaryColor?: string;
+        secondaryColor?: string;
+        logoAlignment?: LogoAlignment;
+        logoHeightPx?: number;
+        logoBackgroundColor?: string;
+      };
       enabledModules?: ModuleKey[];
       employeeNumberFormat?: Partial<EmployeeNumberFormat>;
     }

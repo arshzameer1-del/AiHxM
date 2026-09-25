@@ -71,6 +71,8 @@ describe("Public tenant branding HTTP surface (e2e) — no auth, per-company log
       primaryColor: "#112233",
       hasLogo: false,
       hasLoginBackground: false,
+      logoAlignment: "left",
+      logoHeightPx: 32,
     });
   });
 

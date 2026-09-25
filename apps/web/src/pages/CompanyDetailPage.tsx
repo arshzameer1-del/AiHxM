@@ -32,6 +32,7 @@ import {
   type CompanyStatus,
   type HealthCheckResult,
   type IntegrationProviderKey,
+  type LogoAlignment,
   type SupportTicket,
   type SupportTicketPriority,
   type SupportTicketStatus,
@@ -662,6 +663,17 @@ function BrandingTab({
   const [primaryColor, setPrimaryColor] = useState(branding.primaryColor ?? "#2563EB");
   const [secondaryColor, setSecondaryColor] = useState(branding.secondaryColor ?? "#0F172A");
   const [savingColors, setSavingColors] = useState(false);
+  // Logo layout — how the uploaded logo sits on the tenant's own /:slug/login
+  // page: which side of its own header strip it sits on, how big it renders,
+  // and that strip's background color (distinct from primaryColor/
+  // secondaryColor above, which color buttons/links, not this strip).
+  // Reported straight from a real tenant: the logo always rendered small,
+  // pinned left, on a strip that could only ever be white — no admin control
+  // over any of the three.
+  const [logoAlignment, setLogoAlignment] = useState<LogoAlignment>(branding.logoAlignment ?? "left");
+  const [logoHeightPx, setLogoHeightPx] = useState(branding.logoHeightPx ?? 32);
+  const [logoBackgroundColor, setLogoBackgroundColor] = useState(branding.logoBackgroundColor ?? "#FFFFFF");
+  const [savingLogoLayout, setSavingLogoLayout] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -704,6 +716,21 @@ function BrandingTab({
       setError(err instanceof ApiError ? err.message : "Could not save colors.");
     } finally {
       setSavingColors(false);
+    }
+  }
+
+  async function saveLogoLayout() {
+    setSavingLogoLayout(true);
+    setError(null);
+    try {
+      const config = await api.updateCompanyConfig(companyId, {
+        branding: { logoAlignment, logoHeightPx, logoBackgroundColor },
+      });
+      onSaved(config.branding);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not save logo layout.");
+    } finally {
+      setSavingLogoLayout(false);
     }
   }
 
@@ -775,6 +802,90 @@ function BrandingTab({
             className="bg-accent text-white rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-50"
           >
             {savingColors ? "Saving…" : "Save colors"}
+          </button>
+        </div>
+      </section>
+
+      <section className="bg-card rounded-card p-5 shadow-sm space-y-4">
+        <div>
+          <h2 className="font-semibold text-sm uppercase tracking-wide text-label-tertiary mb-1">Logo layout</h2>
+          <p className="text-xs text-label-tertiary">
+            How the logo above sits on this company's own sign-in page (aihxm.com/{"<slug>"}/login) — its
+            position, size, and the background strip behind it.
+          </p>
+        </div>
+
+        {/* Live preview — same strip this renders on the real login page
+          (LoginPage.tsx), so a change here is judged before it's saved. */}
+        <div className="rounded-lg border border-black/10 overflow-hidden">
+          <div
+            className="flex items-center px-4 py-3"
+            style={{
+              backgroundColor: logoBackgroundColor,
+              justifyContent: logoAlignment === "center" ? "center" : logoAlignment === "right" ? "flex-end" : "flex-start",
+            }}
+          >
+            {previews.logo ? (
+              <img src={previews.logo} alt="Logo preview" style={{ height: logoHeightPx }} className="max-w-full object-contain" />
+            ) : (
+              <span className="text-sm font-semibold" style={{ height: logoHeightPx, lineHeight: `${logoHeightPx}px` }}>
+                {/* No logo uploaded yet — preview the strip itself with a stand-in label. */}
+                Your Company
+              </span>
+            )}
+          </div>
+          <div className="bg-card px-4 py-2 text-xs text-label-tertiary border-t border-black/5">Sign in</div>
+        </div>
+
+        <div className="flex flex-wrap items-end gap-6">
+          <div>
+            <div className="text-xs font-medium text-label-tertiary mb-1.5">Position</div>
+            <div className="inline-flex rounded-lg border border-black/10 overflow-hidden">
+              {(["left", "center", "right"] as LogoAlignment[]).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => setLogoAlignment(option)}
+                  className={`px-3 py-1.5 text-xs font-medium capitalize ${
+                    logoAlignment === option ? "bg-accent text-white" : "bg-transparent hover:bg-black/5"
+                  }`}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-label-tertiary mb-1.5">
+              Size — {logoHeightPx}px
+            </label>
+            <input
+              type="range"
+              min={16}
+              max={120}
+              value={logoHeightPx}
+              onChange={(e) => setLogoHeightPx(Number(e.target.value))}
+              className="w-40 align-middle"
+            />
+          </div>
+
+          <label className="text-sm flex items-center gap-2">
+            Strip background
+            <input
+              type="color"
+              value={logoBackgroundColor}
+              onChange={(e) => setLogoBackgroundColor(e.target.value)}
+              className="h-8 w-12 rounded border border-black/10"
+            />
+          </label>
+
+          <button
+            onClick={saveLogoLayout}
+            disabled={savingLogoLayout}
+            className="bg-accent text-white rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-50"
+          >
+            {savingLogoLayout ? "Saving…" : "Save logo layout"}
           </button>
         </div>
       </section>

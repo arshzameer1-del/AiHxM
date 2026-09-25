@@ -242,6 +242,15 @@ export function LoginPage() {
       }
     : undefined;
 
+  // Logo layout (CompanyDetailPage's "Logo layout" panel, TM-015) — where
+  // the logo sits in its own header strip, how big it renders, and that
+  // strip's own background color. Defaults (left/32px/no override) match
+  // the fixed layout every company had before these were configurable, so
+  // a company that's never touched this setting looks exactly as before.
+  const logoAlignment = tenantBranding?.logoAlignment ?? "left";
+  const logoHeightPx = tenantBranding?.logoHeightPx ?? 32;
+  const logoJustifyContent = logoAlignment === "center" ? "center" : logoAlignment === "right" ? "flex-end" : "flex-start";
+
   const showForm = !tenantSlug || tenantSlugState === "valid";
 
   return (
@@ -264,13 +273,17 @@ export function LoginPage() {
       )}
 
       {showForm && (
-      <div className="w-full max-w-sm bg-card rounded-card p-6 shadow-sm">
-        <div className="mb-1">
+      <div className="w-full max-w-sm bg-card rounded-card shadow-sm overflow-hidden">
+        <div
+          className="flex items-center px-6 py-4"
+          style={{ backgroundColor: tenantBranding?.logoBackgroundColor, justifyContent: logoJustifyContent }}
+        >
           {tenantBranding?.hasLogo ? (
             <img
               src={publicTenantBrandingAssetUrl(tenantBranding.slug, "logo")}
               alt={tenantBranding.companyName}
-              className="h-8 max-w-full object-contain"
+              style={{ height: logoHeightPx }}
+              className="max-w-full object-contain"
             />
           ) : tenantBranding ? (
             <h1 className="text-2xl font-bold">{tenantBranding.companyName}</h1>
@@ -278,6 +291,7 @@ export function LoginPage() {
             <AihxmLogo size={28} />
           )}
         </div>
+        <div className="px-6 pt-4 pb-6">
         <p className="text-sm text-label-tertiary mb-6">Sign in</p>
 
         {error && <div className="text-danger text-sm mb-4">{error}</div>}
@@ -479,6 +493,7 @@ export function LoginPage() {
             </button>
           </form>
         )}
+        </div>
       </div>
       )}
 

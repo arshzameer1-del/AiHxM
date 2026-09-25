@@ -13,6 +13,7 @@ import type {
   Company,
   CompanyAdmin,
   CompanyAdminStatus,
+  CompanyBranding,
   CompanyConfig,
   CompanyDashboardRow,
   CompanyDetail,
@@ -85,6 +86,9 @@ function rowToConfig(row: any): CompanyConfig {
       hasLogo: Boolean(branding.logoStoragePath),
       hasFavicon: Boolean(branding.faviconStoragePath),
       hasLoginBackground: Boolean(branding.loginBackgroundStoragePath),
+      logoAlignment: branding.logoAlignment ?? "left",
+      logoHeightPx: branding.logoHeightPx ?? 32,
+      logoBackgroundColor: branding.logoBackgroundColor ?? undefined,
     },
     enabledModules: row.enabled_modules ?? [],
     employeeNumberFormat: row.employee_number_format,
@@ -603,7 +607,13 @@ export class CompaniesService {
     claims: RequestClaims,
     companyId: string,
     patch: {
-      branding?: { primaryColor?: string; secondaryColor?: string };
+      branding?: {
+        primaryColor?: string;
+        secondaryColor?: string;
+        logoAlignment?: CompanyBranding["logoAlignment"];
+        logoHeightPx?: number;
+        logoBackgroundColor?: string;
+      };
       enabledModules?: ModuleKey[];
       employeeNumberFormat?: Partial<EmployeeNumberFormat>;
     }

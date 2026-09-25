@@ -65,6 +65,9 @@ export class PublicBrandingService {
         secondaryColor: branding.secondaryColor ?? undefined,
         hasLogo: Boolean(branding.logoStoragePath),
         hasLoginBackground: Boolean(branding.loginBackgroundStoragePath),
+        logoAlignment: branding.logoAlignment ?? "left",
+        logoHeightPx: branding.logoHeightPx ?? 32,
+        logoBackgroundColor: branding.logoBackgroundColor ?? undefined,
       };
     });
   }
