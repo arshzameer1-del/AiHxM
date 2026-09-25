@@ -1627,6 +1627,9 @@ function UsageTab({ companyId }: { companyId: string }) {
         </div>
         <p className="text-xs text-label-tertiary">
           The quota can't be set below current usage — enforced server-side, not just in this form.
+          Tenant Management gap-fill Phase 1 item #10: employee document uploads are also blocked
+          server-side once they'd push a tenant over this quota, and only PDF, JPEG, PNG, WEBP, Word,
+          and Excel files are accepted regardless of quota headroom.
         </p>
       </section>
     </div>
@@ -1858,12 +1861,23 @@ const INTEGRATION_FIELDS: Record<IntegrationProviderKey, { key: string; label: s
   ],
 };
 
+// Tenant Management gap-fill Phase 1 item #12 — only these providers'
+// secrets are issued BY AIHXM, so only these offer Rotate. Mirrors
+// ROTATABLE_PROVIDER_KEYS in integrations.service.ts.
+const ROTATABLE_INTEGRATION_KEYS: TenantIntegration["providerKey"][] = ["biometric_device", "webhook"];
+
 function IntegrationsTab({ companyId }: { companyId: string }) {
   const [integrations, setIntegrations] = useState<TenantIntegration[] | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Record<string, string>>>({});
   const [error, setError] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [savedKey, setSavedKey] = useState<string | null>(null);
+  const [rotating, setRotating] = useState<string | null>(null);
+  const [rotatedSecret, setRotatedSecret] = useState<{
+    providerKey: string;
+    newSecretValue: string;
+    previousSecretExpiresAt: string;
+  } | null>(null);
 
   async function load() {
     try {
@@ -1938,6 +1952,30 @@ function IntegrationsTab({ companyId }: { companyId: string }) {
     }
   }
 
+  async function rotateSecret(integration: TenantIntegration) {
+    setRotating(integration.providerKey);
+    setError(null);
+    try {
+      const response = await api.rotateIntegrationSecret(companyId, integration.providerKey);
+      setIntegrations((prev) => prev?.map((x) => (x.providerKey === response.integration.providerKey ? response.integration : x)) ?? prev);
+      setDrafts((prev) => ({
+        ...prev,
+        [integration.providerKey]: Object.fromEntries(
+          Object.entries(response.integration.config).map(([k, v]) => [k, v === null || v === undefined ? "" : String(v)])
+        ),
+      }));
+      setRotatedSecret({
+        providerKey: integration.providerKey,
+        newSecretValue: response.newSecretValue,
+        previousSecretExpiresAt: response.previousSecretExpiresAt,
+      });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not rotate this secret.");
+    } finally {
+      setRotating(null);
+    }
+  }
+
   return (
     <section className="bg-card rounded-card p-5 shadow-sm space-y-5">
       <div>
@@ -1984,7 +2022,7 @@ function IntegrationsTab({ companyId }: { companyId: string }) {
                 </label>
               ))}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <button
                 onClick={() => save(integration)}
                 disabled={busyKey === integration.providerKey}
@@ -1993,7 +2031,43 @@ function IntegrationsTab({ companyId }: { companyId: string }) {
                 {busyKey === integration.providerKey ? "Saving…" : "Save"}
               </button>
               {savedKey === integration.providerKey && <span className="text-xs text-green-700">Saved</span>}
+              {ROTATABLE_INTEGRATION_KEYS.includes(integration.providerKey) && integration.hasSecrets && (
+                <button
+                  onClick={() => rotateSecret(integration)}
+                  disabled={rotating === integration.providerKey}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-black/10 disabled:opacity-50"
+                >
+                  {rotating === integration.providerKey ? "Rotating…" : "Rotate"}
+                </button>
+              )}
             </div>
+            {integration.previousSecretExpiresAt && (
+              <p className="text-xs text-label-tertiary">
+                Previous secret still honored until{" "}
+                {new Date(integration.previousSecretExpiresAt).toLocaleString()}.
+              </p>
+            )}
+            {rotatedSecret && rotatedSecret.providerKey === integration.providerKey && (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 space-y-1.5">
+                <p className="text-xs font-semibold text-amber-900">
+                  New secret — shown once, copy it now:
+                </p>
+                <code className="block text-xs break-all bg-white rounded px-2 py-1.5 border border-amber-200">
+                  {rotatedSecret.newSecretValue}
+                </code>
+                <p className="text-xs text-amber-800">
+                  The previous secret keeps working until{" "}
+                  {new Date(rotatedSecret.previousSecretExpiresAt).toLocaleString()}, so you can update the
+                  device or endpoint without an outage.
+                </p>
+                <button
+                  onClick={() => setRotatedSecret(null)}
+                  className="text-xs font-semibold text-amber-900 underline"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -2255,6 +2329,14 @@ function SupportTicketsTab({ companyId }: { companyId: string }) {
                 <div className="text-xs text-label-tertiary truncate">{t.description}</div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
+                {t.slaBreached && (
+                  <span
+                    className="text-xs font-semibold px-2 py-0.5 rounded-full bg-red-600 text-white"
+                    title={`This ticket has been open past its ${t.priority}-priority SLA target (due ${new Date(t.dueBy).toLocaleString()})`}
+                  >
+                    SLA breached
+                  </span>
+                )}
                 <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${TICKET_PRIORITY_STYLES[t.priority]}`}>
                   {t.priority}
                 </span>
@@ -2298,6 +2380,9 @@ function SupportTicketsTab({ companyId }: { companyId: string }) {
                 className="text-xs rounded-lg border border-black/10 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent"
               />
               <span className="text-[11px] text-label-tertiary/70">Created {new Date(t.createdAt).toLocaleString()}</span>
+              <span className={`text-[11px] ${t.slaBreached ? "text-danger font-semibold" : "text-label-tertiary/70"}`}>
+                Due {new Date(t.dueBy).toLocaleString()}
+              </span>
             </div>
           </div>
         ))}
@@ -2329,7 +2414,7 @@ function TenantAuditTab({ companyId }: { companyId: string }) {
 
   useEffect(() => {
     api
-      .listAuditLog(companyId)
+      .listAuditLog({ companyId })
       .then(setEntries)
       .catch(() => setError("Could not load the audit log for this tenant."));
   }, [companyId]);
@@ -3068,6 +3153,10 @@ function AdminsTab({
   // to redo enrollment from scratch on their next sign-in.
   const [confirmingMfaResetFor, setConfirmingMfaResetFor] = useState<string | null>(null);
   const [mfaResetMessage, setMfaResetMessage] = useState<string | null>(null);
+  // Tenant Management gap-fill Phase 1 item #7 — user access review status.
+  const [reviewingFor, setReviewingFor] = useState<string | null>(null);
+  // Tenant Management gap-fill Phase 1 item #8 — login/invitation lifecycle.
+  const [revokingFor, setRevokingFor] = useState<string | null>(null);
 
   async function handleAdd(e: FormEvent) {
     e.preventDefault();
@@ -3156,6 +3245,52 @@ function AdminsTab({
     }
   }
 
+  // Tenant Management gap-fill Phase 1 item #7 — attests that this admin's
+  // access grant has been looked at, without changing anything about it.
+  async function handleMarkReviewed(admin: CompanyAdmin) {
+    setError(null);
+    setReviewingFor(admin.id);
+    try {
+      const updated = await api.markAdminAccessReviewed(companyId, admin.id);
+      onChanged(admins.map((a) => (a.id === admin.id ? updated : a)));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not mark this admin's access as reviewed.");
+    } finally {
+      setReviewingFor(null);
+    }
+  }
+
+  // Tenant Management gap-fill Phase 1 item #8 — rescinds a login before
+  // it's ever been used. Only offered while loginStatus is pending/expired
+  // (see the JSX below) — an established login uses Lock instead.
+  async function handleRevoke(admin: CompanyAdmin) {
+    setError(null);
+    setRevokingFor(admin.id);
+    try {
+      const updated = await api.revokeAdminLogin(companyId, admin.id);
+      onChanged(admins.map((a) => (a.id === admin.id ? updated : a)));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not revoke this admin's login.");
+    } finally {
+      setRevokingFor(null);
+    }
+  }
+
+  const LOGIN_STATUS_LABEL: Record<CompanyAdmin["loginStatus"], string> = {
+    no_login: "No login",
+    pending: "Pending",
+    expired: "Pending (unused)",
+    active: "Active",
+    revoked: "Revoked",
+  };
+  const LOGIN_STATUS_CLASS: Record<CompanyAdmin["loginStatus"], string> = {
+    no_login: "bg-black/5 text-label-tertiary",
+    pending: "bg-amber-100 text-amber-800",
+    expired: "bg-amber-100 text-amber-800",
+    active: "bg-emerald-100 text-emerald-800",
+    revoked: "bg-red-100 text-red-800",
+  };
+
   return (
     <section className="bg-card rounded-card p-5 shadow-sm space-y-5">
       <div>
@@ -3231,10 +3366,33 @@ function AdminsTab({
                     Login ID: <span className="font-mono">{admin.loginId}</span>
                   </div>
                 )}
+                <div className="text-xs text-label-tertiary">
+                  Access last reviewed:{" "}
+                  {admin.lastAccessReviewedAt ? auditDateFormat.format(new Date(admin.lastAccessReviewedAt)) : "Never"}
+                </div>
               </div>
               <div className="flex items-center gap-3">
+                <button
+                  onClick={() => handleMarkReviewed(admin)}
+                  disabled={reviewingFor === admin.id}
+                  className="text-xs font-semibold text-accent hover:underline disabled:opacity-40"
+                  title="Attest that you've reviewed this admin's access — doesn't change anything about their account"
+                >
+                  {reviewingFor === admin.id ? "Marking…" : "Mark reviewed"}
+                </button>
                 {admin.hasLogin ? (
-                  <span className="text-xs text-label-tertiary">Has login</span>
+                  <span
+                    className={`text-xs font-medium px-2 py-0.5 rounded-full ${LOGIN_STATUS_CLASS[admin.loginStatus]}`}
+                    title={
+                      admin.loginStatus === "active"
+                        ? `Last signed in ${admin.lastLoginAt ? auditDateFormat.format(new Date(admin.lastLoginAt)) : ""}`
+                        : admin.loginStatus === "revoked"
+                          ? "This login was revoked before it was ever used"
+                          : "This login hasn't been used to sign in yet"
+                    }
+                  >
+                    {LOGIN_STATUS_LABEL[admin.loginStatus]}
+                  </span>
                 ) : (
                   <button
                     onClick={() => {
@@ -3261,9 +3419,26 @@ function AdminsTab({
                       setNewPasswordInput("");
                     }}
                     className="text-xs font-semibold text-accent hover:underline"
-                    title="Set a new password for this admin — use if they forgot theirs"
+                    title={
+                      admin.loginStatus === "active"
+                        ? "Set a new password for this admin — use if they forgot theirs"
+                        : "Issue a fresh password for this admin — use if the first one was lost or never delivered"
+                    }
                   >
-                    Reset password
+                    {admin.loginStatus === "active" ? "Reset password" : "Resend"}
+                  </button>
+                )}
+                {/* Tenant Management gap-fill Phase 1 item #8 — only offered
+                    while the login has never been used; once accepted, Lock
+                    above is the right tool. */}
+                {admin.hasLogin && (admin.loginStatus === "pending" || admin.loginStatus === "expired") && (
+                  <button
+                    onClick={() => handleRevoke(admin)}
+                    disabled={revokingFor === admin.id}
+                    className="text-xs font-semibold text-danger hover:underline disabled:opacity-40"
+                    title="Rescind this login before it's ever used"
+                  >
+                    {revokingFor === admin.id ? "Revoking…" : "Revoke"}
                   </button>
                 )}
                 {admin.hasLogin && (

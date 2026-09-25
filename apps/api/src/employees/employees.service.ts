@@ -39,6 +39,22 @@ const SENSITIVE_FIELDS = ["cnic", "dateOfBirth", "salaryBand", "bankAccountNumbe
 const TENANT_ROLE_KEYS = ["hr_admin", "line_manager", "employee_self_service", "system_admin"] as const;
 const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024; // 10MB — see addDocument()'s doc comment.
 
+// Tenant Management gap-fill Phase 1 item #10 — Storage quota enforcement.
+// A conservative allowlist covering what an HR document vault realistically
+// holds (ID/contract scans, certificates, photos, offer letters, payroll
+// spreadsheets) — executables, scripts, and archives are never acceptable
+// here regardless of a tenant's quota headroom.
+const ALLOWED_DOCUMENT_MIME_TYPES = new Set([
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+]);
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function rowToEmployee(row: any): Record<string, unknown> {
   return {
@@ -390,11 +406,38 @@ export class EmployeesService {
     if (file.size > MAX_DOCUMENT_BYTES) {
       throw new BadRequestException(`File exceeds the ${MAX_DOCUMENT_BYTES / (1024 * 1024)}MB limit`);
     }
+    // Tenant Management gap-fill Phase 1 item #10 — file-type allowlist.
+    if (!ALLOWED_DOCUMENT_MIME_TYPES.has(file.mimetype)) {
+      throw new BadRequestException(
+        `"${file.mimetype}" isn't an allowed file type for employee documents. Allowed types: PDF, JPEG, PNG, WEBP, Word, and Excel files.`
+      );
+    }
 
     return this.db.withClaims(claims, async (client) => {
       const employee = await client.query("SELECT id, company_id FROM employees WHERE id = $1", [employeeId]);
       if (employee.rowCount === 0) throw new NotFoundException("Employee not found");
       const companyId = employee.rows[0].company_id;
+
+      // Tenant Management gap-fill Phase 1 item #10 — storage quota
+      // enforcement. UsageService.getSummary() (TM-027/028) already
+      // SURFACES storageUsedMb/storageQuotaMb from this exact same
+      // SUM(size_bytes) query; this is the first place that actually
+      // BLOCKS an upload once the tenant would go over quota, rather than
+      // just reporting the number after the fact.
+      const quotaRow = await client.query(
+        `SELECT c.storage_quota_mb,
+                (SELECT COALESCE(SUM(size_bytes), 0) FROM employee_documents WHERE company_id = c.id) AS used_bytes
+         FROM companies c WHERE c.id = $1`,
+        [companyId]
+      );
+      const quotaMb = Number(quotaRow.rows[0].storage_quota_mb);
+      const quotaBytes = quotaMb * 1024 * 1024;
+      const usedBytes = Number(quotaRow.rows[0].used_bytes);
+      if (usedBytes + file.size > quotaBytes) {
+        throw new BadRequestException(
+          `This upload would exceed the tenant's storage quota (${quotaMb} MB). Ask a Platform Admin to raise it, or remove unused documents first.`
+        );
+      }
 
       const stored = await this.fileStorage.save(companyId, employeeId, file.originalname, file.buffer);
 

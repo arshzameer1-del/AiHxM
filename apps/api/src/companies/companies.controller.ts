@@ -226,6 +226,28 @@ export class CompaniesController {
     return this.companies.unlockAdminAccount(claims, id, adminId);
   }
 
+  // Tenant Management gap-fill Phase 1 item #8 — the "Revoke" half of
+  // login/invitation lifecycle visibility. No body: nothing to configure.
+  @Post(":id/admins/:adminId/account/revoke")
+  revokeAdminLogin(
+    @CurrentClaims() claims: RequestClaims,
+    @Param("id") id: string,
+    @Param("adminId") adminId: string
+  ) {
+    return this.companies.revokeAdminLogin(claims, id, adminId);
+  }
+
+  // Tenant Management gap-fill Phase 1 item #7 — periodic access-review
+  // attestation. No body: nothing to configure, just a timestamp + who.
+  @Post(":id/admins/:adminId/access-review")
+  markAdminAccessReviewed(
+    @CurrentClaims() claims: RequestClaims,
+    @Param("id") id: string,
+    @Param("adminId") adminId: string
+  ) {
+    return this.companies.markAdminAccessReviewed(claims, id, adminId);
+  }
+
   @Post(":id/impersonate")
   impersonate(
     @CurrentClaims() claims: RequestClaims,

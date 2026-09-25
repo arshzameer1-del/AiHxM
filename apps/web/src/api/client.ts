@@ -8,6 +8,7 @@ import type {
   AttendanceCorrectionRequestView,
   AttendanceRecordView,
   AuditLogEntry,
+  AuditLogFilters,
   BrandingAssetSlot,
   CalculatePayrollRunResponse,
   CalibrateReviewRequest,
@@ -84,6 +85,7 @@ import type {
   PlatformAdmin,
   PlatformBranding,
   PlatformSavedView,
+  PlatformSavedViewType,
   PolicyType,
   PublicTenantBranding,
   RatingDistributionView,
@@ -122,6 +124,7 @@ import type {
   TenantConfigurationVersion,
   TenantFeatureEntitlement,
   TenantIntegration,
+  RotateIntegrationSecretResponse,
   TenantUsageSummary,
   UpdateChecklistItemRequest,
   UpdateEmployeeGroupRequest,
@@ -499,13 +502,18 @@ export const api = {
   approveCompanyDeletion: (id: string) =>
     request<Company>(`/platform/companies/${id}/deletion-request/approve`, { method: "POST" }),
 
-  // TM-003 — saved, reusable Tenant Directory filter combinations.
-  listSavedViews: () => request<PlatformSavedView[]>("/platform/saved-views"),
+  // TM-003 — saved, reusable filter combinations. Extended by Tenant
+  // Management gap-fill Phase 1 item #6 to also cover Audit Log searches
+  // (`viewType`); every call site names its own type explicitly so a
+  // Tenant Directory view and an Audit Log search never show up mixed
+  // together in the wrong list.
+  listSavedViews: (viewType: PlatformSavedViewType) =>
+    request<PlatformSavedView[]>(`/platform/saved-views?viewType=${viewType}`),
 
-  createSavedView: (name: string, filters: CompanyListFilters) =>
+  createSavedView: (name: string, viewType: PlatformSavedViewType, filters: CompanyListFilters | AuditLogFilters) =>
     request<PlatformSavedView>("/platform/saved-views", {
       method: "POST",
-      body: JSON.stringify({ name, filters }),
+      body: JSON.stringify({ name, viewType, filters }),
     }),
 
   deleteSavedView: (id: string) =>
@@ -599,6 +607,13 @@ export const api = {
     request<TenantIntegration>(`/platform/companies/${companyId}/integrations/${providerKey}`, {
       method: "PATCH",
       body: JSON.stringify(patch),
+    }),
+
+  // Tenant Management gap-fill Phase 1 item #12 — rotate an AIHXM-issued
+  // integration secret (biometric_device apiKey / webhook signingSecret).
+  rotateIntegrationSecret: (companyId: string, providerKey: IntegrationProviderKey) =>
+    request<RotateIntegrationSecretResponse>(`/platform/companies/${companyId}/integrations/${providerKey}/rotate`, {
+      method: "POST",
     }),
 
   // TM-032 — Health dashboard.
@@ -841,14 +856,39 @@ export const api = {
       method: "POST",
     }),
 
+  // Tenant Management gap-fill Phase 1 item #7 — periodic access-review
+  // attestation. No body: nothing to configure, just a timestamp + who.
+  markAdminAccessReviewed: (id: string, adminId: string) =>
+    request<CompanyAdmin>(`/platform/companies/${id}/admins/${adminId}/access-review`, {
+      method: "POST",
+    }),
+
+  // Tenant Management gap-fill Phase 1 item #8 — revoke a login before
+  // it's ever been used (see companies.service.ts's revokeAdminLogin doc
+  // comment for why this is distinct from Lock).
+  revokeAdminLogin: (id: string, adminId: string) =>
+    request<CompanyAdmin>(`/platform/companies/${id}/admins/${adminId}/account/revoke`, {
+      method: "POST",
+    }),
+
   impersonate: (id: string, reason: string) =>
     request<ImpersonateResponse>(`/platform/companies/${id}/impersonate`, {
       method: "POST",
       body: JSON.stringify({ reason }),
     }),
 
-  listAuditLog: (companyId?: string) =>
-    request<AuditLogEntry[]>(`/platform/audit-log${companyId ? `?companyId=${companyId}` : ""}`),
+  // Tenant Management gap-fill Phase 1 item #6 — actor/action/date-range
+  // filters added alongside the original companyId filter.
+  listAuditLog: (filters?: AuditLogFilters) => {
+    const params = new URLSearchParams();
+    if (filters?.companyId) params.set("companyId", filters.companyId);
+    if (filters?.actor) params.set("actor", filters.actor);
+    if (filters?.action) params.set("action", filters.action);
+    if (filters?.from) params.set("from", filters.from);
+    if (filters?.to) params.set("to", filters.to);
+    const qs = params.toString();
+    return request<AuditLogEntry[]>(`/platform/audit-log${qs ? `?${qs}` : ""}`);
+  },
 
   // --- Employee Core (Task #48) --------------------------------------------
   // Every one of these hits the same RLS/RBAC-scoped endpoints Phase 7

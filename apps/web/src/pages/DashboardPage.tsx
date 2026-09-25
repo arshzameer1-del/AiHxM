@@ -70,7 +70,7 @@ export function DashboardPage() {
   }, [filters, load]);
 
   useEffect(() => {
-    api.listSavedViews().then(setSavedViews).catch(() => undefined);
+    api.listSavedViews("tenant_directory").then(setSavedViews).catch(() => undefined);
   }, []);
 
   function toggle<T>(set: Set<T>, value: T, setter: (s: Set<T>) => void) {
@@ -81,17 +81,21 @@ export function DashboardPage() {
   }
 
   function applyView(view: PlatformSavedView) {
-    setSearchInput(view.filters.search ?? "");
-    setDebouncedSearch(view.filters.search ?? "");
-    setStatusFilter(new Set(view.filters.status ?? []));
-    setTierFilter(new Set(view.filters.packageTier ?? []));
+    // This page only ever lists/creates 'tenant_directory' views, so the
+    // filters shape here is always CompanyListFilters — the union only
+    // matters to the Audit Log page's own saved searches.
+    const viewFilters = view.filters as CompanyListFilters;
+    setSearchInput(viewFilters.search ?? "");
+    setDebouncedSearch(viewFilters.search ?? "");
+    setStatusFilter(new Set(viewFilters.status ?? []));
+    setTierFilter(new Set(viewFilters.packageTier ?? []));
   }
 
   async function saveCurrentView() {
     if (!newViewName.trim()) return;
     setSavingView(true);
     try {
-      const view = await api.createSavedView(newViewName.trim(), filters);
+      const view = await api.createSavedView(newViewName.trim(), "tenant_directory", filters);
       setSavedViews((prev) => [...prev, view]);
       setNewViewName("");
     } catch {

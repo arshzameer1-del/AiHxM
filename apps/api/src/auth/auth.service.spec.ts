@@ -171,6 +171,27 @@ describe("AuthService", () => {
         "Too many failed attempts"
       );
     });
+
+    // Tenant Management gap-fill Phase 1 item #8 — the one signal that
+    // turns a "pending"/"expired" admin login into "active" on the Admins
+    // tab. Stamped by issueSessionToken(), reached via confirmMfaEnrollment
+    // on this account's very first completed login.
+    it("stamps last_login_at once a real session is issued", async () => {
+      const { id, email, password } = await createUserAccount();
+      await grantRoleAssignment(id);
+
+      const before = await db.withClaims(FIXTURE_CLAIMS, (c) =>
+        c.query("SELECT last_login_at FROM user_accounts WHERE id = $1", [id])
+      );
+      expect(before.rows[0].last_login_at).toBeNull();
+
+      await loginToSessionToken(email, password);
+
+      const after = await db.withClaims(FIXTURE_CLAIMS, (c) =>
+        c.query("SELECT last_login_at FROM user_accounts WHERE id = $1", [id])
+      );
+      expect(after.rows[0].last_login_at).not.toBeNull();
+    });
   });
 
   /** A company + an Employee Core row with a known employee_number, linked to a fresh user_accounts login. */

@@ -5,19 +5,40 @@ import { NotificationsService } from "../notifications/notifications.service";
 import type { RequestClaims } from "../database/tenant-context";
 import type { SupportTicket, SupportTicketPriority, SupportTicketStatus } from "@aihxm/shared-types";
 
+// Tenant Management gap-fill Phase 1 item #9 — Support ticket SLA basics.
+// A first-response-time target per priority, not a resolution-time SLA
+// (this codebase tracks status, not a "first reply" event) — a deliberately
+// simple, defensible starting point rather than a configurable-per-tenant
+// SLA policy engine, which nothing in the current backlog asks for yet.
+const SLA_HOURS_BY_PRIORITY: Record<SupportTicketPriority, number> = {
+  urgent: 4,
+  high: 24,
+  normal: 72,
+  low: 120,
+};
+
+const OPEN_STATUSES: SupportTicketStatus[] = ["open", "in_progress"];
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toTicket(row: any): SupportTicket {
+  const createdAt: Date = row.created_at;
+  const status: SupportTicketStatus = row.status;
+  const priority: SupportTicketPriority = row.priority;
+  const dueBy = new Date(createdAt.getTime() + SLA_HOURS_BY_PRIORITY[priority] * 60 * 60 * 1000);
+
   return {
     id: row.id,
     companyId: row.company_id,
     subject: row.subject,
     description: row.description,
-    priority: row.priority,
-    status: row.status,
+    priority,
+    status,
     createdBy: row.created_by,
     assignee: row.assignee ?? null,
-    createdAt: row.created_at.toISOString(),
+    createdAt: createdAt.toISOString(),
     updatedAt: row.updated_at.toISOString(),
+    dueBy: dueBy.toISOString(),
+    slaBreached: OPEN_STATUSES.includes(status) && dueBy.getTime() < Date.now(),
   };
 }
 

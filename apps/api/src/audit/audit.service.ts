@@ -41,9 +41,14 @@ export class AuditService {
     );
   }
 
+  // Tenant Management gap-fill Phase 1 item #6 — actor/action/date-range
+  // filters, added alongside the original companyId filter. `actor` and
+  // `action` are partial (ILIKE) matches: `action` values are free-form
+  // dot-namespaced strings with no fixed vocabulary, so exact match would
+  // be unusable as a search. `from`/`to` bound `created_at` inclusively.
   async list(
     client: PoolClient,
-    filters: { companyId?: string; limit?: number }
+    filters: { companyId?: string; actor?: string; action?: string; from?: string; to?: string; limit?: number }
   ): Promise<AuditLogEntry[]> {
     const limit = Math.min(filters.limit ?? 100, 500);
     const result = await client.query(
@@ -51,9 +56,20 @@ export class AuditService {
        FROM audit_log a
        LEFT JOIN companies c ON c.id = a.company_id
        WHERE ($1::uuid IS NULL OR a.company_id = $1)
+         AND ($2::text IS NULL OR a.actor ILIKE '%' || $2 || '%')
+         AND ($3::text IS NULL OR a.action ILIKE '%' || $3 || '%')
+         AND ($4::timestamptz IS NULL OR a.created_at >= $4)
+         AND ($5::timestamptz IS NULL OR a.created_at <= $5)
        ORDER BY a.created_at DESC
-       LIMIT $2`,
-      [filters.companyId ?? null, limit]
+       LIMIT $6`,
+      [
+        filters.companyId ?? null,
+        filters.actor ?? null,
+        filters.action ?? null,
+        filters.from ?? null,
+        filters.to ?? null,
+        limit,
+      ]
     );
     return result.rows.map(rowToEntry);
   }

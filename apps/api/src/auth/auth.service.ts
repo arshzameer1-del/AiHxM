@@ -260,6 +260,16 @@ export class AuthService {
          RETURNING id`,
         [userAccountId, identity.company_id, identity.is_platform_admin]
       );
+      // Tenant Management gap-fill Phase 1 item #8 — the one signal that
+      // turns a "pending" (or "expired") admin login into "active" on the
+      // Admins tab. Every real session issuance goes through this method
+      // (email login, tenant-path login, MFA enrollment completion, MFA
+      // verify), so this one UPDATE covers all of them uniformly.
+      // CompaniesService.impersonate() issues its own session via a
+      // separate INSERT and deliberately never calls this method, so a
+      // Platform Admin's "Login As" never counts as the real admin having
+      // accepted their login.
+      await client.query("UPDATE user_accounts SET last_login_at = now() WHERE id = $1", [userAccountId]);
       return result.rows[0].id;
     });
 

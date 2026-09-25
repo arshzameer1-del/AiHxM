@@ -259,6 +259,35 @@ export type CompanyAdmin = {
    * currently locked, or when there's no login yet.
    */
   lockedUntil: string | null;
+  /**
+   * Tenant Management gap-fill Phase 1 item #7 — periodic access-review
+   * attestation. Null until a Platform Admin has ever clicked "Mark
+   * reviewed" for this admin. Not automatically cleared by other admin
+   * changes (status/password/MFA) — a deliberately minimal, additive first
+   * pass; a review-invalidation policy can be layered on later without
+   * touching this shape.
+   */
+  lastAccessReviewedAt: string | null;
+  lastAccessReviewedBy: string | null;
+  /**
+   * Tenant Management gap-fill Phase 1 item #8 — Login/invitation
+   * lifecycle visibility. AIHXM hands a Platform-Admin-chosen password
+   * straight to the admin rather than emailing an accept-link, so there's
+   * no separate invitation record — this is computed from whether/when the
+   * login has ever actually been used:
+   *  - "no_login": no login has been created yet (see `hasLogin`).
+   *  - "pending": a login exists, was created/reset recently, and has
+   *    never been used to sign in yet.
+   *  - "expired": same as "pending", but it's been sitting unused long
+   *    enough (7 days) that it's worth re-issuing or revoking.
+   *  - "active": has been used to sign in at least once.
+   *  - "revoked": never signed in, and a Platform Admin explicitly revoked
+   *    it before it was ever used (see `revokeAdminLogin`) — distinct from
+   *    the existing manual Lock/Unlock (`status`), which applies to an
+   *    established login instead.
+   */
+  loginStatus: "no_login" | "pending" | "expired" | "active" | "revoked";
+  lastLoginAt: string | null;
 };
 
 /** TM-002/TM-003 — Tenant Directory search + filters (GET /platform/companies). */
@@ -366,6 +395,20 @@ export type AuditLogEntry = {
   createdAt: string;
 };
 
+// Tenant Management gap-fill Phase 1 item #6 — Audit tab search/filter.
+// `actor`/`action` are partial (ILIKE) matches, not exact — the audit
+// log's `action` values are free-form dot-namespaced strings
+// (`company.impersonate`, `company.admin.mfa_reset`, ...) with no fixed
+// vocabulary to select from, so a substring filter is what's actually
+// usable here. `from`/`to` are inclusive ISO-8601 timestamps.
+export type AuditLogFilters = {
+  companyId?: string;
+  actor?: string;
+  action?: string;
+  from?: string;
+  to?: string;
+};
+
 // Tenant Management gap-fill Phase 1 item #4 — "Login As" hardening.
 // `sessionId` is the token's real `jti` (a genuine `user_sessions` row,
 // same shape as any other login session), which is what makes an
@@ -401,14 +444,20 @@ export type UserSessionView = {
   revokedAt: string | null;
 };
 
-// --- Tenant Management: Saved Views (TM-003) ------------------------------
-// A named, reusable Tenant Directory filter combination. Platform-wide
-// (not per-admin) — `createdBy` is attribution only, matching the spec's
-// "Save as reusable view" note with no per-user scoping requirement.
+// --- Tenant Management: Saved Views (TM-003, extended by Phase 1 item #6) -
+// A named, reusable filter combination. Platform-wide (not per-admin) —
+// `createdBy` is attribution only, matching the spec's "Save as reusable
+// view" note with no per-user scoping requirement. `viewType` discriminates
+// which screen a saved view belongs to (added in migration 0051) — every
+// row created before item #6 is a Tenant Directory view, since saved views
+// didn't exist anywhere else until now.
+export type PlatformSavedViewType = "tenant_directory" | "audit_log";
+
 export type PlatformSavedView = {
   id: string;
   name: string;
-  filters: CompanyListFilters;
+  viewType: PlatformSavedViewType;
+  filters: CompanyListFilters | AuditLogFilters;
   createdBy: string;
   createdAt: string;
 };
@@ -527,6 +576,23 @@ export type TenantIntegration = {
   hasSecrets: boolean;
   updatedAt: string;
   updatedBy: string;
+  /**
+   * Tenant Management gap-fill Phase 1 item #12 — API key/webhook secret
+   * rotation. Only ever set for `biometric_device`/`webhook` (the two
+   * providers whose secret AIHXM itself issues — see
+   * ROTATABLE_PROVIDER_KEYS in integrations.service.ts). Non-null between
+   * a Rotate action and the grace period's end: the previous secret value
+   * is never exposed here (same write-only discipline as the current
+   * one), only that one exists and until when it should still be honored.
+   */
+  previousSecretExpiresAt: string | null;
+};
+
+/** Tenant Management gap-fill Phase 1 item #12 — the one-time plaintext response from a Rotate action. */
+export type RotateIntegrationSecretResponse = {
+  integration: TenantIntegration;
+  newSecretValue: string;
+  previousSecretExpiresAt: string;
 };
 
 // --- Tenant Management: Health (TM-032) ------------------------------------
@@ -554,6 +620,20 @@ export type SupportTicket = {
   assignee: string | null;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Tenant Management gap-fill Phase 1 item #9 — Support ticket SLA
+   * basics. Purely computed from `createdAt` + a fixed per-priority
+   * response window (see SLA_HOURS_BY_PRIORITY in
+   * support-tickets.service.ts) — no new column, no migration. `dueBy`
+   * is always present even for a resolved/closed ticket (so the list can
+   * still show what the target was); `slaBreached` is only ever true for
+   * a ticket that is BOTH past its `dueBy` AND still open/in_progress —
+   * a resolved ticket never shows as breached regardless of how long it
+   * took, since this is a live "needs attention now" signal, not a
+   * historical SLA-compliance report.
+   */
+  dueBy: string;
+  slaBreached: boolean;
 };
 
 // --- Tenant Management: Backups (TM-035) -----------------------------------

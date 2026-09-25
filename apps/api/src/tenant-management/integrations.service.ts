@@ -1,8 +1,9 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { randomBytes } from "crypto";
 import { DatabaseService } from "../database/database.service";
 import { AuditService } from "../audit/audit.service";
 import type { RequestClaims } from "../database/tenant-context";
-import type { IntegrationProviderKey, TenantIntegration } from "@aihxm/shared-types";
+import type { IntegrationProviderKey, RotateIntegrationSecretResponse, TenantIntegration } from "@aihxm/shared-types";
 
 const PROVIDER_KEYS: IntegrationProviderKey[] = ["smtp", "sso", "biometric_device", "webhook"];
 
@@ -18,6 +19,15 @@ const SECRET_FIELDS: Record<IntegrationProviderKey, string[]> = {
   webhook: ["signingSecret"],
 };
 
+// Tenant Management gap-fill Phase 1 item #12 — only these two providers'
+// secrets are ISSUED BY AIHXM (a biometric device's apiKey, a webhook's
+// signingSecret — values we hand to something else and can freely
+// regenerate). smtp's password and sso's clientSecret are issued by the
+// external system instead; "rotating" those isn't something this side can
+// do at all, so Rotate is deliberately not offered for them.
+const ROTATABLE_PROVIDER_KEYS: IntegrationProviderKey[] = ["biometric_device", "webhook"];
+const ROTATION_GRACE_DAYS = 7;
+
 function redact(providerKey: IntegrationProviderKey, config: Record<string, unknown>) {
   const secretFields = SECRET_FIELDS[providerKey];
   const redacted: Record<string, unknown> = {};
@@ -30,6 +40,17 @@ function redact(providerKey: IntegrationProviderKey, config: Record<string, unkn
     redacted[key] = value;
   }
   return { redacted, hasSecrets };
+}
+
+// A grace period that has already lapsed is reported as none at all — an
+// expired "previous secret" is not meaningfully different from having
+// none, and surfacing it as still-active would be misleading to whoever
+// reads this from the Integrations tab.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function activePreviousSecretExpiry(row: any): string | null {
+  if (!row.previous_secret_expires_at) return null;
+  const expiresAt: Date = row.previous_secret_expires_at;
+  return expiresAt.getTime() > Date.now() ? expiresAt.toISOString() : null;
 }
 
 /**
@@ -73,6 +94,7 @@ export class IntegrationsService {
             hasSecrets: false,
             updatedAt: new Date(0).toISOString(),
             updatedBy: "",
+            previousSecretExpiresAt: null,
           };
         }
         const { redacted, hasSecrets } = redact(providerKey, row.config ?? {});
@@ -84,6 +106,7 @@ export class IntegrationsService {
           hasSecrets,
           updatedAt: row.updated_at.toISOString(),
           updatedBy: row.updated_by,
+          previousSecretExpiresAt: activePreviousSecretExpiry(row),
         };
       });
     });
@@ -145,6 +168,87 @@ export class IntegrationsService {
         hasSecrets,
         updatedAt: result.rows[0].updated_at.toISOString(),
         updatedBy: result.rows[0].updated_by,
+        previousSecretExpiresAt: activePreviousSecretExpiry(result.rows[0]),
+      };
+    });
+  }
+
+  /**
+   * Tenant Management gap-fill Phase 1 item #12 — regenerates the one
+   * secret field this provider holds, keeping the OLD value honored for
+   * `ROTATION_GRACE_DAYS` (stored in `previous_secret_value` /
+   * `previous_secret_expires_at`) so a device or endpoint that hasn't yet
+   * picked up the new value doesn't immediately break. Only offered for
+   * providers AIHXM itself issues the secret for — see
+   * `ROTATABLE_PROVIDER_KEYS`'s doc comment. The new value is returned
+   * exactly once, the same "show plaintext once" pattern used elsewhere
+   * (impersonation tokens, initial admin passwords, recovery codes) — it
+   * is never retrievable again after this response.
+   */
+  async rotateSecret(
+    claims: RequestClaims,
+    companyId: string,
+    providerKey: IntegrationProviderKey
+  ): Promise<RotateIntegrationSecretResponse> {
+    if (!ROTATABLE_PROVIDER_KEYS.includes(providerKey)) {
+      throw new BadRequestException(`Secret rotation is not available for "${providerKey}"`);
+    }
+    return this.db.withClaims(claims, async (client) => {
+      const companyCheck = await client.query("SELECT id FROM companies WHERE id = $1", [companyId]);
+      if (companyCheck.rowCount === 0) {
+        throw new NotFoundException("Company not found");
+      }
+
+      const existing = await client.query(
+        "SELECT * FROM tenant_integrations WHERE company_id = $1 AND provider_key = $2",
+        [companyId, providerKey]
+      );
+      if (existing.rowCount === 0) {
+        throw new BadRequestException(`"${providerKey}" has not been configured yet — nothing to rotate`);
+      }
+
+      const [secretField] = SECRET_FIELDS[providerKey];
+      const currentConfig = existing.rows[0].config ?? {};
+      const currentSecretValue: string | undefined = currentConfig[secretField];
+      const newSecretValue = randomBytes(24).toString("hex");
+      const nextConfig = { ...currentConfig, [secretField]: newSecretValue };
+
+      const result = await client.query(
+        `UPDATE tenant_integrations
+         SET config = $3::jsonb,
+             previous_secret_value = $4,
+             previous_secret_expires_at = now() + make_interval(days => $5::int),
+             updated_by = $6,
+             updated_at = now()
+         WHERE company_id = $1 AND provider_key = $2
+         RETURNING *`,
+        [companyId, providerKey, JSON.stringify(nextConfig), currentSecretValue ?? null, ROTATION_GRACE_DAYS, claims.sub]
+      );
+
+      await this.audit.record(client, claims, {
+        companyId,
+        action: "tenant_integration.secret_rotated",
+        target: providerKey,
+        // Never audit secret values — old or new. Only that a rotation
+        // happened and the grace window it opened.
+        metadata: { graceDays: ROTATION_GRACE_DAYS },
+      });
+
+      const row = result.rows[0];
+      const { redacted, hasSecrets } = redact(providerKey, row.config ?? {});
+      return {
+        integration: {
+          companyId,
+          providerKey,
+          enabled: row.enabled,
+          config: redacted,
+          hasSecrets,
+          updatedAt: row.updated_at.toISOString(),
+          updatedBy: row.updated_by,
+          previousSecretExpiresAt: activePreviousSecretExpiry(row),
+        },
+        newSecretValue,
+        previousSecretExpiresAt: row.previous_secret_expires_at.toISOString(),
       };
     });
   }

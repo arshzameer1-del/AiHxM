@@ -1,5 +1,5 @@
 import { Pool } from "pg";
-import { ForbiddenException, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
 import { RbacService } from "../rbac/rbac.service";
@@ -272,6 +272,56 @@ describe("EmployeesService", () => {
           size: fileBuffer.byteLength,
         })
       ).rejects.toThrow(ForbiddenException);
+    });
+
+    // Tenant Management gap-fill Phase 1 item #10 — storage quota
+    // enforcement + file-type allowlist.
+    it("rejects a disallowed file type even for an authorized caller", async () => {
+      const fileBuffer = Buffer.from("#!/bin/sh\necho hi\n");
+      await expect(
+        employees.addDocument(hrAdminClaims, aliceEmployeeId, "other", {
+          originalname: "script.sh",
+          mimetype: "application/x-sh",
+          buffer: fileBuffer,
+          size: fileBuffer.byteLength,
+        })
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("blocks an upload that would push the tenant over its storage quota", async () => {
+      await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query("UPDATE companies SET storage_quota_mb = 0 WHERE id = $1", [companyId])
+      );
+
+      const fileBuffer = Buffer.from("this tenant has zero MB of quota left");
+      await expect(
+        employees.addDocument(hrAdminClaims, aliceEmployeeId, "cnic_copy", {
+          originalname: "over-quota.pdf",
+          mimetype: "application/pdf",
+          buffer: fileBuffer,
+          size: fileBuffer.byteLength,
+        })
+      ).rejects.toThrow(BadRequestException);
+
+      // Restore quota for any tests that run after this one in the file.
+      await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query("UPDATE companies SET storage_quota_mb = 5120 WHERE id = $1", [companyId])
+      );
+    });
+
+    it("allows an upload that fits within the tenant's quota", async () => {
+      const fileBuffer = Buffer.from("small file, plenty of quota");
+      await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query("UPDATE companies SET storage_quota_mb = 5120 WHERE id = $1", [companyId])
+      );
+
+      const doc = await employees.addDocument(hrAdminClaims, aliceEmployeeId, "offer_letter", {
+        originalname: "offer.pdf",
+        mimetype: "application/pdf",
+        buffer: fileBuffer,
+        size: fileBuffer.byteLength,
+      });
+      expect(doc.fileName).toBe("offer.pdf");
     });
 
     it("auto-records job history on hire, transfer, and termination, and lets HR log a manual entry too", async () => {

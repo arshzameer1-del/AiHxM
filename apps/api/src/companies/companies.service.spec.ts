@@ -933,6 +933,266 @@ describe("CompaniesService", () => {
     });
   });
 
+  // Tenant Management gap-fill Phase 1 item #7 — user access review status.
+  describe("markAdminAccessReviewed", () => {
+    it("is null until an admin's access has been reviewed", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Review Never",
+        slug: `test-co-review-never-${Date.now()}`,
+        initialAdmin: {
+          fullName: "Not Yet Reviewed",
+          email: `not-reviewed-${Date.now()}@example.com`,
+        },
+      });
+
+      expect(created.admins[0].lastAccessReviewedAt).toBeNull();
+      expect(created.admins[0].lastAccessReviewedBy).toBeNull();
+    });
+
+    it("stamps a timestamp and the reviewing Platform Admin's identity", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Review Stamp",
+        slug: `test-co-review-stamp-${Date.now()}`,
+        initialAdmin: {
+          fullName: "To Be Reviewed",
+          email: `to-be-reviewed-${Date.now()}@example.com`,
+        },
+      });
+      const adminId = created.admins[0].id;
+
+      const before = new Date();
+      const updated = await service.markAdminAccessReviewed(FIXTURE_CLAIMS, created.company.id, adminId);
+
+      expect(updated.lastAccessReviewedBy).toBe(FIXTURE_CLAIMS.sub);
+      expect(updated.lastAccessReviewedAt).not.toBeNull();
+      expect(new Date(updated.lastAccessReviewedAt!).getTime()).toBeGreaterThanOrEqual(before.getTime() - 1000);
+    });
+
+    it("works for an admin with no login yet", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Review No Login",
+        slug: `test-co-review-no-login-${Date.now()}`,
+        initialAdmin: {
+          fullName: "No Login Reviewed",
+          email: `no-login-reviewed-${Date.now()}@example.com`,
+        },
+      });
+
+      const updated = await service.markAdminAccessReviewed(
+        FIXTURE_CLAIMS,
+        created.company.id,
+        created.admins[0].id
+      );
+      expect(updated.lastAccessReviewedAt).not.toBeNull();
+      expect(updated.failedLoginAttempts).toBe(0);
+      expect(updated.lockedUntil).toBeNull();
+    });
+
+    it("records a company.admin.access_reviewed audit entry", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Review Audit",
+        slug: `test-co-review-audit-${Date.now()}`,
+        initialAdmin: {
+          fullName: "Audited Review",
+          email: `audited-review-${Date.now()}@example.com`,
+        },
+      });
+
+      await service.markAdminAccessReviewed(FIXTURE_CLAIMS, created.company.id, created.admins[0].id);
+
+      const entries = await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query(
+          "SELECT * FROM audit_log WHERE action = 'company.admin.access_reviewed' AND company_id = $1",
+          [created.company.id]
+        )
+      );
+      expect(entries.rowCount).toBeGreaterThan(0);
+    });
+
+    it("404s for an admin that doesn't belong to this company", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Review Wrong Company",
+        slug: `test-co-review-wrong-co-${Date.now()}`,
+      });
+
+      await expect(
+        service.markAdminAccessReviewed(FIXTURE_CLAIMS, created.company.id, "00000000-0000-0000-0000-000000000000")
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  // Tenant Management gap-fill Phase 1 item #8 — login/invitation
+  // lifecycle visibility.
+  describe("login lifecycle (loginStatus)", () => {
+    it("is 'no_login' before a login exists, and 'pending' immediately after createAdminLogin", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Lifecycle Pending",
+        slug: `test-co-lifecycle-pending-${Date.now()}`,
+        initialAdmin: {
+          fullName: "Lifecycle Pending",
+          email: `lifecycle-pending-${Date.now()}@example.com`,
+        },
+      });
+      expect(created.admins[0].loginStatus).toBe("no_login");
+
+      const withLogin = await service.createAdminLogin(
+        FIXTURE_CLAIMS,
+        created.company.id,
+        created.admins[0].id,
+        "InitialPassword123!"
+      );
+      expect(withLogin.loginStatus).toBe("pending");
+      expect(withLogin.lastLoginAt).toBeNull();
+    });
+
+    it("is 'expired' once a never-used login has sat longer than the pending window", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Lifecycle Expired",
+        slug: `test-co-lifecycle-expired-${Date.now()}`,
+        initialAdmin: {
+          fullName: "Lifecycle Expired",
+          email: `lifecycle-expired-${Date.now()}@example.com`,
+        },
+      });
+      await service.createAdminLogin(FIXTURE_CLAIMS, created.company.id, created.admins[0].id, "InitialPassword123!");
+
+      await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query(
+          `UPDATE user_accounts SET credential_issued_at = now() - interval '30 days'
+           WHERE id = (SELECT user_account_id FROM company_admins WHERE id = $1)`,
+          [created.admins[0].id]
+        )
+      );
+
+      const detail = await service.getDetail(FIXTURE_CLAIMS, created.company.id);
+      expect(detail.admins[0].loginStatus).toBe("expired");
+    });
+
+    it("is 'active' once the admin has actually signed in", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Lifecycle Active",
+        slug: `test-co-lifecycle-active-${Date.now()}`,
+        initialAdmin: {
+          fullName: "Lifecycle Active",
+          email: `lifecycle-active-${Date.now()}@example.com`,
+        },
+      });
+      await service.createAdminLogin(FIXTURE_CLAIMS, created.company.id, created.admins[0].id, "InitialPassword123!");
+
+      await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query(
+          `UPDATE user_accounts SET last_login_at = now()
+           WHERE id = (SELECT user_account_id FROM company_admins WHERE id = $1)`,
+          [created.admins[0].id]
+        )
+      );
+
+      const detail = await service.getDetail(FIXTURE_CLAIMS, created.company.id);
+      expect(detail.admins[0].loginStatus).toBe("active");
+    });
+  });
+
+  describe("revokeAdminLogin", () => {
+    it("revokes a pending login, blocking sign-in and flipping loginStatus to 'revoked'", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Revoke",
+        slug: `test-co-revoke-${Date.now()}`,
+        initialAdmin: {
+          fullName: "To Revoke",
+          email: `to-revoke-${Date.now()}@example.com`,
+        },
+      });
+      const adminId = created.admins[0].id;
+      await service.createAdminLogin(FIXTURE_CLAIMS, created.company.id, adminId, "InitialPassword123!");
+
+      const revoked = await service.revokeAdminLogin(FIXTURE_CLAIMS, created.company.id, adminId);
+      expect(revoked.loginStatus).toBe("revoked");
+
+      const row = await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query<{ status: string }>(
+          "SELECT status FROM user_accounts WHERE id = (SELECT user_account_id FROM company_admins WHERE id = $1)",
+          [adminId]
+        )
+      );
+      expect(row.rows[0].status).toBe("locked");
+    });
+
+    it("refuses to revoke an admin with no login yet", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Revoke No Login",
+        slug: `test-co-revoke-no-login-${Date.now()}`,
+        initialAdmin: {
+          fullName: "No Login To Revoke",
+          email: `no-login-revoke-${Date.now()}@example.com`,
+        },
+      });
+
+      await expect(
+        service.revokeAdminLogin(FIXTURE_CLAIMS, created.company.id, created.admins[0].id)
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("refuses to revoke an admin who has already signed in", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Revoke Already Used",
+        slug: `test-co-revoke-used-${Date.now()}`,
+        initialAdmin: {
+          fullName: "Already Used",
+          email: `already-used-revoke-${Date.now()}@example.com`,
+        },
+      });
+      const adminId = created.admins[0].id;
+      await service.createAdminLogin(FIXTURE_CLAIMS, created.company.id, adminId, "InitialPassword123!");
+      await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query(
+          `UPDATE user_accounts SET last_login_at = now()
+           WHERE id = (SELECT user_account_id FROM company_admins WHERE id = $1)`,
+          [adminId]
+        )
+      );
+
+      await expect(service.revokeAdminLogin(FIXTURE_CLAIMS, created.company.id, adminId)).rejects.toThrow(
+        BadRequestException
+      );
+    });
+
+    it("404s for an admin that doesn't belong to this company", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Revoke Wrong Company",
+        slug: `test-co-revoke-wrong-co-${Date.now()}`,
+      });
+
+      await expect(
+        service.revokeAdminLogin(FIXTURE_CLAIMS, created.company.id, "00000000-0000-0000-0000-000000000000")
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it("resetAdminPassword ('Resend') un-revokes a revoked login and resets it to 'pending'", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Resend After Revoke",
+        slug: `test-co-resend-after-revoke-${Date.now()}`,
+        initialAdmin: {
+          fullName: "Resend After Revoke",
+          email: `resend-after-revoke-${Date.now()}@example.com`,
+        },
+      });
+      const adminId = created.admins[0].id;
+      await service.createAdminLogin(FIXTURE_CLAIMS, created.company.id, adminId, "InitialPassword123!");
+      await service.revokeAdminLogin(FIXTURE_CLAIMS, created.company.id, adminId);
+
+      const resent = await service.resetAdminPassword(FIXTURE_CLAIMS, created.company.id, adminId, "NewPassword123!");
+      expect(resent.loginStatus).toBe("pending");
+
+      const row = await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query<{ status: string }>(
+          "SELECT status FROM user_accounts WHERE id = (SELECT user_account_id FROM company_admins WHERE id = $1)",
+          [adminId]
+        )
+      );
+      expect(row.rows[0].status).toBe("active");
+    });
+  });
+
   describe("impersonate", () => {
     it("issues a real, applied-shaped session for the tenant's active admin login", async () => {
       const created = await service.create(FIXTURE_CLAIMS, {

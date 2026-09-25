@@ -128,20 +128,68 @@ function rowToConfig(row: any): CompanyConfig {
   };
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function toIsoOrNull(value: any): string | null {
+  if (!value) return null;
+  return value.toISOString ? value.toISOString() : value;
+}
+
 /**
- * `lockout` is only needed when `row` itself (a plain `company_admins`
- * row, from an INSERT/UPDATE ... RETURNING *) doesn't already carry
- * `failed_login_attempts`/`locked_until` — i.e. everywhere except
- * `getDetail`'s own LEFT JOIN query, which selects them directly onto the
- * row. Every call site that mutates `user_accounts` state itself
- * (resetAdminPassword, resetAdminMfa, unlockAdminAccount) already knows
- * the new values without a re-query and passes them here explicitly;
- * setAdminStatus doesn't touch lockout at all, so it re-reads the current
- * value via getLockoutInfo() so its response doesn't silently report
- * "not locked" for an admin who actually still is.
+ * Tenant Management gap-fill Phase 1 item #8's threshold: a login created
+ * or reset more than this many days ago that has STILL never been used to
+ * sign in is worth flagging as "expired" rather than merely "pending" — a
+ * business-recency judgment call, distinct from RESET_TOKEN_TTL_MINUTES in
+ * auth.service.ts (a short-lived cryptographic link expiry, not this).
+ */
+const LOGIN_PENDING_EXPIRY_DAYS = 7;
+
+type AdminAccountInfo = {
+  failedLoginAttempts: number;
+  lockedUntil: string | null;
+  lastLoginAt: string | null;
+  credentialIssuedAt: string | null;
+  accountStatus: "active" | "locked" | null;
+};
+
+function computeLoginStatus(
+  hasLogin: boolean,
+  lastLoginAt: string | null,
+  credentialIssuedAt: string | null,
+  accountStatus: "active" | "locked" | null
+): CompanyAdmin["loginStatus"] {
+  if (!hasLogin) return "no_login";
+  if (lastLoginAt) return "active";
+  if (accountStatus === "locked") return "revoked";
+  const issuedMs = credentialIssuedAt ? new Date(credentialIssuedAt).getTime() : Date.now();
+  const ageDays = (Date.now() - issuedMs) / (1000 * 60 * 60 * 24);
+  return ageDays > LOGIN_PENDING_EXPIRY_DAYS ? "expired" : "pending";
+}
+
+/**
+ * `info` is only needed when `row` itself (a plain `company_admins` row,
+ * from an INSERT/UPDATE ... RETURNING *) doesn't already carry the
+ * `user_accounts` columns this needs — i.e. everywhere except `getDetail`'s
+ * own LEFT JOIN query, which selects them directly onto the row (aliased
+ * as `login_created_at`/`login_account_status` to avoid colliding with
+ * company_admins' OWN `created_at`/`status` columns from `ca.*`). Every
+ * call site that mutates `user_accounts` state itself (resetAdminPassword,
+ * resetAdminMfa, unlockAdminAccount, revokeAdminLogin) already knows the
+ * new values without a re-query and passes them here explicitly;
+ * setAdminStatus doesn't touch any of this at all, so it re-reads the
+ * current value via getAccountInfo() so its response doesn't silently
+ * report stale lockout/login-lifecycle state.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function rowToAdmin(row: any, lockout?: { failedLoginAttempts: number; lockedUntil: string | null }): CompanyAdmin {
+function rowToAdmin(row: any, info?: Partial<AdminAccountInfo>): CompanyAdmin {
+  const hasLogin = Boolean(row.user_account_id);
+  const failedLoginAttempts = info?.failedLoginAttempts ?? row.failed_login_attempts ?? 0;
+  const lockedUntil = info?.lockedUntil !== undefined ? info.lockedUntil : toIsoOrNull(row.locked_until);
+  const lastLoginAt = info?.lastLoginAt !== undefined ? info.lastLoginAt : toIsoOrNull(row.last_login_at);
+  const credentialIssuedAt =
+    info?.credentialIssuedAt !== undefined ? info.credentialIssuedAt : toIsoOrNull(row.credential_issued_at);
+  const accountStatus: "active" | "locked" | null =
+    info?.accountStatus !== undefined ? info.accountStatus : row.login_account_status ?? null;
+
   return {
     id: row.id,
     companyId: row.company_id,
@@ -149,16 +197,18 @@ function rowToAdmin(row: any, lockout?: { failedLoginAttempts: number; lockedUnt
     email: row.email,
     status: row.status,
     createdAt: row.created_at?.toISOString ? row.created_at.toISOString() : row.created_at,
-    hasLogin: Boolean(row.user_account_id),
+    hasLogin,
     // Not a secret — a foreign key, not a credential — and TM-017's Force
     // Logout action needs it to target the right user's sessions from the
     // Tenant Users / Admins screen.
     userAccountId: row.user_account_id ?? null,
     loginId: row.login_id ?? null,
-    failedLoginAttempts: lockout?.failedLoginAttempts ?? row.failed_login_attempts ?? 0,
-    lockedUntil:
-      lockout?.lockedUntil ??
-      (row.locked_until ? (row.locked_until.toISOString ? row.locked_until.toISOString() : row.locked_until) : null),
+    failedLoginAttempts,
+    lockedUntil,
+    lastAccessReviewedAt: toIsoOrNull(row.last_access_reviewed_at),
+    lastAccessReviewedBy: row.last_access_reviewed_by ?? null,
+    lastLoginAt,
+    loginStatus: computeLoginStatus(hasLogin, lastLoginAt, credentialIssuedAt, accountStatus),
   };
 }
 
@@ -414,12 +464,15 @@ export class CompaniesService {
         [companyId]
       );
       // LEFT JOIN user_accounts for failed_login_attempts/locked_until
-      // (Phase 1 item #3) — company_admins has neither column itself, so
-      // there's no name collision with `ca.*`, and an admin with no login
-      // yet naturally comes back NULL on both (rowToAdmin's `?? 0`/`?? null`
+      // (Phase 1 item #3) and last_login_at/login_created_at/
+      // login_account_status (Phase 1 item #8) — the latter two are
+      // ALIASED because company_admins already has its own, DIFFERENT
+      // `created_at`/`status` columns picked up by `ca.*`; an admin with no
+      // login yet naturally comes back NULL on all of these (rowToAdmin's
       // defaults handle that).
       const adminsResult = await client.query(
-        `SELECT ca.*, ua.failed_login_attempts, ua.locked_until
+        `SELECT ca.*, ua.failed_login_attempts, ua.locked_until, ua.last_login_at,
+                ua.credential_issued_at, ua.status AS login_account_status
          FROM company_admins ca
          LEFT JOIN user_accounts ua ON ua.id = ca.user_account_id
          WHERE ca.company_id = $1
@@ -1017,35 +1070,47 @@ export class CompaniesService {
       // status field, a different concept from the automatic
       // failed-login lockout below) — re-read so the response doesn't
       // silently report "not locked" for an admin who actually still is.
-      const lockout = await this.getLockoutInfo(client, result.rows[0].user_account_id);
-      return rowToAdmin(result.rows[0], lockout);
+      const accountInfo = await this.getAccountInfo(client, result.rows[0].user_account_id);
+      return rowToAdmin(result.rows[0], accountInfo);
     });
   }
 
   /**
    * Tenant Management gap-fill batch 1, Phase 1 item #3's shared read —
    * every mutation below that doesn't itself already know the resulting
-   * lockout state re-reads it here so its response stays accurate. Null
-   * userAccountId (no login yet) is trivially "not locked."
+   * lockout/login-lifecycle state re-reads it here so its response stays
+   * accurate. Null userAccountId (no login yet) trivially means "not
+   * locked, no login." Broadened by Phase 1 item #8 to also carry
+   * `lastLoginAt`/`loginCreatedAt`/`accountStatus` — the login-lifecycle
+   * fields `rowToAdmin`'s `computeLoginStatus` needs — since they come from
+   * the exact same `user_accounts` row this was already reading; hence the
+   * rename from the original getLockoutInfo.
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async getLockoutInfo(
+  private async getAccountInfo(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     client: any,
     userAccountId: string | null
-  ): Promise<{ failedLoginAttempts: number; lockedUntil: string | null }> {
-    if (!userAccountId) return { failedLoginAttempts: 0, lockedUntil: null };
+  ): Promise<AdminAccountInfo> {
+    if (!userAccountId) {
+      return {
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+        lastLoginAt: null,
+        credentialIssuedAt: null,
+        accountStatus: null,
+      };
+    }
     const result = await client.query(
-      "SELECT failed_login_attempts, locked_until FROM user_accounts WHERE id = $1",
+      "SELECT failed_login_attempts, locked_until, last_login_at, credential_issued_at, status FROM user_accounts WHERE id = $1",
       [userAccountId]
     );
     const row = result.rows[0];
     return {
       failedLoginAttempts: row?.failed_login_attempts ?? 0,
-      lockedUntil: row?.locked_until
-        ? row.locked_until.toISOString
-          ? row.locked_until.toISOString()
-          : row.locked_until
-        : null,
+      lockedUntil: toIsoOrNull(row?.locked_until),
+      lastLoginAt: toIsoOrNull(row?.last_login_at),
+      credentialIssuedAt: toIsoOrNull(row?.credential_issued_at),
+      accountStatus: row?.status ?? null,
     };
   }
 
@@ -1189,7 +1254,17 @@ export class CompaniesService {
         metadata: { rolesGranted: ["hr_admin", "system_admin"], loginId: normalizedLoginId },
       });
 
-      return rowToAdmin(updated.rows[0]);
+      // Just created this login (INSERT above) — known values, no re-query
+      // needed. Freshly created always means "pending": never signed in
+      // yet, active status, credential just issued (matches the column's
+      // own DEFAULT now()).
+      return rowToAdmin(updated.rows[0], {
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+        lastLoginAt: null,
+        credentialIssuedAt: new Date().toISOString(),
+        accountStatus: "active",
+      });
     });
   }
 
@@ -1231,6 +1306,14 @@ export class CompaniesService {
            password_hash = $2,
            failed_login_attempts = 0,
            locked_until = NULL,
+           -- Tenant Management gap-fill Phase 1 item #8 — a freshly
+           -- reissued credential hasn't been used yet, even if an earlier
+           -- one was (so the Admins tab shows "pending" again, not stale
+           -- "active"), and this is also the "Resend" action for a
+           -- previously-revoked pending login, so it un-revokes too.
+           last_login_at = NULL,
+           credential_issued_at = now(),
+           status = 'active',
            updated_at = now()
          WHERE id = $1`,
         [userAccountId, passwordHash]
@@ -1243,8 +1326,14 @@ export class CompaniesService {
         metadata: {},
       });
 
-      // Already know the result — just cleared both fields above.
-      return rowToAdmin(existing.rows[0], { failedLoginAttempts: 0, lockedUntil: null });
+      // Already know the result — just set all of these fields above.
+      return rowToAdmin(existing.rows[0], {
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+        lastLoginAt: null,
+        credentialIssuedAt: new Date().toISOString(),
+        accountStatus: "active",
+      });
     });
   }
 
@@ -1297,11 +1386,12 @@ export class CompaniesService {
         metadata: {},
       });
 
-      // MFA reset doesn't touch the password-lockout fields — re-read so
-      // the response doesn't silently report "not locked" for an admin
-      // who's ALSO currently password-locked.
-      const lockout = await this.getLockoutInfo(client, userAccountId);
-      return rowToAdmin(existing.rows[0], lockout);
+      // MFA reset doesn't touch the password-lockout or login-lifecycle
+      // fields — re-read so the response doesn't silently report stale
+      // state for an admin who's ALSO currently password-locked (or
+      // pending/expired/revoked).
+      const accountInfo = await this.getAccountInfo(client, userAccountId);
+      return rowToAdmin(existing.rows[0], accountInfo);
     });
   }
 
@@ -1342,7 +1432,98 @@ export class CompaniesService {
         metadata: {},
       });
 
-      return rowToAdmin(existing.rows[0], { failedLoginAttempts: 0, lockedUntil: null });
+      // Only the two lockout counters were touched above — last_login_at/
+      // credential_issued_at/status are untouched, so re-read rather than
+      // assume, the same reasoning as resetAdminMfa just above.
+      const accountInfo = await this.getAccountInfo(client, userAccountId);
+      return rowToAdmin(existing.rows[0], accountInfo);
+    });
+  }
+
+  /**
+   * Tenant Management gap-fill Phase 1 item #8 — the "Revoke" half of
+   * login/invitation lifecycle visibility. Rescinds a login BEFORE it's
+   * ever been used — the credential handed over turns out to be wrong, or
+   * shouldn't have been issued at all. Deliberately refuses once the admin
+   * has actually signed in even once: at that point it's an established
+   * login, and the existing Lock/Unlock action (setAdminStatus, a
+   * different field — company_admins.status, not user_accounts.status) is
+   * the right tool, not this one. Reuses `user_accounts.status = 'locked'`
+   * — the exact same column/value AuthService.authenticate() already
+   * checks and blocks on — rather than inventing a new blocking mechanism;
+   * resetAdminPassword() ("Resend") is what un-revokes it again.
+   */
+  async revokeAdminLogin(claims: RequestClaims, companyId: string, adminId: string): Promise<CompanyAdmin> {
+    return this.db.withClaims(claims, async (client) => {
+      const existing = await client.query(
+        "SELECT * FROM company_admins WHERE id = $1 AND company_id = $2",
+        [adminId, companyId]
+      );
+      if (existing.rowCount === 0) {
+        throw new NotFoundException("Admin not found for this company");
+      }
+      const userAccountId = existing.rows[0].user_account_id as string | null;
+      if (!userAccountId) {
+        throw new BadRequestException("This admin has no login to revoke yet.");
+      }
+
+      const before = await this.getAccountInfo(client, userAccountId);
+      if (before.lastLoginAt) {
+        throw new BadRequestException(
+          "This admin has already signed in — use Lock instead of Revoke for an established login."
+        );
+      }
+
+      await client.query("UPDATE user_accounts SET status = 'locked', updated_at = now() WHERE id = $1", [
+        userAccountId,
+      ]);
+
+      await this.audit.record(client, claims, {
+        companyId,
+        action: "company.admin.login_revoked",
+        target: existing.rows[0].email,
+        metadata: {},
+      });
+
+      const accountInfo = await this.getAccountInfo(client, userAccountId);
+      return rowToAdmin(existing.rows[0], accountInfo);
+    });
+  }
+
+  /**
+   * Tenant Management gap-fill Phase 1 item #7 — periodic access-review
+   * attestation. Purely a record-keeping stamp: unlike Reset password/MFA
+   * or Unlock, it doesn't touch the admin's access itself, so it works for
+   * an admin with no login yet too (there's still an access GRANT to
+   * attest to — the company_admins row — even before a login exists).
+   */
+  async markAdminAccessReviewed(claims: RequestClaims, companyId: string, adminId: string): Promise<CompanyAdmin> {
+    return this.db.withClaims(claims, async (client) => {
+      const existing = await client.query(
+        "SELECT * FROM company_admins WHERE id = $1 AND company_id = $2",
+        [adminId, companyId]
+      );
+      if (existing.rowCount === 0) {
+        throw new NotFoundException("Admin not found for this company");
+      }
+
+      const result = await client.query(
+        `UPDATE company_admins
+         SET last_access_reviewed_at = now(), last_access_reviewed_by = $3
+         WHERE id = $1 AND company_id = $2
+         RETURNING *`,
+        [adminId, companyId, claims.sub]
+      );
+
+      await this.audit.record(client, claims, {
+        companyId,
+        action: "company.admin.access_reviewed",
+        target: existing.rows[0].email,
+        metadata: {},
+      });
+
+      const accountInfo = await this.getAccountInfo(client, existing.rows[0].user_account_id);
+      return rowToAdmin(result.rows[0], accountInfo);
     });
   }
 
