@@ -161,6 +161,38 @@ export type Company = {
   deletionRequestedAt: string | null;
   deletionReason: string | null;
   deletionPurgeAt: string | null;
+  // Tenant Management gap-fill Phase 1 item #5 — second-approver rule.
+  // `deletionApprovalRequired` is decided once, at request time, from the
+  // tenant's employee count (CompaniesService.SECOND_APPROVAL_EMPLOYEE_THRESHOLD);
+  // when true, `deletionPurgeAt` above stays null (the grace-period clock
+  // hasn't started) until a DIFFERENT Platform Admin approves — see
+  // `deletionApprovedBy`/`deletionApprovedAt`. `deletionGraceDays` is the
+  // grace period chosen at request time, held here so approving doesn't
+  // require re-entering it. `deletionRequestedByEmail` is only populated
+  // by `getDetail()` (a LEFT JOIN to resolve the requester's email), so
+  // the Danger Zone can tell a different admin "who asked" and hide the
+  // Approve action from the requester themselves.
+  deletionApprovalRequired: boolean;
+  deletionGraceDays: number | null;
+  deletionApprovedBy: string | null;
+  deletionApprovedAt: string | null;
+  deletionRequestedByEmail?: string | null;
+};
+
+// Tenant Management gap-fill Phase 1 item #5 — shown before a Platform
+// Admin ever submits a deletion request, so "what will this actually
+// affect" isn't a guess. `requiresSecondApproval` mirrors exactly what
+// `requestDeletion()` itself will decide server-side (same threshold),
+// so the UI can warn about the second-approval step up front rather than
+// surprising the admin after they've already typed a reason.
+export type DeletionImpactPreview = {
+  companyId: string;
+  employeeCount: number;
+  adminCount: number;
+  activeIntegrationsCount: number;
+  storageUsedMb: number;
+  requiresSecondApproval: boolean;
+  secondApprovalThresholdEmployees: number;
 };
 
 /** Dashboard row — a Company plus display-only figures that aren't real billing data yet. */

@@ -239,6 +239,14 @@ export class CompaniesController {
   // existing PATCH :id above (status + required reason). These two are
   // the Danger Zone / TM-038 deletion workflow specifically.
 
+  // Tenant Management gap-fill Phase 1 item #5 — read-only, so the
+  // Danger Zone can show what a deletion would affect BEFORE a Platform
+  // Admin ever types a reason. No body, no side effects.
+  @Get(":id/deletion-impact")
+  getDeletionImpact(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.companies.getDeletionImpact(claims, id);
+  }
+
   @Post(":id/deletion-request")
   requestDeletion(
     @CurrentClaims() claims: RequestClaims,
@@ -251,5 +259,12 @@ export class CompaniesController {
   @Delete(":id/deletion-request")
   cancelDeletion(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
     return this.companies.cancelDeletion(claims, id);
+  }
+
+  // Phase 1 item #5 — the second-approver action. No body: everything
+  // needed (the grace period) was already stashed at request time.
+  @Post(":id/deletion-request/approve")
+  approveDeletion(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.companies.approveDeletion(claims, id);
   }
 }

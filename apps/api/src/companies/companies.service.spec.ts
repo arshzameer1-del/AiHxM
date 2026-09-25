@@ -1,4 +1,4 @@
-import { ConflictException, NotFoundException, BadRequestException } from "@nestjs/common";
+import { ConflictException, NotFoundException, BadRequestException, ForbiddenException } from "@nestjs/common";
 import { Pool } from "pg";
 import * as jwt from "jsonwebtoken";
 import { CompaniesService } from "./companies.service";
@@ -15,6 +15,18 @@ const FIXTURE_CLAIMS: RequestClaims = {
   is_platform_admin: true,
   company_id: null,
   sub: "companies-service-fixtures",
+};
+
+// Phase 1 item #5 — a distinct Platform Admin identity, needed to prove
+// self-approval is rejected and a genuinely different admin's approval is
+// accepted. A different `sub` is all that distinguishes them here — real
+// Platform Admin logins each get their own `user_accounts.id` as `sub`
+// (PlatformAdminsService.create()), so two different literal strings is a
+// faithful enough stand-in for that.
+const SECOND_ADMIN_CLAIMS: RequestClaims = {
+  is_platform_admin: true,
+  company_id: null,
+  sub: "companies-service-fixtures-second-admin",
 };
 
 describe("CompaniesService", () => {
@@ -50,6 +62,23 @@ describe("CompaniesService", () => {
   afterAll(async () => {
     await pool.end();
   });
+
+  // Phase 1 item #5 — seeds `count` plain active employees so
+  // getDeletionImpact()/requestDeletion() have real rows to count against
+  // SECOND_APPROVAL_EMPLOYEE_THRESHOLD. Only the columns the NOT NULL
+  // constraints actually require; employment_status defaults to 'active'
+  // (0010_employee_core.sql), which is exactly what the threshold counts.
+  async function seedActiveEmployees(companyId: string, count: number): Promise<void> {
+    await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+      for (let i = 0; i < count; i++) {
+        await client.query(
+          `INSERT INTO employees (company_id, employee_number, first_name, last_name)
+           VALUES ($1, $2, 'Test', 'Employee')`,
+          [companyId, `EMP-${Date.now()}-${i}`]
+        );
+      }
+    });
+  }
 
   describe("create", () => {
     it("creates a company with default settings", async () => {
@@ -321,6 +350,116 @@ describe("CompaniesService", () => {
       expect(expiredDetail.company.status).toBe("archived");
       const notYetExpiredDetail = await service.getDetail(FIXTURE_CLAIMS, notYetExpired.company.id);
       expect(notYetExpiredDetail.company.status).toBe("locked");
+    });
+  });
+
+  describe("deletion impact preview + second-approver rule (Phase 1 item #5)", () => {
+    it("getDeletionImpact reports real counts and flips requiresSecondApproval at the threshold", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Impact Small",
+        slug: `test-co-impact-small-${Date.now()}`,
+        initialAdmin: { fullName: "Impact Admin", email: `impact-admin-${Date.now()}@example.com` },
+      });
+
+      const smallImpact = await service.getDeletionImpact(FIXTURE_CLAIMS, created.company.id);
+      expect(smallImpact.employeeCount).toBe(0);
+      expect(smallImpact.adminCount).toBe(1);
+      expect(smallImpact.requiresSecondApproval).toBe(false);
+      expect(smallImpact.secondApprovalThresholdEmployees).toBeGreaterThan(0);
+
+      await seedActiveEmployees(created.company.id, smallImpact.secondApprovalThresholdEmployees);
+
+      const bigImpact = await service.getDeletionImpact(FIXTURE_CLAIMS, created.company.id);
+      expect(bigImpact.employeeCount).toBe(smallImpact.secondApprovalThresholdEmployees);
+      expect(bigImpact.requiresSecondApproval).toBe(true);
+    });
+
+    it("404s getDeletionImpact for a company that doesn't exist", async () => {
+      await expect(
+        service.getDeletionImpact(FIXTURE_CLAIMS, "00000000-0000-0000-0000-000000000000")
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it("requestDeletion above the employee threshold locks the tenant but leaves the purge date unset until a second admin approves", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Second Approval",
+        slug: `test-co-second-approval-${Date.now()}`,
+      });
+      const impact = await service.getDeletionImpact(FIXTURE_CLAIMS, created.company.id);
+      await seedActiveEmployees(created.company.id, impact.secondApprovalThresholdEmployees);
+
+      const requested = await service.requestDeletion(FIXTURE_CLAIMS, created.company.id, {
+        reason: "Large tenant closing down",
+        graceDays: 10,
+      });
+      expect(requested.status).toBe("locked");
+      expect(requested.deletionApprovalRequired).toBe(true);
+      expect(requested.deletionPurgeAt).toBeNull();
+      expect(requested.deletionGraceDays).toBe(10);
+      expect(requested.deletionApprovedBy).toBeNull();
+      expect(await sessionSecurity.companyAccessStatus(created.company.id)).toBe("locked");
+
+      // The requester themselves cannot also approve it.
+      await expect(service.approveDeletion(FIXTURE_CLAIMS, created.company.id)).rejects.toThrow(
+        ForbiddenException
+      );
+
+      // A different Platform Admin can.
+      const approved = await service.approveDeletion(SECOND_ADMIN_CLAIMS, created.company.id);
+      expect(approved.deletionPurgeAt).not.toBeNull();
+      expect(approved.deletionApprovedBy).toBe(SECOND_ADMIN_CLAIMS.sub);
+      expect(approved.deletionApprovedAt).not.toBeNull();
+
+      // Can't approve an already-approved request again.
+      await expect(service.approveDeletion(SECOND_ADMIN_CLAIMS, created.company.id)).rejects.toThrow(
+        BadRequestException
+      );
+
+      // cancelDeletion resets the second-approval state along with everything else.
+      const cancelled = await service.cancelDeletion(FIXTURE_CLAIMS, created.company.id);
+      expect(cancelled.status).toBe("active");
+      expect(cancelled.deletionApprovalRequired).toBe(false);
+      expect(cancelled.deletionGraceDays).toBeNull();
+      expect(cancelled.deletionApprovedBy).toBeNull();
+      expect(cancelled.deletionApprovedAt).toBeNull();
+    });
+
+    it("requestDeletion under the threshold behaves exactly as before — no second approval needed", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Below Threshold",
+        slug: `test-co-below-threshold-${Date.now()}`,
+      });
+
+      const requested = await service.requestDeletion(FIXTURE_CLAIMS, created.company.id, {
+        reason: "Small tenant closing down",
+        graceDays: 7,
+      });
+      expect(requested.deletionApprovalRequired).toBe(false);
+      expect(requested.deletionPurgeAt).not.toBeNull();
+    });
+
+    it("approveDeletion rejects a company with no pending deletion request", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Approve No Request",
+        slug: `test-co-approve-no-request-${Date.now()}`,
+      });
+      await expect(service.approveDeletion(SECOND_ADMIN_CLAIMS, created.company.id)).rejects.toThrow(
+        BadRequestException
+      );
+    });
+
+    it("approveDeletion rejects a deletion request that never required a second approval", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Approve Not Required",
+        slug: `test-co-approve-not-required-${Date.now()}`,
+      });
+      await service.requestDeletion(FIXTURE_CLAIMS, created.company.id, {
+        reason: "Small tenant closing down",
+        graceDays: 7,
+      });
+      await expect(service.approveDeletion(SECOND_ADMIN_CLAIMS, created.company.id)).rejects.toThrow(
+        BadRequestException
+      );
     });
   });
 

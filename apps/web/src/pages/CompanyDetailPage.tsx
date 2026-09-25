@@ -39,6 +39,7 @@ import {
   type SupportTicketStatus,
   type DataExportFormat,
   type DataExportScope,
+  type DeletionImpactPreview,
   type TenantBackup,
   type TenantDataExport,
   type ModuleKey,
@@ -53,6 +54,7 @@ import {
   type VerticalPosition,
 } from "@aihxm/shared-types";
 import { api, ApiError } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
 import { StatusPill } from "../components/StatusPill";
 import { ReasonModal } from "../components/ReasonModal";
 
@@ -220,6 +222,9 @@ export function CompanyDetailPage() {
           deletionRequestedAt={company.deletionRequestedAt}
           deletionReason={company.deletionReason}
           deletionPurgeAt={company.deletionPurgeAt}
+          deletionApprovalRequired={company.deletionApprovalRequired}
+          deletionApprovedAt={company.deletionApprovedAt}
+          deletionRequestedByEmail={company.deletionRequestedByEmail ?? null}
           onSaved={(updated) => {
             setDetail({ ...detail, company: { ...company, ...updated } });
             flashSaved();
@@ -1102,6 +1107,9 @@ function LifecycleTab({
   deletionRequestedAt,
   deletionReason,
   deletionPurgeAt,
+  deletionApprovalRequired,
+  deletionApprovedAt,
+  deletionRequestedByEmail,
   onSaved,
 }: {
   companyId: string;
@@ -1109,18 +1117,51 @@ function LifecycleTab({
   deletionRequestedAt: string | null;
   deletionReason: string | null;
   deletionPurgeAt: string | null;
+  deletionApprovalRequired: boolean;
+  deletionApprovedAt: string | null;
+  deletionRequestedByEmail: string | null;
   onSaved: (patch: {
     status: CompanyStatus;
     deletionRequestedAt: string | null;
     deletionReason: string | null;
     deletionPurgeAt: string | null;
+    deletionApprovalRequired: boolean;
+    deletionApprovedAt: string | null;
   }) => void;
 }) {
+  const { identity } = useAuth();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [graceDays, setGraceDays] = useState(14);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [impact, setImpact] = useState<DeletionImpactPreview | null>(null);
+  const [impactError, setImpactError] = useState<string | null>(null);
   const deletionPending = Boolean(deletionRequestedAt);
+  // Phase 1 item #5 — a request above the employee threshold locks the
+  // tenant immediately (unchanged) but leaves deletion_purge_at unset
+  // until a DIFFERENT Platform Admin approves; this is that in-between
+  // state, distinct from "pending, purge already scheduled."
+  const awaitingSecondApproval = deletionPending && deletionApprovalRequired && !deletionApprovedAt;
+  // A courtesy, not the real gate — approveDeletion() rejects self-approval
+  // server-side regardless of what this shows. Unknown requester email
+  // (getDetail's join found nothing) still shows the button rather than
+  // guessing; the API call is the actual check.
+  const canApproveMyself = Boolean(identity?.email) && identity?.email === deletionRequestedByEmail;
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getCompanyDeletionImpact(companyId)
+      .then((result) => {
+        if (!cancelled) setImpact(result);
+      })
+      .catch(() => {
+        if (!cancelled) setImpactError("Could not load the deletion impact preview.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId]);
 
   async function requestDeletion(reason: string) {
     const updated = await api.requestCompanyDeletion(companyId, { reason, graceDays });
@@ -1129,6 +1170,8 @@ function LifecycleTab({
       deletionRequestedAt: updated.deletionRequestedAt,
       deletionReason: updated.deletionReason,
       deletionPurgeAt: updated.deletionPurgeAt,
+      deletionApprovalRequired: updated.deletionApprovalRequired,
+      deletionApprovedAt: updated.deletionApprovedAt,
     });
     setConfirmingDelete(false);
   }
@@ -1143,9 +1186,31 @@ function LifecycleTab({
         deletionRequestedAt: updated.deletionRequestedAt,
         deletionReason: updated.deletionReason,
         deletionPurgeAt: updated.deletionPurgeAt,
+        deletionApprovalRequired: updated.deletionApprovalRequired,
+        deletionApprovedAt: updated.deletionApprovedAt,
       });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not cancel deletion.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function approveDeletion() {
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await api.approveCompanyDeletion(companyId);
+      onSaved({
+        status: updated.status,
+        deletionRequestedAt: updated.deletionRequestedAt,
+        deletionReason: updated.deletionReason,
+        deletionPurgeAt: updated.deletionPurgeAt,
+        deletionApprovalRequired: updated.deletionApprovalRequired,
+        deletionApprovedAt: updated.deletionApprovedAt,
+      });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not approve this deletion request.");
     } finally {
       setBusy(false);
     }
@@ -1173,25 +1238,71 @@ function LifecycleTab({
       <section className="bg-card rounded-card p-5 shadow-sm space-y-4 border border-danger/20">
         <h2 className="font-semibold text-sm uppercase tracking-wide text-danger">Danger Zone</h2>
 
+        {/* Phase 1 item #5 — deletion impact preview, shown before a
+            deletion is ever requested so the number isn't a surprise
+            after the fact. */}
+        {!deletionPending && impact && (
+          <div className="text-sm bg-surface rounded-lg p-3 space-y-1">
+            <div className="font-semibold text-label-secondary">If this tenant is deleted:</div>
+            <div className="text-label-secondary">
+              {impact.employeeCount} active employee{impact.employeeCount === 1 ? "" : "s"} ·{" "}
+              {impact.adminCount} admin{impact.adminCount === 1 ? "" : "s"} ·{" "}
+              {impact.activeIntegrationsCount} active integration{impact.activeIntegrationsCount === 1 ? "" : "s"} ·{" "}
+              {impact.storageUsedMb.toLocaleString()} MB stored
+            </div>
+            {impact.requiresSecondApproval && (
+              <div className="text-xs text-label-tertiary">
+                This tenant has {impact.employeeCount} employees (at or above the{" "}
+                {impact.secondApprovalThresholdEmployees}-employee threshold), so a DIFFERENT Platform
+                Admin will need to approve the request before the grace period starts.
+              </div>
+            )}
+          </div>
+        )}
+        {!deletionPending && impactError && <div className="text-xs text-label-tertiary">{impactError}</div>}
+
         {deletionPending ? (
           <div className="space-y-3">
             <div className="text-sm bg-red-50 border border-red-200 rounded-lg p-3">
-              <div className="font-semibold text-red-900 mb-1">Deletion requested</div>
+              <div className="font-semibold text-red-900 mb-1">
+                {awaitingSecondApproval ? "Deletion requested — awaiting second approval" : "Deletion requested"}
+              </div>
               <div className="text-red-800">{deletionReason}</div>
-              {deletionPurgeAt && (
+              {awaitingSecondApproval ? (
                 <div className="text-xs text-red-700 mt-1">
-                  This tenant will be permanently archived on{" "}
-                  {new Date(deletionPurgeAt).toLocaleString()} unless cancelled before then.
+                  {deletionRequestedByEmail && <>Requested by {deletionRequestedByEmail}. </>}
+                  The grace period hasn't started yet — a different Platform Admin must approve this
+                  request before it proceeds.
+                  {canApproveMyself &&
+                    " You requested this, so a different Platform Admin needs to be the one to approve it."}
                 </div>
+              ) : (
+                deletionPurgeAt && (
+                  <div className="text-xs text-red-700 mt-1">
+                    This tenant will be permanently archived on{" "}
+                    {new Date(deletionPurgeAt).toLocaleString()} unless cancelled before then.
+                  </div>
+                )
               )}
             </div>
-            <button
-              onClick={cancelDeletion}
-              disabled={busy}
-              className="bg-accent text-white rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-50"
-            >
-              {busy ? "Cancelling…" : "Cancel deletion request"}
-            </button>
+            <div className="flex gap-2">
+              {awaitingSecondApproval && !canApproveMyself && (
+                <button
+                  onClick={approveDeletion}
+                  disabled={busy}
+                  className="bg-danger text-white rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                >
+                  {busy ? "Approving…" : "Approve deletion"}
+                </button>
+              )}
+              <button
+                onClick={cancelDeletion}
+                disabled={busy}
+                className="bg-accent text-white rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-50"
+              >
+                {busy ? "Cancelling…" : "Cancel deletion request"}
+              </button>
+            </div>
           </div>
         ) : (
           <>
@@ -1200,6 +1311,8 @@ function LifecycleTab({
               the grace period — it is not instant and can be cancelled any time before the purge
               date. Nothing is hard-deleted from the database by this action; it moves the tenant's
               status to <code>archived</code> for the platform to handle from there.
+              {impact?.requiresSecondApproval &&
+                " Because of this tenant's size, a second Platform Admin will also need to approve it before the grace period starts."}
             </p>
             <button
               onClick={() => setConfirmingDelete(true)}
@@ -1215,7 +1328,11 @@ function LifecycleTab({
       {confirmingDelete && (
         <ReasonModal
           title="Request tenant deletion?"
-          description="This locks the tenant immediately. It will be archived automatically once the grace period elapses, unless you cancel first."
+          description={
+            impact?.requiresSecondApproval
+              ? "This locks the tenant immediately. Because of this tenant's size, a different Platform Admin will need to approve the request before the grace period starts — it will not archive automatically until then."
+              : "This locks the tenant immediately. It will be archived automatically once the grace period elapses, unless you cancel first."
+          }
           confirmLabel="Request deletion"
           danger
           extraField={{ label: "Grace period (days)", value: graceDays, onChange: setGraceDays, min: 1, max: 90 }}

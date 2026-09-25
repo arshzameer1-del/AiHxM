@@ -1,4 +1,11 @@
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { createHash } from "crypto";
 import * as jwt from "jsonwebtoken";
 import { DatabaseService } from "../database/database.service";
@@ -21,12 +28,22 @@ import type {
   CompanyStatus,
   BrandingAssetSlot,
   CreateCompanyRequest,
+  DeletionImpactPreview,
   DomainAvailabilityResult,
   EmployeeNumberFormat,
   ImpersonateResponse,
   ModuleKey,
   PackageTier,
 } from "@aihxm/shared-types";
+
+// Tenant Management gap-fill Phase 1 item #5 — a deletion request for a
+// tenant with at least this many active employees needs a SECOND,
+// different Platform Admin's approval before the grace-period purge
+// clock starts (see requestDeletion/approveDeletion below). Deliberately
+// a plain module constant, same convention as AuthService's
+// MAX_FAILED_ATTEMPTS/LOCKOUT_MINUTES — not meant to be tenant-configurable,
+// just a single easy-to-find place to change it.
+const SECOND_APPROVAL_EMPLOYEE_THRESHOLD = 25;
 
 /**
  * Deterministic placeholder only — see CompanyDashboardRow's doc comment
@@ -72,6 +89,15 @@ function rowToCompany(row: any): Company {
     deletionRequestedAt: isoOrNull(row.deletion_requested_at),
     deletionReason: row.deletion_reason ?? null,
     deletionPurgeAt: isoOrNull(row.deletion_purge_at),
+    deletionApprovalRequired: row.deletion_approval_required ?? false,
+    deletionGraceDays: row.deletion_grace_days ?? null,
+    deletionApprovedBy: row.deletion_approved_by ?? null,
+    deletionApprovedAt: isoOrNull(row.deletion_approved_at),
+    // Only ever present when the query that produced `row` deliberately
+    // joined for it (getDetail()'s own company query) — every other
+    // caller reads back `undefined` here, which the `Company` type marks
+    // optional for exactly that reason.
+    deletionRequestedByEmail: row.deletion_requested_by_email ?? null,
   };
 }
 
@@ -366,7 +392,19 @@ export class CompaniesService {
 
   async getDetail(claims: RequestClaims, companyId: string): Promise<CompanyDetail> {
     return this.db.withClaims(claims, async (client) => {
-      const companyResult = await client.query("SELECT * FROM companies WHERE id = $1", [companyId]);
+      // Phase 1 item #5 — resolves deletion_requested_by (a user_accounts
+      // id stored as plain text, same as claims.sub) to that admin's
+      // email, purely so the Danger Zone can tell a DIFFERENT Platform
+      // Admin who asked and hide the Approve action from the requester
+      // themselves. The cast is safe against non-UUID values (test
+      // fixture subs, or no request at all) — it just joins to nothing.
+      const companyResult = await client.query(
+        `SELECT c.*, ua.email AS deletion_requested_by_email
+         FROM companies c
+         LEFT JOIN user_accounts ua ON ua.id::text = c.deletion_requested_by
+         WHERE c.id = $1`,
+        [companyId]
+      );
       if (companyResult.rowCount === 0) {
         throw new NotFoundException("Company not found");
       }
@@ -543,6 +581,58 @@ export class CompaniesService {
   }
 
   /**
+   * Tenant Management gap-fill Phase 1 item #5 — shown before a Platform
+   * Admin ever submits a deletion request, so "what will this actually
+   * affect" isn't a guess made after the fact. Every figure here is a
+   * real query against this tenant's own rows, same posture as
+   * `UsageService.getSummary()` (its `employeeCount`/`storageUsedMb`
+   * queries are deliberately mirrored here rather than imported —
+   * `CompaniesModule` doesn't otherwise depend on the tenant-management
+   * module, and these two queries are cheap enough that duplicating them
+   * beats introducing that coupling for a read this small).
+   * `requiresSecondApproval` mirrors exactly what `requestDeletion()`
+   * below will decide, so the preview and the real gate can never
+   * disagree.
+   */
+  async getDeletionImpact(claims: RequestClaims, companyId: string): Promise<DeletionImpactPreview> {
+    return this.db.withClaims(claims, async (client) => {
+      const companyResult = await client.query("SELECT id FROM companies WHERE id = $1", [companyId]);
+      if (companyResult.rowCount === 0) {
+        throw new NotFoundException("Company not found");
+      }
+
+      const employeeCount = await client.query(
+        "SELECT COUNT(*)::int AS n FROM employees WHERE company_id = $1 AND employment_status <> 'terminated'",
+        [companyId]
+      );
+      const adminCount = await client.query(
+        "SELECT COUNT(*)::int AS n FROM company_admins WHERE company_id = $1",
+        [companyId]
+      );
+      const activeIntegrationsCount = await client.query(
+        "SELECT COUNT(*)::int AS n FROM tenant_integrations WHERE company_id = $1 AND enabled = true",
+        [companyId]
+      );
+      const storageRow = await client.query(
+        "SELECT COALESCE(SUM(size_bytes), 0)::bigint AS bytes FROM employee_documents WHERE company_id = $1",
+        [companyId]
+      );
+      const storageUsedMb = Number(storageRow.rows[0].bytes) / (1024 * 1024);
+
+      const employees = employeeCount.rows[0].n as number;
+      return {
+        companyId,
+        employeeCount: employees,
+        adminCount: adminCount.rows[0].n,
+        activeIntegrationsCount: activeIntegrationsCount.rows[0].n,
+        storageUsedMb: Math.round(storageUsedMb * 100) / 100,
+        requiresSecondApproval: employees >= SECOND_APPROVAL_EMPLOYEE_THRESHOLD,
+        secondApprovalThresholdEmployees: SECOND_APPROVAL_EMPLOYEE_THRESHOLD,
+      };
+    });
+  }
+
+  /**
    * TM-038 Danger Zone: request deletion with a grace period rather than
    * ever hard-deleting on a single API call — "Never immediate hard
    * delete" per the spec's own guidance. `TenantLifecycleSweep` (a new
@@ -550,6 +640,13 @@ export class CompaniesService {
    * company once `deletion_purge_at` passes; this only starts the clock
    * and immediately blocks access the same way Lock/Suspend do (a company
    * pending deletion has no business staying reachable in the meantime).
+   *
+   * Phase 1 item #5 — above `SECOND_APPROVAL_EMPLOYEE_THRESHOLD` active
+   * employees, the lock still happens immediately (unchanged), but
+   * `deletion_purge_at` is deliberately left NULL: the grace-period clock
+   * doesn't start until a DIFFERENT Platform Admin calls
+   * `approveDeletion()` below. `graceDays` is stashed in
+   * `deletion_grace_days` so approving doesn't need to ask for it again.
    */
   async requestDeletion(
     claims: RequestClaims,
@@ -561,6 +658,9 @@ export class CompaniesService {
     }
     const graceDays = input.graceDays ?? 14;
 
+    const impact = await this.getDeletionImpact(claims, companyId);
+    const requiresSecondApproval = impact.requiresSecondApproval;
+
     const company = await this.db.withClaims(claims, async (client) => {
       const result = await client.query(
         `UPDATE companies SET
@@ -569,12 +669,16 @@ export class CompaniesService {
            status_changed_at = now(),
            deletion_requested_at = now(),
            deletion_reason = $2,
-           deletion_purge_at = now() + ($3 || ' days')::interval,
+           deletion_purge_at = CASE WHEN $5 THEN NULL ELSE now() + ($3::text || ' days')::interval END,
            deletion_requested_by = $4,
+           deletion_approval_required = $5,
+           deletion_grace_days = $3::integer,
+           deletion_approved_by = NULL,
+           deletion_approved_at = NULL,
            updated_at = now()
          WHERE id = $1
          RETURNING *`,
-        [companyId, input.reason, graceDays, claims.sub]
+        [companyId, input.reason, graceDays, claims.sub, requiresSecondApproval]
       );
       if (result.rowCount === 0) {
         throw new NotFoundException("Company not found");
@@ -584,13 +688,76 @@ export class CompaniesService {
         companyId,
         action: "company.deletion_requested",
         target: companyId,
-        metadata: { reason: input.reason, graceDays },
+        metadata: {
+          reason: input.reason,
+          graceDays,
+          requiresSecondApproval,
+          employeeCount: impact.employeeCount,
+        },
       });
 
       return rowToCompany(result.rows[0]);
     });
 
     await this.sessionSecurity.invalidateCompanyStatusCache(companyId);
+    return company;
+  }
+
+  /**
+   * Phase 1 item #5's second half — the ONLY way `deletion_purge_at` ever
+   * gets set for a request `requestDeletion()` flagged as needing a
+   * second approval. Self-approval is rejected outright: the whole point
+   * is a second, independent pair of eyes, so the admin who filed the
+   * request (`deletion_requested_by`) can't also be the one who clears it.
+   */
+  async approveDeletion(claims: RequestClaims, companyId: string): Promise<Company> {
+    const company = await this.db.withClaims(claims, async (client) => {
+      const existing = await client.query(
+        `SELECT deletion_requested_at, deletion_requested_by, deletion_approval_required,
+                deletion_approved_at, deletion_grace_days
+         FROM companies WHERE id = $1`,
+        [companyId]
+      );
+      if (existing.rowCount === 0) {
+        throw new NotFoundException("Company not found");
+      }
+      const row = existing.rows[0];
+      if (!row.deletion_requested_at) {
+        throw new BadRequestException("This tenant has no pending deletion request.");
+      }
+      if (!row.deletion_approval_required) {
+        throw new BadRequestException("This deletion request does not require a second approval.");
+      }
+      if (row.deletion_approved_at) {
+        throw new BadRequestException("This deletion request has already been approved.");
+      }
+      if (row.deletion_requested_by === claims.sub) {
+        throw new ForbiddenException(
+          "A different Platform Admin must approve this deletion request — the admin who requested it can't also approve it."
+        );
+      }
+
+      const result = await client.query(
+        `UPDATE companies SET
+           deletion_purge_at = now() + (deletion_grace_days || ' days')::interval,
+           deletion_approved_by = $2,
+           deletion_approved_at = now(),
+           updated_at = now()
+         WHERE id = $1
+         RETURNING *`,
+        [companyId, claims.sub]
+      );
+
+      await this.audit.record(client, claims, {
+        companyId,
+        action: "company.deletion_approved",
+        target: companyId,
+        metadata: { requestedBy: row.deletion_requested_by },
+      });
+
+      return rowToCompany(result.rows[0]);
+    });
+
     return company;
   }
 
@@ -606,6 +773,10 @@ export class CompaniesService {
            deletion_reason = NULL,
            deletion_purge_at = NULL,
            deletion_requested_by = NULL,
+           deletion_approval_required = false,
+           deletion_grace_days = NULL,
+           deletion_approved_by = NULL,
+           deletion_approved_at = NULL,
            updated_at = now()
          WHERE id = $1 AND deletion_requested_at IS NOT NULL
          RETURNING *`,

@@ -27,6 +27,7 @@ import type {
   CreateEmployeeGroupRequest,
   CreateEmployeeLoginRequest,
   CreateEmployeeLoginResponse,
+  DeletionImpactPreview,
   CreateEmployeeRequest,
   CreateGoalRequest,
   CreateHolidayRequest,
@@ -482,6 +483,10 @@ export const api = {
     }),
 
   // TM-037/TM-038 — Lifecycle: Danger Zone deletion workflow.
+  // Phase 1 item #5 — impact preview (read-only) + second-approver rule.
+  getCompanyDeletionImpact: (id: string) =>
+    request<DeletionImpactPreview>(`/platform/companies/${id}/deletion-impact`),
+
   requestCompanyDeletion: (id: string, input: { reason: string; graceDays?: number }) =>
     request<Company>(`/platform/companies/${id}/deletion-request`, {
       method: "POST",
@@ -490,6 +495,9 @@ export const api = {
 
   cancelCompanyDeletion: (id: string) =>
     request<Company>(`/platform/companies/${id}/deletion-request`, { method: "DELETE" }),
+
+  approveCompanyDeletion: (id: string) =>
+    request<Company>(`/platform/companies/${id}/deletion-request/approve`, { method: "POST" }),
 
   // TM-003 — saved, reusable Tenant Directory filter combinations.
   listSavedViews: () => request<PlatformSavedView[]>("/platform/saved-views"),
