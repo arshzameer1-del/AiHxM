@@ -1832,7 +1832,7 @@ function FeaturesTab({ companyId }: { companyId: string }) {
 
 const INTEGRATION_LABELS: Record<IntegrationProviderKey, string> = {
   smtp: "SMTP (outbound email)",
-  sso: "Single sign-on (OIDC)",
+  sso: "Single sign-on (OIDC / SAML)",
   biometric_device: "Biometric attendance device",
   webhook: "Outbound webhook",
 };
@@ -1841,17 +1841,17 @@ const INTEGRATION_LABELS: Record<IntegrationProviderKey, string> = {
 // are always sent blank-if-unchanged (an empty value means "leave as
 // is" — the backend merges rather than replaces `config`), and are never
 // pre-filled from a GET response since the server never returns them.
-const INTEGRATION_FIELDS: Record<IntegrationProviderKey, { key: string; label: string; secret?: boolean }[]> = {
+// `multiline` renders a `<textarea>` instead of a single-line `<input>` —
+// only ever needed for `sso`'s SAML certificate below, a PEM block that
+// spans many lines.
+type IntegrationField = { key: string; label: string; secret?: boolean; multiline?: boolean };
+
+const INTEGRATION_FIELDS: Record<Exclude<IntegrationProviderKey, "sso">, IntegrationField[]> = {
   smtp: [
     { key: "host", label: "SMTP host" },
     { key: "port", label: "Port" },
     { key: "username", label: "Username" },
     { key: "password", label: "Password", secret: true },
-  ],
-  sso: [
-    { key: "issuerUrl", label: "Issuer URL" },
-    { key: "clientId", label: "Client ID" },
-    { key: "clientSecret", label: "Client secret", secret: true },
   ],
   biometric_device: [
     { key: "deviceEndpoint", label: "Device endpoint URL" },
@@ -1863,6 +1863,29 @@ const INTEGRATION_FIELDS: Record<IntegrationProviderKey, { key: string; label: s
   ],
 };
 
+// Phase 3 item #1 — `sso`'s field set depends on which protocol is
+// selected, unlike every other provider above (a fixed list), so it gets
+// its own small map plus the protocol selector rendered in the card
+// below, rather than being force-fit into `INTEGRATION_FIELDS`. Advanced,
+// less-common fields (`groupsClaim`/`groupsAttribute`, `roleMapping`,
+// `defaultRoleKey`) are deliberately NOT exposed here yet, for both
+// protocols equally — same minimal-first scope OIDC's own slice already
+// shipped with; still settable directly via the API for a tenant that
+// needs them today.
+type SsoProtocol = "oidc" | "saml";
+const SSO_PROTOCOL_FIELDS: Record<SsoProtocol, IntegrationField[]> = {
+  oidc: [
+    { key: "issuerUrl", label: "Issuer URL" },
+    { key: "clientId", label: "Client ID" },
+    { key: "clientSecret", label: "Client secret", secret: true },
+  ],
+  saml: [
+    { key: "idpEntityId", label: "IdP Entity ID (Issuer)" },
+    { key: "idpSsoUrl", label: "IdP Single Sign-On URL" },
+    { key: "idpCertificate", label: "IdP X.509 certificate (PEM)", multiline: true },
+  ],
+};
+
 // Tenant Management gap-fill Phase 1 item #12 — only these providers'
 // secrets are issued BY AIHXM, so only these offer Rotate. Mirrors
 // ROTATABLE_PROVIDER_KEYS in integrations.service.ts.
@@ -1871,6 +1894,10 @@ const ROTATABLE_INTEGRATION_KEYS: TenantIntegration["providerKey"][] = ["biometr
 function IntegrationsTab({ companyId }: { companyId: string }) {
   const [integrations, setIntegrations] = useState<TenantIntegration[] | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Record<string, string>>>({});
+  // Phase 3 item #1, slice 2 — which protocol's fields are showing for the
+  // `sso` card, seeded from whatever's already saved (defaulting to OIDC,
+  // the original protocol, for a company with no `sso` config yet).
+  const [ssoProtocol, setSsoProtocol] = useState<SsoProtocol>("oidc");
   const [error, setError] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [savedKey, setSavedKey] = useState<string | null>(null);
@@ -1884,6 +1911,12 @@ function IntegrationsTab({ companyId }: { companyId: string }) {
   // @RequireStepUp() route.
   const { runWithStepUp, stepUpModal } = useStepUp();
 
+  /** `INTEGRATION_FIELDS[key]` for every provider except `sso`, whose field set depends on `ssoProtocol` instead of being fixed. */
+  function fieldsFor(providerKey: IntegrationProviderKey): IntegrationField[] {
+    if (providerKey === "sso") return SSO_PROTOCOL_FIELDS[ssoProtocol];
+    return INTEGRATION_FIELDS[providerKey];
+  }
+
   async function load() {
     try {
       const list = await api.listIntegrations(companyId);
@@ -1896,6 +1929,9 @@ function IntegrationsTab({ companyId }: { companyId: string }) {
           ])
         )
       );
+      const sso = list.find((i) => i.providerKey === "sso");
+      if (sso?.config.protocol === "saml") setSsoProtocol("saml");
+      else if (sso?.config.protocol === "oidc") setSsoProtocol("oidc");
     } catch {
       setError("Could not load integrations.");
     }
@@ -1926,7 +1962,7 @@ function IntegrationsTab({ companyId }: { companyId: string }) {
   }
 
   async function save(integration: TenantIntegration) {
-    const fields = INTEGRATION_FIELDS[integration.providerKey];
+    const fields = fieldsFor(integration.providerKey);
     const draft = drafts[integration.providerKey] ?? {};
     // Only send secret fields the admin actually typed something into —
     // an untouched blank secret field must never overwrite a saved one.
@@ -1937,14 +1973,26 @@ function IntegrationsTab({ companyId }: { companyId: string }) {
       if (!f.secret) config[f.key] = value;
       else config[f.key] = value;
     }
-    // SsoService (Phase 3 item #1) requires `protocol: "oidc"` on the
-    // stored config before it will treat an "sso" integration as usable
-    // (`loadEnabledOidcConfig` rejects anything else as "incomplete") —
-    // OIDC is the only protocol this form supports today (SAML is a
-    // later slice), so this is set here rather than exposing a
-    // single-option dropdown for a choice that isn't really a choice yet.
+    // SsoService (Phase 3 item #1) requires `protocol` on the stored
+    // config before it will treat an "sso" integration as usable
+    // (`loadEnabledSsoConfig` rejects anything else as "incomplete") —
+    // `ssoProtocol` is this card's own selector state, so it's set here
+    // rather than exposed as one of `fields` above (it isn't a value the
+    // admin types, it's which set of fields they're even looking at).
+    //
+    // Note: `IntegrationsService.configure()` MERGES `config` into
+    // whatever's already saved (never a wholesale replace — see its own
+    // comment on why: an untouched secret field must survive a save).
+    // Switching protocols therefore leaves the previous protocol's fields
+    // sitting unused in the stored config rather than deleting them —
+    // harmless (`loadEnabledSsoConfig` only ever reads the fields for
+    // `config.protocol`'s CURRENT value) but real: a tenant that tries
+    // OIDC, switches to SAML, could still have an old `clientSecret`
+    // parked in the row. A real, additive follow-up (clearing the other
+    // protocol's known keys on an explicit switch) if that ever matters
+    // for a real tenant, not a correctness or security issue today.
     if (integration.providerKey === "sso") {
-      config.protocol = "oidc";
+      config.protocol = ssoProtocol;
     }
     setBusyKey(integration.providerKey);
     setError(null);
@@ -2023,17 +2071,43 @@ function IntegrationsTab({ companyId }: { companyId: string }) {
                 {integration.enabled ? "Enabled" : "Disabled"}
               </button>
             </div>
+            {integration.providerKey === "sso" && (
+              <div className="flex items-center gap-3 text-xs">
+                <span className="text-label-tertiary">Protocol</span>
+                {(["oidc", "saml"] as const).map((p) => (
+                  <label key={p} className="flex items-center gap-1.5">
+                    <input
+                      type="radio"
+                      name={`sso-protocol-${companyId}`}
+                      checked={ssoProtocol === p}
+                      onChange={() => setSsoProtocol(p)}
+                    />
+                    {p === "oidc" ? "OpenID Connect" : "SAML 2.0"}
+                  </label>
+                ))}
+              </div>
+            )}
             <div className="space-y-2">
-              {INTEGRATION_FIELDS[integration.providerKey].map((f) => (
+              {fieldsFor(integration.providerKey).map((f) => (
                 <label key={f.key} className="block text-xs text-label-tertiary">
                   {f.label}
-                  <input
-                    type={f.secret ? "password" : "text"}
-                    placeholder={f.secret && integration.hasSecrets ? "•••••••• (unchanged)" : ""}
-                    value={drafts[integration.providerKey]?.[f.key] ?? ""}
-                    onChange={(e) => setDraftField(integration.providerKey, f.key, e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-black/10 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
-                  />
+                  {f.multiline ? (
+                    <textarea
+                      rows={4}
+                      placeholder={f.secret && integration.hasSecrets ? "•••••••• (unchanged)" : ""}
+                      value={drafts[integration.providerKey]?.[f.key] ?? ""}
+                      onChange={(e) => setDraftField(integration.providerKey, f.key, e.target.value)}
+                      className="mt-1 w-full rounded-lg border border-black/10 px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-accent"
+                    />
+                  ) : (
+                    <input
+                      type={f.secret ? "password" : "text"}
+                      placeholder={f.secret && integration.hasSecrets ? "•••••••• (unchanged)" : ""}
+                      value={drafts[integration.providerKey]?.[f.key] ?? ""}
+                      onChange={(e) => setDraftField(integration.providerKey, f.key, e.target.value)}
+                      className="mt-1 w-full rounded-lg border border-black/10 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                    />
+                  )}
                 </label>
               ))}
             </div>

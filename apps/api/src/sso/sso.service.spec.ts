@@ -12,7 +12,7 @@ import { EntitlementsService } from "../entitlements/entitlements.service";
 import { MailerService } from "../mailer/mailer.service";
 import { PG_POOL } from "../database/pg-pool.token";
 import type { RequestClaims } from "../database/tenant-context";
-import type { OidcSsoConfig } from "@aihxm/shared-types";
+import type { OidcSsoConfig, SamlSsoConfig } from "@aihxm/shared-types";
 
 /**
  * `provisionAndIssueToken()` (the JIT-provisioning core) and
@@ -347,6 +347,74 @@ describe("SsoService", () => {
           config: { protocol: "oidc", issuerUrl: "x", clientId: "x", clientSecret: "x" },
         })
       ).rejects.toThrow(BadRequestException);
+    });
+
+    // provisionAndIssueToken/resolveRoleKey are written once against
+    // SsoIntegrationConfig — the union of OidcSsoConfig and
+    // SamlSsoConfig — precisely so the JIT-provisioning logic above never
+    // needs a second, near-identical copy for SAML. These two tests exist
+    // to prove that generalization actually holds, not just compiles: the
+    // exact same account-creation/role-mapping behavior already proven
+    // above for an OidcSsoConfig also holds for a SamlSsoConfig, with
+    // nothing SAML-specific about it at this layer (that specificity —
+    // NameID, assertion attributes, XML-DSig — lives entirely in
+    // handleSamlAcs()/buildSamlClient(), covered by sso.e2e.spec.ts's own
+    // SAML suite against a genuine mock IdP).
+    it("provisions a brand-new account from a SAML config exactly like an OIDC one, with the config's default role", async () => {
+      const { companyId, slug } = await createCompanyWithSso();
+      const externalSubject = `saml-nameid-${randomUUID()}@example.com`;
+      const email = `saml-first-time-${randomUUID()}@example.com`;
+      const config: SamlSsoConfig = {
+        protocol: "saml",
+        idpEntityId: "https://idp.example.com/saml",
+        idpSsoUrl: "https://idp.example.com/saml/sso",
+        idpCertificate: "-----BEGIN CERTIFICATE-----\nspec-not-a-real-cert\n-----END CERTIFICATE-----",
+        defaultRoleKey: "employee_self_service",
+      };
+
+      const token = await service.provisionAndIssueToken({
+        companyId,
+        companySlug: slug,
+        externalSubject,
+        externalEmail: email,
+        groups: [],
+        config,
+      });
+
+      expect(typeof token).toBe("string");
+      const identity = await getFederatedIdentity(companyId, externalSubject);
+      expect(identity.external_email).toBe(email);
+      const account = await getUserAccount(identity.user_account_id);
+      expect(account.auth_provider).toBe("sso");
+      const roleKey = await getRoleKeyForAssignment(identity.user_account_id, companyId);
+      expect(roleKey).toBe("employee_self_service");
+    });
+
+    it("uses a SAML config's roleMapping to resolve a role from the assertion's groups attribute", async () => {
+      const { companyId, slug } = await createCompanyWithSso();
+      const externalSubject = `saml-mapped-${randomUUID()}@example.com`;
+      const config: SamlSsoConfig = {
+        protocol: "saml",
+        idpEntityId: "https://idp.example.com/saml",
+        idpSsoUrl: "https://idp.example.com/saml/sso",
+        idpCertificate: "-----BEGIN CERTIFICATE-----\nspec-not-a-real-cert\n-----END CERTIFICATE-----",
+        groupsAttribute: "groups",
+        roleMapping: { "idp-hr-group": "hr_admin" },
+        defaultRoleKey: "employee_self_service",
+      };
+
+      await service.provisionAndIssueToken({
+        companyId,
+        companySlug: slug,
+        externalSubject,
+        externalEmail: `mapped-${randomUUID()}@example.com`,
+        groups: ["idp-hr-group"],
+        config,
+      });
+
+      const identity = await getFederatedIdentity(companyId, externalSubject);
+      const roleKey = await getRoleKeyForAssignment(identity.user_account_id, companyId);
+      expect(roleKey).toBe("hr_admin");
     });
 
     it("rejects a role mapping that resolves to a role key nothing recognizes", async () => {

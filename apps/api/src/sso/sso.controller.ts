@@ -1,7 +1,8 @@
-import { Controller, Get, Param, Query, Res } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Query, Res } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 import type { Response } from "express";
 import { SsoService } from "./sso.service";
+import { SamlAcsDto } from "./dto/saml-acs.dto";
 
 /**
  * Phase 3 item #1 — no `@UseGuards` anywhere in this file, same posture
@@ -48,6 +49,24 @@ export class SsoController {
     @Res() res: Response
   ) {
     const { redirectTo } = await this.sso.handleCallback({ code, state, error, error_description: errorDescription });
+    res.redirect(redirectTo);
+  }
+
+  /**
+   * SAML 2.0's Assertion Consumer Service — the ACS URL every tenant's
+   * IdP is configured to POST its `<Response>` back to, via a real
+   * browser auto-submitting an HTML form (SAML's HTTP-POST binding),
+   * never a `fetch()` — hence `@Post` and a redirect response here,
+   * exactly like `callback()` above does for OIDC's GET-based equivalent.
+   * Deliberately NOT company-slug-scoped in its own path, for the same
+   * reason `callback()` isn't: the company is recovered from
+   * `RelayState`'s signed ticket, not the URL, so there is one static ACS
+   * URL for every tenant to register with their IdP.
+   */
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @Post("auth/sso/saml/acs")
+  async samlAcs(@Body() body: SamlAcsDto, @Res() res: Response) {
+    const { redirectTo } = await this.sso.handleSamlAcs(body);
     res.redirect(redirectTo);
   }
 }

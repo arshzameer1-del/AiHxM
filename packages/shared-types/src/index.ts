@@ -595,7 +595,21 @@ export type RotateIntegrationSecretResponse = {
   previousSecretExpiresAt: string;
 };
 
-// --- Phase 3 item #1: SSO & Identity Federation (OpenID Connect) ----------
+// --- Phase 3 item #1: SSO & Identity Federation (OpenID Connect + SAML) ----
+
+/**
+ * JIT role-resolution fields common to every SSO protocol's config —
+ * `SsoService.resolveRoleKey()` reads only these two, regardless of
+ * whether the login came in over OIDC or SAML, so they live in one place
+ * both `OidcSsoConfig` and `SamlSsoConfig` extend rather than being
+ * redeclared (and risking drift) on each.
+ */
+type SsoRoleResolutionConfig = {
+  /** IdP group/role name -> this tenant's `roles.key` (e.g. "hr_admin"). First match wins. */
+  roleMapping?: Record<string, string>;
+  /** The role a brand-new SSO-provisioned user gets when no group mapping matches. */
+  defaultRoleKey?: string;
+};
 
 /**
  * The shape of `tenant_integrations.config` for `providerKey: "sso"` once
@@ -603,11 +617,11 @@ export type RotateIntegrationSecretResponse = {
  * Platform Admin the same way every other integration is (TM-031's own
  * `IntegrationsController`, Platform-Admin + step-up gated). `clientSecret`
  * is one of `SECRET_FIELDS.sso` (integrations.service.ts) — never returned
- * by a GET, exactly like every other provider's secret. Only OIDC exists
- * today; a future SAML slice adds `protocol: "saml"` with its own sibling
- * fields, never repurposing these.
+ * by a GET, exactly like every other provider's secret. `SamlSsoConfig`
+ * below is this protocol's sibling — its own fields, never repurposing
+ * these.
  */
-export type OidcSsoConfig = {
+export type OidcSsoConfig = SsoRoleResolutionConfig & {
   protocol: "oidc";
   /** The IdP's issuer URL — `${issuerUrl}/.well-known/openid-configuration` must resolve. */
   issuerUrl: string;
@@ -621,11 +635,51 @@ export type OidcSsoConfig = {
    * unset to skip mapping and always fall back to `defaultRoleKey`.
    */
   groupsClaim?: string;
-  /** IdP group name -> this tenant's `roles.key` (e.g. "hr_admin"). First match wins. */
-  roleMapping?: Record<string, string>;
-  /** The role a brand-new SSO-provisioned user gets when no group mapping matches. */
-  defaultRoleKey?: string;
 };
+
+/**
+ * The shape of `tenant_integrations.config` for `providerKey: "sso"` once
+ * `protocol` is `"saml"` (Phase 3 item #1, slice 2) — AIHXM as a SAML 2.0
+ * Service Provider. No client secret exists in this protocol the way OIDC
+ * has one: what proves the IdP's identity here is `idpCertificate`, the
+ * IdP's own public signing certificate, checked against every assertion's
+ * XML-DSig signature — not a value AIHXM has to keep confidential, so it
+ * is deliberately NOT one of `SECRET_FIELDS.sso` (a wrong/expired cert
+ * just needs replacing, never rotating like a leaked secret would).
+ *
+ * There is likewise no SP private key here: this SP does not sign its own
+ * AuthnRequests (see `SsoService.buildSamlClient()`'s doc comment for why
+ * that's a deliberate scope decision, not an oversight), so nothing on
+ * this side of the exchange is ever secret.
+ */
+export type SamlSsoConfig = SsoRoleResolutionConfig & {
+  protocol: "saml";
+  /** The IdP's own Issuer/EntityID, checked against every assertion's `<Issuer>`. */
+  idpEntityId: string;
+  /** Where `SsoService` sends the browser to start a login — the IdP's "SSO URL" / "Sign-on URL". */
+  idpSsoUrl: string;
+  /** The IdP's X.509 signing certificate, PEM-encoded (`-----BEGIN CERTIFICATE-----...`). */
+  idpCertificate: string;
+  /**
+   * Which SAML assertion attribute (if any) carries the IdP's group/role
+   * names — e.g. "http://schemas.xmlsoap.org/claims/Group" (AD FS) or a
+   * plain "groups" (Okta/OneLogin apps commonly let the admin name this
+   * themselves). Unset skips mapping and always falls back to
+   * `defaultRoleKey`, same as OIDC's `groupsClaim`.
+   */
+  groupsAttribute?: string;
+  /**
+   * Which SAML assertion attribute carries the person's email, for IdPs
+   * that don't put it in the NameID itself. Unset falls back, in order,
+   * to the assertion's `email`/`mail` attributes and then the NameID
+   * itself when it's already email-shaped — the common case for most
+   * IdPs' default SAML app configuration, so this is rarely needed.
+   */
+  emailAttribute?: string;
+};
+
+/** Whichever protocol a given tenant's `sso` integration is actually configured for. */
+export type SsoIntegrationConfig = OidcSsoConfig | SamlSsoConfig;
 
 /**
  * The public, no-session answer to "does this tenant's login page need a

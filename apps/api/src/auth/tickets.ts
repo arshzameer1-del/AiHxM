@@ -85,3 +85,53 @@ export function verifySsoStateTicket(token: string): SsoStateTicketPayload {
   }
   return decoded;
 }
+
+/**
+ * Phase 3 item #1, slice 2 — SAML's sibling of `SsoStateTicketPayload`,
+ * carried as the `RelayState` value SAML's HTTP-Redirect/HTTP-POST
+ * bindings already define for exactly this purpose (an opaque value the
+ * IdP is required to echo back unchanged), rather than reusing
+ * `SsoStateTicketPayload` itself — this is a genuinely different value
+ * from OIDC's `state`: there's no PKCE `code_verifier` or OIDC `nonce`
+ * here, and `requestId` plays a different, SAML-specific role (see next).
+ *
+ * `requestId` is the `<AuthnRequest ID="...">` value `SsoService` itself
+ * chose when starting this login (never the SAML library's own default
+ * generator — see `buildSamlClient()`'s doc comment on `generateUniqueId`)
+ * — carrying it here, rather than in a server-side request-tracking cache
+ * (`@node-saml/node-saml`'s own default `InMemoryCacheProvider`), is what
+ * keeps this whole flow stateless across restarts and, if this API is
+ * ever scaled to more than one instance, across instances too — the exact
+ * same reasoning `SsoStateTicketPayload` already applies to OIDC's PKCE
+ * verifier/nonce. `SsoService.handleSamlAcs()` compares this to the
+ * validated assertion's own `InResponseTo` itself, instead of asking
+ * `@node-saml/node-saml` to (`validateInResponseTo` is left at `never`
+ * for exactly this reason).
+ */
+export type SamlStateTicketPayload = {
+  typ: "saml_state_ticket";
+  companyId: string;
+  companySlug: string;
+  requestId: string;
+  /** Where the browser should land after a successful/failed login. */
+  returnOrigin: string;
+};
+
+export function signSamlStateTicket(payload: Omit<SamlStateTicketPayload, "typ">): string {
+  const full: SamlStateTicketPayload = { typ: "saml_state_ticket", ...payload };
+  // Same 10-minute window as SsoStateTicketPayload, for the same reason.
+  return jwt.sign(full, secret(), { expiresIn: "10m" });
+}
+
+export function verifySamlStateTicket(token: string): SamlStateTicketPayload {
+  let decoded: SamlStateTicketPayload;
+  try {
+    decoded = jwt.verify(token, secret()) as SamlStateTicketPayload;
+  } catch {
+    throw new Error("Login session expired or invalid. Please try signing in again.");
+  }
+  if (decoded.typ !== "saml_state_ticket") {
+    throw new Error("Ticket is not valid for this operation");
+  }
+  return decoded;
+}
