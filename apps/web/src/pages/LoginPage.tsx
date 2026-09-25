@@ -179,8 +179,11 @@ export function LoginPage() {
     }
   }
 
-  async function handleMfaSetupSubmit(e: FormEvent, mfaTicket: string) {
-    e.preventDefault();
+  // Split into a no-event "submit" (called both by the form's own onSubmit
+  // AND by the auto-verify effect below, which has no FormEvent to give it)
+  // and a thin onSubmit wrapper that just handles preventDefault — same
+  // split for both MFA steps.
+  async function submitMfaSetup(mfaTicket: string) {
     setError(null);
     setLoading(true);
     try {
@@ -189,13 +192,22 @@ export function LoginPage() {
       navigate(identity.isPlatformAdmin ? "/" : "/app", { replace: true });
     } catch (err) {
       fail(err, "Could not verify that code.");
+      // Clear it so a wrong/expired code doesn't just sit there at 6
+      // digits — that would never re-trigger the auto-verify effect below
+      // (it only fires when `code` actually CHANGES to length 6), leaving
+      // retry stuck on a manual click with nothing else to press.
+      setCode("");
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleMfaVerifySubmit(e: FormEvent, mfaTicket: string) {
+  function handleMfaSetupSubmit(e: FormEvent, mfaTicket: string) {
     e.preventDefault();
+    void submitMfaSetup(mfaTicket);
+  }
+
+  async function submitMfaVerify(mfaTicket: string) {
     setError(null);
     setLoading(true);
     try {
@@ -204,10 +216,33 @@ export function LoginPage() {
       navigate(identity.isPlatformAdmin ? "/" : "/app", { replace: true });
     } catch (err) {
       fail(err, "Could not verify that code.");
+      setCode("");
     } finally {
       setLoading(false);
     }
   }
+
+  function handleMfaVerifySubmit(e: FormEvent, mfaTicket: string) {
+    e.preventDefault();
+    void submitMfaVerify(mfaTicket);
+  }
+
+  // Real complaint from a screenshot: the 6-digit code field required
+  // typing the code AND then clicking "Sign in" — every other authenticator
+  // flow (Google's, banking apps, etc.) submits itself the instant the 6th
+  // digit lands. Fires once per completed code (the `code` dependency only
+  // changes again once the user types something new — see the `setCode("")`
+  // resets above on failure), and `loading` guards against a duplicate
+  // fire if this effect somehow re-ran mid-request.
+  useEffect(() => {
+    if (loading || code.length !== 6) return;
+    if (step.name === "mfaSetup") {
+      void submitMfaSetup(step.mfaTicket);
+    } else if (step.name === "mfaVerify") {
+      void submitMfaVerify(step.mfaTicket);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [code]);
 
   async function handleResetRequestSubmit(e: FormEvent) {
     e.preventDefault();
@@ -397,8 +432,9 @@ export function LoginPage() {
             <input
               autoFocus
               inputMode="numeric"
+              maxLength={6}
               value={code}
-              onChange={(e) => setCode(e.target.value)}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
               className="w-full rounded-lg border border-black/10 px-3 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-accent tracking-widest text-center text-lg"
             />
             <button
@@ -418,8 +454,9 @@ export function LoginPage() {
             <input
               autoFocus
               inputMode="numeric"
+              maxLength={6}
               value={code}
-              onChange={(e) => setCode(e.target.value)}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
               className="w-full rounded-lg border border-black/10 px-3 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-accent tracking-widest text-center text-lg"
             />
             <button
