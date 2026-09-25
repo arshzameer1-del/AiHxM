@@ -277,7 +277,13 @@ export function CompanyDetailPage() {
         />
       )}
 
-      {tab === "Security" && <SecurityTab companyId={company.id} admins={admins} />}
+      {tab === "Security" && (
+        <SecurityTab
+          companyId={company.id}
+          admins={admins}
+          onAdminsChanged={(nextAdmins) => setDetail({ ...detail, admins: nextAdmins })}
+        />
+      )}
     </div>
   );
 }
@@ -2940,6 +2946,11 @@ function AdminsTab({
   const [resettingPasswordFor, setResettingPasswordFor] = useState<string | null>(null);
   const [newPasswordInput, setNewPasswordInput] = useState("");
   const [resetCredential, setResetCredential] = useState<{ email: string; password: string } | null>(null);
+  // Tenant Management gap-fill batch 1, Phase 1 item #2 — a two-step
+  // confirm (unlike Force Logout's one click) since this forces the admin
+  // to redo enrollment from scratch on their next sign-in.
+  const [confirmingMfaResetFor, setConfirmingMfaResetFor] = useState<string | null>(null);
+  const [mfaResetMessage, setMfaResetMessage] = useState<string | null>(null);
 
   async function handleAdd(e: FormEvent) {
     e.preventDefault();
@@ -3013,6 +3024,21 @@ function AdminsTab({
     }
   }
 
+  async function handleResetMfa(admin: CompanyAdmin) {
+    setError(null);
+    try {
+      const updated = await api.resetAdminMfa(companyId, admin.id);
+      onChanged(admins.map((a) => (a.id === admin.id ? updated : a)));
+      setConfirmingMfaResetFor(null);
+      setMfaResetMessage(
+        `${admin.fullName}'s MFA has been reset — they'll set up a new authenticator app on their next sign-in.`
+      );
+      setTimeout(() => setMfaResetMessage(null), 5000);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not reset MFA for this admin.");
+    }
+  }
+
   return (
     <section className="bg-card rounded-card p-5 shadow-sm space-y-5">
       <div>
@@ -3070,6 +3096,12 @@ function AdminsTab({
         </div>
       )}
 
+      {mfaResetMessage && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-900">
+          {mfaResetMessage}
+        </div>
+      )}
+
       <div className="divide-y divide-black/5">
         {admins.map((admin) => (
           <div key={admin.id} className="py-3 space-y-2">
@@ -3119,6 +3151,17 @@ function AdminsTab({
                 )}
                 {admin.hasLogin && (
                   <button
+                    onClick={() =>
+                      setConfirmingMfaResetFor(confirmingMfaResetFor === admin.id ? null : admin.id)
+                    }
+                    className="text-xs font-semibold text-accent hover:underline"
+                    title="Force this admin to set up a new authenticator app — use if they've lost their device and their recovery codes"
+                  >
+                    Reset MFA
+                  </button>
+                )}
+                {admin.hasLogin && (
+                  <button
                     onClick={() => handleForceLogout(admin)}
                     className="text-xs font-semibold text-danger hover:underline"
                     title="Sign this admin out of every device immediately"
@@ -3128,6 +3171,30 @@ function AdminsTab({
                 )}
               </div>
             </div>
+
+            {confirmingMfaResetFor === admin.id && (
+              <div className="flex items-center justify-between gap-3 bg-black/5 rounded-lg p-3">
+                <p className="text-xs text-label-tertiary">
+                  {admin.fullName} will be signed out of their current MFA and asked to set up a new
+                  authenticator app (with a fresh set of recovery codes) the next time they sign in. Use
+                  this only if they've lost their device and their recovery codes are also gone.
+                </p>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => handleResetMfa(admin)}
+                    className="text-xs font-semibold text-danger hover:underline"
+                  >
+                    Confirm reset
+                  </button>
+                  <button
+                    onClick={() => setConfirmingMfaResetFor(null)}
+                    className="text-xs font-semibold text-label-tertiary hover:underline"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
 
             {resettingPasswordFor === admin.id && (
               <form
@@ -3245,10 +3312,20 @@ function AdminsTab({
   );
 }
 
-function SecurityTab({ companyId, admins }: { companyId: string; admins: CompanyAdmin[] }) {
+function SecurityTab({
+  companyId,
+  admins,
+  onAdminsChanged,
+}: {
+  companyId: string;
+  admins: CompanyAdmin[];
+  onAdminsChanged: (admins: CompanyAdmin[]) => void;
+}) {
   const [sessions, setSessions] = useState<UserSessionView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // Tenant Management gap-fill batch 1, Phase 1 item #3.
+  const [unlockBusyId, setUnlockBusyId] = useState<string | null>(null);
 
   async function load() {
     try {
@@ -3275,10 +3352,76 @@ function SecurityTab({ companyId, admins }: { companyId: string; admins: Company
     }
   }
 
+  async function unlock(admin: CompanyAdmin) {
+    setUnlockBusyId(admin.id);
+    try {
+      const updated = await api.unlockAdminAccount(companyId, admin.id);
+      onAdminsChanged(admins.map((a) => (a.id === admin.id ? updated : a)));
+    } catch {
+      setError("Could not unlock this admin's account.");
+    } finally {
+      setUnlockBusyId(null);
+    }
+  }
+
   const adminNameByAccount = new Map(admins.map((a) => [a.userAccountId, a.fullName]));
+
+  // Only admins actually worth calling out: locked right now, or carrying
+  // failed attempts toward that (AuthService.MAX_FAILED_ATTEMPTS = 5) —
+  // the common case is an empty list, same posture as the Health tab.
+  const now = Date.now();
+  const flaggedAdmins = admins.filter(
+    (a) => a.hasLogin && (a.failedLoginAttempts > 0 || (a.lockedUntil && new Date(a.lockedUntil).getTime() > now))
+  );
 
   return (
     <section className="bg-card rounded-card p-5 shadow-sm space-y-4">
+      <div>
+        <h2 className="font-semibold text-sm uppercase tracking-wide text-label-tertiary mb-1">
+          Account lockouts
+        </h2>
+        <p className="text-xs text-label-tertiary">
+          Failed sign-in attempts for this tenant's admin logins. Five failed attempts locks the
+          account for 15 minutes automatically — unlock immediately here if it's genuinely them
+          trying again, without waiting it out or resetting their password.
+        </p>
+      </div>
+
+      <div className="divide-y divide-black/5">
+        {flaggedAdmins.map((admin) => {
+          const isLocked = Boolean(admin.lockedUntil && new Date(admin.lockedUntil).getTime() > now);
+          return (
+            <div key={admin.id} className="py-3 flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium">{admin.fullName}</div>
+                <div className="text-xs text-label-tertiary">
+                  {admin.email} ·{" "}
+                  {isLocked ? (
+                    <span className="text-danger font-medium">
+                      Locked until {new Date(admin.lockedUntil as string).toLocaleString()}
+                    </span>
+                  ) : (
+                    `${admin.failedLoginAttempts} failed attempt${admin.failedLoginAttempts === 1 ? "" : "s"}`
+                  )}
+                </div>
+              </div>
+              <button
+                onClick={() => unlock(admin)}
+                disabled={unlockBusyId === admin.id}
+                className="text-xs font-semibold text-accent hover:underline disabled:opacity-50"
+              >
+                {unlockBusyId === admin.id ? "Unlocking…" : "Unlock now"}
+              </button>
+            </div>
+          );
+        })}
+        {flaggedAdmins.length === 0 && (
+          <div className="py-4 text-center text-sm text-label-tertiary">
+            No lockouts — every admin login is in good standing.
+          </div>
+        )}
+      </div>
+
       <div>
         <h2 className="font-semibold text-sm uppercase tracking-wide text-label-tertiary mb-1">
           Active sessions

@@ -324,6 +324,12 @@ describe("AuthService", () => {
 
       expect(confirmed.status).toBe("ok");
       expect(confirmed.token).toEqual(expect.any(String));
+      // Ten single-use recovery codes, issued exactly once, right here.
+      expect(confirmed.recoveryCodes).toHaveLength(10);
+      expect(new Set(confirmed.recoveryCodes)).toHaveProperty("size", 10);
+      for (const recoveryCode of confirmed.recoveryCodes) {
+        expect(recoveryCode).toMatch(/^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{5}$/);
+      }
     });
 
     it("rejects an incorrect enrollment code", async () => {
@@ -396,6 +402,98 @@ describe("AuthService", () => {
 
     it("rejects a malformed or expired mfa ticket", async () => {
       await expect(service.verifyMfa("not-a-real-ticket", "123456")).rejects.toThrow(
+        UnauthorizedException
+      );
+    });
+  });
+
+  describe("verifyMfaRecoveryCode", () => {
+    it("signs in with a valid recovery code and consumes it (single-use)", async () => {
+      const { id, email, password } = await createUserAccount();
+      await grantRoleAssignment(id);
+
+      const enroll = await service.login(email, password);
+      if (enroll.status !== "mfa_setup_required") throw new Error("expected mfa_setup_required");
+      const enrollCode = await generateTotp({ secret: enroll.secretForManualEntry });
+      const confirmed = await service.confirmMfaEnrollment(enroll.mfaTicket, enrollCode);
+      const [recoveryCode] = confirmed.recoveryCodes;
+
+      const login = await service.login(email, password);
+      if (login.status !== "mfa_required") throw new Error("expected mfa_required");
+      const verified = await service.verifyMfaRecoveryCode(login.mfaTicket, recoveryCode);
+      expect(verified.status).toBe("ok");
+      expect(verified.token).toEqual(expect.any(String));
+
+      // Same code again — a fresh ticket, since a spent mfa_verify ticket
+      // is itself single-use (tickets.ts), but the RECOVERY CODE is what
+      // this test is really about: it must already be burned.
+      const secondLogin = await service.login(email, password);
+      if (secondLogin.status !== "mfa_required") throw new Error("expected mfa_required");
+      await expect(
+        service.verifyMfaRecoveryCode(secondLogin.mfaTicket, recoveryCode)
+      ).rejects.toThrow("Invalid or already-used recovery code");
+    });
+
+    it("accepts a recovery code regardless of case or surrounding whitespace", async () => {
+      const { id, email, password } = await createUserAccount();
+      await grantRoleAssignment(id);
+
+      const enroll = await service.login(email, password);
+      if (enroll.status !== "mfa_setup_required") throw new Error("expected mfa_setup_required");
+      const enrollCode = await generateTotp({ secret: enroll.secretForManualEntry });
+      const confirmed = await service.confirmMfaEnrollment(enroll.mfaTicket, enrollCode);
+      const [recoveryCode] = confirmed.recoveryCodes;
+
+      const login = await service.login(email, password);
+      if (login.status !== "mfa_required") throw new Error("expected mfa_required");
+      const verified = await service.verifyMfaRecoveryCode(
+        login.mfaTicket,
+        `  ${recoveryCode.toLowerCase()}  `
+      );
+      expect(verified.status).toBe("ok");
+    });
+
+    it("rejects an unknown recovery code", async () => {
+      const { id, email, password } = await createUserAccount();
+      await grantRoleAssignment(id);
+
+      const enroll = await service.login(email, password);
+      if (enroll.status !== "mfa_setup_required") throw new Error("expected mfa_setup_required");
+      const enrollCode = await generateTotp({ secret: enroll.secretForManualEntry });
+      await service.confirmMfaEnrollment(enroll.mfaTicket, enrollCode);
+
+      const login = await service.login(email, password);
+      if (login.status !== "mfa_required") throw new Error("expected mfa_required");
+      await expect(
+        service.verifyMfaRecoveryCode(login.mfaTicket, "ZZZZZ-ZZZZZ")
+      ).rejects.toThrow("Invalid or already-used recovery code");
+    });
+
+    it("rejects a recovery code belonging to a different account", async () => {
+      const accountA = await createUserAccount();
+      await grantRoleAssignment(accountA.id);
+      const enrollA = await service.login(accountA.email, accountA.password);
+      if (enrollA.status !== "mfa_setup_required") throw new Error("expected mfa_setup_required");
+      const enrollCodeA = await generateTotp({ secret: enrollA.secretForManualEntry });
+      const confirmedA = await service.confirmMfaEnrollment(enrollA.mfaTicket, enrollCodeA);
+      const [recoveryCodeA] = confirmedA.recoveryCodes;
+
+      const accountB = await createUserAccount();
+      await grantRoleAssignment(accountB.id);
+      const enrollB = await service.login(accountB.email, accountB.password);
+      if (enrollB.status !== "mfa_setup_required") throw new Error("expected mfa_setup_required");
+      const enrollCodeB = await generateTotp({ secret: enrollB.secretForManualEntry });
+      await service.confirmMfaEnrollment(enrollB.mfaTicket, enrollCodeB);
+
+      const loginB = await service.login(accountB.email, accountB.password);
+      if (loginB.status !== "mfa_required") throw new Error("expected mfa_required");
+      await expect(
+        service.verifyMfaRecoveryCode(loginB.mfaTicket, recoveryCodeA)
+      ).rejects.toThrow("Invalid or already-used recovery code");
+    });
+
+    it("rejects a malformed or expired mfa ticket", async () => {
+      await expect(service.verifyMfaRecoveryCode("not-a-real-ticket", "ABCDE-FGHJK")).rejects.toThrow(
         UnauthorizedException
       );
     });

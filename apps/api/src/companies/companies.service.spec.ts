@@ -149,6 +149,36 @@ describe("CompaniesService", () => {
       expect(detail.config.companyId).toBe(created.company.id);
       expect(detail.admins).toHaveLength(1);
       expect(detail.admins[0].fullName).toBe("Admin");
+      // Phase 1 item #3 — an admin with no login yet is trivially "not locked."
+      expect(detail.admins[0].failedLoginAttempts).toBe(0);
+      expect(detail.admins[0].lockedUntil).toBeNull();
+    });
+
+    it("surfaces an admin's real lockout state via the LEFT JOIN to user_accounts", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Detail Lockout",
+        slug: `test-co-detail-lockout-${Date.now()}`,
+        initialAdmin: {
+          fullName: "Locked Admin",
+          email: `detail-lockout-admin-${Date.now()}@example.com`,
+        },
+      });
+      const adminId = created.admins[0].id;
+      await service.createAdminLogin(FIXTURE_CLAIMS, created.company.id, adminId, "OriginalPassword123!");
+
+      const futureLock = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+      await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        await client.query(
+          `UPDATE user_accounts SET failed_login_attempts = 5, locked_until = $2
+           WHERE id = (SELECT user_account_id FROM company_admins WHERE id = $1)`,
+          [adminId, futureLock]
+        );
+      });
+
+      const detail = await service.getDetail(FIXTURE_CLAIMS, created.company.id);
+      const admin = detail.admins.find((a) => a.id === adminId);
+      expect(admin?.failedLoginAttempts).toBe(5);
+      expect(admin?.lockedUntil).toEqual(futureLock);
     });
 
     it("throws NotFoundException for non-existent company", async () => {
@@ -613,6 +643,152 @@ describe("CompaniesService", () => {
 
       await expect(
         service.resetAdminPassword(FIXTURE_CLAIMS, created.company.id, "00000000-0000-0000-0000-000000000000", "SomePassword123!")
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe("resetAdminMfa", () => {
+    it("clears the enrolled MFA secret and any recovery codes, forcing re-enrollment", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Reset MFA",
+        slug: `test-co-reset-mfa-${Date.now()}`,
+        initialAdmin: {
+          fullName: "Reset MFA Test",
+          email: `reset-mfa-${Date.now()}@example.com`,
+        },
+      });
+      const adminId = created.admins[0].id;
+      await service.createAdminLogin(FIXTURE_CLAIMS, created.company.id, adminId, "OriginalPassword123!");
+
+      const userAccountId = await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const row = await client.query<{ user_account_id: string }>(
+          "SELECT user_account_id FROM company_admins WHERE id = $1",
+          [adminId]
+        );
+        const id = row.rows[0].user_account_id;
+        // Simulate a completed enrollment directly — a real one goes
+        // through AuthService, out of scope for this service-level test.
+        await client.query(
+          "UPDATE user_accounts SET mfa_enabled = true, mfa_secret_encrypted = 'fake-encrypted-secret' WHERE id = $1",
+          [id]
+        );
+        await client.query(
+          "INSERT INTO mfa_recovery_codes (user_account_id, code_hash) VALUES ($1, 'fake-hash')",
+          [id]
+        );
+        return id;
+      });
+
+      const updated = await service.resetAdminMfa(FIXTURE_CLAIMS, created.company.id, adminId);
+      expect(updated.hasLogin).toBe(true);
+
+      const row = await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query<{ mfa_enabled: boolean; mfa_secret_encrypted: string | null }>(
+          "SELECT mfa_enabled, mfa_secret_encrypted FROM user_accounts WHERE id = $1",
+          [userAccountId]
+        )
+      );
+      expect(row.rows[0].mfa_enabled).toBe(false);
+      expect(row.rows[0].mfa_secret_encrypted).toBeNull();
+
+      const codes = await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query("SELECT id FROM mfa_recovery_codes WHERE user_account_id = $1", [userAccountId])
+      );
+      expect(codes.rowCount).toBe(0);
+    });
+
+    it("refuses to reset MFA for an admin with no login yet", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Reset MFA No Login",
+        slug: `test-co-reset-mfa-no-login-${Date.now()}`,
+        initialAdmin: {
+          fullName: "No Login Yet",
+          email: `no-login-mfa-${Date.now()}@example.com`,
+        },
+      });
+
+      await expect(
+        service.resetAdminMfa(FIXTURE_CLAIMS, created.company.id, created.admins[0].id)
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("404s for an admin that doesn't belong to this company", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Reset MFA Wrong Company",
+        slug: `test-co-reset-mfa-wrong-co-${Date.now()}`,
+      });
+
+      await expect(
+        service.resetAdminMfa(FIXTURE_CLAIMS, created.company.id, "00000000-0000-0000-0000-000000000000")
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe("unlockAdminAccount", () => {
+    it("clears failed attempts and an active lockout, leaving the password untouched", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Unlock",
+        slug: `test-co-unlock-${Date.now()}`,
+        initialAdmin: {
+          fullName: "Unlock Test",
+          email: `unlock-${Date.now()}@example.com`,
+        },
+      });
+      const adminId = created.admins[0].id;
+      await service.createAdminLogin(FIXTURE_CLAIMS, created.company.id, adminId, "OriginalPassword123!");
+
+      const userAccountId = await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const row = await client.query<{ user_account_id: string }>(
+          "SELECT user_account_id FROM company_admins WHERE id = $1",
+          [adminId]
+        );
+        const id = row.rows[0].user_account_id;
+        await client.query(
+          "UPDATE user_accounts SET failed_login_attempts = 5, locked_until = now() + interval '15 minutes' WHERE id = $1",
+          [id]
+        );
+        return id;
+      });
+
+      const updated = await service.unlockAdminAccount(FIXTURE_CLAIMS, created.company.id, adminId);
+      expect(updated.failedLoginAttempts).toBe(0);
+      expect(updated.lockedUntil).toBeNull();
+
+      const row = await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query<{ password_hash: string; failed_login_attempts: number; locked_until: Date | null }>(
+          "SELECT password_hash, failed_login_attempts, locked_until FROM user_accounts WHERE id = $1",
+          [userAccountId]
+        )
+      );
+      expect(row.rows[0].failed_login_attempts).toBe(0);
+      expect(row.rows[0].locked_until).toBeNull();
+      // The password itself is untouched — unlike resetAdminPassword.
+      await expect(verifyPassword("OriginalPassword123!", row.rows[0].password_hash)).resolves.toBe(true);
+    });
+
+    it("refuses to unlock an admin with no login yet", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Unlock No Login",
+        slug: `test-co-unlock-no-login-${Date.now()}`,
+        initialAdmin: {
+          fullName: "No Login Yet",
+          email: `no-login-unlock-${Date.now()}@example.com`,
+        },
+      });
+
+      await expect(
+        service.unlockAdminAccount(FIXTURE_CLAIMS, created.company.id, created.admins[0].id)
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("404s for an admin that doesn't belong to this company", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Unlock Wrong Company",
+        slug: `test-co-unlock-wrong-co-${Date.now()}`,
+      });
+
+      await expect(
+        service.unlockAdminAccount(FIXTURE_CLAIMS, created.company.id, "00000000-0000-0000-0000-000000000000")
       ).rejects.toThrow(NotFoundException);
     });
   });

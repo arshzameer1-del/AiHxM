@@ -4,7 +4,7 @@ import { AuthService } from "./auth.service";
 import { CurrentClaims } from "./current-claims.decorator";
 import { LoginDto } from "./dto/login.dto";
 import { LoginWithEmployeeNumberDto } from "./dto/login-with-employee-number.dto";
-import { MfaEnrollConfirmDto, MfaVerifyDto } from "./dto/mfa.dto";
+import { MfaEnrollConfirmDto, MfaRecoveryCodeVerifyDto, MfaVerifyDto } from "./dto/mfa.dto";
 import { PasswordResetConfirmDto, PasswordResetRequestDto } from "./dto/password-reset.dto";
 import { SessionGuard } from "./session.guard";
 import type { RequestClaims } from "../database/tenant-context";
@@ -57,6 +57,16 @@ export class AuthController {
   @Post("mfa/verify")
   verifyMfa(@Body() dto: MfaVerifyDto) {
     return this.auth.verifyMfa(dto.mfaTicket, dto.code);
+  }
+
+  // Same throttle as mfa/verify — a recovery code is just an alternate
+  // credential for the identical login step (see AuthService's doc comment),
+  // and each code is single-use regardless, so there's no extra guessing
+  // surface this needs a tighter limit for.
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Post("mfa/recovery-code/verify")
+  verifyMfaRecoveryCode(@Body() dto: MfaRecoveryCodeVerifyDto) {
+    return this.auth.verifyMfaRecoveryCode(dto.mfaTicket, dto.code);
   }
 
   @Throttle({ default: { limit: 5, ttl: 60_000 } })

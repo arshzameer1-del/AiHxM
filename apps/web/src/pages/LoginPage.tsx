@@ -35,7 +35,16 @@ import { AihxmLogo } from "../components/AihxmLogo";
 type Step =
   | { name: "password" }
   | { name: "mfaSetup"; mfaTicket: string; otpauthUrl: string; secretForManualEntry: string }
+  // Shown exactly once, right after enrollment succeeds — the only moment
+  // recovery codes are ever handed back in plaintext (AuthService's doc
+  // comment on confirmMfaEnrollment). navigateTo is where the setup step
+  // was already headed; the session token is already applied by the time
+  // this renders, so "Continue" is purely an acknowledgement, not a submit.
+  | { name: "mfaSetupRecoveryCodes"; codes: string[]; navigateTo: string }
   | { name: "mfaVerify"; mfaTicket: string }
+  // The "I lost my authenticator device" fallback off the same mfa_verify
+  // ticket — see AuthService.verifyMfaRecoveryCode's doc comment.
+  | { name: "mfaRecoveryCode"; mfaTicket: string }
   | { name: "resetRequest" }
   | { name: "resetConfirm"; devModeToken?: string };
 
@@ -65,6 +74,7 @@ export function LoginPage() {
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
+  const [recoveryCode, setRecoveryCode] = useState("");
   const [resetEmail, setResetEmail] = useState("");
   const [resetToken, setResetToken] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -189,7 +199,15 @@ export function LoginPage() {
     try {
       const result = await api.confirmMfaEnrollment(mfaTicket, code);
       const identity = await setSessionToken(result.token);
-      navigate(identity.isPlatformAdmin ? "/" : "/app", { replace: true });
+      const navigateTo = identity.isPlatformAdmin ? "/" : "/app";
+      // The session token is already applied above — recoveryCodes only
+      // delays the redirect so the user has a chance to actually see and
+      // save them, since they can never be retrieved again after this.
+      if (result.recoveryCodes && result.recoveryCodes.length > 0) {
+        setStep({ name: "mfaSetupRecoveryCodes", codes: result.recoveryCodes, navigateTo });
+      } else {
+        navigate(navigateTo, { replace: true });
+      }
     } catch (err) {
       fail(err, "Could not verify that code.");
       // Clear it so a wrong/expired code doesn't just sit there at 6
@@ -205,6 +223,10 @@ export function LoginPage() {
   function handleMfaSetupSubmit(e: FormEvent, mfaTicket: string) {
     e.preventDefault();
     void submitMfaSetup(mfaTicket);
+  }
+
+  function acknowledgeRecoveryCodes(navigateTo: string) {
+    navigate(navigateTo, { replace: true });
   }
 
   async function submitMfaVerify(mfaTicket: string) {
@@ -225,6 +247,26 @@ export function LoginPage() {
   function handleMfaVerifySubmit(e: FormEvent, mfaTicket: string) {
     e.preventDefault();
     void submitMfaVerify(mfaTicket);
+  }
+
+  async function submitMfaRecoveryCode(mfaTicket: string) {
+    setError(null);
+    setLoading(true);
+    try {
+      const result = await api.verifyMfaRecoveryCode(mfaTicket, recoveryCode);
+      const identity = await setSessionToken(result.token);
+      navigate(identity.isPlatformAdmin ? "/" : "/app", { replace: true });
+    } catch (err) {
+      fail(err, "Could not verify that recovery code.");
+      setRecoveryCode("");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleMfaRecoveryCodeSubmit(e: FormEvent, mfaTicket: string) {
+    e.preventDefault();
+    void submitMfaRecoveryCode(mfaTicket);
   }
 
   // Real complaint from a screenshot: the 6-digit code field required
@@ -448,6 +490,30 @@ export function LoginPage() {
           </form>
         )}
 
+        {step.name === "mfaSetupRecoveryCodes" && (
+          <div>
+            <p className="text-sm mb-3">
+              Save these recovery codes somewhere safe. Each one can be used once, instead of your
+              authenticator app, if you ever lose access to your device. They won't be shown again.
+            </p>
+            <div className="grid grid-cols-2 gap-2 mb-4 bg-black/5 rounded-lg px-3 py-3">
+              {step.codes.map((c) => (
+                <code key={c} className="text-sm font-mono text-center">
+                  {c}
+                </code>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => acknowledgeRecoveryCodes(step.navigateTo)}
+              style={accentButtonStyle}
+              className="w-full bg-accent text-white rounded-lg py-2 font-semibold"
+            >
+              I've saved these codes — continue
+            </button>
+          </div>
+        )}
+
         {step.name === "mfaVerify" && (
           <form onSubmit={(e) => handleMfaVerifySubmit(e, step.mfaTicket)}>
             <p className="text-sm mb-4">Enter the 6-digit code from your authenticator app.</p>
@@ -466,6 +532,54 @@ export function LoginPage() {
               className="w-full bg-accent text-white rounded-lg py-2 font-semibold disabled:opacity-50"
             >
               {loading ? "Verifying…" : "Sign in"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setError(null);
+                setRecoveryCode("");
+                setStep({ name: "mfaRecoveryCode", mfaTicket: step.mfaTicket });
+              }}
+              style={accentTextStyle}
+              className="w-full text-center text-xs text-label-tertiary hover:text-accent mt-3"
+            >
+              Use a recovery code instead
+            </button>
+          </form>
+        )}
+
+        {step.name === "mfaRecoveryCode" && (
+          <form onSubmit={(e) => handleMfaRecoveryCodeSubmit(e, step.mfaTicket)}>
+            <p className="text-sm mb-4">
+              Enter one of the recovery codes you saved when you set up your authenticator app. Each
+              code only works once.
+            </p>
+            <input
+              autoFocus
+              placeholder="ABCDE-FGHJK"
+              value={recoveryCode}
+              onChange={(e) => setRecoveryCode(e.target.value.toUpperCase())}
+              className="w-full rounded-lg border border-black/10 px-3 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-accent tracking-widest text-center text-lg font-mono"
+            />
+            <button
+              type="submit"
+              disabled={loading || !recoveryCode}
+              style={accentButtonStyle}
+              className="w-full bg-accent text-white rounded-lg py-2 font-semibold disabled:opacity-50"
+            >
+              {loading ? "Verifying…" : "Sign in"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setError(null);
+                setCode("");
+                setStep({ name: "mfaVerify", mfaTicket: step.mfaTicket });
+              }}
+              style={accentTextStyle}
+              className="w-full text-center text-xs text-label-tertiary hover:text-accent mt-3"
+            >
+              Back to authenticator code
             </button>
           </form>
         )}

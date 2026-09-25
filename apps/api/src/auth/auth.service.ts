@@ -8,6 +8,7 @@ import { MailerService } from "../mailer/mailer.service";
 import type { RequestClaims } from "../database/tenant-context";
 import type { LoginResult, MeResponse, PasswordResetRequestResult, TenantRoleKey } from "@aihxm/shared-types";
 import { normalizeEmail } from "./email.util";
+import { generateRecoveryCodes, normalizeRecoveryCode } from "./mfa-recovery-codes.util";
 import { decryptMfaSecret, encryptMfaSecret } from "./mfa-secret-crypto";
 import { hashPassword, verifyPassword } from "./password";
 import { signMfaTicket, verifyMfaTicket } from "./tickets";
@@ -147,7 +148,10 @@ export class AuthService {
     return { status: "mfa_required", mfaTicket: signMfaTicket("mfa_verify", account.id) };
   }
 
-  async confirmMfaEnrollment(mfaTicket: string, code: string): Promise<{ status: "ok"; token: string }> {
+  async confirmMfaEnrollment(
+    mfaTicket: string,
+    code: string
+  ): Promise<{ status: "ok"; token: string; recoveryCodes: string[] }> {
     const { userAccountId } = this.verifyTicket(mfaTicket, "mfa_enroll");
     const account = await this.findAccountById(userAccountId);
     if (!account?.mfa_secret_encrypted) {
@@ -161,8 +165,16 @@ export class AuthService {
     }
 
     await this.enableMfa(account.id);
+    // Issued exactly once, right here — the only moment recovery codes are
+    // ever handed back in plaintext. Re-enrollment (a fresh mfa_setup_required
+    // round after a Platform-Admin-driven MFA reset — Phase 1 item #2) lands
+    // here again and simply supersedes the prior batch, same as a fresh
+    // password reset supersedes an outstanding token elsewhere in this file.
+    const recoveryCodes = generateRecoveryCodes();
+    await this.storeRecoveryCodes(account.id, recoveryCodes);
+
     const identity = await this.resolveIdentityForAccount(account.id);
-    return { status: "ok", token: await this.issueSessionToken(identity, account.id) };
+    return { status: "ok", token: await this.issueSessionToken(identity, account.id), recoveryCodes };
   }
 
   async verifyMfa(mfaTicket: string, code: string): Promise<{ status: "ok"; token: string }> {
@@ -176,6 +188,43 @@ export class AuthService {
     const result = await verifyTotp({ token: code, secret });
     if (!result.valid) {
       throw new UnauthorizedException("Invalid verification code");
+    }
+
+    const identity = await this.resolveIdentityForAccount(account.id);
+    return { status: "ok", token: await this.issueSessionToken(identity, account.id) };
+  }
+
+  /**
+   * The fallback for "I lost my authenticator device" — one of the ten
+   * single-use codes issued once at `confirmMfaEnrollment` substitutes for
+   * a TOTP code here. Shares `verifyMfa`'s ticket purpose ("mfa_verify")
+   * since it's an alternate credential for the exact same login step, not a
+   * different flow — a caller with a valid mfa_verify ticket can present
+   * either a TOTP code (verifyMfa) or a recovery code (this method).
+   */
+  async verifyMfaRecoveryCode(mfaTicket: string, code: string): Promise<{ status: "ok"; token: string }> {
+    const { userAccountId } = this.verifyTicket(mfaTicket, "mfa_verify");
+    const account = await this.findAccountById(userAccountId);
+    if (!account?.mfa_enabled) {
+      throw new UnauthorizedException("MFA is not enabled for this account");
+    }
+
+    const codeHash = sha256(normalizeRecoveryCode(code));
+    const consumed = await this.db.withClaims(SERVICE_CLAIMS, async (client) => {
+      // Single-use: the UPDATE itself is the check — only an as-yet-unused
+      // row for this exact account+hash matches, and it flips to used in
+      // the same statement, so two concurrent requests for the same code
+      // can never both succeed (the second finds zero matching rows).
+      const result = await client.query(
+        `UPDATE mfa_recovery_codes SET used_at = now()
+         WHERE user_account_id = $1 AND code_hash = $2 AND used_at IS NULL
+         RETURNING id`,
+        [account.id, codeHash]
+      );
+      return (result.rowCount ?? 0) > 0;
+    });
+    if (!consumed) {
+      throw new UnauthorizedException("Invalid or already-used recovery code");
     }
 
     const identity = await this.resolveIdentityForAccount(account.id);
@@ -600,6 +649,23 @@ export class AuthService {
         "UPDATE user_accounts SET mfa_enabled = true, updated_at = now() WHERE id = $1",
         [userAccountId]
       );
+    });
+  }
+
+  /**
+   * `sha256`, not `hashPassword` — see 0049_mfa_recovery_codes.sql's doc
+   * comment: these are cryptographically-random 10-character codes, not
+   * user-chosen passwords, so a fast hash carries no brute-force risk and a
+   * slow bcrypt-style one would only add unnecessary latency to every login.
+   */
+  private async storeRecoveryCodes(userAccountId: string, plaintextCodes: string[]): Promise<void> {
+    await this.db.withClaims(SERVICE_CLAIMS, async (client) => {
+      for (const plaintext of plaintextCodes) {
+        await client.query(
+          "INSERT INTO mfa_recovery_codes (user_account_id, code_hash) VALUES ($1, $2)",
+          [userAccountId, sha256(normalizeRecoveryCode(plaintext))]
+        );
+      }
     });
   }
 }

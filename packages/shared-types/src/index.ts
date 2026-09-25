@@ -212,6 +212,21 @@ export type CompanyAdmin = {
    * alongside employees.employee_number there).
    */
   loginId: string | null;
+  /**
+   * Tenant Management gap-fill batch 1, Phase 1 item #3 — mirrors
+   * `user_accounts.failed_login_attempts` (AuthService's own lockout
+   * counter, `MAX_FAILED_ATTEMPTS = 5`). Always 0 for an admin with no
+   * login yet.
+   */
+  failedLoginAttempts: number;
+  /**
+   * Mirrors `user_accounts.locked_until` — set once `failedLoginAttempts`
+   * crosses AuthService's threshold, cleared automatically by a
+   * successful login, a password reset, or the Security tab's "Unlock
+   * now" action (CompaniesService.unlockAdminAccount). Null when not
+   * currently locked, or when there's no login yet.
+   */
+  lockedUntil: string | null;
 };
 
 /** TM-002/TM-003 — Tenant Directory search + filters (GET /platform/companies). */
@@ -582,9 +597,28 @@ export type MfaVerifyRequest = {
   code: string;
 };
 
+/**
+ * Tenant Management gap-fill batch 1 — MFA recovery codes. The fallback for
+ * "I lost my authenticator device": one of the ten single-use codes issued
+ * once at enrollment (see SessionResult.recoveryCodes) substitutes for a
+ * TOTP code on this one alternate path off the normal mfa_verify ticket.
+ */
+export type MfaRecoveryCodeVerifyRequest = {
+  mfaTicket: string;
+  code: string;
+};
+
 export type SessionResult = {
   status: "ok";
   token: string;
+  /**
+   * Present ONLY on the response to `/auth/mfa/enroll/confirm` — a fresh
+   * batch of ten single-use recovery codes, shown to the user exactly this
+   * once (never retrievable again; only the salted hashes are persisted).
+   * Absent everywhere else, including `/auth/mfa/verify` and
+   * `/auth/mfa/recovery-code/verify`, both of which reuse this same type.
+   */
+  recoveryCodes?: string[];
 };
 
 /**

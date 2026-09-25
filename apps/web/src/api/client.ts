@@ -338,6 +338,15 @@ export const api = {
       body: JSON.stringify({ mfaTicket, code }),
     }),
 
+  // The "I lost my authenticator device" fallback — one of the ten
+  // single-use codes shown once at enrollment (confirmMfaEnrollment's
+  // result.recoveryCodes) in place of a TOTP code.
+  verifyMfaRecoveryCode: (mfaTicket: string, code: string) =>
+    request<SessionResult>("/auth/mfa/recovery-code/verify", {
+      method: "POST",
+      body: JSON.stringify({ mfaTicket, code }),
+    }),
+
   requestPasswordReset: (email: string) =>
     request<PasswordResetRequestResult>("/auth/password-reset/request", {
       method: "POST",
@@ -766,6 +775,21 @@ export const api = {
     request<CompanyAdmin>(`/platform/companies/${id}/admins/${adminId}/account/reset-password`, {
       method: "POST",
       body: JSON.stringify({ newPassword }),
+    }),
+
+  // Tenant Management gap-fill batch 1, Phase 1 item #2 — forces a fresh
+  // MFA enrollment on this admin's next login (clears the old secret,
+  // deletes any outstanding recovery codes). No body: nothing to configure.
+  resetAdminMfa: (id: string, adminId: string) =>
+    request<CompanyAdmin>(`/platform/companies/${id}/admins/${adminId}/account/reset-mfa`, {
+      method: "POST",
+    }),
+
+  // Tenant Management gap-fill batch 1, Phase 1 item #3 — clears the
+  // automatic failed-login lockout without touching the password or MFA.
+  unlockAdminAccount: (id: string, adminId: string) =>
+    request<CompanyAdmin>(`/platform/companies/${id}/admins/${adminId}/account/unlock`, {
+      method: "POST",
     }),
 
   impersonate: (id: string) =>

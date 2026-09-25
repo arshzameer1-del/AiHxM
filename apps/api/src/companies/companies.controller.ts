@@ -192,6 +192,31 @@ export class CompaniesController {
     return this.companies.resetAdminPassword(claims, id, adminId, dto.newPassword);
   }
 
+  // Tenant Management gap-fill batch 1, Phase 1 item #2 — the MFA
+  // counterpart to reset-password above, for an admin who's lost their
+  // authenticator device AND their recovery codes. No request body: this
+  // always forces a fresh enrollment, there's nothing else to configure.
+  @Post(":id/admins/:adminId/account/reset-mfa")
+  resetAdminMfa(
+    @CurrentClaims() claims: RequestClaims,
+    @Param("id") id: string,
+    @Param("adminId") adminId: string
+  ) {
+    return this.companies.resetAdminMfa(claims, id, adminId);
+  }
+
+  // Tenant Management gap-fill batch 1, Phase 1 item #3 — clears the
+  // automatic password-lockout counters without touching the password or
+  // MFA enrollment. No request body: nothing to configure.
+  @Post(":id/admins/:adminId/account/unlock")
+  unlockAdminAccount(
+    @CurrentClaims() claims: RequestClaims,
+    @Param("id") id: string,
+    @Param("adminId") adminId: string
+  ) {
+    return this.companies.unlockAdminAccount(claims, id, adminId);
+  }
+
   @Post(":id/impersonate")
   impersonate(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
     return this.companies.impersonate(claims, id);

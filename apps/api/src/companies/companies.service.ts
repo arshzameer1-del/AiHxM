@@ -102,8 +102,20 @@ function rowToConfig(row: any): CompanyConfig {
   };
 }
 
+/**
+ * `lockout` is only needed when `row` itself (a plain `company_admins`
+ * row, from an INSERT/UPDATE ... RETURNING *) doesn't already carry
+ * `failed_login_attempts`/`locked_until` — i.e. everywhere except
+ * `getDetail`'s own LEFT JOIN query, which selects them directly onto the
+ * row. Every call site that mutates `user_accounts` state itself
+ * (resetAdminPassword, resetAdminMfa, unlockAdminAccount) already knows
+ * the new values without a re-query and passes them here explicitly;
+ * setAdminStatus doesn't touch lockout at all, so it re-reads the current
+ * value via getLockoutInfo() so its response doesn't silently report
+ * "not locked" for an admin who actually still is.
+ */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function rowToAdmin(row: any): CompanyAdmin {
+function rowToAdmin(row: any, lockout?: { failedLoginAttempts: number; lockedUntil: string | null }): CompanyAdmin {
   return {
     id: row.id,
     companyId: row.company_id,
@@ -117,6 +129,10 @@ function rowToAdmin(row: any): CompanyAdmin {
     // Tenant Users / Admins screen.
     userAccountId: row.user_account_id ?? null,
     loginId: row.login_id ?? null,
+    failedLoginAttempts: lockout?.failedLoginAttempts ?? row.failed_login_attempts ?? 0,
+    lockedUntil:
+      lockout?.lockedUntil ??
+      (row.locked_until ? (row.locked_until.toISOString ? row.locked_until.toISOString() : row.locked_until) : null),
   };
 }
 
@@ -359,8 +375,17 @@ export class CompaniesService {
         "SELECT * FROM company_config WHERE company_id = $1",
         [companyId]
       );
+      // LEFT JOIN user_accounts for failed_login_attempts/locked_until
+      // (Phase 1 item #3) — company_admins has neither column itself, so
+      // there's no name collision with `ca.*`, and an admin with no login
+      // yet naturally comes back NULL on both (rowToAdmin's `?? 0`/`?? null`
+      // defaults handle that).
       const adminsResult = await client.query(
-        "SELECT * FROM company_admins WHERE company_id = $1 ORDER BY created_at ASC",
+        `SELECT ca.*, ua.failed_login_attempts, ua.locked_until
+         FROM company_admins ca
+         LEFT JOIN user_accounts ua ON ua.id = ca.user_account_id
+         WHERE ca.company_id = $1
+         ORDER BY ca.created_at ASC`,
         [companyId]
       );
 
@@ -374,7 +399,7 @@ export class CompaniesService {
       return {
         company: rowToCompany(companyResult.rows[0]),
         config,
-        admins: adminsResult.rows.map(rowToAdmin),
+        admins: adminsResult.rows.map((row) => rowToAdmin(row)),
       };
     });
   }
@@ -817,8 +842,40 @@ export class CompaniesService {
         metadata: {},
       });
 
-      return rowToAdmin(result.rows[0]);
+      // Doesn't touch user_accounts at all (this is the manual admin-level
+      // status field, a different concept from the automatic
+      // failed-login lockout below) — re-read so the response doesn't
+      // silently report "not locked" for an admin who actually still is.
+      const lockout = await this.getLockoutInfo(client, result.rows[0].user_account_id);
+      return rowToAdmin(result.rows[0], lockout);
     });
+  }
+
+  /**
+   * Tenant Management gap-fill batch 1, Phase 1 item #3's shared read —
+   * every mutation below that doesn't itself already know the resulting
+   * lockout state re-reads it here so its response stays accurate. Null
+   * userAccountId (no login yet) is trivially "not locked."
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async getLockoutInfo(
+    client: any,
+    userAccountId: string | null
+  ): Promise<{ failedLoginAttempts: number; lockedUntil: string | null }> {
+    if (!userAccountId) return { failedLoginAttempts: 0, lockedUntil: null };
+    const result = await client.query(
+      "SELECT failed_login_attempts, locked_until FROM user_accounts WHERE id = $1",
+      [userAccountId]
+    );
+    const row = result.rows[0];
+    return {
+      failedLoginAttempts: row?.failed_login_attempts ?? 0,
+      lockedUntil: row?.locked_until
+        ? row.locked_until.toISOString
+          ? row.locked_until.toISOString()
+          : row.locked_until
+        : null,
+    };
   }
 
   /**
@@ -1015,7 +1072,106 @@ export class CompaniesService {
         metadata: {},
       });
 
-      return rowToAdmin(existing.rows[0]);
+      // Already know the result — just cleared both fields above.
+      return rowToAdmin(existing.rows[0], { failedLoginAttempts: 0, lockedUntil: null });
+    });
+  }
+
+  /**
+   * Tenant Management gap-fill batch 1, Phase 1 item #2 — the counterpart
+   * to resetAdminPassword() directly above, for when an admin is locked
+   * out of MFA specifically (lost/wiped authenticator device, AND the
+   * recovery codes from mfa-recovery-codes.util.ts are also gone or
+   * exhausted) rather than locked out on password. Same shape as
+   * resetAdminPassword(): find the admin, require an existing login,
+   * mutate user_accounts under the Platform Admin's own claims, audit,
+   * return the (unchanged) admin row.
+   *
+   * Clears `mfa_enabled`/`mfa_secret_encrypted` so the account's next
+   * login goes through `authenticate()`'s `!account.mfa_enabled` branch
+   * again (auth.service.ts) — i.e. forces a brand-new enrollment, exactly
+   * like a first-ever login. Also deletes any outstanding
+   * `mfa_recovery_codes` rows: the old codes were only ever valid for the
+   * old (now-revoked) secret's enrollment, and leaving them live would let
+   * a stale code sign in without ever proving the person re-enrolled.
+   */
+  async resetAdminMfa(claims: RequestClaims, companyId: string, adminId: string): Promise<CompanyAdmin> {
+    return this.db.withClaims(claims, async (client) => {
+      const existing = await client.query(
+        "SELECT * FROM company_admins WHERE id = $1 AND company_id = $2",
+        [adminId, companyId]
+      );
+      if (existing.rowCount === 0) {
+        throw new NotFoundException("Admin not found for this company");
+      }
+      const userAccountId = existing.rows[0].user_account_id as string | null;
+      if (!userAccountId) {
+        throw new BadRequestException("This admin has no login yet — use Create login instead");
+      }
+
+      await client.query(
+        `UPDATE user_accounts SET
+           mfa_enabled = false,
+           mfa_secret_encrypted = NULL,
+           updated_at = now()
+         WHERE id = $1`,
+        [userAccountId]
+      );
+      await client.query("DELETE FROM mfa_recovery_codes WHERE user_account_id = $1", [userAccountId]);
+
+      await this.audit.record(client, claims, {
+        companyId,
+        action: "company.admin.mfa_reset",
+        target: existing.rows[0].email,
+        metadata: {},
+      });
+
+      // MFA reset doesn't touch the password-lockout fields — re-read so
+      // the response doesn't silently report "not locked" for an admin
+      // who's ALSO currently password-locked.
+      const lockout = await this.getLockoutInfo(client, userAccountId);
+      return rowToAdmin(existing.rows[0], lockout);
+    });
+  }
+
+  /**
+   * Tenant Management gap-fill batch 1, Phase 1 item #3 — the much more
+   * common counterpart to resetAdminPassword/resetAdminMfa above: an admin
+   * who mistyped their password a few too many times
+   * (`AuthService.MAX_FAILED_ATTEMPTS = 5`) and just needs a fresh start,
+   * not a credential reset. Clears ONLY the lockout counters, leaving the
+   * password and MFA enrollment untouched — same fields
+   * `AuthService.resetFailedAttempts()` clears on a genuinely successful
+   * login, just triggered by a Platform Admin instead of waiting out
+   * `LOCKOUT_MINUTES` or resetting the password as a workaround.
+   */
+  async unlockAdminAccount(claims: RequestClaims, companyId: string, adminId: string): Promise<CompanyAdmin> {
+    return this.db.withClaims(claims, async (client) => {
+      const existing = await client.query(
+        "SELECT * FROM company_admins WHERE id = $1 AND company_id = $2",
+        [adminId, companyId]
+      );
+      if (existing.rowCount === 0) {
+        throw new NotFoundException("Admin not found for this company");
+      }
+      const userAccountId = existing.rows[0].user_account_id as string | null;
+      if (!userAccountId) {
+        throw new BadRequestException("This admin has no login yet — use Create login instead");
+      }
+
+      await client.query(
+        "UPDATE user_accounts SET failed_login_attempts = 0, locked_until = NULL, updated_at = now() WHERE id = $1",
+        [userAccountId]
+      );
+
+      await this.audit.record(client, claims, {
+        companyId,
+        action: "company.admin.lockout_cleared",
+        target: existing.rows[0].email,
+        metadata: {},
+      });
+
+      return rowToAdmin(existing.rows[0], { failedLoginAttempts: 0, lockedUntil: null });
     });
   }
 

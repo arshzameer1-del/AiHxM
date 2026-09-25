@@ -169,6 +169,7 @@ describe("Auth HTTP surface (e2e)", () => {
       expect(confirmRes.status).toBe(201);
       expect(confirmRes.body.status).toBe("ok");
       expect(confirmRes.body.token).toEqual(expect.any(String));
+      expect(confirmRes.body.recoveryCodes).toHaveLength(10);
 
       const secondLoginRes = await request(app.getHttpServer())
         .post("/auth/login")
@@ -209,6 +210,15 @@ describe("Auth HTTP surface (e2e)", () => {
       expect(res.status).toBe(401);
     });
   });
+
+  // POST /auth/mfa/recovery-code/verify has its own e2e file
+  // (mfa-recovery-code.e2e.spec.ts) rather than a describe block here —
+  // this file's login-heavy suite already sits right at /auth/login's
+  // 10-req/min throttle (see the comment in the password-reset test below),
+  // and a real login round trip is unavoidable per recovery-code scenario
+  // (a login to enroll, then a second to reach mfa_required). A separate
+  // spec file gets its own Nest app instance and therefore its own,
+  // independent throttle storage.
 
   describe("POST /auth/password-reset/request and POST /auth/password-reset/confirm", () => {
     it("issues a dev-mode reset token and allows resetting the password with it", async () => {
