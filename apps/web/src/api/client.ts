@@ -180,6 +180,47 @@ export function setLastTenantSlug(slug: string | null): void {
   }
 }
 
+// Tenant Management gap-fill Phase 1 item #4 — "Login As" now swaps the
+// active token for a real tenant session (see AuthContext.setSessionToken),
+// so the Platform Admin's own token has to be stashed somewhere to come
+// back to: on "End session" (a deliberate click) and on the impersonation
+// token's own natural 30-minute expiry (AuthContext's SESSION_EXPIRED_EVENT
+// handler). localStorage (not React state) for the same reason
+// LAST_TENANT_SLUG_KEY above is: it has to survive a page refresh taken
+// while impersonating. `sessionId` is the impersonation token's own `jti`,
+// used to force-end it server-side via the existing revoke-session
+// endpoint — that call has to be made with the STASHED Platform Admin
+// token, since PlatformAdminGuard (unlike SessionGuard) is what
+// /platform/sessions/:id/revoke requires, and the impersonation token
+// itself never carries is_platform_admin.
+export type ImpersonationStash = {
+  adminToken: string;
+  sessionId: string;
+  companyId: string;
+  companyName: string;
+  impersonatedAdminEmail: string;
+};
+
+const IMPERSONATION_KEY = "aihxm.impersonation";
+
+export function getImpersonationStash(): ImpersonationStash | null {
+  const raw = localStorage.getItem(IMPERSONATION_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as ImpersonationStash;
+  } catch {
+    return null;
+  }
+}
+
+export function setImpersonationStash(stash: ImpersonationStash): void {
+  localStorage.setItem(IMPERSONATION_KEY, JSON.stringify(stash));
+}
+
+export function clearImpersonationStash(): void {
+  localStorage.removeItem(IMPERSONATION_KEY);
+}
+
 // Real bug found from a production screenshot: a 401 from ANY call, not
 // just AuthContext's own getMe(), already cleared the stored token below —
 // but nothing told the rest of the app that had happened. AuthContext's
@@ -792,8 +833,11 @@ export const api = {
       method: "POST",
     }),
 
-  impersonate: (id: string) =>
-    request<ImpersonateResponse>(`/platform/companies/${id}/impersonate`, { method: "POST" }),
+  impersonate: (id: string, reason: string) =>
+    request<ImpersonateResponse>(`/platform/companies/${id}/impersonate`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    }),
 
   listAuditLog: (companyId?: string) =>
     request<AuditLogEntry[]>(`/platform/audit-log${companyId ? `?companyId=${companyId}` : ""}`),

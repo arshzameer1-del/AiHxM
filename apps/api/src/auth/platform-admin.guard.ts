@@ -15,8 +15,9 @@ export type SessionTokenPayload = {
   sub: string;
   is_platform_admin: boolean;
   company_id?: string | null;
-  /** Session id (also `user_sessions.id`) — absent on tokens minted before
-   *  sessions existed and on "Login As" impersonation tokens; see
+  /** Session id (also `user_sessions.id`) — absent only on tokens minted
+   *  before sessions existed. "Login As" impersonation tokens carry a real
+   *  one too, as of Tenant Management gap-fill Phase 1 item #4; see
    *  SessionSecurityService's doc comment. */
   jti?: string;
 };

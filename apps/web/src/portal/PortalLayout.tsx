@@ -124,8 +124,62 @@ function PortalMark({ companySlug, companyName }: { companySlug: string | null; 
   return <div className="text-lg font-bold tracking-tight">AI HXM</div>;
 }
 
+/**
+ * Tenant Management gap-fill Phase 1 item #4 — the persistent
+ * "you're impersonating X" banner that makes a "Login As" session
+ * impossible to forget you're in, per the original hardening request.
+ * Rendered here (not on DashboardPage, which the impersonated session
+ * never sees again) since PortalLayout wraps every /app route for the
+ * whole duration of the session. `endImpersonation` (AuthContext) is
+ * what actually force-revokes it server-side and restores the Platform
+ * Admin's own session — this component only drives the button's busy
+ * state and surfaces a failure, since `endImpersonation` swallows the
+ * revoke call's own errors as best-effort (see its doc comment).
+ */
+function ImpersonationBanner({
+  impersonation,
+  endImpersonation,
+}: {
+  impersonation: NonNullable<ReturnType<typeof useAuth>["impersonation"]>;
+  endImpersonation: () => Promise<void>;
+}) {
+  const [ending, setEnding] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleEnd() {
+    setEnding(true);
+    setError(null);
+    try {
+      await endImpersonation();
+    } catch {
+      setError("Could not end this session — try again.");
+      setEnding(false);
+    }
+  }
+
+  return (
+    <div className="bg-warning text-white px-4 py-2 text-sm flex flex-wrap items-center justify-between gap-2">
+      <span>
+        You're viewing <strong>{impersonation.companyName}</strong> as{" "}
+        {impersonation.impersonatedAdminEmail} — a real, audited session that ends automatically in
+        30 minutes.
+      </span>
+      <div className="flex items-center gap-3 shrink-0">
+        {error && <span className="text-xs">{error}</span>}
+        <button
+          onClick={handleEnd}
+          disabled={ending}
+          className="bg-white/20 hover:bg-white/30 rounded-lg px-3 py-1 text-xs font-semibold disabled:opacity-50 whitespace-nowrap"
+        >
+          {ending ? "Ending…" : "End session"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function PortalLayout() {
-  const { identity, logout } = useAuth();
+  const { identity, logout, impersonation, endImpersonation } = useAuth();
 
   // ProtectedRoute/RequireTenant guarantee `identity` is loaded and
   // non-platform-admin before this ever renders.
@@ -134,35 +188,39 @@ export function PortalLayout() {
   const navItems = buildNavItems(roleKeys, enabledModules);
 
   return (
-    <div className="min-h-screen flex">
-      <aside className="w-56 shrink-0 border-r border-black/5 bg-card px-3 py-6 flex flex-col">
-        <div className="px-3 mb-8">
-          <PortalMark companySlug={identity?.companySlug ?? null} companyName={identity?.companyName ?? null} />
-          <div className="text-xs text-label-tertiary truncate">{identity?.companyName ?? "Your company"}</div>
-        </div>
+    <div className="min-h-screen flex flex-col">
+      {impersonation && <ImpersonationBanner impersonation={impersonation} endImpersonation={endImpersonation} />}
 
-        <nav className="flex flex-col gap-1">
-          {navItems.map((item) => (
-            <NavLink key={item.to} to={item.to} end={item.end} className={navLinkClass}>
-              {item.label}
-            </NavLink>
-          ))}
-        </nav>
+      <div className="flex flex-1">
+        <aside className="w-56 shrink-0 border-r border-black/5 bg-card px-3 py-6 flex flex-col">
+          <div className="px-3 mb-8">
+            <PortalMark companySlug={identity?.companySlug ?? null} companyName={identity?.companyName ?? null} />
+            <div className="text-xs text-label-tertiary truncate">{identity?.companyName ?? "Your company"}</div>
+          </div>
 
-        <div className="mt-auto px-3">
-          <div className="text-xs text-label-tertiary mb-2 truncate">{identity?.fullName}</div>
-          <button
-            onClick={logout}
-            className="text-sm text-label-tertiary hover:text-danger transition-colors"
-          >
-            Log out
-          </button>
-        </div>
-      </aside>
+          <nav className="flex flex-col gap-1">
+            {navItems.map((item) => (
+              <NavLink key={item.to} to={item.to} end={item.end} className={navLinkClass}>
+                {item.label}
+              </NavLink>
+            ))}
+          </nav>
 
-      <main className="flex-1 px-8 py-8 max-w-5xl">
-        <Outlet />
-      </main>
+          <div className="mt-auto px-3">
+            <div className="text-xs text-label-tertiary mb-2 truncate">{identity?.fullName}</div>
+            <button
+              onClick={logout}
+              className="text-sm text-label-tertiary hover:text-danger transition-colors"
+            >
+              Log out
+            </button>
+          </div>
+        </aside>
+
+        <main className="flex-1 px-8 py-8 max-w-5xl">
+          <Outlet />
+        </main>
+      </div>
     </div>
   );
 }

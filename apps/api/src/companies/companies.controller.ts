@@ -58,6 +58,15 @@ class RequestDeletionDto {
   graceDays?: number;
 }
 
+// Tenant Management gap-fill Phase 1 item #4 — "Login As" now requires a
+// reason, same as every other high-risk action here (Suspend/Lock via
+// UpdateCompanyDto, deletion via RequestDeletionDto above).
+class ImpersonateRequestDto {
+  @IsString()
+  @MaxLength(500)
+  reason!: string;
+}
+
 @Controller("platform/companies")
 @UseGuards(PlatformAdminGuard)
 export class CompaniesController {
@@ -218,8 +227,12 @@ export class CompaniesController {
   }
 
   @Post(":id/impersonate")
-  impersonate(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
-    return this.companies.impersonate(claims, id);
+  impersonate(
+    @CurrentClaims() claims: RequestClaims,
+    @Param("id") id: string,
+    @Body() dto: ImpersonateRequestDto
+  ) {
+    return this.companies.impersonate(claims, id, dto.reason);
   }
 
   // --- Lifecycle: TM-005 Suspend / TM-030 Tenant Lock go through the

@@ -1212,27 +1212,78 @@ export class CompaniesService {
   }
 
   /**
-   * "Login As" scoped impersonation (plan doc Section 3). Issues a
-   * short-lived, company-scoped token — not a platform-admin one — and
-   * logs the fact that impersonation happened. There is no tenant
-   * workspace UI to actually land on yet (that starts at Phase 7); this
-   * proves the scoped-session mechanism itself end to end, which is the
-   * part Phase 2's exit criterion actually cares about.
+   * "Login As" scoped impersonation (plan doc Section 3), hardened per
+   * Tenant Management gap-fill Phase 1 item #4. The original version of
+   * this method signed a synthetic, non-UUID `sub`
+   * (`"${claims.sub}:login-as"`) that was never a real login identity —
+   * it would crash the instant it touched any RLS policy using the
+   * standard `NULLIF(app.jwt()->>'sub','')::uuid` cast (a plain `OR`
+   * before that cast doesn't reliably short-circuit in Postgres), had no
+   * `jti` so it could never be individually force-ended, and the
+   * frontend never actually applied the returned token as a session —
+   * between the three, the feature had never once been used as a real
+   * "Login As", only as a proof that a JWT could be signed.
+   *
+   * This version resolves a REAL, already-active admin login for the
+   * target company and issues a session shaped exactly like
+   * `AuthService.issueSessionToken()`'s normal login tokens — same `sub`
+   * shape, same real `user_sessions` row and `jti` — so it's a genuinely
+   * usable, individually revocable session (via the existing
+   * `POST /platform/sessions/:id/revoke`) rather than a special case
+   * RLS or SessionGuard have to carve out. `reason` is required and
+   * audited, matching every other high-risk Tenant Management action
+   * (Suspend, Force Logout, deletion request).
    */
-  async impersonate(claims: RequestClaims, companyId: string): Promise<ImpersonateResponse> {
+  async impersonate(claims: RequestClaims, companyId: string, reason: string): Promise<ImpersonateResponse> {
     return this.db.withClaims(claims, async (client) => {
-      const companyResult = await client.query("SELECT id FROM companies WHERE id = $1", [companyId]);
+      const companyResult = await client.query("SELECT id, name FROM companies WHERE id = $1", [companyId]);
       if (companyResult.rowCount === 0) {
         throw new NotFoundException("Company not found");
       }
+      const company = companyResult.rows[0];
+
+      // The impersonation session's real identity: the longest-standing
+      // active admin login on this tenant. There's no "which admin"
+      // picker in the UI (plan doc Section 3 doesn't call for one), and
+      // any active admin's RLS-scoped view of their own company is
+      // identical either way — the choice only matters for the audit
+      // trail, where it's recorded below.
+      const adminResult = await client.query(
+        `SELECT user_account_id, email FROM company_admins
+         WHERE company_id = $1 AND status = 'active' AND user_account_id IS NOT NULL
+         ORDER BY created_at ASC
+         LIMIT 1`,
+        [companyId]
+      );
+      if (adminResult.rowCount === 0) {
+        throw new BadRequestException(
+          "This tenant has no active admin with a login yet — there's no session to impersonate."
+        );
+      }
+      const { user_account_id: userAccountId, email: adminEmail } = adminResult.rows[0];
 
       const secret = process.env.JWT_SECRET;
       if (!secret) {
         throw new Error("JWT_SECRET is not set");
       }
 
+      // Same shape as AuthService.issueSessionToken()'s real login
+      // sessions — a real user_sessions row is what gives this a `jti`,
+      // making it show up in the Security tab's session list and be
+      // individually revocable via the existing "End session"/revoke
+      // endpoint, instead of only ever expiring on its own after 30
+      // minutes.
+      const sessionResult = await client.query<{ id: string; expires_at: Date }>(
+        `INSERT INTO user_sessions (user_account_id, company_id, is_platform_admin, device_label, expires_at)
+         VALUES ($1, $2, false, $3, now() + interval '30 minutes')
+         RETURNING id, expires_at`,
+        [userAccountId, companyId, "Platform Admin impersonation session"]
+      );
+      const sessionId = sessionResult.rows[0].id;
+      const expiresAt = sessionResult.rows[0].expires_at.toISOString();
+
       const token = jwt.sign(
-        { sub: `${claims.sub}:login-as`, is_platform_admin: false, company_id: companyId },
+        { sub: userAccountId, is_platform_admin: false, company_id: companyId, jti: sessionId },
         secret,
         { expiresIn: "30m" }
       );
@@ -1241,14 +1292,16 @@ export class CompaniesService {
         companyId,
         action: "company.impersonate",
         target: companyId,
-        metadata: {},
+        metadata: { reason, impersonatedAdminId: userAccountId, impersonatedAdminEmail: adminEmail },
       });
 
       return {
         token,
-        expiresIn: "30m",
+        sessionId,
+        expiresAt,
         companyId,
-        note: "Tenant workspace UI arrives starting Phase 7 (Employee Core). This token proves the scoped-session mechanism end to end: it carries this company's id and is not a platform-admin token, exactly what RLS keys off.",
+        companyName: company.name,
+        impersonatedAdminEmail: adminEmail,
       };
     });
   }

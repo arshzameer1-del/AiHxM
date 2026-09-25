@@ -230,18 +230,52 @@ describe("Companies HTTP surface (e2e) — Platform Admin company management", (
       .send({
         name: "Impersonate Company",
         slug: `impersonate-${Date.now()}`,
+        initialAdmin: {
+          fullName: "Impersonate Admin",
+          email: `impersonate-admin-${Date.now()}@example.com`,
+        },
       });
 
     const companyId = createRes.body.company.id;
+    const adminId = createRes.body.admins[0].id;
+
+    // Tenant Management gap-fill Phase 1 item #4 — impersonation now
+    // issues a real, applied-shaped session for an actual admin login, so
+    // one has to exist first (just like every other admin-account action
+    // in this same spec file).
+    await request(app.getHttpServer())
+      .post(`/platform/companies/${companyId}/admins/${adminId}/account`)
+      .set("Authorization", `Bearer ${platformAdminToken}`)
+      .send({ initialPassword: "OriginalPassword123!" });
 
     const res = await request(app.getHttpServer())
       .post(`/platform/companies/${companyId}/impersonate`)
-      .set("Authorization", `Bearer ${platformAdminToken}`);
+      .set("Authorization", `Bearer ${platformAdminToken}`)
+      .send({ reason: "Verifying the Login As flow end to end" });
 
     expect(res.status).toBe(201);
     expect(res.body.token).toBeDefined();
+    expect(res.body.sessionId).toBeDefined();
+    expect(res.body.expiresAt).toBeDefined();
     expect(res.body.companyId).toBe(companyId);
-    expect(res.body.expiresIn).toBe("30m");
+    expect(res.body.impersonatedAdminEmail).toBe(createRes.body.admins[0].email);
+  });
+
+  it("rejects impersonation without a reason", async () => {
+    const createRes = await request(app.getHttpServer())
+      .post("/platform/companies")
+      .set("Authorization", `Bearer ${platformAdminToken}`)
+      .send({
+        name: "Impersonate Company No Reason",
+        slug: `impersonate-no-reason-${Date.now()}`,
+      });
+
+    const res = await request(app.getHttpServer())
+      .post(`/platform/companies/${createRes.body.company.id}/impersonate`)
+      .set("Authorization", `Bearer ${platformAdminToken}`)
+      .send({});
+
+    expect(res.status).toBe(400);
   });
 
   it("update company config via PATCH /companies/:id/config", async () => {

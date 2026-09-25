@@ -44,11 +44,12 @@ export class SessionSecurityService {
   }
 
   /**
-   * A token with no `jti` (issued before sessions existed, or a "Login As"
-   * impersonation token — see companies.service.ts's `impersonate()`) is
-   * never treated as revoked here; it simply expires on its own short
-   * natural TTL. Only tokens minted by `AuthService.issueSessionToken()`
-   * after this feature shipped carry a `jti` and can be force-revoked.
+   * A token with no `jti` (issued before sessions existed) is never
+   * treated as revoked here; it simply expires on its own short natural
+   * TTL. Tokens minted by `AuthService.issueSessionToken()`, and — as of
+   * Tenant Management gap-fill Phase 1 item #4 — "Login As" impersonation
+   * tokens from `companies.service.ts`'s `impersonate()`, both carry a
+   * real `jti` and can be force-revoked here.
    */
   async isRevoked(sessionId: string | undefined): Promise<boolean> {
     if (!sessionId) return false;

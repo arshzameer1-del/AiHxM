@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import type {
   CompanyDashboardRow,
   CompanyListFilters,
   CompanyStatus,
-  ImpersonateResponse,
   PackageTier,
   PlatformSavedView,
 } from "@aihxm/shared-types";
 import { api } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
 import { StatusPill } from "../components/StatusPill";
 import { ReasonModal } from "../components/ReasonModal";
 
@@ -25,9 +25,11 @@ const TIER_OPTIONS: PackageTier[] = ["starter", "growth", "professional", "enter
  * lives on the Tenant detail page's Overview tab.
  */
 export function DashboardPage() {
+  const navigate = useNavigate();
+  const { beginImpersonation } = useAuth();
   const [companies, setCompanies] = useState<CompanyDashboardRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [impersonation, setImpersonation] = useState<ImpersonateResponse | null>(null);
+  const [loginAsTarget, setLoginAsTarget] = useState<CompanyDashboardRow | null>(null);
 
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -117,12 +119,20 @@ export function DashboardPage() {
 
   const hasActiveFilters = Boolean(debouncedSearch) || statusFilter.size > 0 || tierFilter.size > 0;
 
-  async function handleLoginAs(id: string) {
-    try {
-      setImpersonation(await api.impersonate(id));
-    } catch {
-      setError("Could not start a scoped session for this company.");
-    }
+  // Tenant Management gap-fill Phase 1 item #4 — "Login As" now requires
+  // a reason (like every other high-risk action here) and, once the
+  // backend hands back a real, applied-shaped session, actually APPLIES
+  // it via AuthContext.beginImpersonation and navigates into the tenant
+  // portal, instead of showing the raw token in a read-only modal that
+  // never did anything. PortalLayout's persistent banner (driven by
+  // AuthContext's `impersonation` state) is what gets a Platform Admin
+  // back out again.
+  async function confirmLoginAs(reason: string) {
+    if (!loginAsTarget) return;
+    const response = await api.impersonate(loginAsTarget.id, reason);
+    await beginImpersonation(response);
+    setLoginAsTarget(null);
+    navigate("/app");
   }
 
   async function confirmSuspend(reason: string) {
@@ -302,7 +312,7 @@ export function DashboardPage() {
                     </button>
                   )}
                   <button
-                    onClick={() => handleLoginAs(c.id)}
+                    onClick={() => setLoginAsTarget(c)}
                     className="text-accent text-xs font-semibold hover:underline"
                   >
                     Login As
@@ -326,29 +336,14 @@ export function DashboardPage() {
         </table>
       </div>
 
-      {impersonation && (
-        <div className="fixed inset-0 bg-black/30 flex items-center justify-center px-4" onClick={() => setImpersonation(null)}>
-          <div
-            className="bg-card rounded-card p-6 shadow-sm max-w-md w-full"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 className="font-bold text-lg mb-2">Scoped session issued</h2>
-            <p className="text-sm text-label-secondary mb-3">{impersonation.note}</p>
-            <div className="bg-surface rounded-lg p-3 text-xs font-mono break-all mb-4">
-              {impersonation.token}
-            </div>
-            <p className="text-xs text-label-tertiary mb-4">
-              Expires in {impersonation.expiresIn}. Logged to the audit log as{" "}
-              <code>company.impersonate</code>.
-            </p>
-            <button
-              onClick={() => setImpersonation(null)}
-              className="bg-accent text-white rounded-lg px-4 py-2 text-sm font-semibold"
-            >
-              Close
-            </button>
-          </div>
-        </div>
+      {loginAsTarget && (
+        <ReasonModal
+          title={`Log in as ${loginAsTarget.name}?`}
+          description="Starts a real, 30-minute session as this tenant's admin — you'll see and act on exactly what they would. Logged to the audit log as company.impersonate, and end-able any time from the banner shown while it's active."
+          confirmLabel="Start session"
+          onCancel={() => setLoginAsTarget(null)}
+          onConfirm={confirmLoginAs}
+        />
       )}
 
       {suspendTarget && (

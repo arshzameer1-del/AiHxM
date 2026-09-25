@@ -243,11 +243,11 @@ export class AuthService {
    * Every real session token now carries a `jti` — the `user_sessions` row
    * this creates — so it can be individually force-revoked later (Tenant
    * Management's "Force Logout", TM-017/029; see SessionSecurityService).
-   * Tokens issued before this feature shipped, and "Login As" impersonation
-   * tokens (companies.service.ts's `impersonate()`, which intentionally
-   * stays outside normal session tracking — it's already short-lived and
-   * audited on issuance), have no `jti` and simply cannot be individually
-   * revoked; they still expire on their own schedule.
+   * "Login As" impersonation tokens (companies.service.ts's
+   * `impersonate()`) follow this exact same pattern as of Phase 1 item #4
+   * and are just as individually revocable. Only tokens issued before
+   * either feature shipped have no `jti` and simply expire on their own
+   * schedule instead.
    */
   private async issueSessionToken(identity: SessionIdentity, userAccountId: string): Promise<string> {
     const secret = process.env.JWT_SECRET;

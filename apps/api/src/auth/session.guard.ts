@@ -22,9 +22,10 @@ import { SessionSecurityService } from "./session-security.service";
  * could already be set to `suspended` (migration 0001), but nothing in
  * the request path ever actually checked it, so a "suspended" tenant's
  * existing logged-in sessions kept working exactly as before. An
- * impersonation ("Login As") token has no `jti` to revoke individually,
- * but IS a normal company-scoped token, so it's still blocked the moment
- * the company it targets is locked/suspended/archived.
+ * impersonation ("Login As") token is a normal company-scoped token with
+ * a real `jti` as of Tenant Management gap-fill Phase 1 item #4, so it's
+ * both individually revocable AND still blocked the moment the company
+ * it targets is locked/suspended/archived.
  */
 @Injectable()
 export class SessionGuard implements CanActivate {

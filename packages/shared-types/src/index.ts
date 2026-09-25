@@ -334,11 +334,23 @@ export type AuditLogEntry = {
   createdAt: string;
 };
 
+// Tenant Management gap-fill Phase 1 item #4 — "Login As" hardening.
+// `sessionId` is the token's real `jti` (a genuine `user_sessions` row,
+// same shape as any other login session), which is what makes an
+// impersonation session show up in the Security tab's session list and
+// be individually end-able via the existing revoke-session endpoint,
+// instead of only ever expiring on its own after 30 minutes.
+export type ImpersonateRequest = {
+  reason: string;
+};
+
 export type ImpersonateResponse = {
   token: string;
-  expiresIn: string;
+  sessionId: string;
+  expiresAt: string;
   companyId: string;
-  note: string;
+  companyName: string;
+  impersonatedAdminEmail: string;
 };
 
 // --- Tenant Management: Sessions (TM-017/029) ----------------------------

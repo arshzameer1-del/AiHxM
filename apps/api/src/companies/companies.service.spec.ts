@@ -1,5 +1,6 @@
 import { ConflictException, NotFoundException, BadRequestException } from "@nestjs/common";
 import { Pool } from "pg";
+import * as jwt from "jsonwebtoken";
 import { CompaniesService } from "./companies.service";
 import { DatabaseService } from "../database/database.service";
 import { AuditService } from "../audit/audit.service";
@@ -794,17 +795,92 @@ describe("CompaniesService", () => {
   });
 
   describe("impersonate", () => {
-    it("generates a scoped impersonation token", async () => {
+    it("issues a real, applied-shaped session for the tenant's active admin login", async () => {
       const created = await service.create(FIXTURE_CLAIMS, {
         name: "Test Company Impersonate",
         slug: `test-co-imp-${Date.now()}`,
+        initialAdmin: {
+          fullName: "Impersonate Admin",
+          email: `impersonate-admin-${Date.now()}@example.com`,
+        },
       });
+      const adminId = created.admins[0].id;
+      await service.createAdminLogin(FIXTURE_CLAIMS, created.company.id, adminId, "OriginalPassword123!");
 
-      const result = await service.impersonate(FIXTURE_CLAIMS, created.company.id);
+      const result = await service.impersonate(FIXTURE_CLAIMS, created.company.id, "Debugging a support ticket");
 
       expect(result.token).toBeDefined();
       expect(result.companyId).toBe(created.company.id);
-      expect(result.expiresIn).toBe("30m");
+      expect(result.companyName).toBe("Test Company Impersonate");
+      expect(result.impersonatedAdminEmail).toBe(created.admins[0].email);
+      expect(result.sessionId).toBeDefined();
+
+      // The whole point of this rewrite: `sub` is a real user_account_id
+      // (not the old synthetic "<platformAdminId>:login-as" string), and
+      // `jti` matches a genuine user_sessions row — same shape as any
+      // other real login token, so it's individually revocable and never
+      // crashes an RLS policy's `::uuid` cast.
+      const payload = jwt.verify(result.token, process.env.JWT_SECRET as string) as jwt.JwtPayload;
+      expect(payload.is_platform_admin).toBe(false);
+      expect(payload.company_id).toBe(created.company.id);
+      expect(payload.jti).toBe(result.sessionId);
+
+      const sessionRow = await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const res = await client.query("SELECT * FROM user_sessions WHERE id = $1", [result.sessionId]);
+        return res.rows[0];
+      });
+      expect(sessionRow).toBeDefined();
+      expect(sessionRow.company_id).toBe(created.company.id);
+      expect(sessionRow.is_platform_admin).toBe(false);
+      expect(sessionRow.user_account_id).toBe(payload.sub);
+    });
+
+    it("records the reason and the impersonated admin's identity in the audit log", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Impersonate Audit",
+        slug: `test-co-imp-audit-${Date.now()}`,
+        initialAdmin: {
+          fullName: "Audited Admin",
+          email: `impersonate-audit-admin-${Date.now()}@example.com`,
+        },
+      });
+      const adminId = created.admins[0].id;
+      await service.createAdminLogin(FIXTURE_CLAIMS, created.company.id, adminId, "OriginalPassword123!");
+
+      const result = await service.impersonate(FIXTURE_CLAIMS, created.company.id, "Investigating a payroll bug");
+
+      const auditRow = await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const res = await client.query(
+          `SELECT * FROM audit_log WHERE action = 'company.impersonate' AND company_id = $1
+           ORDER BY created_at DESC LIMIT 1`,
+          [created.company.id]
+        );
+        return res.rows[0];
+      });
+      expect(auditRow).toBeDefined();
+      expect(auditRow.metadata.reason).toBe("Investigating a payroll bug");
+      expect(auditRow.metadata.impersonatedAdminEmail).toBe(created.admins[0].email);
+      expect(auditRow.metadata.impersonatedAdminId).toBeDefined();
+
+      const payload = jwt.decode(result.token) as jwt.JwtPayload;
+      expect(auditRow.metadata.impersonatedAdminId).toBe(payload.sub);
+    });
+
+    it("refuses to impersonate a tenant with no active admin login", async () => {
+      const created = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Impersonate No Login",
+        slug: `test-co-imp-no-login-${Date.now()}`,
+        initialAdmin: {
+          fullName: "No Login Admin",
+          email: `impersonate-no-login-admin-${Date.now()}@example.com`,
+        },
+      });
+
+      // Never called createAdminLogin — this admin exists but has no
+      // user_account_id, so there's no real identity to issue as.
+      await expect(
+        service.impersonate(FIXTURE_CLAIMS, created.company.id, "Some reason")
+      ).rejects.toThrow(BadRequestException);
     });
   });
 });

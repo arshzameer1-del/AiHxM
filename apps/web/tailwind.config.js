@@ -15,6 +15,10 @@ export default {
         },
         success: "#34C759",
         danger: "#FF3B30",
+        // Tenant Management gap-fill Phase 1 item #4 — the persistent
+        // "you're impersonating X" banner. Apple HIG's system orange,
+        // same family as accent/success/danger above.
+        warning: "#FF9500",
         label: {
           primary: "#1C1C1E",
           secondary: "#3C3C43",
