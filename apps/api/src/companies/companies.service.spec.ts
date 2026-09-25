@@ -470,6 +470,35 @@ describe("CompaniesService", () => {
       ).rejects.toThrow(ConflictException);
     });
 
+    it("rejects creating a login when the admin's email already has a login elsewhere, with a friendly error instead of a raw 500", async () => {
+      // Real bug found from a production log: company_admins.email isn't
+      // globally unique (two different companies' admin rows can list the
+      // same address, e.g. a founder standing up several test tenants with
+      // their own email), but user_accounts.email is (Section 5). This
+      // path used to let that INSERT's 23505 escape unhandled — the
+      // sibling insert in EmployeesService.createLogin() already caught it
+      // — so a second company's "create login" for the same address
+      // crashed as an unhandled exception instead of a clear 409.
+      const sharedEmail = `shared-across-companies-${Date.now()}@example.com`;
+
+      const first = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Shared Email A",
+        slug: `test-co-shared-email-a-${Date.now()}`,
+        initialAdmin: { fullName: "Shared Email Admin A", email: sharedEmail },
+      });
+      await service.createAdminLogin(FIXTURE_CLAIMS, first.company.id, first.admins[0].id, "SecurePassword123!");
+
+      const second = await service.create(FIXTURE_CLAIMS, {
+        name: "Test Company Shared Email B",
+        slug: `test-co-shared-email-b-${Date.now()}`,
+        initialAdmin: { fullName: "Shared Email Admin B", email: sharedEmail },
+      });
+
+      await expect(
+        service.createAdminLogin(FIXTURE_CLAIMS, second.company.id, second.admins[0].id, "AnotherPassword123!")
+      ).rejects.toThrow(ConflictException);
+    });
+
     it("stores a Platform-Admin-chosen loginId, so this admin can sign in through their own tenant-path login too", async () => {
       const created = await service.create(FIXTURE_CLAIMS, {
         name: "Test Company Login ID",
