@@ -1,12 +1,33 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
+import {
+  type LucideIcon,
+  Home,
+  User,
+  Users,
+  Network,
+  Settings2,
+  ShieldCheck,
+  Terminal,
+  CalendarDays,
+  Briefcase,
+  Target,
+  Wallet,
+} from "lucide-react";
 import type { ModuleKey, PublicTenantBranding, TenantRoleKey } from "@aihxm/shared-types";
 import { api, publicTenantBrandingAssetUrl } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 
+// Theme alignment pass (2026-09-26) — the sidebar used to be a plain text
+// list with a solid, full-saturation active block (bg-accent text-white).
+// Every other icon-bearing surface already added since (CompanyDetailPage's
+// tile grid, this file's own children pattern) settled on a soft tinted
+// pill instead (`bg-accent/10 text-accent`) — this brings the persistent
+// nav shell itself in line with that, and with kumail's reference design
+// (icon + label, soft blue pill on the active item, not a solid block).
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
-  `block px-3 py-2 rounded-lg text-sm font-medium ${
-    isActive ? "bg-accent text-white" : "text-label-secondary hover:bg-black/5"
+  `flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+    isActive ? "bg-accent/10 text-accent" : "text-label-secondary hover:bg-black/5"
   }`;
 
 // Organization Management Phase 9 (Unified Integration & Synchronization
@@ -16,7 +37,10 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
 // app, none of which needs grouping, is unaffected). Deliberately only ONE
 // level deep — a group's `children` are always plain leaf items, never
 // another nested group — since nothing in this app needs more than that.
-type NavItem = { to: string; label: string; end?: boolean; children?: NavItem[] };
+// `icon` was added in the same theme-alignment pass as navLinkClass above —
+// optional so a child item (no icon in the reference design either) simply
+// renders without the leading glyph.
+type NavItem = { to: string; label: string; end?: boolean; children?: NavItem[]; icon?: LucideIcon };
 
 /**
  * Decision #13 — nav visibility is the union of every role this session
@@ -33,12 +57,12 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): 
   const hasRole = (...keys: TenantRoleKey[]) => keys.some((k) => roleKeys.includes(k));
   const hasModule = (key: ModuleKey) => enabledModules.includes(key);
 
-  const items: NavItem[] = [{ to: "/app", label: "Home", end: true }];
+  const items: NavItem[] = [{ to: "/app", label: "Home", end: true, icon: Home }];
 
   if (hasRole("hr_admin", "line_manager") && hasModule("employee")) {
-    items.push({ to: "/app/employees", label: "Employees" });
+    items.push({ to: "/app/employees", label: "Employees", icon: Users });
   } else if (roleKeys.length > 0 && hasModule("employee")) {
-    items.push({ to: "/app/profile", label: "My Profile" });
+    items.push({ to: "/app/profile", label: "My Profile", icon: User });
   }
 
   // Organization Management Phase 1 — org_unit.view.all is seeded broadly
@@ -63,6 +87,7 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): 
       to: "/app/organization",
       label: "Organization",
       end: true,
+      icon: Network,
       children: [
         { to: "/app/organization/jobs", label: "Jobs" },
         { to: "/app/organization/positions", label: "Positions" },
@@ -87,30 +112,30 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): 
   // Payroll Settings) — shown to the same roles that see at least one of
   // those, so it never promises a screen with nothing behind it.
   if (hasRole("hr_admin", "system_admin")) {
-    items.push({ to: "/app/configuration-center", label: "Configuration Center" });
+    items.push({ to: "/app/configuration-center", label: "Configuration Center", icon: Settings2 });
   }
 
   if (hasRole("hr_admin")) {
-    items.push({ to: "/app/admin", label: "Admin Center" });
+    items.push({ to: "/app/admin", label: "Admin Center", icon: ShieldCheck });
   }
 
   // Decision #20 — deliberately not module-gated: workflow/role
   // configuration is a core platform capability, not a licensed module,
   // same posture as Admin Center above.
   if (hasRole("system_admin")) {
-    items.push({ to: "/app/system-admin", label: "System Admin" });
+    items.push({ to: "/app/system-admin", label: "System Admin", icon: Terminal });
   }
 
   if (hasModule("leave") && roleKeys.length > 0) {
-    items.push({ to: "/app/leave", label: "Leave & Attendance" });
+    items.push({ to: "/app/leave", label: "Leave & Attendance", icon: CalendarDays });
   }
 
   if (hasRole("hr_admin") && hasModule("recruitment")) {
-    items.push({ to: "/app/recruitment", label: "Recruitment" });
+    items.push({ to: "/app/recruitment", label: "Recruitment", icon: Briefcase });
   }
 
   if (hasModule("performance") && roleKeys.length > 0) {
-    items.push({ to: "/app/performance", label: "Performance" });
+    items.push({ to: "/app/performance", label: "Performance", icon: Target });
   }
 
   // Phase 12 (Decision #14) — 0023_payroll_seed.sql grants
@@ -119,7 +144,7 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): 
   // those are the only two role keys that ever have anything to see on
   // this route; a line_manager-only session gets no nav entry here.
   if (hasModule("payroll") && hasRole("hr_admin", "employee_self_service")) {
-    items.push({ to: "/app/payroll", label: "Payroll" });
+    items.push({ to: "/app/payroll", label: "Payroll", icon: Wallet });
   }
 
   return items;
@@ -193,11 +218,13 @@ function PortalMark({ companySlug, companyName }: { companySlug: string | null; 
  */
 function NavGroup({ item }: { item: NavItem & { children: NavItem[] } }) {
   const [expanded, setExpanded] = useState(true);
+  const Icon = item.icon;
 
   return (
     <div>
       <div className="flex items-center gap-1">
         <NavLink to={item.to} end={item.end} className={navLinkClass} style={{ flex: 1 }}>
+          {Icon && <Icon size={18} strokeWidth={1.75} className="shrink-0" />}
           {item.label}
         </NavLink>
         <button
@@ -298,15 +325,18 @@ export function PortalLayout() {
           </div>
 
           <nav className="flex flex-col gap-1">
-            {navItems.map((item) =>
-              item.children ? (
-                <NavGroup key={item.to} item={item as NavItem & { children: NavItem[] }} />
-              ) : (
+            {navItems.map((item) => {
+              if (item.children) {
+                return <NavGroup key={item.to} item={item as NavItem & { children: NavItem[] }} />;
+              }
+              const Icon = item.icon;
+              return (
                 <NavLink key={item.to} to={item.to} end={item.end} className={navLinkClass}>
+                  {Icon && <Icon size={18} strokeWidth={1.75} className="shrink-0" />}
                   {item.label}
                 </NavLink>
-              )
-            )}
+              );
+            })}
           </nav>
 
           <div className="mt-auto px-3">

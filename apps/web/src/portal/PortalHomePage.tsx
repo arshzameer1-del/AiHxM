@@ -1,6 +1,19 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import type { OrganizationCommandCenterSummary } from "@aihxm/shared-types";
+import {
+  type LucideIcon,
+  User,
+  Users,
+  Network,
+  Settings2,
+  ShieldCheck,
+  Terminal,
+  CalendarDays,
+  Briefcase,
+  Target,
+  Wallet,
+} from "lucide-react";
+import type { ModuleKey, OrganizationCommandCenterSummary, TenantRoleKey } from "@aihxm/shared-types";
 import { useAuth } from "../auth/AuthContext";
 import { api } from "../api/client";
 
@@ -9,6 +22,84 @@ const ROLE_LABELS: Record<string, string> = {
   line_manager: "Line Manager",
   employee_self_service: "Employee",
 };
+
+// Theme alignment pass (2026-09-26) — kumail's reference screenshot shows
+// the tenant home page as a grid of module cards (icon badge + title +
+// one-line description), not the plain "modules enabled" pill list this
+// page used to lead with. Mirrors buildNavItems()'s own gating in
+// PortalLayout.tsx exactly (same role/module conditions, same routes) so a
+// card here never links anywhere the sidebar itself wouldn't also show —
+// deliberately NOT duplicating that function; a small parallel list is
+// easier to keep honest than importing a function that returns nav-only
+// shapes (icons/children) this page doesn't need. Per kumail's explicit
+// instruction, these cards carry no status/phase badge — the reference
+// prototype's "Phase 1/2/3" pills marked build order for a not-yet-built
+// roadmap, which doesn't apply to features that are already live.
+type HomeCard = { to: string; label: string; description: string; icon: LucideIcon };
+
+function buildHomeCards(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): HomeCard[] {
+  const hasRole = (...keys: TenantRoleKey[]) => keys.some((k) => roleKeys.includes(k));
+  const hasModule = (key: ModuleKey) => enabledModules.includes(key);
+  const cards: HomeCard[] = [];
+
+  if (hasRole("hr_admin", "line_manager") && hasModule("employee")) {
+    cards.push({ to: "/app/employees", label: "Employees", description: "Directory, records & profiles", icon: Users });
+  } else if (roleKeys.length > 0 && hasModule("employee")) {
+    cards.push({ to: "/app/profile", label: "My Profile", description: "Your own employee record", icon: User });
+  }
+
+  if (hasModule("employee") && roleKeys.length > 0) {
+    cards.push({ to: "/app/organization", label: "Organization", description: "Org chart, positions & structure", icon: Network });
+  }
+
+  if (hasRole("hr_admin", "system_admin")) {
+    cards.push({ to: "/app/configuration-center", label: "Configuration Center", description: "Tenant setup & configuration", icon: Settings2 });
+  }
+
+  if (hasRole("hr_admin")) {
+    cards.push({ to: "/app/admin", label: "Admin Center", description: "Policies, schedules & groups", icon: ShieldCheck });
+  }
+
+  if (hasRole("system_admin")) {
+    cards.push({ to: "/app/system-admin", label: "System Admin", description: "Roles, workflow & platform rules", icon: Terminal });
+  }
+
+  if (hasModule("leave") && roleKeys.length > 0) {
+    cards.push({ to: "/app/leave", label: "Leave & Attendance", description: "Requests, balances & calendar", icon: CalendarDays });
+  }
+
+  if (hasRole("hr_admin") && hasModule("recruitment")) {
+    cards.push({ to: "/app/recruitment", label: "Recruitment", description: "Requisitions, candidates & offers", icon: Briefcase });
+  }
+
+  if (hasModule("performance") && roleKeys.length > 0) {
+    cards.push({ to: "/app/performance", label: "Performance", description: "Goals & review cycles", icon: Target });
+  }
+
+  if (hasModule("payroll") && hasRole("hr_admin", "employee_self_service")) {
+    cards.push({ to: "/app/payroll", label: "Payroll", description: "Payslips & statutory calculations", icon: Wallet });
+  }
+
+  return cards;
+}
+
+function HomeCardTile({ card }: { card: HomeCard }) {
+  const Icon = card.icon;
+  return (
+    <Link
+      to={card.to}
+      className="flex flex-col gap-3 bg-card rounded-card p-4 shadow-sm border border-black/5 hover:border-accent/30 hover:shadow transition-all"
+    >
+      <div className="w-10 h-10 rounded-lg bg-accent/10 text-accent flex items-center justify-center">
+        <Icon size={20} strokeWidth={1.75} />
+      </div>
+      <div>
+        <div className="font-semibold text-sm">{card.label}</div>
+        <div className="text-xs text-label-tertiary mt-0.5">{card.description}</div>
+      </div>
+    </Link>
+  );
+}
 
 const REORG_STATUS_LABELS: Record<string, string> = {
   draft: "Draft",
@@ -45,11 +136,20 @@ export function PortalHomePage() {
   if (!identity) return null;
 
   const { fullName, companyName, roleKeys, enabledModules } = identity;
+  const homeCards = buildHomeCards(roleKeys, enabledModules);
 
   return (
     <div>
-      <h1 className="text-2xl font-bold tracking-tight mb-1">Welcome, {fullName}</h1>
+      <h1 className="text-2xl font-bold tracking-tight mb-1">Good to see you, {fullName}</h1>
       <p className="text-sm text-label-tertiary mb-6">{companyName}</p>
+
+      {homeCards.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
+          {homeCards.map((card) => (
+            <HomeCardTile key={card.to} card={card} />
+          ))}
+        </div>
+      )}
 
       {roleKeys.length === 0 ? (
         <div className="bg-card rounded-card p-6 shadow-sm border border-amber-200">
