@@ -90,6 +90,20 @@ const OrgHierarchyPage = lazy(() =>
     default: m.OrgHierarchyPage,
   })),
 );
+// Organization Management, Phase 2 — Job Catalog (a setup screen) and
+// Position Workbench (occupancy/lifecycle). See
+// 0068_job_position_architecture.sql and jobs.service.ts's/
+// positions.service.ts's own header comments.
+const JobsPage = lazy(() =>
+  import("./portal/organization/JobsPage").then((m) => ({
+    default: m.JobsPage,
+  })),
+);
+const PositionWorkbenchPage = lazy(() =>
+  import("./portal/organization/PositionWorkbenchPage").then((m) => ({
+    default: m.PositionWorkbenchPage,
+  })),
+);
 const ConfigurationCenterPage = lazy(() =>
   import("./portal/admin/ConfigurationCenterPage").then((m) => ({
     default: m.ConfigurationCenterPage,
@@ -228,6 +242,14 @@ export default function App() {
                     side; PortalLayout's nav gates it the same courtesy way
                     as every other route here. */}
                   <Route path="organization" element={<OrgHierarchyPage />} />
+                  {/* Organization Management Phase 2 — Job Catalog +
+                    Position Workbench. job.view.all/job.manage.all and
+                    position.view.all/position.manage.all (both seeded in
+                    0069) are the real gates; PortalLayout's nav gates
+                    these the same courtesy way as every other route
+                    here. */}
+                  <Route path="organization/jobs" element={<JobsPage />} />
+                  <Route path="organization/positions" element={<PositionWorkbenchPage />} />
                   {/* Task #49 — Admin Center. hr_admin-only in PortalLayout's
                     nav (a courtesy); EmployeeGroupsService's own
                     employee_group.manage/leave_policy.manage gates are the

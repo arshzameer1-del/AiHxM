@@ -41,6 +41,17 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): 
   // actions the page itself renders.
   if (hasModule("employee") && roleKeys.length > 0) {
     items.push({ to: "/app/organization", label: "Organization" });
+    // Organization Management Phase 2 — Job Catalog + Position Workbench.
+    // `NavItem` here is a plain flat `{to, label}` with no sub-nav/nesting
+    // concept anywhere in this component (every existing entry, including
+    // Organization itself, is a top-level item) — inventing a nested nav
+    // shape for just these two would be new UI surface this component was
+    // never built to render, so they're added as two more flat items
+    // rather than "sub-items under Organization." job.view.all/
+    // position.view.all are seeded to the same broad audience as
+    // org_unit.view.all (0069's seed), so they're gated identically.
+    items.push({ to: "/app/organization/jobs", label: "Jobs" });
+    items.push({ to: "/app/organization/positions", label: "Positions" });
   }
 
   // Configuration Center is a read-only index over config domains this

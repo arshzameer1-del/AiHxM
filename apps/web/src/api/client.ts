@@ -78,6 +78,16 @@ import type {
   OrgUnitTreeNode,
   OrgUnitVersionView,
   OrgUnitView,
+  CreateJobRequest,
+  UpdateJobRequest,
+  JobVersionView,
+  JobView,
+  CreatePositionRequest,
+  UpdatePositionRequest,
+  AssignPositionRequest,
+  PositionStatus,
+  PositionVersionView,
+  PositionView,
   OffboardingChecklistItemView,
   OffboardingItemTemplateView,
   OfferView,
@@ -1081,6 +1091,58 @@ export const api = {
   activateOrgUnit: (id: string) => request<OrgUnitView>(`/organization/units/${id}/activate`, { method: "POST" }),
 
   getOrgUnitHistory: (id: string) => request<OrgUnitVersionView[]>(`/organization/units/${id}/history`),
+
+  // --- Organization Management, Phase 2 (0068_job_position_architecture.sql) --
+  // Job Catalog (JobsPage.tsx — a setup screen) and Position Workbench
+  // (PositionWorkbenchPage.tsx — the occupancy/lifecycle screen), the same
+  // "list is the page's data source, the rest back its actions" shape the
+  // Org Unit calls above already established.
+  listJobs: () => request<JobView[]>("/organization/jobs"),
+
+  getJob: (id: string) => request<JobView>(`/organization/jobs/${id}`),
+
+  createJob: (input: CreateJobRequest) =>
+    request<JobView>("/organization/jobs", { method: "POST", body: JSON.stringify(input) }),
+
+  updateJob: (id: string, patch: UpdateJobRequest) =>
+    request<JobView>(`/organization/jobs/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  archiveJob: (id: string) => request<JobView>(`/organization/jobs/${id}/archive`, { method: "POST" }),
+
+  activateJob: (id: string) => request<JobView>(`/organization/jobs/${id}/activate`, { method: "POST" }),
+
+  getJobHistory: (id: string) => request<JobVersionView[]>(`/organization/jobs/${id}/history`),
+
+  listPositions: (filters?: { status?: PositionStatus; orgUnitId?: string }) => {
+    const params = new URLSearchParams();
+    if (filters?.status) params.set("status", filters.status);
+    if (filters?.orgUnitId) params.set("orgUnitId", filters.orgUnitId);
+    const qs = params.toString();
+    return request<PositionView[]>(`/organization/positions${qs ? `?${qs}` : ""}`);
+  },
+
+  getPosition: (id: string) => request<PositionView>(`/organization/positions/${id}`),
+
+  createPosition: (input: CreatePositionRequest) =>
+    request<PositionView>("/organization/positions", { method: "POST", body: JSON.stringify(input) }),
+
+  updatePosition: (id: string, patch: UpdatePositionRequest) =>
+    request<PositionView>(`/organization/positions/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  assignPosition: (id: string, input: AssignPositionRequest) =>
+    request<PositionView>(`/organization/positions/${id}/assign`, { method: "POST", body: JSON.stringify(input) }),
+
+  unassignPosition: (id: string) => request<PositionView>(`/organization/positions/${id}/unassign`, { method: "POST" }),
+
+  freezePosition: (id: string) => request<PositionView>(`/organization/positions/${id}/freeze`, { method: "POST" }),
+
+  unfreezePosition: (id: string) => request<PositionView>(`/organization/positions/${id}/unfreeze`, { method: "POST" }),
+
+  abolishPosition: (id: string) => request<PositionView>(`/organization/positions/${id}/abolish`, { method: "POST" }),
+
+  reactivatePosition: (id: string) => request<PositionView>(`/organization/positions/${id}/reactivate`, { method: "POST" }),
+
+  getPositionHistory: (id: string) => request<PositionVersionView[]>(`/organization/positions/${id}/history`),
 
   // --- Employee Groups & Leave Policies (Task #49) --------------------------
   // Admin Center's own screen for the Phase 8 resolver: the API already

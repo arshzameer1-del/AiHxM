@@ -71,6 +71,11 @@ function rowToEmployee(row: any): Record<string, unknown> {
     maritalStatus: row.marital_status,
     department: row.department,
     orgUnitId: row.org_unit_id,
+    // Organization Management Phase 2 (0068_job_position_architecture.sql)
+    // — read-only from this service's perspective; only
+    // PositionsService.assignEmployee()/unassignEmployee() ever writes it
+    // (see this service's own class doc comment... and positions.service.ts's).
+    positionId: row.position_id ?? null,
     designation: row.designation,
     location: row.location,
     employmentType: row.employment_type,

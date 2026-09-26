@@ -1490,6 +1490,17 @@ export type EmployeeView = {
    * whatever free text was typed directly, same as before this phase.
    */
   orgUnitId: string | null;
+  /**
+   * Organization Management Phase 2 addition
+   * (0068_job_position_architecture.sql) — nullable, additive. Set ONLY
+   * by PositionsService.assignEmployee()/unassignEmployee() (see that
+   * service's own doc comment for why): there is deliberately no
+   * `positionId` field on `CreateEmployeeRequest`/`UpdateEmployeeRequest`
+   * this phase — occupancy is a Position Workbench action, not a plain
+   * employee-record field edit. `null` means this employee doesn't
+   * currently occupy any position.
+   */
+  positionId: string | null;
   designation: string | null;
   location: string | null;
   employmentType: EmploymentType;
@@ -2964,6 +2975,150 @@ export type OrgUnitVersionView = {
   code: string | null;
   name: string;
   status: OrgUnitStatus;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  createdAt: string;
+};
+
+// --- Organization Management, Phase 2: Job + Position Architecture ----
+// See the Master Engineering Instruction doc's Section 9 (Position
+// Management) + Section 10 (Job Architecture), and
+// 0068_job_position_architecture.sql's own header comment for the full
+// design writeup. `JobView`/`PositionView` are the CURRENT
+// (denormalized-cache) state the API returns for reads; `JobVersionView`/
+// `PositionVersionView` are one entry of each entity's effective-dated
+// history — the exact same split `OrgUnitView`/`OrgUnitVersionView`
+// established above, applied a second time.
+
+/** A validated-but-open set (CHECK-enforced in 0068) — not a rigid,
+ * hardcoded taxonomy; a dedicated Job Family master is a future gap-fill
+ * item, not built in this phase. */
+export type JobFamily =
+  | "engineering"
+  | "sales"
+  | "marketing"
+  | "finance"
+  | "hr"
+  | "operations"
+  | "legal"
+  | "customer_support"
+  | "product"
+  | "administration"
+  | "executive"
+  | "other";
+
+export type JobStatus = "active" | "archived";
+
+export type JobView = {
+  id: string;
+  companyId: string;
+  jobCode: string | null;
+  title: string;
+  /** Free grade/band label (e.g. "L4", "Band 3") — tenants' banding
+   * schemes vary too widely to normalize into a table this phase. */
+  jobLevel: string | null;
+  jobFamily: JobFamily | null;
+  description: string | null;
+  status: JobStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateJobRequest = {
+  title: string;
+  jobCode?: string;
+  jobFamily?: JobFamily;
+  jobLevel?: string;
+  description?: string;
+  /** Defaults to today (server date) when omitted, same as every other
+   * EffectiveDatingEngine consumer's `effectiveFrom`. */
+  effectiveFrom?: string;
+};
+
+export type UpdateJobRequest = {
+  title?: string;
+  jobCode?: string;
+  jobFamily?: JobFamily;
+  jobLevel?: string;
+  description?: string;
+  effectiveFrom?: string;
+};
+
+export type JobVersionView = {
+  id: string;
+  jobId: string;
+  jobCode: string | null;
+  title: string;
+  jobFamily: JobFamily | null;
+  jobLevel: string | null;
+  description: string | null;
+  status: JobStatus;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  createdAt: string;
+};
+
+/** `vacant` (zero occupants — a first-class, valid state, not an edge
+ * case, per the master instruction) / `filled` (an employee currently
+ * occupies it — set ONLY by PositionsService.assignEmployee(), never by a
+ * plain field patch) / `frozen` (temporarily not fillable) / `abolished`
+ * (permanently retired — a soft-delete state, the row is never removed). */
+export type PositionStatus = "vacant" | "filled" | "frozen" | "abolished";
+
+export type PositionView = {
+  id: string;
+  companyId: string;
+  orgUnitId: string;
+  jobId: string | null;
+  positionCode: string | null;
+  positionTitle: string;
+  headcountFte: number;
+  status: PositionStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreatePositionRequest = {
+  orgUnitId: string;
+  jobId?: string;
+  /** Defaults to the linked job's current title when omitted and a
+   * `jobId` is given; required when no `jobId` is given. Independently
+   * editable afterward either way — a position's title does not stay
+   * mechanically pinned to its job's title. */
+  positionTitle?: string;
+  positionCode?: string;
+  headcountFte?: number;
+  effectiveFrom?: string;
+};
+
+/** Renames/retitles/recodes/reassigns-job/adjusts-headcount in place —
+ * status transitions (freeze/unfreeze/abolish/reactivate,
+ * assign/unassign) are their own dedicated actions below, not a plain
+ * field patch, the same "the one edit that needs guarding gets its own
+ * endpoint" split `MoveOrgUnitRequest` established for org units. */
+export type UpdatePositionRequest = {
+  orgUnitId?: string;
+  jobId?: string | null;
+  positionTitle?: string;
+  positionCode?: string;
+  headcountFte?: number;
+  effectiveFrom?: string;
+};
+
+export type AssignPositionRequest = {
+  employeeId: string;
+  effectiveFrom?: string;
+};
+
+export type PositionVersionView = {
+  id: string;
+  positionId: string;
+  orgUnitId: string;
+  jobId: string | null;
+  positionCode: string | null;
+  positionTitle: string;
+  headcountFte: number;
+  status: PositionStatus;
   effectiveFrom: string;
   effectiveTo: string | null;
   createdAt: string;

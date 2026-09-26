@@ -8,6 +8,7 @@ import { WorkflowService } from "../workflow/workflow.service";
 import { PayrollService } from "../payroll/payroll.service";
 import { CustomFieldsService } from "../custom-fields/custom-fields.service";
 import { OrgUnitsService } from "../organization/org-units.service";
+import { JobsService } from "../organization/jobs.service";
 import type { ConfigurationDomainSummary } from "@aihxm/shared-types";
 
 type RegistryRow = {
@@ -43,7 +44,8 @@ export class ConfigurationCenterService {
     private readonly workflow: WorkflowService,
     private readonly payroll: PayrollService,
     private readonly customFields: CustomFieldsService,
-    private readonly orgUnits: OrgUnitsService
+    private readonly orgUnits: OrgUnitsService,
+    private readonly jobs: JobsService
   ) {}
 
   async getSummary(claims: RequestClaims): Promise<ConfigurationDomainSummary[]> {
@@ -94,6 +96,15 @@ export class ConfigurationCenterService {
           // exactly like every other case here; this counts every unit in
           // the tenant's hierarchy (flat, not just roots).
           return (await this.orgUnits.list(claims)).length;
+        case "job":
+          // Organization Management Phase 2 (0068_job_position_architecture.sql)
+          // — JobsService.list() applies the same entitlement-then-RBAC
+          // gate (`employee` module, then job.view.all/job.manage.all) as
+          // every other case here. Position is deliberately NOT registered
+          // in configuration_registry (0070's own header comment) — it's
+          // operational/transactional data, not a setup catalog, so there
+          // is no corresponding "position" case.
+          return (await this.jobs.list(claims)).length;
         case "tax_slab":
           // listTaxSlabs lazily seeds the default FBR bracket table the
           // first time a payroll-enabled tenant has none -- an accepted

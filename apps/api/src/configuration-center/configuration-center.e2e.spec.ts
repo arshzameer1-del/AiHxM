@@ -116,6 +116,18 @@ describe("Configuration Center HTTP surface (e2e)", () => {
     expect(orgUnitRow.adminRoute).toBe("/app/organization");
     expect(orgUnitRow.supportsEffectiveDating).toBe(true);
     expect(typeof orgUnitRow.count).toBe("number");
+
+    // Organization Management Phase 2's Configuration Center registration
+    // (0070_configuration_center_job.sql) — proves the real HTTP route
+    // surfaces the Job Catalog card with its real admin route and a live
+    // count. Position deliberately never appears (0070's own header
+    // comment — operational data, not a setup catalog).
+    const jobRow = res.body.find((row: { domainKey: string }) => row.domainKey === "job");
+    expect(jobRow).toBeDefined();
+    expect(jobRow.adminRoute).toBe("/app/organization/jobs");
+    expect(jobRow.supportsEffectiveDating).toBe(true);
+    expect(typeof jobRow.count).toBe("number");
+    expect(domainKeys).not.toContain("position");
   });
 
   it("returns a narrower list for a plain employee_self_service login", async () => {

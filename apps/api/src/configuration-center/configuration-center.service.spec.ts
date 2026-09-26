@@ -13,6 +13,7 @@ import { CustomFieldsService } from "../custom-fields/custom-fields.service";
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
 import { RulesEngine } from "../rules-engine/rules-engine.engine";
 import { OrgUnitsService } from "../organization/org-units.service";
+import { JobsService } from "../organization/jobs.service";
 import { ConfigurationCenterService } from "./configuration-center.service";
 
 const FIXTURE_CLAIMS: RequestClaims = { is_platform_admin: true, company_id: null, sub: "config-center-spec-fixtures" };
@@ -35,6 +36,7 @@ describe("ConfigurationCenterService", () => {
   let employeeGroups: EmployeeGroupsService;
   let holidays: HolidaysService;
   let orgUnits: OrgUnitsService;
+  let jobs: JobsService;
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: process.env.APP_DATABASE_URL });
@@ -49,6 +51,7 @@ describe("ConfigurationCenterService", () => {
     const payroll = new PayrollService(db, rbac, entitlements, audit, {} as never, new EffectiveDatingEngine());
     const customFields = new CustomFieldsService(db, rbac);
     orgUnits = new OrgUnitsService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
+    jobs = new JobsService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
     configurationCenter = new ConfigurationCenterService(
       db,
       employeeGroups,
@@ -57,7 +60,8 @@ describe("ConfigurationCenterService", () => {
       workflow,
       payroll,
       customFields,
-      orgUnits
+      orgUnits,
+      jobs
     );
   });
 
@@ -145,6 +149,7 @@ describe("ConfigurationCenterService", () => {
       await employeeGroups.createLeavePolicy(hrAdminClaims, { name: "Config Center Test Policy" });
       await holidays.createHoliday(hrAdminClaims, { name: "Config Center Test Holiday", holidayDate: "2026-11-11" });
       await orgUnits.create(hrAdminClaims, { name: "Config Center Test Unit", unitType: "department" });
+      await jobs.create(hrAdminClaims, { title: "Config Center Test Job" });
     });
 
     it("includes every domain hr_admin can manage, with real counts, but omits Workflow Templates", async () => {
@@ -165,6 +170,16 @@ describe("ConfigurationCenterService", () => {
       expect(byKey.org_unit.count).toBeGreaterThanOrEqual(1);
       expect(byKey.org_unit.adminRoute).toBe("/app/organization");
       expect(byKey.org_unit.supportsEffectiveDating).toBe(true);
+
+      // Organization Management Phase 2 — the Job Catalog card, backed by
+      // JobsService.list(), not a duplicated count query. Position is
+      // deliberately absent (0070's own header comment — it's operational
+      // data, not a setup catalog, so it never gets a registry row at all).
+      expect(byKey.job).toBeDefined();
+      expect(byKey.job.count).toBeGreaterThanOrEqual(1);
+      expect(byKey.job.adminRoute).toBe("/app/organization/jobs");
+      expect(byKey.job.supportsEffectiveDating).toBe(true);
+      expect(byKey.position).toBeUndefined();
 
       // hr_admin does not hold workflow_template.manage.all (that's
       // system_admin's job, per Decision #20) -- this proves the
@@ -204,6 +219,13 @@ describe("ConfigurationCenterService", () => {
       expect(typeof orgUnitRow?.count).toBe("number");
     });
 
+    it("still includes job for a plain employee_self_service login (job.view.all is seeded broadly, 0069's seed)", async () => {
+      const summary = await configurationCenter.getSummary(staffClaims);
+      const jobRow = summary.find((s) => s.domainKey === "job");
+      expect(jobRow).toBeDefined();
+      expect(typeof jobRow?.count).toBe("number");
+    });
+
     it("omits org_unit for a role holding neither org_unit.view.all nor org_unit.manage.all", async () => {
       const summary = await configurationCenter.getSummary(systemAdminOnlyClaims);
       const domainKeys = summary.map((s) => s.domainKey);
@@ -212,6 +234,13 @@ describe("ConfigurationCenterService", () => {
       // domain-specific gate (OrgUnitsService's own RBAC check), not this
       // login being denied the whole summary.
       expect(domainKeys).toContain("workflow_template");
+    });
+
+    it("omits job for a role holding neither job.view.all nor job.manage.all", async () => {
+      const summary = await configurationCenter.getSummary(systemAdminOnlyClaims);
+      const domainKeys = summary.map((s) => s.domainKey);
+      expect(domainKeys).not.toContain("job");
+      expect(domainKeys).not.toContain("position");
     });
 
     it("every returned summary row carries a real admin route and label from the registry", async () => {
@@ -245,7 +274,9 @@ describe("ConfigurationCenterService", () => {
       const domainKeys = summary.map((s) => s.domainKey);
 
       expect(domainKeys).not.toContain("tax_slab");
-      expect(domainKeys).toEqual(expect.arrayContaining(["leave_policy", "employee_group", "shift", "holiday", "org_unit"]));
+      expect(domainKeys).toEqual(
+        expect.arrayContaining(["leave_policy", "employee_group", "shift", "holiday", "org_unit", "job"])
+      );
     });
   });
 });
