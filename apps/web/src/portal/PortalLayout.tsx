@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { NavLink, Outlet } from "react-router-dom";
 import type { ModuleKey, PublicTenantBranding, TenantRoleKey } from "@aihxm/shared-types";
 import { api, publicTenantBrandingAssetUrl } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
@@ -174,20 +174,25 @@ function PortalMark({ companySlug, companyName }: { companySlug: string | null; 
 
 /**
  * Organization Management Phase 9 — renders one grouped nav entry: a
- * top-level link (the Hierarchy Explorer, for "Organization") plus a
- * disclosure toggle that shows/hides its `children`. Starts expanded
- * whenever the current route is already inside the group (so following a
- * deep link — or a "View" link from a detail page — never lands on a
- * collapsed group hiding the very item that's active), collapsed
- * otherwise, so the seven-item list Phases 2-5 each added doesn't
- * dominate the sidebar for a viewer who hasn't opened it. This is the only
- * place in the sidebar that renders a group; every flat `NavItem` still
- * renders as a single `NavLink`, unchanged from before this phase.
+ * top-level link (the Hierarchy Explorer, for "Organization") plus its
+ * `children` (Jobs, Positions, Assignments, Reporting Lines, Locations,
+ * Financial Centers, Reorganizations, Legacy Data Reconciliation). Starts
+ * EXPANDED unconditionally — an earlier version of this component started
+ * collapsed unless the current route was already inside the group, on the
+ * reasoning that the eight-item list shouldn't "dominate the sidebar for a
+ * viewer who hasn't opened it." In real use that traded a minor cosmetic
+ * concern for a much worse one: a collapsed group with only a small,
+ * easy-to-miss disclosure arrow reads as those screens having been removed
+ * entirely, not merely tucked away — real functionality (Position
+ * creation, Reporting Lines) must never be one accidental click away from
+ * looking deleted. The manual collapse toggle stays available for anyone
+ * who wants to tidy their own view, but nobody's session should ever load
+ * with it already closed. This is the only place in the sidebar that
+ * renders a group; every flat `NavItem` still renders as a single
+ * `NavLink`, unchanged from before this phase.
  */
 function NavGroup({ item }: { item: NavItem & { children: NavItem[] } }) {
-  const location = useLocation();
-  const isWithinGroup = location.pathname === item.to || location.pathname.startsWith(`${item.to}/`);
-  const [expanded, setExpanded] = useState(isWithinGroup);
+  const [expanded, setExpanded] = useState(true);
 
   return (
     <div>

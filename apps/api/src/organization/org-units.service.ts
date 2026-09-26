@@ -17,6 +17,21 @@ import type {
   UpdateOrgUnitRequest,
 } from "@aihxm/shared-types";
 
+/** Shape shared by every method that supersedes the current
+ * `org_unit_versions` generation (`create`/`update`/`move`/`setStatus`/
+ * `setHeadPosition`) — kept as one named type so adding a field (as
+ * `head_position_id` was) only means touching this one declaration plus
+ * each call site's own object literal, not four separately-typed
+ * parameter lists drifting out of sync with each other. */
+type OrgUnitVersionData = {
+  parent_id: string | null;
+  unit_type: string;
+  code: string | null;
+  name: string;
+  status: string;
+  head_position_id: string | null;
+};
+
 // Org Units are gated under the same `employee` module every other
 // Employee Core object (department/designation, Employee Groups) already
 // lives under — this is that same object's canonical replacement, not a
@@ -38,6 +53,7 @@ type OrgUnitRow = {
   code: string | null;
   name: string;
   status: string;
+  head_position_id: string | null;
   created_at: unknown;
   updated_at: unknown;
 };
@@ -57,6 +73,7 @@ function rowToOrgUnit(row: any): OrgUnitView {
     code: row.code,
     name: row.name,
     status: row.status,
+    headPositionId: row.head_position_id ?? null,
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
   };
@@ -72,6 +89,7 @@ function rowToVersion(row: any): OrgUnitVersionView {
     code: row.code,
     name: row.name,
     status: row.status,
+    headPositionId: row.head_position_id ?? null,
     effectiveFrom: toIso(row.effective_from).slice(0, 10),
     effectiveTo: row.effective_to ? toIso(row.effective_to).slice(0, 10) : null,
     createdAt: toIso(row.created_at),
@@ -152,6 +170,10 @@ export class OrgUnitsService {
           code: unit.code,
           name: unit.name,
           status: unit.status,
+          // A brand-new unit has no positions yet, so it can't have a head
+          // yet either — set via the dedicated setHeadPosition() action
+          // below once a position exists to point at.
+          head_position_id: null,
         },
         effectiveFrom: input.effectiveFrom,
       });
@@ -317,6 +339,7 @@ export class OrgUnitsService {
         code: patch.code ?? before.code,
         name: patch.name ?? before.name,
         status: before.status,
+        head_position_id: before.head_position_id,
       };
 
       const unit = await this.applyVersionAndSync(client, claims, id, next, patch.effectiveFrom);
@@ -370,6 +393,10 @@ export class OrgUnitsService {
         code: before.code,
         name: before.name,
         status: before.status,
+        // Reparenting moves the unit, not its Positions — the head
+        // position (if any) stays exactly who it was; only which OTHER
+        // unit this one now sits under changes.
+        head_position_id: before.head_position_id,
       };
 
       const unit = await this.applyVersionAndSync(client, claims, id, next, input.effectiveFrom);
@@ -407,6 +434,9 @@ export class OrgUnitsService {
         code: before.code,
         name: before.name,
         status,
+        // Archiving/activating a unit doesn't change who its head is —
+        // carried through unchanged, same as move() does for reparenting.
+        head_position_id: before.head_position_id,
       };
       const unit = await this.applyVersionAndSync(client, claims, id, next);
 
@@ -450,7 +480,7 @@ export class OrgUnitsService {
     client: PoolClient,
     claims: RequestClaims,
     id: string,
-    data: { parent_id: string | null; unit_type: string; code: string | null; name: string; status: string },
+    data: OrgUnitVersionData,
     effectiveFrom?: string
   ): Promise<Record<string, unknown>> {
     await this.effectiveDating.applyVersionedRow(client, {
@@ -462,11 +492,75 @@ export class OrgUnitsService {
     });
 
     const result = await client.query(
-      `UPDATE org_units SET parent_id = $2, unit_type = $3, code = $4, name = $5, status = $6, updated_at = now()
+      `UPDATE org_units SET parent_id = $2, unit_type = $3, code = $4, name = $5, status = $6,
+         head_position_id = $7, updated_at = now()
        WHERE id = $1 RETURNING *`,
-      [id, data.parent_id, data.unit_type, data.code, data.name, data.status]
+      [id, data.parent_id, data.unit_type, data.code, data.name, data.status, data.head_position_id]
     );
     return result.rows[0];
+  }
+
+  /**
+   * "Head of Department" (kumail's own term) — flags one Position within
+   * this exact org unit as the unit's Chief for org-chart display, the
+   * same single nullable pointer SAP's Org and Staffing view calls the
+   * unit's "Chief Position". `positionId: null` clears the head; anything
+   * else must be a position that (a) exists in this tenant and (b)
+   * currently belongs to THIS org unit — a head borrowed from a different
+   * unit would be meaningless (and, once a position moves to another
+   * unit via `PositionsService.update()`'s own `orgUnitId` patch, would
+   * silently go stale), so that's checked fresh on every call rather than
+   * only at position-move time.
+   *
+   * Deliberately its own action (mirrors `move()` being split out of
+   * `update()`) rather than a field on `UpdateOrgUnitDto` — setting a head
+   * has its own validation rule (must belong to this unit) that a generic
+   * partial-patch endpoint would have to special-case anyway.
+   */
+  async setHeadPosition(
+    claims: RequestClaims,
+    id: string,
+    input: { positionId: string | null; effectiveFrom?: string }
+  ): Promise<OrgUnitView> {
+    await this.requireManage(claims);
+    return this.db.withClaims(claims, async (client) => {
+      const before = await this.mustExist(client, id);
+
+      if (input.positionId) {
+        const position = await client.query<{ id: string; org_unit_id: string }>(
+          "SELECT id, org_unit_id FROM positions WHERE id = $1 AND company_id = $2",
+          [input.positionId, claims.company_id]
+        );
+        if (position.rowCount === 0) {
+          throw new NotFoundException("Position not found");
+        }
+        if (position.rows[0].org_unit_id !== id) {
+          throw new BadRequestException("The head position must belong to this org unit");
+        }
+      }
+
+      const next: OrgUnitVersionData = {
+        parent_id: before.parent_id,
+        unit_type: before.unit_type,
+        code: before.code,
+        name: before.name,
+        status: before.status,
+        head_position_id: input.positionId ?? null,
+      };
+
+      const unit = await this.applyVersionAndSync(client, claims, id, next, input.effectiveFrom);
+
+      await this.audit.record(client, claims, {
+        companyId: claims.company_id ?? null,
+        action: "org_unit.set_head_position",
+        target: id,
+        metadata: { fromPositionId: before.head_position_id, toPositionId: input.positionId ?? null },
+      });
+
+      const view = rowToOrgUnit(unit);
+      this.publishChanged(claims, "set_head_position", view);
+      return view;
+    });
   }
 
   private async mustExist(client: PoolClient, id: string): Promise<OrgUnitRow> {

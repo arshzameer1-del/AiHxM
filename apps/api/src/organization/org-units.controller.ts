@@ -6,6 +6,7 @@ import { OrgUnitsService } from "./org-units.service";
 import { CreateOrgUnitDto } from "./dto/create-org-unit.dto";
 import { UpdateOrgUnitDto } from "./dto/update-org-unit.dto";
 import { MoveOrgUnitDto } from "./dto/move-org-unit.dto";
+import { SetOrgUnitHeadPositionDto } from "./dto/set-org-unit-head-position.dto";
 
 /**
  * Any real session (SessionGuard) can call these — OrgUnitsService's own
@@ -69,6 +70,15 @@ export class OrgUnitsController {
   @Post(":id/move")
   move(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: MoveOrgUnitDto) {
     return this.orgUnits.move(claims, id, dto);
+  }
+
+  @Post(":id/head-position")
+  setHeadPosition(
+    @CurrentClaims() claims: RequestClaims,
+    @Param("id") id: string,
+    @Body() dto: SetOrgUnitHeadPositionDto
+  ) {
+    return this.orgUnits.setHeadPosition(claims, id, dto);
   }
 
   @Post(":id/activate")

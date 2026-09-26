@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import type { EmployeeView, JobView, OrgUnitView, PositionStatus, PositionView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
@@ -51,16 +51,24 @@ type CreateFormValue = {
 function CreatePositionForm({
   orgUnits,
   jobs,
+  initialOrgUnitId,
   onCancel,
   onSaved,
 }: {
   orgUnits: OrgUnitView[];
   jobs: JobView[];
+  /** Set when this form was opened via the "+ Position" shortcut on an org
+   * unit's own row in the Hierarchy tree (`?orgUnitId=` on this page's own
+   * URL) — defaults the org unit picker to that unit instead of the first
+   * one alphabetically, so the shortcut actually saves the click it's
+   * supposed to. Plain top-level "New Position" (no query param) keeps the
+   * old default. */
+  initialOrgUnitId?: string;
   onCancel: () => void;
   onSaved: () => void;
 }) {
   const [value, setValue] = useState<CreateFormValue>({
-    orgUnitId: orgUnits[0]?.id ?? "",
+    orgUnitId: initialOrgUnitId || orgUnits[0]?.id || "",
     jobId: "",
     positionTitle: "",
     positionCode: "",
@@ -362,14 +370,23 @@ function PositionRow({
  */
 export function PositionWorkbenchPage() {
   const { identity } = useAuth();
+  // Organization Management Phase 9 addendum — the Hierarchy tree's own
+  // "+ Position" shortcut on each org unit row lands here with
+  // `?orgUnitId=<id>`: pre-filters the list to that unit AND auto-opens
+  // the create form defaulted to it, so the shortcut is a real one-click
+  // path from "I'm looking at this department" to "creating a position in
+  // it," not just a bookmark to this same generic screen. Arriving here
+  // directly from the nav (no query param) behaves exactly as before.
+  const [searchParams] = useSearchParams();
+  const initialOrgUnitId = searchParams.get("orgUnitId") ?? "";
   const [positions, setPositions] = useState<PositionView[] | null>(null);
   const [orgUnits, setOrgUnits] = useState<OrgUnitView[]>([]);
   const [jobs, setJobs] = useState<JobView[]>([]);
   const [employees, setEmployees] = useState<EmployeeView[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState(Boolean(initialOrgUnitId));
   const [statusFilter, setStatusFilter] = useState<PositionStatus | "">("");
-  const [orgUnitFilter, setOrgUnitFilter] = useState<string>("");
+  const [orgUnitFilter, setOrgUnitFilter] = useState<string>(initialOrgUnitId);
 
   const canManage = identity?.roleKeys.includes("hr_admin") ?? false;
 
@@ -420,6 +437,7 @@ export function PositionWorkbenchPage() {
           <CreatePositionForm
             orgUnits={orgUnits}
             jobs={jobs}
+            initialOrgUnitId={initialOrgUnitId || undefined}
             onCancel={() => setCreating(false)}
             onSaved={() => {
               setCreating(false);

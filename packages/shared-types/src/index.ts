@@ -3077,6 +3077,18 @@ export type OrgUnitView = {
   code: string | null;
   name: string;
   status: OrgUnitStatus;
+  /** "Head of Department" — the one Position (within THIS org unit) whose
+   * occupant is this unit's head, mirroring the "Chief position" concept
+   * enterprise HR systems' org-chart views already surface (kumail's own
+   * request). `null` means no head is currently designated — a normal,
+   * unremarkable state for a brand-new unit, not an error. Set/cleared via
+   * the dedicated `POST /organization/units/:id/head-position` action
+   * (`OrgUnitsService.setHeadPosition()`), not a plain field on
+   * `UpdateOrgUnitRequest` below, since it needs its own validation (the
+   * position must belong to this exact org unit) the same way reparenting
+   * needed its own `move()` action. See `ORG_STRUCTURE_RELATIONSHIP_CODES`
+   * below — this is reference code `ST-060`. */
+  headPositionId: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -3117,6 +3129,16 @@ export type MoveOrgUnitRequest = {
   effectiveFrom?: string;
 };
 
+/** `POST /organization/units/:id/head-position` — `positionId: null` clears
+ * the head (a real, required value here, same "null is a value, omission
+ * is a validation error" posture `MoveOrgUnitRequest.parentId` already
+ * takes); a non-null value must be a Position that belongs to this exact
+ * org unit — validated server-side, not merely by this type. */
+export type SetOrgUnitHeadPositionRequest = {
+  positionId: string | null;
+  effectiveFrom?: string;
+};
+
 export type OrgUnitVersionView = {
   id: string;
   orgUnitId: string;
@@ -3125,6 +3147,7 @@ export type OrgUnitVersionView = {
   code: string | null;
   name: string;
   status: OrgUnitStatus;
+  headPositionId: string | null;
   effectiveFrom: string;
   effectiveTo: string | null;
   createdAt: string;
@@ -3372,6 +3395,86 @@ export type EmployeeOrgAssignmentVersionView = {
 export type OrgRelationshipType = "direct" | "dotted_line" | "matrix" | "temporary" | "acting";
 
 export type OrgRelationshipStatus = "active" | "ended";
+
+/**
+ * Organization Management — relationship reference codes (kumail's own
+ * request: "there should be relationship codes like SAP standards ... but
+ * unique, don't copy same from SAP"). Enterprise HR systems label every
+ * organizational relationship with a short, stable code so it can be
+ * referenced unambiguously in exports, support conversations, and
+ * integration mappings, rather than only by a longer display label that
+ * could be reworded later. This is AIHXM's OWN numbering — deliberately
+ * NOT SAP's single-letter-direction + three-digit Infotype 1001 scheme
+ * (A012/B012, A008/B008, ...): no `A`/`B` direction letters (this product
+ * doesn't model a relationship as a bidirectional pair of rows the way
+ * SAP's own HRP1001 table does — one row, one code, read from whichever
+ * side makes sense in context), a `ST-`/`RL-` category prefix instead of a
+ * bare number, and independent, gap-left numbering per category so a
+ * future addition never forces renumbering an existing code.
+ *
+ * `ST-` (Structure) codes describe how the fixed master-data objects
+ * relate to each other — Position to Org Unit/Job/Cost Center/Profit
+ * Center, Employee to Position (the "holder" relationship), Org Unit to
+ * Position (the "head of department" relationship, `head_position_id` on
+ * `org_units`), and Org Unit to Cost Center (an org unit's own budget
+ * dimension, `cost_centers.org_unit_id` — see `ST-070` below). Every one
+ * of these already exists as a plain foreign key (`positions.org_unit_id`,
+ * `employees.position_id`, `org_units.head_position_id`,
+ * `cost_centers.org_unit_id`, ...); this table adds no new column or
+ * behavior of its own, it only gives each existing link a reference code
+ * for display.
+ *
+ * `org_unit_cost_center` (`ST-070`) is deliberately the ONLY structure
+ * code read from the "child" side rather than the "parent" side of its
+ * own foreign key: `cost_centers.org_unit_id` already points FROM the
+ * cost center TO the org unit it belongs to (0073_locations_and_financial_centers.sql,
+ * Phase 4 — a cost center is "optionally linked to an org unit", the same
+ * shape Job/Location already use), so kumail's "org unit's own cost
+ * center" request is this existing relationship, surfaced in the
+ * Organization workspace, NOT a second, competing pointer added to
+ * `org_units` itself — that would let a cost center's own org unit and an
+ * org unit's own cost center disagree with each other, which a single
+ * foreign key can't do. One org unit can have zero, one, or several cost
+ * centers tagged to it (unlike Head of Department's strictly-one-or-none
+ * `head_position_id`), so this is a filter over the existing
+ * `cost_centers` list, not a field on `OrgUnitView` — see
+ * `OrgUnitDetailPage.tsx`'s Overview tab. No monetary "budget" figure
+ * exists anywhere in Cost Center today (`CostCenterView` is
+ * code/name/orgUnitId/status only, the same flat-catalog shape as Job) —
+ * an actual planned-vs-actual budget amount would mean integrating with
+ * Payroll's cost data, which is its own, separately-scoped feature, not a
+ * field this pass adds.
+ *
+ * `RL-` (Reporting Line) codes cover the five `OrgRelationshipType`
+ * values `OrgRelationshipsService` already models. Numbered in tens
+ * (100, 110, 120, ...) rather than consecutively so a sixth type (the
+ * master engineering instruction's own "functional manager"/"delegate"/
+ * "supervisor"/"project manager"/"HR relationship" — deferred, not built
+ * yet) can be inserted with a code that sorts in a sensible place without
+ * touching any code already in use.
+ *
+ * Purely a reference/display label — carries no authorization or
+ * validation behavior of its own.
+ */
+export const ORG_STRUCTURE_RELATIONSHIP_CODES = {
+  position_org_unit: { code: "ST-010", label: "Position — Org Unit" },
+  position_job: { code: "ST-020", label: "Position — Job" },
+  position_cost_center: { code: "ST-030", label: "Position — Cost Center" },
+  position_profit_center: { code: "ST-040", label: "Position — Profit Center" },
+  employee_position_holder: { code: "ST-050", label: "Employee — Position (Holder)" },
+  org_unit_head_position: { code: "ST-060", label: "Org Unit — Position (Head of Department)" },
+  org_unit_cost_center: { code: "ST-070", label: "Org Unit — Cost Center" },
+} as const;
+
+export type OrgStructureRelationshipKey = keyof typeof ORG_STRUCTURE_RELATIONSHIP_CODES;
+
+export const ORG_REPORTING_RELATIONSHIP_CODES: Record<OrgRelationshipType, { code: string; label: string }> = {
+  direct: { code: "RL-100", label: "Direct Manager" },
+  dotted_line: { code: "RL-110", label: "Dotted-Line Manager" },
+  matrix: { code: "RL-120", label: "Matrix Manager" },
+  temporary: { code: "RL-130", label: "Temporary Manager" },
+  acting: { code: "RL-140", label: "Acting Manager" },
+};
 
 export type OrgRelationshipView = {
   id: string;

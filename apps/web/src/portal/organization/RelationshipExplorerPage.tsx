@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import type { EmployeeView, OrgRelationshipType, OrgRelationshipView } from "@aihxm/shared-types";
+import { ORG_REPORTING_RELATIONSHIP_CODES, type EmployeeView, type OrgRelationshipType, type OrgRelationshipView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 
@@ -83,7 +83,7 @@ function CreateRelationshipForm({
           >
             {RELATIONSHIP_TYPES.map((t) => (
               <option key={t} value={t}>
-                {TYPE_LABELS[t]}
+                {TYPE_LABELS[t]} ({ORG_REPORTING_RELATIONSHIP_CODES[t].code})
               </option>
             ))}
           </select>
@@ -154,6 +154,15 @@ function RelationshipRow({
       <div className="flex items-center gap-2 py-2.5 border-b border-black/5 hover:bg-black/[0.02] flex-wrap">
         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${typeBadgeClass(relationship.relationshipType)}`}>
           {TYPE_LABELS[relationship.relationshipType]}
+        </span>
+        {/* Organization Management Phase 9 addendum — AIHXM's own
+          relationship reference code (kumail's request: labeled like SAP's
+          own relationship codes, but not copied from them — see this
+          constant's own doc comment in shared-types for the numbering
+          rationale). Purely a reference label; the badge above still
+          carries the actual relationship type. */}
+        <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-black/5 text-label-tertiary" title="AIHXM relationship reference code">
+          {ORG_REPORTING_RELATIONSHIP_CODES[relationship.relationshipType].code}
         </span>
         <span className="font-medium text-sm">{counterpartName}</span>
         <span

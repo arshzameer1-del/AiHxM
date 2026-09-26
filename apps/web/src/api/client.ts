@@ -75,6 +75,7 @@ import type {
   MoveOrgUnitRequest,
   CreateOrgUnitRequest,
   UpdateOrgUnitRequest,
+  SetOrgUnitHeadPositionRequest,
   OrgUnitTreeNode,
   OrgUnitVersionView,
   OrgUnitView,
@@ -1126,6 +1127,9 @@ export const api = {
   archiveOrgUnit: (id: string) => request<OrgUnitView>(`/organization/units/${id}/archive`, { method: "POST" }),
 
   activateOrgUnit: (id: string) => request<OrgUnitView>(`/organization/units/${id}/activate`, { method: "POST" }),
+
+  setOrgUnitHeadPosition: (id: string, input: SetOrgUnitHeadPositionRequest) =>
+    request<OrgUnitView>(`/organization/units/${id}/head-position`, { method: "POST", body: JSON.stringify(input) }),
 
   getOrgUnitHistory: (id: string) => request<OrgUnitVersionView[]>(`/organization/units/${id}/history`),
 

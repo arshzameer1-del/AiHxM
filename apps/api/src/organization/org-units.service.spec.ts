@@ -11,6 +11,7 @@ import { LocalFileStorageService } from "../file-storage/local-file-storage.serv
 import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
 import { IntegrationsService } from "../tenant-management/integrations.service";
 import { OrgUnitsService } from "./org-units.service";
+import { PositionsService } from "./positions.service";
 
 const FIXTURE_CLAIMS: RequestClaims = { is_platform_admin: true, company_id: null, sub: "org-units-spec-fixtures" };
 
@@ -27,6 +28,7 @@ describe("OrgUnitsService", () => {
   let db: DatabaseService;
   let orgUnits: OrgUnitsService;
   let employees: EmployeesService;
+  let positions: PositionsService;
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: process.env.APP_DATABASE_URL });
@@ -36,6 +38,7 @@ describe("OrgUnitsService", () => {
     const audit = new AuditService();
     orgUnits = new OrgUnitsService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
     employees = new EmployeesService(db, rbac, entitlements, audit, new LocalFileStorageService());
+    positions = new PositionsService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
   });
 
   afterAll(async () => {
@@ -492,6 +495,108 @@ describe("OrgUnitsService", () => {
       await assignRole(noRoleUserId, companyId, "system_admin");
       const noScopeClaims: RequestClaims = { is_platform_admin: false, company_id: companyId, sub: noRoleUserId };
       await expect(orgUnits.list(noScopeClaims)).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  /**
+   * "Head of Department" (kumail's own term, after seeing the nested
+   * Position/Holder tree view — SAP's Org and Staffing calls the same
+   * thing a unit's "Chief Position"). 0080_org_unit_head_position.sql's
+   * own header comment covers the schema; this proves the one real
+   * business rule `setHeadPosition()` enforces — the position must belong
+   * to the EXACT unit being given a head, not merely exist somewhere in
+   * the tenant — plus clearing, history, and permission gating.
+   */
+  describe("setHeadPosition() — Head of Department", () => {
+    let companyId: string;
+    let hrAdminClaims: RequestClaims;
+    let managerClaims: RequestClaims;
+    let engineeringId: string;
+    let salesId: string;
+    let engineeringLeadPositionId: string;
+    let salesPositionId: string;
+
+    beforeAll(async () => {
+      companyId = await createFixtureCompany("Head Of Dept Co");
+      const stamp = Date.now();
+      const hrAdminUserId = await createUser(`hod-hr-${stamp}@example.com`);
+      const managerUserId = await createUser(`hod-mgr-${stamp}@example.com`);
+      await assignRole(hrAdminUserId, companyId, "hr_admin");
+      await assignRole(managerUserId, companyId, "line_manager");
+      hrAdminClaims = { is_platform_admin: false, company_id: companyId, sub: hrAdminUserId };
+      managerClaims = { is_platform_admin: false, company_id: companyId, sub: managerUserId };
+
+      engineeringId = (await orgUnits.create(hrAdminClaims, { name: "Engineering", unitType: "department" })).id;
+      salesId = (await orgUnits.create(hrAdminClaims, { name: "Sales", unitType: "department" })).id;
+
+      engineeringLeadPositionId = (
+        await positions.create(hrAdminClaims, { orgUnitId: engineeringId, positionTitle: "Engineering Lead" })
+      ).id;
+      salesPositionId = (await positions.create(hrAdminClaims, { orgUnitId: salesId, positionTitle: "Sales Lead" })).id;
+    });
+
+    it("a freshly created unit has no head", async () => {
+      const unit = await orgUnits.get(hrAdminClaims, engineeringId);
+      expect(unit.headPositionId).toBeNull();
+    });
+
+    it("sets a position that belongs to the unit as its head", async () => {
+      const updated = await orgUnits.setHeadPosition(hrAdminClaims, engineeringId, { positionId: engineeringLeadPositionId });
+      expect(updated.headPositionId).toBe(engineeringLeadPositionId);
+
+      const refetched = await orgUnits.get(hrAdminClaims, engineeringId);
+      expect(refetched.headPositionId).toBe(engineeringLeadPositionId);
+    });
+
+    it("rejects a position that belongs to a different org unit", async () => {
+      await expect(
+        orgUnits.setHeadPosition(hrAdminClaims, engineeringId, { positionId: salesPositionId })
+      ).rejects.toThrow(BadRequestException);
+      // The earlier, valid head is left completely untouched by the rejection.
+      const unit = await orgUnits.get(hrAdminClaims, engineeringId);
+      expect(unit.headPositionId).toBe(engineeringLeadPositionId);
+    });
+
+    it("rejects a nonexistent position id", async () => {
+      await expect(
+        orgUnits.setHeadPosition(hrAdminClaims, engineeringId, { positionId: "00000000-0000-0000-0000-000000000000" })
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it("positionId: null clears the head", async () => {
+      const cleared = await orgUnits.setHeadPosition(hrAdminClaims, engineeringId, { positionId: null });
+      expect(cleared.headPositionId).toBeNull();
+
+      // Restore for the remaining tests in this block.
+      await orgUnits.setHeadPosition(hrAdminClaims, engineeringId, { positionId: engineeringLeadPositionId });
+    });
+
+    it("reparenting a unit does not change who its head is", async () => {
+      const moved = await orgUnits.move(hrAdminClaims, engineeringId, { parentId: salesId });
+      expect(moved.headPositionId).toBe(engineeringLeadPositionId);
+
+      // Move it back so it doesn't affect other blocks' assumptions.
+      await orgUnits.move(hrAdminClaims, engineeringId, { parentId: null });
+    });
+
+    it("opens a new effective-dated version when the head changes", async () => {
+      const before = await orgUnits.getHistory(hrAdminClaims, salesId);
+      expect(before).toHaveLength(1);
+      expect(before[0].headPositionId).toBeNull();
+
+      await orgUnits.setHeadPosition(hrAdminClaims, salesId, {
+        positionId: salesPositionId,
+        effectiveFrom: "2099-01-01",
+      });
+      const after = await orgUnits.getHistory(hrAdminClaims, salesId);
+      expect(after).toHaveLength(2);
+      expect(after[after.length - 1]).toMatchObject({ headPositionId: salesPositionId, effectiveFrom: "2099-01-01" });
+    });
+
+    it("a Line Manager (view-only) cannot set a head of department", async () => {
+      await expect(
+        orgUnits.setHeadPosition(managerClaims, engineeringId, { positionId: engineeringLeadPositionId })
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 });
