@@ -5,7 +5,7 @@ import { AuditService } from "../audit/audit.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { FILE_STORAGE, type FileStorageService } from "../file-storage/file-storage.interface";
 import type { RequestClaims } from "../database/tenant-context";
-import type { HealthCheckResult, HealthCheckStatus } from "@aihxm/shared-types";
+import type { HealthCheckResult, HealthCheckStatus, PlatformHealthSummary } from "@aihxm/shared-types";
 
 const CHECK_KEYS = ["api", "db", "jobs", "email", "storage", "integrations"] as const;
 type CheckKey = (typeof CHECK_KEYS)[number];
@@ -110,6 +110,133 @@ export class HealthService {
           checkedAt: row?.checked_at?.toISOString() ?? new Date(0).toISOString(),
         };
       });
+    });
+  }
+
+  /**
+   * Phase 3 item #9 — Monitoring. Cross-tenant "at a glance" view for
+   * Platform Admins, built entirely on the same tenant_health_check_log
+   * table getLatest() reads, via the same DISTINCT ON idiom, just across
+   * every non-draft/non-archived company instead of one.
+   *
+   * Deliberately does NOT reuse getLatest()'s "no row yet → default to
+   * ok" convenience: that default exists there purely so a brand-new
+   * tenant's own Health tab doesn't show six false reds before anyone has
+   * ever clicked "Run Check". Here, silently reporting "ok" for a tenant
+   * nobody has ever actually checked would be a false signal on the one
+   * screen whose entire job is telling platform ops what's actually
+   * wrong — so an unchecked company is counted under
+   * `companiesNeverChecked` and left out of `perCheckCounts` and
+   * `failingCompanies` entirely, never assumed healthy.
+   *
+   * A single LEFT JOIN query does the cross-tenant read (RLS is bypassed
+   * for is_platform_admin/is_service claims, same as CompaniesService.list),
+   * so a company with zero check rows still comes back as one row with
+   * null check_key/status — exactly what marks it "never checked" below.
+   */
+  async getPlatformSummary(claims: RequestClaims): Promise<PlatformHealthSummary> {
+    return this.db.withClaims(claims, async (client) => {
+      // Phase 2 gap-fill item #7 — same scoping CompaniesService.list()
+      // applies: a 'scoped' Platform Admin only ever sees the tenants they
+      // were explicitly granted, even on a cross-tenant aggregate view
+      // like this one. An empty scope list correctly yields zero rows
+      // rather than falling through to "no filter".
+      const params: unknown[] = [];
+      let scopeClause = "";
+      if (claims.platformAdminAccessLevel === "scoped") {
+        params.push(claims.platformAdminScopedCompanyIds ?? []);
+        scopeClause = `AND c.id = ANY($${params.length}::uuid[])`;
+      }
+      const result = await client.query(
+        `SELECT c.id AS company_id, c.name AS company_name, c.slug AS company_slug,
+                l.check_key, l.status, l.detail, l.checked_at
+         FROM companies c
+         LEFT JOIN (
+           SELECT DISTINCT ON (company_id, check_key) company_id, check_key, status, detail, checked_at
+           FROM tenant_health_check_log
+           WHERE company_id IS NOT NULL
+           ORDER BY company_id, check_key, checked_at DESC
+         ) l ON l.company_id = c.id
+         WHERE c.status NOT IN ('draft', 'archived') ${scopeClause}
+         ORDER BY c.name, c.id`,
+        params
+      );
+
+      type Row = {
+        company_id: string;
+        company_name: string;
+        company_slug: string;
+        check_key: CheckKey | null;
+        status: HealthCheckStatus | null;
+        detail: string | null;
+        checked_at: Date | null;
+      };
+
+      const byCompany = new Map<string, { name: string; slug: string; checks: Map<CheckKey, Row> }>();
+      for (const row of result.rows as Row[]) {
+        let entry = byCompany.get(row.company_id);
+        if (!entry) {
+          entry = { name: row.company_name, slug: row.company_slug, checks: new Map() };
+          byCompany.set(row.company_id, entry);
+        }
+        if (row.check_key) {
+          entry.checks.set(row.check_key, row);
+        }
+      }
+
+      const perCheckCounts: PlatformHealthSummary["perCheckCounts"] = Object.fromEntries(
+        CHECK_KEYS.map((k) => [k, { ok: 0, degraded: 0, down: 0 }])
+      );
+      let companiesNeverChecked = 0;
+      const failingCompanies: PlatformHealthSummary["failingCompanies"] = [];
+
+      for (const [companyId, entry] of byCompany) {
+        if (entry.checks.size === 0) {
+          companiesNeverChecked++;
+          continue;
+        }
+        const failingChecks: PlatformHealthSummary["failingCompanies"][number]["failingChecks"] = [];
+        for (const key of CHECK_KEYS) {
+          const row = entry.checks.get(key);
+          if (!row || !row.status) continue;
+          perCheckCounts[key][row.status]++;
+          if (row.status !== "ok") {
+            failingChecks.push({
+              checkKey: key,
+              status: row.status,
+              detail: row.detail,
+              checkedAt: (row.checked_at as Date).toISOString(),
+            });
+          }
+        }
+        if (failingChecks.length > 0) {
+          failingCompanies.push({
+            companyId,
+            companyName: entry.name,
+            companySlug: entry.slug,
+            failingChecks,
+          });
+        }
+      }
+
+      // Worst-first: any company with a "down" check sorts before every
+      // company whose worst check is only "degraded". Array.sort is
+      // stable, so within each tier the original name-ordering (from the
+      // query's own ORDER BY) is preserved.
+      failingCompanies.sort((a, b) => {
+        const aDown = a.failingChecks.some((c) => c.status === "down");
+        const bDown = b.failingChecks.some((c) => c.status === "down");
+        if (aDown === bDown) return 0;
+        return aDown ? -1 : 1;
+      });
+
+      return {
+        generatedAt: new Date().toISOString(),
+        totalCompanies: byCompany.size,
+        companiesNeverChecked,
+        perCheckCounts,
+        failingCompanies,
+      };
     });
   }
 

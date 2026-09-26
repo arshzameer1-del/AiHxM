@@ -22,3 +22,21 @@ export class HealthController {
     return this.health.runCheck(claims, companyId);
   }
 }
+
+// Phase 3 item #9 — Monitoring. Cross-tenant, so it deliberately does NOT
+// live under platform/companies/:companyId/health above — there is no
+// single company to scope it to, and @ScopedCompanyParam has nothing to
+// check against here. HealthService.getPlatformSummary itself applies the
+// 'scoped' Platform Admin filter (same as CompaniesService.list) since
+// there's no single :companyId route param for PlatformAdminGuard's own
+// @ScopedCompanyParam check to key off.
+@Controller("platform/health")
+@UseGuards(PlatformAdminGuard)
+export class PlatformHealthController {
+  constructor(private readonly health: HealthService) {}
+
+  @Get("summary")
+  getSummary(@CurrentClaims() claims: RequestClaims) {
+    return this.health.getPlatformSummary(claims);
+  }
+}

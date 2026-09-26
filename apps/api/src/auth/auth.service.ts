@@ -3,6 +3,7 @@ import * as jwt from "jsonwebtoken";
 import { generateSecret, verify as verifyTotp, generateURI } from "otplib";
 import { createHash, randomBytes } from "crypto";
 import { DatabaseService } from "../database/database.service";
+import { AuditService } from "../audit/audit.service";
 import { EntitlementsService } from "../entitlements/entitlements.service";
 import { MailerService } from "../mailer/mailer.service";
 import { SessionSecurityService } from "./session-security.service";
@@ -50,8 +51,56 @@ type SessionIdentity = {
   adminStatus: "active" | "locked";
 };
 
+/**
+ * Phase 3 item #8 — every real login flow (email, tenant-path, MFA
+ * enrollment completion, MFA verify/recovery-code, SSO) now threads the
+ * actual HTTP request's IP and User-Agent through to `issueSessionToken()`
+ * so `user_sessions.ip_address`/`user_agent` are finally populated (see
+ * this file's own doc comment on `issueSessionToken` for why they were
+ * silently NULL since Phase 1). `undefined` request context (there isn't
+ * one — a unit test driving this service directly, for instance) degrades
+ * to `null` for both fields, exactly as an unknown value always has here.
+ */
+export type SessionRequestContext = {
+  ipAddress: string | null;
+  userAgent: string | null;
+};
+
+const NO_REQUEST_CONTEXT: SessionRequestContext = { ipAddress: null, userAgent: null };
+
+/**
+ * Phase 3 item #8 — heuristic threshold for "rapid re-authentication from
+ * a different network" (see `issueSessionToken`'s doc comment for the full
+ * scoping decision). 15 minutes: short enough that a genuine location/
+ * network change this fast is unusual, long enough that it isn't tripped
+ * by ordinary session renewal. This is NOT a hard security boundary — a
+ * VPN reconnect or a mobile carrier rotating its outbound IP pool can
+ * trigger this same signal for a perfectly legitimate user, so it is
+ * surfaced as a flag for a human to notice, never used to block a login.
+ */
+const RAPID_NETWORK_CHANGE_WINDOW_MINUTES = 15;
+
 function sha256(input: string): string {
   return createHash("sha256").update(input).digest("hex");
+}
+
+/**
+ * Phase 3 item #8's "device-trust fingerprinting" — deliberately just a
+ * stable hash of the normalized User-Agent header, not a real browser-
+ * fingerprinting library (canvas/WebGL/font enumeration etc.). That level
+ * of sophistication buys nothing here: the only question this needs to
+ * answer is "have we seen a login from what looks like this same browser/
+ * device for this account before," and the User-Agent string is already
+ * exactly what `user_sessions.user_agent` records for every session, so a
+ * normalized hash of it is enough to tell "same" from "never seen" without
+ * a new column or a new dependency. A missing/blank header (a non-browser
+ * client, or a test harness) is its own single, stable fingerprint rather
+ * than a fresh "new device" every time — an absent value isn't more novel
+ * than any other absent value.
+ */
+function computeDeviceFingerprint(userAgent: string | null): string {
+  const normalized = userAgent?.trim() ? userAgent.trim().toLowerCase() : "unknown-device";
+  return sha256(normalized);
 }
 
 @Injectable()
@@ -60,11 +109,20 @@ export class AuthService {
     private readonly db: DatabaseService,
     private readonly entitlements: EntitlementsService,
     private readonly mailer: MailerService,
-    private readonly sessionSecurity: SessionSecurityService
+    private readonly sessionSecurity: SessionSecurityService,
+    private readonly audit: AuditService
   ) {}
 
   // --- Login ------------------------------------------------------------
 
+  // Neither login() nor loginWithEmployeeNumber() ever issues a session
+  // directly — MFA is mandatory (see authenticate() below), so every real
+  // login always ends at confirmMfaEnrollment()/verifyMfa()/
+  // verifyMfaRecoveryCode() instead, which is where a `SessionRequestContext`
+  // actually matters and is threaded through. The request that completes
+  // MFA is the one that establishes the session, so that request's own
+  // IP/User-Agent — not this earlier password-check request's — is what
+  // gets recorded.
   async login(email: string, password: string): Promise<LoginResult> {
     const account = await this.findAccountByEmail(email);
     return this.authenticate(account, password, {
@@ -173,7 +231,8 @@ export class AuthService {
 
   async confirmMfaEnrollment(
     mfaTicket: string,
-    code: string
+    code: string,
+    requestContext: SessionRequestContext = NO_REQUEST_CONTEXT
   ): Promise<{ status: "ok"; token: string; recoveryCodes: string[] }> {
     const { userAccountId } = this.verifyTicket(mfaTicket, "mfa_enroll");
     const account = await this.findAccountById(userAccountId);
@@ -197,10 +256,18 @@ export class AuthService {
     await this.storeRecoveryCodes(account.id, recoveryCodes);
 
     const identity = await this.resolveIdentityForAccount(account.id);
-    return { status: "ok", token: await this.issueSessionToken(identity, account.id), recoveryCodes };
+    return {
+      status: "ok",
+      token: await this.issueSessionToken(identity, account.id, requestContext),
+      recoveryCodes,
+    };
   }
 
-  async verifyMfa(mfaTicket: string, code: string): Promise<{ status: "ok"; token: string }> {
+  async verifyMfa(
+    mfaTicket: string,
+    code: string,
+    requestContext: SessionRequestContext = NO_REQUEST_CONTEXT
+  ): Promise<{ status: "ok"; token: string }> {
     const { userAccountId } = this.verifyTicket(mfaTicket, "mfa_verify");
     const account = await this.findAccountById(userAccountId);
     if (!account?.mfa_enabled || !account.mfa_secret_encrypted) {
@@ -214,7 +281,7 @@ export class AuthService {
     }
 
     const identity = await this.resolveIdentityForAccount(account.id);
-    return { status: "ok", token: await this.issueSessionToken(identity, account.id) };
+    return { status: "ok", token: await this.issueSessionToken(identity, account.id, requestContext) };
   }
 
   /**
@@ -225,7 +292,11 @@ export class AuthService {
    * different flow — a caller with a valid mfa_verify ticket can present
    * either a TOTP code (verifyMfa) or a recovery code (this method).
    */
-  async verifyMfaRecoveryCode(mfaTicket: string, code: string): Promise<{ status: "ok"; token: string }> {
+  async verifyMfaRecoveryCode(
+    mfaTicket: string,
+    code: string,
+    requestContext: SessionRequestContext = NO_REQUEST_CONTEXT
+  ): Promise<{ status: "ok"; token: string }> {
     const { userAccountId } = this.verifyTicket(mfaTicket, "mfa_verify");
     const account = await this.findAccountById(userAccountId);
     if (!account?.mfa_enabled) {
@@ -251,7 +322,7 @@ export class AuthService {
     }
 
     const identity = await this.resolveIdentityForAccount(account.id);
-    return { status: "ok", token: await this.issueSessionToken(identity, account.id) };
+    return { status: "ok", token: await this.issueSessionToken(identity, account.id, requestContext) };
   }
 
   private verifyTicket(mfaTicket: string, purpose: "mfa_enroll" | "mfa_verify") {
@@ -271,8 +342,44 @@ export class AuthService {
    * and are just as individually revocable. Only tokens issued before
    * either feature shipped have no `jti` and simply expire on their own
    * schedule instead.
+   *
+   * Phase 3 item #8 — this is also where `user_sessions.ip_address`/
+   * `user_agent` are finally populated (they were previously threaded
+   * nowhere and silently stayed NULL since Phase 1 — a real pre-existing
+   * gap, not new schema), and where the two honest, zero-external-data
+   * security signals this item scopes down to are computed and stored:
+   *
+   *   - `is_new_device`: this login's User-Agent fingerprint
+   *     (`computeDeviceFingerprint`) has never appeared in any prior
+   *     `user_sessions` row for this exact account.
+   *   - `is_rapid_network_change`: this login's IP differs from the
+   *     account's own immediately-preceding session AND the gap between
+   *     the two is under `RAPID_NETWORK_CHANGE_WINDOW_MINUTES`.
+   *
+   * Deliberately NOT "impossible travel" or geo-velocity: there is no
+   * GeoIP database or IP-geolocation API anywhere in this codebase, and
+   * none is being added here — either option means bundling a large
+   * binary asset or making a third party's uptime/rate-limits a
+   * dependency of the login-critical path, for a platform that has
+   * consistently declined that kind of trade-off elsewhere (Data
+   * Residency/DR, migration 0063, is the same discipline applied to "we
+   * have one Postgres region and won't pretend at multi-region
+   * infrastructure"). What's computed above needs no geography at all —
+   * just IP-string identity and elapsed time — so it is named for exactly
+   * what it detects, no more: a real anomaly signal, but one a VPN
+   * reconnect or a mobile carrier's IP rotation can trip for a perfectly
+   * legitimate user, never a hard block.
+   *
+   * Both flags are also audited (`auth.suspicious_login`) when either is
+   * true, in the same transaction as the session insert — see below —
+   * so a Platform Admin can see this happened from the Audit Log even
+   * without opening the Security tab's session list.
    */
-  private async issueSessionToken(identity: SessionIdentity, userAccountId: string): Promise<string> {
+  private async issueSessionToken(
+    identity: SessionIdentity,
+    userAccountId: string,
+    requestContext: SessionRequestContext = NO_REQUEST_CONTEXT
+  ): Promise<string> {
     const secret = process.env.JWT_SECRET;
     if (!secret) throw new Error("JWT_SECRET is not set");
 
@@ -285,12 +392,67 @@ export class AuthService {
     const expiryMinutes = policy.sessionTimeoutMinutes > 0 ? policy.sessionTimeoutMinutes : 720;
 
     const sessionId = await this.db.withClaims(SERVICE_CLAIMS, async (client) => {
-      const result = await client.query<{ id: string }>(
-        `INSERT INTO user_sessions (user_account_id, company_id, is_platform_admin, expires_at)
-         VALUES ($1, $2, $3, now() + ($4 || ' minutes')::interval)
-         RETURNING id`,
-        [userAccountId, identity.company_id, identity.is_platform_admin, expiryMinutes]
+      // Phase 3 item #8 — new-device fingerprinting. Only distinct
+      // historical User-Agent values are fetched (not every session row),
+      // since that's all `computeDeviceFingerprint` can ever distinguish
+      // between; a brand-new account with zero prior sessions correctly
+      // finds no match and is flagged as a new device on its first login.
+      const priorAgents = await client.query<{ user_agent: string | null }>(
+        "SELECT DISTINCT user_agent FROM user_sessions WHERE user_account_id = $1",
+        [userAccountId]
       );
+      const newFingerprint = computeDeviceFingerprint(requestContext.userAgent);
+      const isNewDevice = !priorAgents.rows.some(
+        (row) => computeDeviceFingerprint(row.user_agent) === newFingerprint
+      );
+
+      // Phase 3 item #8 — rapid re-authentication from a different
+      // network. Compared against the account's single most recent prior
+      // session (any status — revoked/expired sessions are still real
+      // evidence of when and from where this account last authenticated).
+      let isRapidNetworkChange = false;
+      if (requestContext.ipAddress) {
+        const priorSession = await client.query<{ ip_address: string | null; created_at: Date }>(
+          "SELECT ip_address, created_at FROM user_sessions WHERE user_account_id = $1 ORDER BY created_at DESC LIMIT 1",
+          [userAccountId]
+        );
+        const prior = priorSession.rows[0];
+        if (prior?.ip_address && prior.ip_address !== requestContext.ipAddress) {
+          const gapMinutes = (Date.now() - new Date(prior.created_at).getTime()) / 60_000;
+          isRapidNetworkChange = gapMinutes >= 0 && gapMinutes < RAPID_NETWORK_CHANGE_WINDOW_MINUTES;
+        }
+      }
+
+      const result = await client.query<{ id: string }>(
+        `INSERT INTO user_sessions
+           (user_account_id, company_id, is_platform_admin, expires_at, ip_address, user_agent, is_new_device, is_rapid_network_change)
+         VALUES ($1, $2, $3, now() + ($4 || ' minutes')::interval, $5, $6, $7, $8)
+         RETURNING id`,
+        [
+          userAccountId,
+          identity.company_id,
+          identity.is_platform_admin,
+          expiryMinutes,
+          requestContext.ipAddress,
+          requestContext.userAgent,
+          isNewDevice,
+          isRapidNetworkChange,
+        ]
+      );
+
+      if (isNewDevice || isRapidNetworkChange) {
+        await this.audit.record(client, { ...SERVICE_CLAIMS, sub: userAccountId }, {
+          companyId: identity.company_id,
+          action: "auth.suspicious_login",
+          target: result.rows[0].id,
+          metadata: {
+            isNewDevice,
+            isRapidNetworkChange,
+            ipAddress: requestContext.ipAddress,
+          },
+        });
+      }
+
       // Tenant Management gap-fill Phase 1 item #8 — the one signal that
       // turns a "pending" (or "expired") admin login into "active" on the
       // Admins tab. Every real session issuance goes through this method
@@ -359,13 +521,23 @@ export class AuthService {
    * shared method instead, since an SSO login IS meant to be a normal,
    * fully-privileged session for that account — not a separate,
    * intentionally-limited kind the way impersonation is.
+   *
+   * `requestContext` accepted (and defaulted to null/null) for the same
+   * reason every other `issueSessionToken` caller now takes one, but
+   * `SsoController`'s callback routes aren't wired to pass a real one as
+   * of Phase 3 item #8 — that's a real, separate follow-up (the SP-only
+   * SAML ACS route and OIDC callback would each need `@Req()` added), out
+   * of this item's scope of "AuthController's relevant routes."
    */
-  async issueSessionTokenForFederatedLogin(userAccountId: string): Promise<string> {
+  async issueSessionTokenForFederatedLogin(
+    userAccountId: string,
+    requestContext: SessionRequestContext = NO_REQUEST_CONTEXT
+  ): Promise<string> {
     const identity = await this.resolveIdentityForAccount(userAccountId);
     if (identity.adminStatus === "locked") {
       throw new UnauthorizedException("This account has been locked. Contact your Platform Admin.");
     }
-    return this.issueSessionToken(identity, userAccountId);
+    return this.issueSessionToken(identity, userAccountId, requestContext);
   }
 
   // --- Password reset -----------------------------------------------------

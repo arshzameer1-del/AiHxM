@@ -4,7 +4,7 @@ import { AuditService } from "../audit/audit.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { FILE_STORAGE, type FileStorageService } from "../file-storage/file-storage.interface";
 import type { RequestClaims } from "../database/tenant-context";
-import type { TenantBackup } from "@aihxm/shared-types";
+import type { RecordDrTestRequest, TenantBackup, TenantDrTestLogEntry } from "@aihxm/shared-types";
 
 const INELIGIBLE_STATUSES = new Set(["archived", "churned"]);
 
@@ -20,6 +20,19 @@ function toBackup(row: any): TenantBackup {
     createdAt: row.created_at.toISOString(),
     completedAt: row.completed_at?.toISOString() ?? null,
     error: row.error,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function toDrTestEntry(row: any): TenantDrTestLogEntry {
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    testedAt: row.tested_at.toISOString(),
+    outcome: row.outcome,
+    notes: row.notes,
+    recordedBy: row.recorded_by,
+    createdAt: row.created_at.toISOString(),
   };
 }
 
@@ -160,6 +173,58 @@ export class BackupsService {
         target: backup.id,
       });
       return { fileName: `backup-${backupId}.json`, buffer };
+    });
+  }
+
+  /**
+   * Phase 3 item #7 — Backup & Disaster Recovery (advanced): a manual DR
+   * test EVIDENCE log, not an automated failover harness (there is no
+   * real infrastructure in this platform to fail over between — building
+   * a fake test harness on top of nothing would be dishonest). A Platform
+   * Admin records the result of an actual, manually-performed recovery
+   * test they ran outside this system (e.g. restoring this tenant's
+   * latest backup into a scratch environment and verifying it), so a
+   * compliance-conscious customer or auditor can be shown genuine
+   * evidence of when this tenant's data was last tested for
+   * recoverability, and how it went.
+   */
+  async recordDrTest(claims: RequestClaims, companyId: string, input: RecordDrTestRequest): Promise<TenantDrTestLogEntry> {
+    return this.db.withClaims(claims, async (client) => {
+      const companyCheck = await client.query("SELECT id FROM companies WHERE id = $1", [companyId]);
+      if (companyCheck.rowCount === 0) throw new NotFoundException("Company not found");
+
+      const testedAt = new Date(input.testedAt);
+      if (Number.isNaN(testedAt.getTime())) {
+        throw new BadRequestException("testedAt must be a valid date/time.");
+      }
+
+      const result = await client.query(
+        `INSERT INTO tenant_dr_test_log (company_id, tested_at, outcome, notes, recorded_by)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING *`,
+        [companyId, testedAt.toISOString(), input.outcome, input.notes ?? null, claims.sub]
+      );
+
+      await this.audit.record(client, claims, {
+        companyId,
+        action: "tenant_dr_test.recorded",
+        target: result.rows[0].id,
+        metadata: { outcome: input.outcome, testedAt: testedAt.toISOString() },
+      });
+
+      return toDrTestEntry(result.rows[0]);
+    });
+  }
+
+  async listDrTests(claims: RequestClaims, companyId: string): Promise<TenantDrTestLogEntry[]> {
+    return this.db.withClaims(claims, async (client) => {
+      const companyCheck = await client.query("SELECT id FROM companies WHERE id = $1", [companyId]);
+      if (companyCheck.rowCount === 0) throw new NotFoundException("Company not found");
+      const result = await client.query(
+        "SELECT * FROM tenant_dr_test_log WHERE company_id = $1 ORDER BY tested_at DESC",
+        [companyId]
+      );
+      return result.rows.map(toDrTestEntry);
     });
   }
 }

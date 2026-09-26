@@ -17,6 +17,9 @@ function rowToSession(row: any): UserSessionView {
     createdAt: row.created_at.toISOString(),
     expiresAt: row.expires_at.toISOString(),
     revokedAt: row.revoked_at ? row.revoked_at.toISOString() : null,
+    ipAddress: row.ip_address ?? null,
+    isNewDevice: row.is_new_device ?? false,
+    isRapidNetworkChange: row.is_rapid_network_change ?? false,
   };
 }
 

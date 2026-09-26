@@ -53,6 +53,7 @@ import type {
   ExtendOfferRequest,
   GoalView,
   HealthCheckResult,
+  PlatformHealthSummary,
   HolidayView,
   HorizontalPosition,
   ConfigurationDomainSummary,
@@ -117,6 +118,10 @@ import type {
   TestInvitationResult,
   TenantBackup,
   TenantDataExport,
+  TenantExportKeyStatus,
+  DataResidencyStatus,
+  RecordDrTestRequest,
+  TenantDrTestLogEntry,
   SystemAdminRoleAssignmentView,
   TaxSlabSetView,
   TaxSlabView,
@@ -125,6 +130,8 @@ import type {
   TenantFeatureEntitlement,
   TenantIntegration,
   RotateIntegrationSecretResponse,
+  SecurityPostureScore,
+  WebhookEvent,
   ScimProvisioningStatus,
   GenerateScimTokenResponse,
   SetPlatformAdminAccessRequest,
@@ -664,6 +671,17 @@ export const api = {
       method: "POST",
     }),
 
+  // Phase 3 item #4 — Webhooks & Eventing. Real delivery for the
+  // `webhook` integration's own config above — see WebhookDispatchService.
+  listWebhookEvents: (companyId: string) =>
+    request<WebhookEvent[]>(`/platform/companies/${companyId}/webhook-events`),
+
+  replayWebhookEvent: (companyId: string, eventId: string) =>
+    request<WebhookEvent>(`/platform/companies/${companyId}/webhook-events/${eventId}/replay`, { method: "POST" }),
+
+  sendTestWebhookEvent: (companyId: string) =>
+    request<WebhookEvent>(`/platform/companies/${companyId}/webhook-events/test`, { method: "POST" }),
+
   // Phase 3 item #1, slice 3 — SCIM 2.0 inbound provisioning. A separate
   // small surface from the `sso` integration's own config/rotate routes
   // above: this token isn't a `tenant_integrations.config` jsonb field,
@@ -682,6 +700,10 @@ export const api = {
 
   runHealthCheck: (companyId: string) =>
     request<HealthCheckResult[]>(`/platform/companies/${companyId}/health/check`, { method: "POST" }),
+
+  // Phase 3 item #9 — Monitoring. Cross-tenant summary for the Tenant
+  // Directory's Platform Health panel.
+  getPlatformHealthSummary: () => request<PlatformHealthSummary>(`/platform/health/summary`),
 
   // TM-033 — Support tickets.
   listSupportTickets: (companyId: string, status?: SupportTicketStatus) =>
@@ -780,6 +802,55 @@ export const api = {
     link.remove();
     URL.revokeObjectURL(url);
   },
+
+  // Phase 3 item #5 — tenant-dedicated export encryption key, with
+  // independent rotation. Never returns key material of any kind — see
+  // TenantExportKeyService's own doc comment.
+  getExportKeyStatus: (companyId: string) =>
+    request<TenantExportKeyStatus>(`/platform/companies/${companyId}/export-key`),
+
+  enableExportKey: (companyId: string) =>
+    request<TenantExportKeyStatus>(`/platform/companies/${companyId}/export-key/enable`, { method: "POST" }),
+
+  rotateExportKey: (companyId: string) =>
+    request<TenantExportKeyStatus>(`/platform/companies/${companyId}/export-key/rotate`, { method: "POST" }),
+
+  disableExportKey: (companyId: string) =>
+    request<TenantExportKeyStatus>(`/platform/companies/${companyId}/export-key/disable`, { method: "POST" }),
+
+  // Phase 3 item #6 — Data Residency & Sovereignty: a declaration +
+  // disclosure mechanism, not real multi-region data placement (this
+  // platform runs on one Supabase region). See DataResidencyStatus's own
+  // doc comment (shared-types) for the honest scope.
+  getResidencyStatus: (companyId: string) =>
+    request<DataResidencyStatus>(`/platform/companies/${companyId}/residency`),
+
+  setResidencyRequiredRegion: (companyId: string, requiredRegion: string | null) =>
+    request<DataResidencyStatus>(`/platform/companies/${companyId}/residency`, {
+      method: "POST",
+      body: JSON.stringify({ requiredRegion }),
+    }),
+
+  acknowledgeResidencyMismatch: (companyId: string) =>
+    request<DataResidencyStatus>(`/platform/companies/${companyId}/residency/acknowledge`, { method: "POST" }),
+
+  // Phase 3 item #8 — read-only, entirely computed from data already
+  // collected elsewhere; see SecurityPostureService's own doc comment for
+  // the point-weighting behind the number this returns.
+  getSecurityPosture: (companyId: string) =>
+    request<SecurityPostureScore>(`/platform/companies/${companyId}/security-posture`),
+
+  // Phase 3 item #7 — manual DR test evidence log (no automated failover
+  // harness exists in this platform; see BackupsService.recordDrTest's
+  // own doc comment).
+  listDrTests: (companyId: string) =>
+    request<TenantDrTestLogEntry[]>(`/platform/companies/${companyId}/backups/dr-tests`),
+
+  recordDrTest: (companyId: string, dto: RecordDrTestRequest) =>
+    request<TenantDrTestLogEntry>(`/platform/companies/${companyId}/backups/dr-tests`, {
+      method: "POST",
+      body: JSON.stringify(dto),
+    }),
 
   updateCompanyConfig: (
     id: string,

@@ -7,6 +7,8 @@ import { EntitlementsService } from "../entitlements/entitlements.service";
 import { AuditService } from "../audit/audit.service";
 import { LocalFileStorageService } from "../file-storage/local-file-storage.service";
 import { EmployeesService } from "./employees.service";
+import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
+import { IntegrationsService } from "../tenant-management/integrations.service";
 
 const FIXTURE_CLAIMS: RequestClaims = { is_platform_admin: true, company_id: null, sub: "employees-spec-fixtures" };
 
@@ -355,6 +357,93 @@ describe("EmployeesService", () => {
 
       const asSelf = await employees.get(aliceClaims, aliceEmployeeId);
       expect("terminationReason" in asSelf).toBe(false);
+    });
+  });
+
+  /**
+   * Phase 3 item #4 — Webhooks & Eventing. Confirms the 2 real trigger
+   * points this rollout wires up (see EmployeesService's own doc comment
+   * on the scope decision) actually enqueue, end to end through a real
+   * WebhookDispatchService — not just that `enqueue()` itself works in
+   * isolation (webhook-dispatch.service.spec.ts already covers that), but
+   * that EmployeesService really calls it, with the real company/event
+   * data, at exactly the two moments intended. `employees` above (this
+   * file's shared instance) is built WITHOUT a WebhookDispatchService —
+   * proving the optional-dependency design doesn't secretly break
+   * anything for it — so this uses its own instance instead.
+   */
+  describe("webhook events (Phase 3 item #4)", () => {
+    let companyId: string;
+    let hrAdminUserId: string;
+    let hrAdminClaims: RequestClaims;
+    let employeesWithWebhooks: EmployeesService;
+    const platformClaims: RequestClaims = { is_platform_admin: true, company_id: null, sub: "webhook-trigger-spec" };
+
+    beforeAll(async () => {
+      companyId = await createFixtureCompany("Webhook Trigger Co");
+      hrAdminUserId = await createUser(`webhook-trigger-hr-${Date.now()}@example.com`);
+      await assignRole(hrAdminUserId, companyId, "hr_admin");
+      hrAdminClaims = { is_platform_admin: false, company_id: companyId, sub: hrAdminUserId };
+
+      await new IntegrationsService(db, new AuditService()).configure(platformClaims, companyId, "webhook", {
+        enabled: true,
+        config: { url: "http://127.0.0.1:1/hook", signingSecret: "employee-trigger-secret" },
+      });
+
+      employeesWithWebhooks = new EmployeesService(
+        db,
+        new RbacService(db),
+        new EntitlementsService(db),
+        new AuditService(),
+        new LocalFileStorageService(),
+        new WebhookDispatchService(db, new AuditService())
+      );
+    });
+
+    async function latestEventFor(type: string) {
+      // enqueue() is fire-and-forget from EmployeesService's own call
+      // sites — give its own DB write a moment to land before asserting.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      // webhook_events RLS gates on is_platform_admin() OR is_service() —
+      // same as tenant_integrations itself — so this reads it back with
+      // platformClaims, not the tenant-side hrAdminClaims that drove the
+      // create()/update() calls above.
+      const result = await db.withClaims(platformClaims, (client) =>
+        client.query(
+          "SELECT * FROM webhook_events WHERE company_id = $1 AND event_type = $2 ORDER BY created_at DESC LIMIT 1",
+          [companyId, type]
+        )
+      );
+      return result.rows[0];
+    }
+
+    it("enqueues employee.created on create()", async () => {
+      const created = await employeesWithWebhooks.create(hrAdminClaims, { firstName: "Webhook", lastName: "Hire" });
+      const event = await latestEventFor("employee.created");
+      expect(event).toBeDefined();
+      expect(event.payload.employee.id).toBe(created.id);
+      expect(event.status).toBe("pending");
+    });
+
+    it("enqueues employee.terminated when employmentStatus transitions to terminated, but not on an unrelated update", async () => {
+      const created = await employeesWithWebhooks.create(hrAdminClaims, { firstName: "Webhook", lastName: "Termination" });
+
+      await employeesWithWebhooks.update(hrAdminClaims, created.id, { department: "Ops" });
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const noTerminationYet = await db.withClaims(platformClaims, (client) =>
+        client.query("SELECT * FROM webhook_events WHERE company_id = $1 AND event_type = 'employee.terminated'", [companyId])
+      );
+      expect(noTerminationYet.rowCount).toBe(0);
+
+      await employeesWithWebhooks.update(hrAdminClaims, created.id, {
+        employmentStatus: "terminated",
+        terminationDate: new Date().toISOString().slice(0, 10),
+        terminationReason: "Resigned",
+      });
+      const event = await latestEventFor("employee.terminated");
+      expect(event).toBeDefined();
+      expect(event.payload.employee.id).toBe(created.id);
+      expect(event.payload.employee.employmentStatus).toBe("terminated");
     });
   });
 });

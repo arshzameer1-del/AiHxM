@@ -8,6 +8,7 @@ import { AuditService } from "../audit/audit.service";
 import { normalizeEmail } from "../auth/email.util";
 import { hashPassword } from "../auth/password";
 import { FILE_STORAGE, type FileStorageService } from "../file-storage/file-storage.interface";
+import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
 import { formatEmployeeNumber, parseEmployeeNumberSequence } from "./employee-number.util";
 import type {
   CreateEmployeeRequest,
@@ -137,6 +138,24 @@ function toIsoDate(value: any): string | null {
  * kind of "no" than "this record doesn't exist for you," and the existing
  * WorkflowService/CustomFieldsService manage-permission checks already
  * established that distinction.
+ *
+ * Phase 3 item #4 (Webhooks & Eventing) scope decision: this is one of
+ * only 2 real, already-audited trigger points wired to
+ * `WebhookDispatchService.enqueue()` in this whole rollout —
+ * `employee.created` (end of `create()`) and `employee.terminated` (inside
+ * `autoRecordJobHistory()`, the one place a termination is ever detected,
+ * shared by every path that can cause one). These are the two events an
+ * external HR/payroll/Slack integration most obviously wants to react to
+ * (new hire provisioning, offboarding kickoff) — chosen specifically
+ * because both already have a durable, audited moment in the code
+ * (`employee_job_history`'s own 'hire'/'termination' rows) to hang off,
+ * rather than inventing a new one. Every other lifecycle change
+ * (promotion, transfer, salary change, a plain profile edit) deliberately
+ * does NOT fire a webhook yet — not a gap, a "rule of three, don't
+ * over-build ahead of demand" call (see onboarding-offboarding's own
+ * module doc comments for the same discipline applied elsewhere in this
+ * codebase): a real, additive follow-up once an actual integration
+ * customer asks for one of them, not before.
  */
 @Injectable()
 export class EmployeesService {
@@ -145,7 +164,22 @@ export class EmployeesService {
     private readonly rbac: RbacService,
     private readonly entitlements: EntitlementsService,
     private readonly audit: AuditService,
-    @Inject(FILE_STORAGE) private readonly fileStorage: FileStorageService
+    @Inject(FILE_STORAGE) private readonly fileStorage: FileStorageService,
+    // Optional (not just "injected via DI") deliberately: a large number
+    // of OTHER feature areas' spec files (shifts, performance, leave,
+    // recruitment, onboarding-offboarding, employee-groups, system-admin,
+    // data-subject-requests, ...) hand-construct EmployeesService directly
+    // as a fixture dependency, with no interest in webhooks at all. Making
+    // this required would force a mechanical, purely-compile-driven edit
+    // across a dozen-plus unrelated test files for a Phase 3 gap-fill
+    // item they have nothing to do with — exactly the kind of blast-radius
+    // creep this rollout is trying to avoid. NestJS's real DI container
+    // (EmployeesModule -> WebhooksModule) always supplies a real instance
+    // in production and in every e2e test that boots the whole AppModule;
+    // only a test that constructs this service BY HAND, and never calls
+    // create()/update() in a way that would enqueue anything, ever sees it
+    // as undefined.
+    private readonly webhooks?: WebhookDispatchService
   ) {}
 
   async create(claims: RequestClaims, input: CreateEmployeeRequest): Promise<EmployeeView> {
@@ -196,7 +230,22 @@ export class EmployeesService {
         [claims.company_id, row.id, row.date_of_joining, row.department, row.designation, row.salary_band, claims.sub]
       );
 
-      return rowToEmployee(row) as EmployeeView;
+      const employee = rowToEmployee(row) as EmployeeView;
+
+      // Phase 3 item #4 — Webhooks & Eventing. `employee.created` is one
+      // of the 2 real event types this rollout wires up for real (the
+      // other is `employee.terminated`, in autoRecordJobHistory below) —
+      // see this service's own top-of-file doc comment for the deliberate
+      // scope decision on why exactly these two and not more. Fire-and-
+      // forget on its own connection, same "never let a side-effect
+      // notification fail or delay the main write" pattern
+      // BackupsService/HealthService already use for
+      // NotificationsService.dispatch(): a webhook target that's slow,
+      // misconfigured, or simply not set up must never make hiring an
+      // employee fail.
+      this.webhooks?.enqueue(claims.company_id!, "employee.created", { employee }).catch(() => undefined);
+
+      return employee;
     });
   }
 
@@ -776,5 +825,15 @@ export class EmployeesService {
         claims.sub,
       ]
     );
+
+    // Phase 3 item #4 — the second of this rollout's 2 real webhook
+    // trigger points (see this class's own doc comment). Fire-and-forget,
+    // same reasoning as `create()`'s `employee.created`: a webhook target
+    // must never make an HR admin's update() call fail or hang.
+    if (eventType === "termination") {
+      this.webhooks
+        ?.enqueue(after.company_id, "employee.terminated", { employee: rowToEmployee(after) })
+        .catch(() => undefined);
+    }
   }
 }

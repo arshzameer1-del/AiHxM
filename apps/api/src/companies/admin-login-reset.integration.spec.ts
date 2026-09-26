@@ -54,7 +54,7 @@ describe("Admin login create -> reset -> login (integration)", () => {
       sessionSecurity,
       new LocalFileStorageService()
     );
-    auth = new AuthService(db, new EntitlementsService(db), new MailerService(), sessionSecurity);
+    auth = new AuthService(db, new EntitlementsService(db), new MailerService(), sessionSecurity, new AuditService());
   });
 
   afterAll(async () => {

@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import {
   Archive,
   BarChart3,
@@ -42,13 +42,19 @@ import {
   type DeletionImpactPreview,
   type TenantBackup,
   type TenantDataExport,
+  type TenantExportKeyStatus,
+  type DataResidencyStatus,
+  type DrTestOutcome,
+  type TenantDrTestLogEntry,
   type ModuleKey,
   type PackageTier,
+  type SecurityPostureScore,
   type SubscriptionSummary,
   type TenantConfigurationSetting,
   type TenantConfigurationVersion,
   type TenantFeatureEntitlement,
   type TenantIntegration,
+  type WebhookEvent,
   type ScimProvisioningStatus,
   type TenantUsageSummary,
   type UserSessionView,
@@ -117,8 +123,16 @@ const TAB_ICONS: Record<Tab, LucideIcon> = {
 
 export function CompanyDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
+  // Phase 3 item #9 — Monitoring's platform-wide health panel links
+  // straight into a failing tenant's own Health tab via ?tab=Health,
+  // rather than dropping a Platform Admin on Overview and making them
+  // click through again. Any other/unknown value falls back to Overview.
+  const initialTab = searchParams.get("tab");
   const [detail, setDetail] = useState<CompanyDetail | null>(null);
-  const [tab, setTab] = useState<Tab>("Overview");
+  const [tab, setTab] = useState<Tab>(
+    (TABS as readonly string[]).includes(initialTab ?? "") ? (initialTab as Tab) : "Overview"
+  );
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
@@ -1918,6 +1932,15 @@ function IntegrationsTab({ companyId }: { companyId: string }) {
   const [scimToken, setScimToken] = useState<string | null>(null);
   const [scimBusy, setScimBusy] = useState(false);
   const [scimError, setScimError] = useState<string | null>(null);
+  // Phase 3 item #4 — Webhooks & Eventing. The `webhook` provider card's
+  // own delivery-log sub-panel, loaded/managed separately from its config
+  // form above — same reason SCIM's status/token above is its own state
+  // rather than folded into `integrations`/`drafts`: it isn't part of
+  // `tenant_integrations.config`, it's a whole separate table.
+  const [webhookEvents, setWebhookEvents] = useState<WebhookEvent[] | null>(null);
+  const [webhookEventsError, setWebhookEventsError] = useState<string | null>(null);
+  const [webhookEventBusyId, setWebhookEventBusyId] = useState<string | null>(null);
+  const [webhookTestBusy, setWebhookTestBusy] = useState(false);
 
   /** `INTEGRATION_FIELDS[key]` for every provider except `sso`, whose field set depends on `ssoProtocol` instead of being fixed. */
   function fieldsFor(providerKey: IntegrationProviderKey): IntegrationField[] {
@@ -1953,11 +1976,46 @@ function IntegrationsTab({ companyId }: { companyId: string }) {
     }
   }
 
+  async function loadWebhookEvents() {
+    try {
+      setWebhookEvents(await api.listWebhookEvents(companyId));
+    } catch {
+      setWebhookEventsError("Could not load the webhook delivery log.");
+    }
+  }
+
   useEffect(() => {
     load();
     loadScimStatus();
+    loadWebhookEvents();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId]);
+
+  async function replayWebhookEvent(eventId: string) {
+    setWebhookEventBusyId(eventId);
+    setWebhookEventsError(null);
+    try {
+      const replayed = await api.replayWebhookEvent(companyId, eventId);
+      setWebhookEvents((prev) => prev?.map((e) => (e.id === replayed.id ? replayed : e)) ?? prev);
+    } catch (err) {
+      setWebhookEventsError(err instanceof ApiError ? err.message : "Could not replay this event.");
+    } finally {
+      setWebhookEventBusyId(null);
+    }
+  }
+
+  async function sendTestWebhookEvent() {
+    setWebhookTestBusy(true);
+    setWebhookEventsError(null);
+    try {
+      const event = await api.sendTestWebhookEvent(companyId);
+      setWebhookEvents((prev) => (prev ? [event, ...prev] : [event]));
+    } catch (err) {
+      setWebhookEventsError(err instanceof ApiError ? err.message : "Could not send a test event.");
+    } finally {
+      setWebhookTestBusy(false);
+    }
+  }
 
   async function generateScimToken() {
     setScimBusy(true);
@@ -2262,10 +2320,123 @@ function IntegrationsTab({ companyId }: { companyId: string }) {
                 </button>
               </div>
             )}
+            {integration.providerKey === "webhook" && (
+              <WebhookDeliveryPanel
+                events={webhookEvents}
+                error={webhookEventsError}
+                busyEventId={webhookEventBusyId}
+                testBusy={webhookTestBusy}
+                onReplay={replayWebhookEvent}
+                onSendTest={sendTestWebhookEvent}
+              />
+            )}
           </div>
         ))}
       </div>
     </section>
+  );
+}
+
+const WEBHOOK_EVENT_STATUS_STYLES: Record<string, string> = {
+  pending: "bg-gray-200 text-gray-700",
+  delivered: "bg-green-100 text-green-800",
+  failed: "bg-amber-100 text-amber-800",
+  dead_letter: "bg-red-100 text-red-800",
+};
+
+/**
+ * Phase 3 item #4 — Webhooks & Eventing. The `webhook` provider card's
+ * delivery log — real rows from `webhook_events`, not a mock. Kept as its
+ * own small component (rather than inlined in IntegrationsTab's already
+ * long per-provider card) the same way the SCIM sub-panel just above it
+ * in this file stays visually distinct from the plain config-field list
+ * every provider gets.
+ */
+function WebhookDeliveryPanel({
+  events,
+  error,
+  busyEventId,
+  testBusy,
+  onReplay,
+  onSendTest,
+}: {
+  events: WebhookEvent[] | null;
+  error: string | null;
+  busyEventId: string | null;
+  testBusy: boolean;
+  onReplay: (eventId: string) => void;
+  onSendTest: () => void;
+}) {
+  return (
+    <div className="rounded-lg border border-black/10 bg-black/[0.02] p-3 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs font-semibold">Recent deliveries</div>
+        <button
+          onClick={onSendTest}
+          disabled={testBusy}
+          className="text-xs font-semibold px-2.5 py-1 rounded-lg border border-black/10 disabled:opacity-50"
+        >
+          {testBusy ? "Sending…" : "Send test event"}
+        </button>
+      </div>
+      {error && <p className="text-xs text-danger">{error}</p>}
+      {!events || events.length === 0 ? (
+        <p className="text-xs text-label-tertiary">
+          No deliveries yet. Save a target URL and signing secret above, enable this integration, and try
+          "Send test event".
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left text-label-tertiary">
+                <th className="font-medium pr-2 py-1">Event</th>
+                <th className="font-medium pr-2 py-1">Status</th>
+                <th className="font-medium pr-2 py-1">Attempts</th>
+                <th className="font-medium pr-2 py-1">Last attempt</th>
+                <th className="font-medium py-1"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {events.map((event) => (
+                <tr key={event.id} className="border-t border-black/5">
+                  <td className="pr-2 py-1 font-mono">{event.eventType}</td>
+                  <td className="pr-2 py-1">
+                    <span
+                      title={event.lastError ?? undefined}
+                      className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+                        WEBHOOK_EVENT_STATUS_STYLES[event.status] ?? "bg-gray-200 text-gray-600"
+                      }`}
+                    >
+                      {event.status.replace("_", " ")}
+                    </span>
+                  </td>
+                  <td className="pr-2 py-1">{event.attemptCount}</td>
+                  <td className="pr-2 py-1 text-label-tertiary">
+                    {event.deliveredAt
+                      ? new Date(event.deliveredAt).toLocaleString()
+                      : event.attemptCount > 0
+                        ? new Date(event.createdAt).toLocaleString()
+                        : "—"}
+                  </td>
+                  <td className="py-1">
+                    {(event.status === "failed" || event.status === "dead_letter") && (
+                      <button
+                        onClick={() => onReplay(event.id)}
+                        disabled={busyEventId === event.id}
+                        className="text-xs font-semibold px-2 py-0.5 rounded-lg border border-black/10 disabled:opacity-50"
+                      >
+                        {busyEventId === event.id ? "Replaying…" : "Replay"}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -2740,6 +2911,37 @@ function formatBytes(bytes: number | null): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
+// Phase 3 item #7 — used only for the "Last backup: X ago" summary line;
+// coarse (minutes/hours/days) is all that line needs.
+function formatTimeAgo(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  const minutes = Math.floor(ms / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+const DR_TEST_OUTCOME_STYLES: Record<DrTestOutcome, string> = {
+  pass: "bg-green-100 text-green-800",
+  partial: "bg-amber-100 text-amber-800",
+  fail: "bg-red-100 text-red-800",
+};
+
+const RESIDENCY_STATUS_STYLES: Record<DataResidencyStatus["complianceStatus"], string> = {
+  matches: "bg-green-100 text-green-800",
+  no_requirement: "bg-black/[0.06] text-label-tertiary",
+  mismatch: "bg-red-100 text-red-800",
+};
+
+const RESIDENCY_STATUS_LABELS: Record<DataResidencyStatus["complianceStatus"], string> = {
+  matches: "Matches",
+  no_requirement: "No requirement set",
+  mismatch: "Mismatch",
+};
+
 function BackupsTab({ companyId }: { companyId: string }) {
   const [backups, setBackups] = useState<TenantBackup[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -2785,6 +2987,7 @@ function BackupsTab({ companyId }: { companyId: string }) {
   }
 
   return (
+    <div className="space-y-5">
     <section className="bg-card rounded-card p-5 shadow-sm space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
@@ -2804,6 +3007,17 @@ function BackupsTab({ companyId }: { companyId: string }) {
       </div>
 
       {error && <div className="text-danger text-sm">{error}</div>}
+
+      {backups && backups.length > 0 && (
+        <div className="text-xs text-label-tertiary">
+          Last backup: <span className="font-semibold text-label-primary">{formatTimeAgo(backups[0].createdAt)}</span>{" "}
+          (
+          <span className={`font-semibold px-1.5 py-0.5 rounded-full ${BACKUP_STATUS_STYLES[backups[0].status]}`}>
+            {backups[0].status}
+          </span>
+          )
+        </div>
+      )}
 
       <div className="overflow-hidden rounded-lg border border-black/10">
         <table className="w-full text-sm">
@@ -2854,6 +3068,272 @@ function BackupsTab({ companyId }: { companyId: string }) {
         </table>
       </div>
     </section>
+
+    <DrTestLogPanel companyId={companyId} />
+    <DataResidencyPanel companyId={companyId} />
+    </div>
+  );
+}
+
+function DrTestLogPanel({ companyId }: { companyId: string }) {
+  const [tests, setTests] = useState<TenantDrTestLogEntry[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [recording, setRecording] = useState(false);
+  const [testedAt, setTestedAt] = useState(() => new Date().toISOString().slice(0, 16));
+  const [outcome, setOutcome] = useState<DrTestOutcome>("pass");
+  const [notes, setNotes] = useState("");
+
+  async function load() {
+    try {
+      setTests(await api.listDrTests(companyId));
+    } catch {
+      setError("Could not load the DR test log.");
+    }
+  }
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId]);
+
+  async function record() {
+    setRecording(true);
+    setError(null);
+    try {
+      await api.recordDrTest(companyId, {
+        testedAt: new Date(testedAt).toISOString(),
+        outcome,
+        notes: notes.trim() || undefined,
+      });
+      setNotes("");
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not record this DR test result.");
+    } finally {
+      setRecording(false);
+    }
+  }
+
+  return (
+    <section className="bg-card rounded-card p-5 shadow-sm space-y-4">
+      <div>
+        <h2 className="font-semibold text-sm uppercase tracking-wide text-label-tertiary mb-1">
+          Disaster recovery test log
+        </h2>
+        <p className="text-xs text-label-tertiary">
+          A manual evidence log, not an automated failover harness — there is no real
+          infrastructure in this platform to fail over between. Record the result each time
+          this tenant's data is actually tested for recoverability (e.g. restoring the latest
+          backup into a scratch environment), so a compliance-conscious customer or auditor can
+          be shown genuine evidence, not a claim.
+        </p>
+      </div>
+
+      {error && <div className="text-danger text-sm">{error}</div>}
+
+      <div className="flex items-end gap-2 flex-wrap rounded-lg border border-black/10 p-4">
+        <label className="text-xs text-label-tertiary">
+          Tested at
+          <input
+            type="datetime-local"
+            value={testedAt}
+            onChange={(e) => setTestedAt(e.target.value)}
+            className="mt-1 block rounded-lg border border-black/10 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+          />
+        </label>
+        <label className="text-xs text-label-tertiary">
+          Outcome
+          <select
+            value={outcome}
+            onChange={(e) => setOutcome(e.target.value as DrTestOutcome)}
+            className="mt-1 block rounded-lg border border-black/10 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+          >
+            <option value="pass">Pass</option>
+            <option value="partial">Partial</option>
+            <option value="fail">Fail</option>
+          </select>
+        </label>
+        <label className="text-xs text-label-tertiary flex-1 min-w-[200px]">
+          Notes
+          <input
+            type="text"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="What was tested, and what happened"
+            className="mt-1 block w-full rounded-lg border border-black/10 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+          />
+        </label>
+        <button
+          onClick={record}
+          disabled={recording}
+          className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-accent text-white disabled:opacity-50"
+        >
+          {recording ? "Recording…" : "Record test result"}
+        </button>
+      </div>
+
+      <div className="overflow-hidden rounded-lg border border-black/10">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs uppercase tracking-wide text-label-tertiary border-b border-black/5 bg-black/[0.02]">
+              <th className="px-3 py-2">Tested at</th>
+              <th className="px-3 py-2">Outcome</th>
+              <th className="px-3 py-2">Notes</th>
+              <th className="px-3 py-2">Recorded by</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(tests ?? []).map((t) => (
+              <tr key={t.id} className="border-b border-black/5 last:border-0">
+                <td className="px-3 py-2 whitespace-nowrap text-xs text-label-tertiary">
+                  {new Date(t.testedAt).toLocaleString()}
+                </td>
+                <td className="px-3 py-2">
+                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${DR_TEST_OUTCOME_STYLES[t.outcome]}`}>
+                    {t.outcome}
+                  </span>
+                </td>
+                <td className="px-3 py-2 text-xs text-label-tertiary max-w-xs truncate" title={t.notes ?? undefined}>
+                  {t.notes ?? "—"}
+                </td>
+                <td className="px-3 py-2 text-xs text-label-tertiary">{t.recordedBy}</td>
+              </tr>
+            ))}
+            {tests?.length === 0 && (
+              <tr>
+                <td colSpan={4} className="px-3 py-8 text-center text-label-tertiary text-sm">
+                  No DR tests recorded yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function DataResidencyPanel({ companyId }: { companyId: string }) {
+  const [status, setStatus] = useState<DataResidencyStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [requiredRegionInput, setRequiredRegionInput] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [acknowledging, setAcknowledging] = useState(false);
+
+  async function load() {
+    try {
+      const s = await api.getResidencyStatus(companyId);
+      setStatus(s);
+      setRequiredRegionInput(s.requiredRegion ?? "");
+    } catch {
+      setError("Could not load data residency status.");
+    }
+  }
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId]);
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    try {
+      setStatus(await api.setResidencyRequiredRegion(companyId, requiredRegionInput.trim() || null));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not save this requirement.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function acknowledge() {
+    setAcknowledging(true);
+    setError(null);
+    try {
+      setStatus(await api.acknowledgeResidencyMismatch(companyId));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not record this acknowledgment.");
+    } finally {
+      setAcknowledging(false);
+    }
+  }
+
+  return (
+    <section className="bg-card rounded-card p-5 shadow-sm space-y-4">
+      <div>
+        <h2 className="font-semibold text-sm uppercase tracking-wide text-label-tertiary mb-1">
+          Data residency
+        </h2>
+        <p className="text-xs text-label-tertiary">
+          A declaration + disclosure record, not real data placement — this platform runs on a
+          single hosting region and cannot actually move or place tenant data across regions.
+          Record what this tenant's own contract or expectation says, if anything, and this
+          panel plainly discloses whether that matches where the platform actually runs.
+        </p>
+      </div>
+
+      {error && <div className="text-danger text-sm">{error}</div>}
+
+      <div className="rounded-lg border border-black/10 p-4 space-y-3">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="text-xs text-label-tertiary">
+            Platform's actual hosting region:{" "}
+            <span className="font-semibold text-label-primary">{status?.platformActualRegion ?? "…"}</span>
+          </div>
+          {status && (
+            <span
+              className={`text-xs font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${RESIDENCY_STATUS_STYLES[status.complianceStatus]}`}
+            >
+              {RESIDENCY_STATUS_LABELS[status.complianceStatus]}
+            </span>
+          )}
+        </div>
+
+        <label className="text-xs text-label-tertiary block">
+          Required region (per contract)
+          <div className="flex items-center gap-2 mt-1">
+            <input
+              type="text"
+              value={requiredRegionInput}
+              onChange={(e) => setRequiredRegionInput(e.target.value)}
+              placeholder="e.g. Pakistan, EU, No requirement"
+              className="flex-1 rounded-lg border border-black/10 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+            />
+            <button
+              onClick={save}
+              disabled={saving}
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-black/10 disabled:opacity-50 shrink-0"
+            >
+              {saving ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </label>
+
+        {status?.complianceStatus === "mismatch" && (
+          <div className="rounded-lg bg-red-50 border border-red-200 p-3 space-y-2">
+            <p className="text-xs text-red-800">
+              The declared requirement does not match the platform's actual hosting region. This
+              platform cannot move tenant data to comply — disclose this to the customer, then
+              record that you have.
+            </p>
+            {status.acknowledgedBy ? (
+              <p className="text-xs text-red-800">
+                Acknowledged by {status.acknowledgedBy} on {new Date(status.acknowledgedAt!).toLocaleString()}.
+              </p>
+            ) : (
+              <button
+                onClick={acknowledge}
+                disabled={acknowledging}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-danger text-white disabled:opacity-50"
+              >
+                {acknowledging ? "Recording…" : "Acknowledge — I've told this customer"}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -2879,6 +3359,13 @@ function DataExportsTab({ companyId }: { companyId: string }) {
   // Phase 2 gap-fill item #6 — the export whose download password we're
   // currently collecting, if any.
   const [passwordPromptFor, setPasswordPromptFor] = useState<TenantDataExport | null>(null);
+  // Phase 3 item #5 — this tenant's dedicated export encryption key
+  // status, loaded/managed separately from the export jobs list above
+  // (it's its own small table, not a `tenant_data_exports` field).
+  const [keyStatus, setKeyStatus] = useState<TenantExportKeyStatus | null>(null);
+  const [keyError, setKeyError] = useState<string | null>(null);
+  const [keyBusy, setKeyBusy] = useState(false);
+  const { runWithStepUp, stepUpModal } = useStepUp();
 
   async function load() {
     try {
@@ -2888,10 +3375,55 @@ function DataExportsTab({ companyId }: { companyId: string }) {
     }
   }
 
+  async function loadKeyStatus() {
+    try {
+      setKeyStatus(await api.getExportKeyStatus(companyId));
+    } catch {
+      setKeyError("Could not load the export encryption key status.");
+    }
+  }
+
   useEffect(() => {
     load();
+    loadKeyStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId]);
+
+  async function enableExportKey() {
+    setKeyBusy(true);
+    setKeyError(null);
+    try {
+      setKeyStatus(await runWithStepUp(() => api.enableExportKey(companyId)));
+    } catch (err) {
+      setKeyError(err instanceof ApiError ? err.message : "Could not enable a dedicated export key.");
+    } finally {
+      setKeyBusy(false);
+    }
+  }
+
+  async function rotateExportKey() {
+    setKeyBusy(true);
+    setKeyError(null);
+    try {
+      setKeyStatus(await runWithStepUp(() => api.rotateExportKey(companyId)));
+    } catch (err) {
+      setKeyError(err instanceof ApiError ? err.message : "Could not rotate this export key.");
+    } finally {
+      setKeyBusy(false);
+    }
+  }
+
+  async function disableExportKey() {
+    setKeyBusy(true);
+    setKeyError(null);
+    try {
+      setKeyStatus(await runWithStepUp(() => api.disableExportKey(companyId)));
+    } catch (err) {
+      setKeyError(err instanceof ApiError ? err.message : "Could not disable this export key.");
+    } finally {
+      setKeyBusy(false);
+    }
+  }
 
   async function requestExport() {
     if (passwordProtect && requestPassword.trim().length < 8) {
@@ -2953,6 +3485,72 @@ function DataExportsTab({ companyId }: { companyId: string }) {
       </div>
 
       {error && <div className="text-danger text-sm">{error}</div>}
+
+      <div className="rounded-lg border border-black/10 p-4 space-y-2">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <h3 className="text-sm font-semibold">Export encryption key</h3>
+            <p className="text-xs text-label-tertiary mt-0.5">
+              {keyStatus?.enabled ? (
+                <>
+                  Exports for this tenant are encrypted with a dedicated key, independently rotatable from
+                  other tenants' keys.
+                </>
+              ) : (
+                <>Exports use the platform's shared default encryption key.</>
+              )}{" "}
+              This is a tenant-dedicated key with independent rotation — not a customer-held or HSM-backed
+              key (no external KMS integration exists in this platform).
+            </p>
+          </div>
+          <span
+            className={`text-xs font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${
+              keyStatus?.enabled ? "bg-green-100 text-green-800" : "bg-black/[0.06] text-label-tertiary"
+            }`}
+          >
+            {keyStatus?.enabled ? "Dedicated tenant key" : "Platform default key"}
+          </span>
+        </div>
+
+        {keyError && <div className="text-danger text-xs">{keyError}</div>}
+
+        {keyStatus?.previousKeyExpiresAt && (
+          <p className="text-xs text-label-tertiary">
+            Previous key still honored for exports made just before the last rotation, until{" "}
+            {new Date(keyStatus.previousKeyExpiresAt).toLocaleString()}.
+          </p>
+        )}
+
+        <div className="flex items-center gap-2">
+          {!keyStatus?.enabled && (
+            <button
+              onClick={enableExportKey}
+              disabled={keyBusy}
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-accent text-white disabled:opacity-50"
+            >
+              {keyBusy ? "Working…" : "Enable dedicated key"}
+            </button>
+          )}
+          {keyStatus?.enabled && (
+            <>
+              <button
+                onClick={rotateExportKey}
+                disabled={keyBusy}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-black/10 disabled:opacity-50"
+              >
+                {keyBusy ? "Working…" : "Rotate"}
+              </button>
+              <button
+                onClick={disableExportKey}
+                disabled={keyBusy}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-black/10 text-danger disabled:opacity-50"
+              >
+                {keyBusy ? "Working…" : "Disable"}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
 
       <div className="flex items-end gap-2 flex-wrap rounded-lg border border-black/10 p-4">
         <label className="text-xs text-label-tertiary">
@@ -3096,6 +3694,7 @@ function DataExportsTab({ companyId }: { companyId: string }) {
           }}
         />
       )}
+      {stepUpModal}
     </section>
   );
 }
@@ -3893,12 +4492,20 @@ function SecurityTab({
   const [busyId, setBusyId] = useState<string | null>(null);
   // Tenant Management gap-fill batch 1, Phase 1 item #3.
   const [unlockBusyId, setUnlockBusyId] = useState<string | null>(null);
+  // Phase 3 item #8 — security posture score.
+  const [posture, setPosture] = useState<SecurityPostureScore | null>(null);
+  const [postureError, setPostureError] = useState<string | null>(null);
 
   async function load() {
     try {
       setSessions(await api.listSessions(companyId));
     } catch {
       setError("Could not load sessions for this tenant.");
+    }
+    try {
+      setPosture(await api.getSecurityPosture(companyId));
+    } catch {
+      setPostureError("Could not load the security posture score for this tenant.");
     }
   }
 
@@ -3943,6 +4550,54 @@ function SecurityTab({
 
   return (
     <section className="bg-card rounded-card p-5 shadow-sm space-y-4">
+      <div>
+        <h2 className="font-semibold text-sm uppercase tracking-wide text-label-tertiary mb-1">
+          Security posture score
+        </h2>
+        <p className="text-xs text-label-tertiary">
+          Phase 3 item #8 — a checklist, not a rating: each item below is something you can turn on
+          for this tenant directly. Computed fresh on every load from this tenant's own MFA,
+          SSO, IP-list, and lockout configuration — nothing here is stored separately.
+        </p>
+      </div>
+
+      {postureError && <div className="text-danger text-sm">{postureError}</div>}
+
+      {posture && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <div className="text-2xl font-bold">
+              {posture.score}
+              <span className="text-sm font-normal text-label-tertiary">/{posture.maxScore}</span>
+            </div>
+            <div className="flex-1 h-2 rounded-full bg-black/10 overflow-hidden">
+              <div
+                className={`h-full rounded-full ${
+                  posture.score >= 80 ? "bg-success" : posture.score >= 50 ? "bg-warning" : "bg-danger"
+                }`}
+                style={{ width: `${Math.max(0, Math.min(100, (posture.score / posture.maxScore) * 100))}%` }}
+              />
+            </div>
+          </div>
+          <div className="divide-y divide-black/5">
+            {posture.signals.map((s) => (
+              <div key={s.key} className="py-2 flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-medium flex items-center gap-2">
+                    <span className={s.passed ? "text-success" : "text-danger"}>{s.passed ? "✓" : "✕"}</span>
+                    {s.label}
+                  </div>
+                  <div className="text-xs text-label-tertiary">{s.detail}</div>
+                </div>
+                <div className="text-xs text-label-tertiary whitespace-nowrap">
+                  {s.pointsEarned}/{s.pointsPossible} pts
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div>
         <h2 className="font-semibold text-sm uppercase tracking-wide text-label-tertiary mb-1">
           Account lockouts
@@ -4006,12 +4661,29 @@ function SecurityTab({
         {sessions?.map((s) => (
           <div key={s.id} className="py-3 flex items-center justify-between">
             <div>
-              <div className="text-sm font-medium">
+              <div className="text-sm font-medium flex items-center gap-2 flex-wrap">
                 {s.displayName ?? adminNameByAccount.get(s.userAccountId) ?? s.email ?? "Unknown user"}
+                {/* Phase 3 item #8 — see UserSessionView's own doc comment
+                    (shared-types) for what these two flags do and don't
+                    detect (no geo-IP; a heuristic on IP + elapsed time). */}
+                {s.isNewDevice && (
+                  <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-warning/15 text-warning">
+                    New device
+                  </span>
+                )}
+                {s.isRapidNetworkChange && (
+                  <span
+                    title="This session's IP differs from the account's immediately preceding one, arriving implausibly soon after — could be a VPN or mobile carrier reconnecting, not necessarily a real concern."
+                    className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-danger/15 text-danger"
+                  >
+                    Rapid network change
+                  </span>
+                )}
               </div>
               <div className="text-xs text-label-tertiary">
                 {s.email} · signed in {new Date(s.createdAt).toLocaleString()} · expires{" "}
                 {new Date(s.expiresAt).toLocaleString()}
+                {s.ipAddress && <> · {s.ipAddress}</>}
               </div>
             </div>
             {s.revokedAt ? (

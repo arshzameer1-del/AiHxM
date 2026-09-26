@@ -442,6 +442,15 @@ export type UserSessionView = {
   createdAt: string;
   expiresAt: string;
   revokedAt: string | null;
+  // Phase 3 item #8 — see auth/auth.service.ts's `issueSessionToken` doc
+  // comment for the full scoping decision (no geo-IP; these are the two
+  // honest, zero-external-data signals computed at session-issuance time).
+  // `ipAddress` is included here (not just the two boolean flags) so the
+  // Security tab can show WHICH network a flagged session actually came
+  // from, not just that something looked unusual.
+  ipAddress: string | null;
+  isNewDevice: boolean;
+  isRapidNetworkChange: boolean;
 };
 
 // --- Tenant Management: Saved Views (TM-003, extended by Phase 1 item #6) -
@@ -477,7 +486,11 @@ export type TenantConfigurationCategory =
   | "attendance"
   | "leave"
   | "payroll"
-  | "security";
+  | "security"
+  // Phase 3 item #7 — Backup & Disaster Recovery (advanced): RTO/RPO
+  // targets, informational only (no automated enforcement — see migration
+  // 0063's own header comment).
+  | "backup_dr";
 
 export type TenantConfigurationValueType = "boolean" | "integer" | "text";
 
@@ -593,6 +606,38 @@ export type RotateIntegrationSecretResponse = {
   integration: TenantIntegration;
   newSecretValue: string;
   previousSecretExpiresAt: string;
+};
+
+// --- Phase 3 item #4: Webhooks & Eventing -----------------------------------
+
+/**
+ * The delivery lifecycle of one queued webhook event — see
+ * `webhook_events` (migration 0061) and `WebhookDispatchService` for the
+ * full state machine (backoff schedule, max attempts, dead-lettering).
+ * `pending`/`failed` are both "still eligible for the next sweep tick" —
+ * the two are kept distinct only so the admin delivery log can show
+ * whether a row has ever actually been attempted yet.
+ */
+export type WebhookEventStatus = "pending" | "delivered" | "failed" | "dead_letter";
+
+/**
+ * One row of a tenant's webhook delivery log — `GET
+ * /platform/companies/:id/webhook-events`. `payload` is included (unlike
+ * an integration secret) since it's the tenant's own event data, not a
+ * credential; there is nothing here to redact.
+ */
+export type WebhookEvent = {
+  id: string;
+  companyId: string;
+  eventType: string;
+  payload: Record<string, unknown>;
+  status: WebhookEventStatus;
+  attemptCount: number;
+  nextAttemptAt: string;
+  lastError: string | null;
+  lastResponseStatus: number | null;
+  createdAt: string;
+  deliveredAt: string | null;
 };
 
 // --- Phase 3 item #1: SSO & Identity Federation (OpenID Connect + SAML) ----
@@ -738,6 +783,33 @@ export type HealthCheckResult = {
   checkedAt: string;
 };
 
+// --- Tenant Management: Platform-wide Health Monitoring (Phase 3 item #9) --
+// Cross-tenant aggregation on top of the same tenant_health_check_log table
+// TM-032 writes to. A company with zero rows there is never folded into
+// "ok" — see HealthService.getPlatformSummary's own doc comment — so it is
+// counted separately via `companiesNeverChecked` instead.
+export type PlatformHealthFailingCheck = {
+  checkKey: string;
+  status: Exclude<HealthCheckStatus, "ok">;
+  detail: string | null;
+  checkedAt: string;
+};
+
+export type PlatformHealthFailingCompany = {
+  companyId: string;
+  companyName: string;
+  companySlug: string;
+  failingChecks: PlatformHealthFailingCheck[];
+};
+
+export type PlatformHealthSummary = {
+  generatedAt: string;
+  totalCompanies: number;
+  companiesNeverChecked: number;
+  perCheckCounts: Record<string, { ok: number; degraded: number; down: number }>;
+  failingCompanies: PlatformHealthFailingCompany[];
+};
+
 // --- Tenant Management: Support Tickets (TM-033) ---------------------------
 export type SupportTicketPriority = "low" | "normal" | "high" | "urgent";
 export type SupportTicketStatus = "open" | "in_progress" | "resolved" | "closed";
@@ -813,6 +885,85 @@ export type RequestDataExportRequest = {
    * password instead of the server's own key, and the same password must
    * be supplied again to download it. Never persisted anywhere. */
   password?: string;
+};
+
+/**
+ * Phase 3 item #5 — "Encryption & Secrets (advanced)": a tenant-dedicated
+ * export encryption key with independent rotation, NOT a true
+ * customer-held/HSM-backed key (see TenantExportKeyService's own doc
+ * comment for the full, honest scope of what this is and isn't).
+ * `GET /platform/companies/:id/export-key`. Deliberately carries no key
+ * material of any kind, wrapped or not — that never leaves the server,
+ * unlike a rotated integration secret or SCIM token, since this key is
+ * only ever used internally and never needs to be copy-pasted anywhere.
+ */
+export type TenantExportKeyStatus = {
+  enabled: boolean;
+  /** True once a key has ever been generated for this tenant, even if `enabled` is currently false (disabling keeps the key material so already-encrypted exports stay decryptable). */
+  hasKey: boolean;
+  createdAt: string | null;
+  /** Non-null only while a just-rotated-out previous key generation is still inside its 7-day grace period. */
+  previousKeyExpiresAt: string | null;
+};
+
+/**
+ * Phase 3 item #6 — "Data Residency & Sovereignty", the honest,
+ * proportionate version: a residency DECLARATION + DISCLOSURE mechanism,
+ * not real multi-region data placement (this platform runs on a single
+ * Supabase Postgres region and has no multi-region infrastructure to move
+ * data between). `platformActualRegion` is a fixed, platform-wide
+ * constant (`PLATFORM_DATA_REGION`, see DataResidencyService) — it is the
+ * SAME for every tenant, since there is only one region. `requiredRegion`
+ * is whatever a Platform Admin recorded on behalf of this tenant's own
+ * contract/expectation, freely-entered text since real requirements vary
+ * ("Pakistan", "EU", "No requirement", etc.) — null means nothing has
+ * ever been recorded. `complianceStatus` is computed, never stored:
+ * "no_requirement" when `requiredRegion` is null/empty, "matches" when it
+ * case-insensitively appears within `platformActualRegion` (or vice
+ * versa), "mismatch" otherwise. `acknowledgedBy`/`acknowledgedAt` are only
+ * ever set (via POST .../residency/acknowledge) while a mismatch exists,
+ * and are cleared automatically the next time `requiredRegion` changes —
+ * an acknowledgment of one stated requirement must never be read as
+ * covering a different one recorded later.
+ */
+export type DataResidencyComplianceStatus = "matches" | "no_requirement" | "mismatch";
+
+export type DataResidencyStatus = {
+  companyId: string;
+  platformActualRegion: string;
+  requiredRegion: string | null;
+  complianceStatus: DataResidencyComplianceStatus;
+  acknowledgedBy: string | null;
+  acknowledgedAt: string | null;
+};
+
+// --- Phase 3 item #7: Backup & Disaster Recovery (advanced) ----------------
+// RTO/RPO targets ride the existing `tenant_configuration_defaults`/
+// `tenant_configuration` mechanism (category 'backup_dr', migration 0063)
+// and so need no dedicated type here — TenantConfigurationSetting already
+// covers them. What's new is the manual DR test evidence log: there is no
+// automated failover harness in this platform (explicitly out of scope —
+// no real infrastructure exists to fail over between), so this is an
+// honest record of actual, manually-performed recovery tests a Platform
+// Admin ran, kept for the same reason a real ops team keeps one: to show
+// a compliance-conscious customer or auditor genuine evidence of when
+// this tenant's data was last tested for recoverability, and how it went.
+export type DrTestOutcome = "pass" | "fail" | "partial";
+
+export type TenantDrTestLogEntry = {
+  id: string;
+  companyId: string;
+  testedAt: string;
+  outcome: DrTestOutcome;
+  notes: string | null;
+  recordedBy: string;
+  createdAt: string;
+};
+
+export type RecordDrTestRequest = {
+  testedAt: string;
+  outcome: DrTestOutcome;
+  notes?: string;
 };
 
 // --- Phase 3: Auth & Identity --------------------------------------------
@@ -2689,4 +2840,40 @@ export type FulfillDataSubjectRequestRequest = {
 export type DecideOnDutyRequestRequest = {
   decision: "approved" | "rejected";
   comment?: string;
+};
+
+// --- Phase 3 item #8: Security Policy (advanced) — Security Posture Score -
+// Entirely computed, read-only, and derived from data this codebase
+// already collects (MFA enrollment, SSO configuration, IP allow/denylist,
+// concurrent-session limits, admin lockouts, lockout policy) — no new
+// table. See SecurityPostureService for the point-weighting rationale
+// behind each signal; `pointsPossible` across `signals` always sums to
+// `maxScore`, and `score` is just the sum of each signal's `pointsEarned`.
+// This is deliberately NOT a security rating service or a benchmark
+// against other tenants — it's a checklist that tells a Platform Admin
+// which of a small number of concrete, actionable things this tenant
+// hasn't turned on yet.
+export type SecurityPostureSignalKey =
+  | "admin_mfa_coverage"
+  | "sso_configured"
+  | "ip_allow_or_denylist"
+  | "concurrent_session_limit"
+  | "no_active_admin_lockouts"
+  | "lockout_policy_not_permissive";
+
+export type SecurityPostureSignal = {
+  key: SecurityPostureSignalKey;
+  label: string;
+  passed: boolean;
+  pointsEarned: number;
+  pointsPossible: number;
+  detail: string;
+};
+
+export type SecurityPostureScore = {
+  companyId: string;
+  score: number;
+  maxScore: number;
+  signals: SecurityPostureSignal[];
+  computedAt: string;
 };

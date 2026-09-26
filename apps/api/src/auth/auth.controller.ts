@@ -1,6 +1,8 @@
-import { Body, Controller, Get, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Post, Req, UseGuards } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
+import type { Request } from "express";
 import { AuthService } from "./auth.service";
+import type { SessionRequestContext } from "./auth.service";
 import { StepUpService } from "./step-up.service";
 import { CurrentClaims } from "./current-claims.decorator";
 import { LoginDto } from "./dto/login.dto";
@@ -10,6 +12,26 @@ import { StepUpVerifyDto } from "./dto/step-up-verify.dto";
 import { PasswordResetConfirmDto, PasswordResetRequestDto } from "./dto/password-reset.dto";
 import { SessionGuard } from "./session.guard";
 import type { RequestClaims } from "../database/tenant-context";
+
+/**
+ * Phase 3 item #8 — the one place a request's real IP/User-Agent are read
+ * for the three routes that actually issue a session
+ * (mfa/enroll/confirm, mfa/verify, mfa/recovery-code/verify). `req.ip` is
+ * already trusted elsewhere in this exact same posture (SessionGuard, IP
+ * allow/denylist enforcement) thanks to main.ts's `trust proxy: 1` — this
+ * app sits behind exactly one reverse-proxy hop (Render/Netlify), so
+ * Express's own X-Forwarded-For handling is what's relied on here rather
+ * than reading the header directly, for the identical reason SessionGuard
+ * doesn't either. `login`/`login/employee` deliberately do NOT need this:
+ * MFA is mandatory, so neither ever issues a session itself — see
+ * AuthService.login's own doc comment.
+ */
+function sessionRequestContext(req: Request): SessionRequestContext {
+  return {
+    ipAddress: req.ip || null,
+    userAgent: req.headers["user-agent"] || null,
+  };
+}
 
 /**
  * Public — no guard. Every endpoint here is either the pre-authentication
@@ -54,14 +76,14 @@ export class AuthController {
 
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post("mfa/enroll/confirm")
-  confirmMfaEnrollment(@Body() dto: MfaEnrollConfirmDto) {
-    return this.auth.confirmMfaEnrollment(dto.mfaTicket, dto.code);
+  confirmMfaEnrollment(@Body() dto: MfaEnrollConfirmDto, @Req() req: Request) {
+    return this.auth.confirmMfaEnrollment(dto.mfaTicket, dto.code, sessionRequestContext(req));
   }
 
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post("mfa/verify")
-  verifyMfa(@Body() dto: MfaVerifyDto) {
-    return this.auth.verifyMfa(dto.mfaTicket, dto.code);
+  verifyMfa(@Body() dto: MfaVerifyDto, @Req() req: Request) {
+    return this.auth.verifyMfa(dto.mfaTicket, dto.code, sessionRequestContext(req));
   }
 
   // Same throttle as mfa/verify — a recovery code is just an alternate
@@ -70,8 +92,8 @@ export class AuthController {
   // surface this needs a tighter limit for.
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post("mfa/recovery-code/verify")
-  verifyMfaRecoveryCode(@Body() dto: MfaRecoveryCodeVerifyDto) {
-    return this.auth.verifyMfaRecoveryCode(dto.mfaTicket, dto.code);
+  verifyMfaRecoveryCode(@Body() dto: MfaRecoveryCodeVerifyDto, @Req() req: Request) {
+    return this.auth.verifyMfaRecoveryCode(dto.mfaTicket, dto.code, sessionRequestContext(req));
   }
 
   @Throttle({ default: { limit: 5, ttl: 60_000 } })

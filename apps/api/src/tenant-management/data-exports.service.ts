@@ -8,6 +8,7 @@ import { FILE_STORAGE, type FileStorageService } from "../file-storage/file-stor
 import type { RequestClaims } from "../database/tenant-context";
 import type { DataExportFormat, DataExportScope, RequestDataExportRequest, TenantDataExport } from "@aihxm/shared-types";
 import { decryptExportPayload, encryptExportPayload } from "./export-crypto";
+import { TenantExportKeyService } from "./tenant-export-key.service";
 
 const EXPORT_TTL_HOURS = 72;
 
@@ -48,6 +49,15 @@ function toExport(row: any): TenantDataExport {
  * key — see export-crypto.ts's own doc comment for exactly what that
  * does and does not protect against, and why the password itself is
  * never persisted anywhere.
+ *
+ * Phase 3 item #5 — a tenant with a dedicated, enabled export encryption
+ * key (`TenantExportKeyService`) gets its exports encrypted under THAT
+ * key instead of the platform's shared server key, whenever no explicit
+ * per-export `password` was supplied. Precedence, deliberately: an
+ * explicit `password` always wins — a requester who asks for a one-off
+ * password-protected export gets exactly that, regardless of whatever
+ * standing tenant key exists, the same way a more specific setting always
+ * overrides a more general default elsewhere in this codebase.
  */
 @Injectable()
 export class DataExportsService {
@@ -56,6 +66,7 @@ export class DataExportsService {
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
     private readonly importExport: ImportExportService,
+    private readonly tenantExportKey: TenantExportKeyService,
     @Inject(FILE_STORAGE) private readonly fileStorage: FileStorageService
   ) {}
 
@@ -88,9 +99,12 @@ export class DataExportsService {
       try {
         const { fileName, buffer } = await this.buildPayload(client, companyId, dto.scope, dto.format, exportId);
         // Real data never touches storage in plaintext, regardless of
-        // whether the requester set a password — see this class's own
-        // doc comment and export-crypto.ts.
-        const encrypted = encryptExportPayload(buffer, dto.password);
+        // which of the three modes ends up keying it — see this class's
+        // own doc comment and export-crypto.ts. An explicit password
+        // always takes priority; only when none was supplied do we check
+        // for a dedicated tenant key (Phase 3 item #5).
+        const tenantKey = dto.password ? null : await this.tenantExportKey.resolveActiveKey(client, companyId);
+        const encrypted = encryptExportPayload(buffer, dto.password, tenantKey ?? undefined);
         const stored = await this.fileStorage.save(companyId, "exports", fileName, encrypted);
         const expiresAt = new Date(Date.now() + EXPORT_TTL_HOURS * 60 * 60 * 1000);
         const completed = await client.query(
@@ -152,17 +166,29 @@ export class DataExportsService {
       }
       const encrypted = await this.fileStorage.read(dataExport.fileKey);
       let buffer: Buffer;
-      try {
-        buffer = decryptExportPayload(encrypted, password);
-      } catch (err) {
-        const code = (err as Error).message;
-        if (code === "PASSWORD_REQUIRED") {
-          throw new BadRequestException("This export is password-protected — supply the password to download it.");
+      if (encrypted[0] === 2) {
+        // Phase 3 item #5 — envelope mode 2: this export was encrypted
+        // under a tenant-dedicated key. There is no way to tell from the
+        // envelope alone whether it was the tenant's CURRENT key or the
+        // previous one (still valid, briefly, right after a rotation) —
+        // see TenantExportKeyService.resolveKeyForDecryption()'s own doc
+        // comment — so try current first, then previous within its grace
+        // period, before giving up.
+        const { current, previous } = await this.tenantExportKey.resolveKeyForDecryption(client, companyId);
+        buffer = this.tryDecryptWithTenantKeys(encrypted, current, previous);
+      } else {
+        try {
+          buffer = decryptExportPayload(encrypted, password);
+        } catch (err) {
+          const code = (err as Error).message;
+          if (code === "PASSWORD_REQUIRED") {
+            throw new BadRequestException("This export is password-protected — supply the password to download it.");
+          }
+          if (code === "INCORRECT_PASSWORD") {
+            throw new BadRequestException("Incorrect password.");
+          }
+          throw new BadRequestException("This export could not be decrypted.");
         }
-        if (code === "INCORRECT_PASSWORD") {
-          throw new BadRequestException("Incorrect password.");
-        }
-        throw new BadRequestException("This export could not be decrypted.");
       }
       await this.audit.record(client, claims, {
         companyId,
@@ -172,6 +198,28 @@ export class DataExportsService {
       const ext = dataExport.format === "csv" ? "csv" : "json";
       return { fileName: `export-${dataExport.scope}-${exportId}.${ext}`, buffer };
     });
+  }
+
+  /**
+   * Phase 3 item #5 — tries the tenant's current key, then its previous
+   * one (if still within its rotation grace period), and only THEN gives
+   * up — mirroring the existing PASSWORD_REQUIRED/INCORRECT_PASSWORD
+   * error-code pattern with a mode-2-specific message, since "wrong
+   * password" would be a misleading thing to tell a caller here (there is
+   * no password involved at all in this mode).
+   */
+  private tryDecryptWithTenantKeys(encrypted: Buffer, current: Buffer | null, previous: Buffer | null): Buffer {
+    for (const candidate of [current, previous]) {
+      if (!candidate) continue;
+      try {
+        return decryptExportPayload(encrypted, undefined, candidate);
+      } catch {
+        // try the next candidate key, if any
+      }
+    }
+    throw new BadRequestException(
+      "This export was encrypted with this tenant's dedicated key, which could not be resolved for decryption."
+    );
   }
 
   private async buildPayload(

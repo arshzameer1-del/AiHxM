@@ -121,4 +121,47 @@ describe("Backups (e2e)", () => {
       .set("Authorization", `Bearer ${platformAdminToken}`);
     expect(res.status).toBe(400);
   });
+
+  // Phase 3 item #7 — manual DR test evidence log.
+  describe("DR test evidence log", () => {
+    it("starts empty", async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/platform/companies/${companyId}/backups/dr-tests`)
+        .set("Authorization", `Bearer ${platformAdminToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual([]);
+    });
+
+    it("rejects an unknown outcome value", async () => {
+      const res = await request(app.getHttpServer())
+        .post(`/platform/companies/${companyId}/backups/dr-tests`)
+        .set("Authorization", `Bearer ${platformAdminToken}`)
+        .send({ testedAt: "2026-06-01T10:00:00.000Z", outcome: "bogus" });
+      expect(res.status).toBe(400);
+    });
+
+    it("records a real DR test result", async () => {
+      const res = await request(app.getHttpServer())
+        .post(`/platform/companies/${companyId}/backups/dr-tests`)
+        .set("Authorization", `Bearer ${platformAdminToken}`)
+        .send({
+          testedAt: "2026-06-01T10:00:00.000Z",
+          outcome: "pass",
+          notes: "Restored the latest backup into a scratch environment and verified employee records.",
+        });
+      expect(res.status).toBe(201);
+      expect(res.body.outcome).toBe("pass");
+      expect(res.body.companyId).toBe(companyId);
+      expect(res.body.recordedBy).toBeTruthy();
+    });
+
+    it("lists the recorded DR test back", async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/platform/companies/${companyId}/backups/dr-tests`)
+        .set("Authorization", `Bearer ${platformAdminToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveLength(1);
+      expect(res.body[0].outcome).toBe("pass");
+    });
+  });
 });

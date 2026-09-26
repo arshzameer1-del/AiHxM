@@ -4,8 +4,10 @@ import { generate as generateTotp } from "otplib";
 import * as bcrypt from "bcryptjs";
 import { Pool } from "pg";
 import { AuthService } from "./auth.service";
+import type { SessionRequestContext } from "./auth.service";
 import { SessionSecurityService } from "./session-security.service";
 import { CacheService } from "../cache/cache.service";
+import { AuditService } from "../audit/audit.service";
 import { DatabaseService } from "../database/database.service";
 import { EntitlementsService } from "../entitlements/entitlements.service";
 import { MailerService } from "../mailer/mailer.service";
@@ -44,6 +46,7 @@ describe("AuthService", () => {
         MailerService,
         SessionSecurityService,
         CacheService,
+        AuditService,
         {
           provide: PG_POOL,
           useValue: pool,
@@ -103,14 +106,34 @@ describe("AuthService", () => {
   }
 
   /** Drives an account all the way from a fresh login() to a real session token, completing MFA enrollment along the way. */
-  async function loginToSessionToken(email: string, password: string): Promise<string> {
+  async function loginToSessionToken(
+    email: string,
+    password: string,
+    requestContext?: SessionRequestContext
+  ): Promise<string> {
     const first = await service.login(email, password);
     if (first.status !== "mfa_setup_required") {
       throw new Error(`Expected mfa_setup_required, got ${first.status}`);
     }
     const code = await generateTotp({ secret: first.secretForManualEntry });
-    const confirmed = await service.confirmMfaEnrollment(first.mfaTicket, code);
+    const confirmed = await service.confirmMfaEnrollment(first.mfaTicket, code, requestContext);
     return confirmed.token;
+  }
+
+  /** A second (already-MFA-enabled) login for an account, driven all the way to a fresh session token. */
+  async function reLoginToSessionToken(
+    email: string,
+    password: string,
+    totpSecret: string,
+    requestContext?: SessionRequestContext
+  ): Promise<string> {
+    const login = await service.login(email, password);
+    if (login.status !== "mfa_required") {
+      throw new Error(`Expected mfa_required, got ${login.status}`);
+    }
+    const code = await generateTotp({ secret: totpSecret });
+    const verified = await service.verifyMfa(login.mfaTicket, code, requestContext);
+    return verified.token;
   }
 
   describe("login", () => {
@@ -803,6 +826,205 @@ describe("AuthService", () => {
       const secondRow = sessions.rows.find((r) => r.id === secondJti);
       expect(firstRow?.revoked_at).not.toBeNull();
       expect(secondRow?.revoked_at).toBeNull();
+    });
+  });
+
+  // Phase 3 item #8 — closing the real, pre-existing gap: ip_address/
+  // user_agent were threaded nowhere and stayed NULL since Phase 1 (see
+  // issueSessionToken's own doc comment), plus the two honest,
+  // zero-external-data signals computed from that data now that it's
+  // actually captured.
+  describe("session request context (Phase 3 item #8)", () => {
+    async function latestSession(userAccountId: string) {
+      const result = await db.withClaims(FIXTURE_CLAIMS, (c) =>
+        c.query<{
+          ip_address: string | null;
+          user_agent: string | null;
+          is_new_device: boolean;
+          is_rapid_network_change: boolean;
+          created_at: Date;
+        }>(
+          "SELECT ip_address, user_agent, is_new_device, is_rapid_network_change, created_at FROM user_sessions WHERE user_account_id = $1 ORDER BY created_at DESC LIMIT 1",
+          [userAccountId]
+        )
+      );
+      return result.rows[0];
+    }
+
+    async function auditEntries(userAccountId: string) {
+      const result = await db.withClaims(FIXTURE_CLAIMS, (c) =>
+        c.query<{ metadata: Record<string, unknown> }>(
+          "SELECT metadata FROM audit_log WHERE action = 'auth.suspicious_login' AND actor = $1",
+          [userAccountId]
+        )
+      );
+      return result.rows;
+    }
+
+    it("persists the real IP address and User-Agent, not null", async () => {
+      const { id, email, password } = await createUserAccount();
+      await grantRoleAssignment(id);
+
+      await loginToSessionToken(email, password, { ipAddress: "203.0.113.7", userAgent: "TestAgent/1.0" });
+
+      const row = await latestSession(id);
+      expect(row.ip_address).toBe("203.0.113.7");
+      expect(row.user_agent).toBe("TestAgent/1.0");
+    });
+
+    it("flags a brand-new account's very first session as a new device", async () => {
+      const { id, email, password } = await createUserAccount();
+      await grantRoleAssignment(id);
+
+      await loginToSessionToken(email, password, { ipAddress: "203.0.113.7", userAgent: "TestAgent/1.0" });
+
+      const row = await latestSession(id);
+      expect(row.is_new_device).toBe(true);
+    });
+
+    it("does not flag a returning fingerprint (same User-Agent) as a new device", async () => {
+      const { id, email, password } = await createUserAccount();
+      await grantRoleAssignment(id);
+
+      const enroll = await service.login(email, password);
+      if (enroll.status !== "mfa_setup_required") throw new Error("expected mfa_setup_required");
+      await service.confirmMfaEnrollment(enroll.mfaTicket, await generateTotp({ secret: enroll.secretForManualEntry }), {
+        ipAddress: "203.0.113.7",
+        userAgent: "TestAgent/1.0",
+      });
+
+      await reLoginToSessionToken(email, password, enroll.secretForManualEntry, {
+        ipAddress: "203.0.113.7",
+        userAgent: "TestAgent/1.0",
+      });
+
+      const row = await latestSession(id);
+      expect(row.is_new_device).toBe(false);
+    });
+
+    it("flags a genuinely new User-Agent fingerprint as a new device on a later login", async () => {
+      const { id, email, password } = await createUserAccount();
+      await grantRoleAssignment(id);
+
+      const enroll = await service.login(email, password);
+      if (enroll.status !== "mfa_setup_required") throw new Error("expected mfa_setup_required");
+      await service.confirmMfaEnrollment(enroll.mfaTicket, await generateTotp({ secret: enroll.secretForManualEntry }), {
+        ipAddress: "203.0.113.7",
+        userAgent: "TestAgent/1.0",
+      });
+
+      await reLoginToSessionToken(email, password, enroll.secretForManualEntry, {
+        ipAddress: "203.0.113.7",
+        userAgent: "SomeOtherBrowser/9.9",
+      });
+
+      const row = await latestSession(id);
+      expect(row.is_new_device).toBe(true);
+    });
+
+    it("flags rapid re-authentication from a different IP arriving soon after the prior session", async () => {
+      const { id, email, password } = await createUserAccount();
+      await grantRoleAssignment(id);
+
+      const enroll = await service.login(email, password);
+      if (enroll.status !== "mfa_setup_required") throw new Error("expected mfa_setup_required");
+      await service.confirmMfaEnrollment(enroll.mfaTicket, await generateTotp({ secret: enroll.secretForManualEntry }), {
+        ipAddress: "203.0.113.7",
+        userAgent: "TestAgent/1.0",
+      });
+
+      await reLoginToSessionToken(email, password, enroll.secretForManualEntry, {
+        ipAddress: "198.51.100.9",
+        userAgent: "TestAgent/1.0",
+      });
+
+      const row = await latestSession(id);
+      expect(row.is_rapid_network_change).toBe(true);
+    });
+
+    it("does not flag a same-IP re-login, even immediately after", async () => {
+      const { id, email, password } = await createUserAccount();
+      await grantRoleAssignment(id);
+
+      const enroll = await service.login(email, password);
+      if (enroll.status !== "mfa_setup_required") throw new Error("expected mfa_setup_required");
+      await service.confirmMfaEnrollment(enroll.mfaTicket, await generateTotp({ secret: enroll.secretForManualEntry }), {
+        ipAddress: "203.0.113.7",
+        userAgent: "TestAgent/1.0",
+      });
+
+      await reLoginToSessionToken(email, password, enroll.secretForManualEntry, {
+        ipAddress: "203.0.113.7",
+        userAgent: "TestAgent/1.0",
+      });
+
+      const row = await latestSession(id);
+      expect(row.is_rapid_network_change).toBe(false);
+    });
+
+    it("does not flag a different IP once the gap exceeds the rapid-change window", async () => {
+      const { id, email, password } = await createUserAccount();
+      await grantRoleAssignment(id);
+
+      const enroll = await service.login(email, password);
+      if (enroll.status !== "mfa_setup_required") throw new Error("expected mfa_setup_required");
+      await service.confirmMfaEnrollment(enroll.mfaTicket, await generateTotp({ secret: enroll.secretForManualEntry }), {
+        ipAddress: "203.0.113.7",
+        userAgent: "TestAgent/1.0",
+      });
+
+      // Backdate that first session's created_at well outside the
+      // (15-minute) window, rather than sleeping the test for 15 minutes.
+      await db.withClaims(FIXTURE_CLAIMS, (c) =>
+        c.query("UPDATE user_sessions SET created_at = now() - interval '1 hour' WHERE user_account_id = $1", [id])
+      );
+
+      await reLoginToSessionToken(email, password, enroll.secretForManualEntry, {
+        ipAddress: "198.51.100.9",
+        userAgent: "TestAgent/1.0",
+      });
+
+      const row = await latestSession(id);
+      expect(row.is_rapid_network_change).toBe(false);
+    });
+
+    it("records auth.suspicious_login only when at least one flag trips, and not on an unremarkable login", async () => {
+      const { id, email, password } = await createUserAccount();
+      await grantRoleAssignment(id);
+
+      // First login ever: always a new device (nothing to compare
+      // against), so this SHOULD produce exactly one audit entry.
+      await loginToSessionToken(email, password, { ipAddress: "203.0.113.7", userAgent: "TestAgent/1.0" });
+      expect(await auditEntries(id)).toHaveLength(1);
+      expect(await auditEntries(id)).toEqual([
+        expect.objectContaining({
+          metadata: expect.objectContaining({ isNewDevice: true, ipAddress: "203.0.113.7" }),
+        }),
+      ]);
+    });
+
+    it("records no auth.suspicious_login for an unremarkable repeat login (same device, same IP, no rush)", async () => {
+      const { id, email, password } = await createUserAccount();
+      await grantRoleAssignment(id);
+
+      const enroll = await service.login(email, password);
+      if (enroll.status !== "mfa_setup_required") throw new Error("expected mfa_setup_required");
+      await service.confirmMfaEnrollment(enroll.mfaTicket, await generateTotp({ secret: enroll.secretForManualEntry }), {
+        ipAddress: "203.0.113.7",
+        userAgent: "TestAgent/1.0",
+      });
+      // The enrollment login itself is a new device (first ever) — clear
+      // that one audit entry from consideration and only assert on what
+      // happens for the SECOND, unremarkable login.
+      const afterEnrollCount = (await auditEntries(id)).length;
+      expect(afterEnrollCount).toBe(1);
+
+      await reLoginToSessionToken(email, password, enroll.secretForManualEntry, {
+        ipAddress: "203.0.113.7",
+        userAgent: "TestAgent/1.0",
+      });
+
+      expect(await auditEntries(id)).toHaveLength(afterEnrollCount);
     });
   });
 });

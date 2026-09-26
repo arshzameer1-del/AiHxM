@@ -7,6 +7,7 @@ import request from "supertest";
 import { AppModule } from "../app.module";
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
+import { performStepUpForTest } from "../auth/step-up-test-support";
 
 const FIXTURE_CLAIMS: RequestClaims = {
   is_platform_admin: true,
@@ -25,6 +26,11 @@ describe("Data exports (e2e)", () => {
   let pool: Pool;
   let db: DatabaseService;
   let platformAdminToken: string;
+  // Phase 3 item #5's export-key routes are @RequireStepUp()-gated — kept
+  // from the same login flow this file already drives so a fresh step-up
+  // grant can be minted on demand via the real POST /auth/step-up route,
+  // same idiom as scim.e2e.spec.ts's performStepUpForTest().
+  let platformAdminMfaSecret: string;
   let companyId: string;
 
   async function createPlatformAdmin(email: string, password: string): Promise<void> {
@@ -41,13 +47,14 @@ describe("Data exports (e2e)", () => {
     });
   }
 
-  async function loginToSessionToken(email: string, password: string): Promise<string> {
+  async function loginToSessionToken(email: string, password: string): Promise<{ token: string; mfaSecret: string }> {
     const loginRes = await request(app.getHttpServer()).post("/auth/login").send({ email, password });
-    const code = await generateTotp({ secret: loginRes.body.secretForManualEntry });
+    const mfaSecret = loginRes.body.secretForManualEntry as string;
+    const code = await generateTotp({ secret: mfaSecret });
     const confirmRes = await request(app.getHttpServer())
       .post("/auth/mfa/enroll/confirm")
       .send({ mfaTicket: loginRes.body.mfaTicket, code });
-    return confirmRes.body.token;
+    return { token: confirmRes.body.token, mfaSecret };
   }
 
   beforeAll(async () => {
@@ -62,7 +69,9 @@ describe("Data exports (e2e)", () => {
     const email = `exports-e2e-admin-${Date.now()}@example.com`;
     const password = "SuperSecret123!";
     await createPlatformAdmin(email, password);
-    platformAdminToken = await loginToSessionToken(email, password);
+    const login = await loginToSessionToken(email, password);
+    platformAdminToken = login.token;
+    platformAdminMfaSecret = login.mfaSecret;
 
     const adminEmail = `exports-test-admin-${Date.now()}@example.com`;
     const createRes = await request(app.getHttpServer())
@@ -220,6 +229,153 @@ describe("Data exports (e2e)", () => {
       const raw = await fs.readFile(path.join(storageRoot, fileKey));
       expect(raw.toString("utf8")).not.toContain("employee_number");
       expect(raw[0]).toBe(1); // envelope mode byte: 1 = password-keyed
+    });
+  });
+
+  describe("Phase 3 item #5 — tenant-dedicated export encryption key", () => {
+    let firstExportId: string;
+    let firstExportFileKey: string;
+
+    it("enabling a dedicated key reports it in the status endpoint", async () => {
+      const statusBefore = await request(app.getHttpServer())
+        .get(`/platform/companies/${companyId}/export-key`)
+        .set("Authorization", `Bearer ${platformAdminToken}`);
+      expect(statusBefore.status).toBe(200);
+      expect(statusBefore.body).toEqual({ enabled: false, hasKey: false, createdAt: null, previousKeyExpiresAt: null });
+
+      const enableRes = await request(app.getHttpServer())
+        .post(`/platform/companies/${companyId}/export-key/enable`)
+        .set("Authorization", `Bearer ${platformAdminToken}`);
+      // No step-up grant has been established in this test yet — the
+      // route is @RequireStepUp()-gated, same as rotateIntegrationSecret.
+      expect(enableRes.status).toBe(403);
+
+      await performStepUpForTest(app, platformAdminToken, platformAdminMfaSecret);
+
+      const enabled = await request(app.getHttpServer())
+        .post(`/platform/companies/${companyId}/export-key/enable`)
+        .set("Authorization", `Bearer ${platformAdminToken}`);
+      expect(enabled.status).toBe(201);
+      expect(enabled.body.enabled).toBe(true);
+      expect(enabled.body.hasKey).toBe(true);
+      // Never exposes any key material, wrapped or not.
+      expect(JSON.stringify(enabled.body)).not.toMatch(/[0-9a-f]{48,}/);
+    });
+
+    it("a new export with no explicit password now uses the tenant's own key (mode byte 2), not the shared server key", async () => {
+      const res = await request(app.getHttpServer())
+        .post(`/platform/companies/${companyId}/exports`)
+        .set("Authorization", `Bearer ${platformAdminToken}`)
+        .send({ scope: "employees", format: "csv" });
+      expect(res.status).toBe(201);
+      expect(res.body.status).toBe("completed");
+      firstExportId = res.body.id;
+
+      const row = await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query("SELECT file_key FROM tenant_data_exports WHERE id = $1", [firstExportId])
+      );
+      firstExportFileKey = row.rows[0].file_key as string;
+      const fs = await import("fs/promises");
+      const path = await import("path");
+      const storageRoot = path.resolve(process.env.FILE_STORAGE_LOCAL_DIR ?? "./storage-data");
+      const raw = await fs.readFile(path.join(storageRoot, firstExportFileKey));
+      expect(raw[0]).toBe(2); // envelope mode byte: 2 = tenant-key
+    });
+
+    it("downloads successfully using the tenant key transparently (no password needed)", async () => {
+      const download = await request(app.getHttpServer())
+        .get(`/platform/companies/${companyId}/exports/${firstExportId}/download`)
+        .set("Authorization", `Bearer ${platformAdminToken}`);
+      expect(download.status).toBe(200);
+      expect(download.text.split("\n")[0]).toBe("id,employee_number,first_name,last_name,employment_status,hire_date");
+    });
+
+    it("rotating the key still allows downloading the OLDER export via the previous-key grace period", async () => {
+      const rotated = await request(app.getHttpServer())
+        .post(`/platform/companies/${companyId}/export-key/rotate`)
+        .set("Authorization", `Bearer ${platformAdminToken}`);
+      expect(rotated.status).toBe(201);
+      expect(rotated.body.enabled).toBe(true);
+      expect(rotated.body.previousKeyExpiresAt).toBeTruthy();
+
+      const download = await request(app.getHttpServer())
+        .get(`/platform/companies/${companyId}/exports/${firstExportId}/download`)
+        .set("Authorization", `Bearer ${platformAdminToken}`);
+      expect(download.status).toBe(200);
+      expect(download.text.split("\n")[0]).toBe("id,employee_number,first_name,last_name,employment_status,hire_date");
+    });
+
+    it("a fresh export made after rotation is encrypted under the NEW current key, and downloads fine", async () => {
+      const res = await request(app.getHttpServer())
+        .post(`/platform/companies/${companyId}/exports`)
+        .set("Authorization", `Bearer ${platformAdminToken}`)
+        .send({ scope: "employees", format: "csv" });
+      expect(res.status).toBe(201);
+
+      const download = await request(app.getHttpServer())
+        .get(`/platform/companies/${companyId}/exports/${res.body.id}/download`)
+        .set("Authorization", `Bearer ${platformAdminToken}`);
+      expect(download.status).toBe(200);
+      expect(download.text.split("\n")[0]).toBe("id,employee_number,first_name,last_name,employment_status,hire_date");
+    });
+
+    it("disabling the key falls back to the shared server key for NEW exports, while the OLD tenant-keyed export still downloads", async () => {
+      const disabled = await request(app.getHttpServer())
+        .post(`/platform/companies/${companyId}/export-key/disable`)
+        .set("Authorization", `Bearer ${platformAdminToken}`);
+      expect(disabled.status).toBe(201);
+      expect(disabled.body.enabled).toBe(false);
+      expect(disabled.body.hasKey).toBe(true);
+
+      const res = await request(app.getHttpServer())
+        .post(`/platform/companies/${companyId}/exports`)
+        .set("Authorization", `Bearer ${platformAdminToken}`)
+        .send({ scope: "employees", format: "csv" });
+      expect(res.status).toBe(201);
+
+      const row = await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query("SELECT file_key FROM tenant_data_exports WHERE id = $1", [res.body.id])
+      );
+      const fs = await import("fs/promises");
+      const path = await import("path");
+      const storageRoot = path.resolve(process.env.FILE_STORAGE_LOCAL_DIR ?? "./storage-data");
+      const raw = await fs.readFile(path.join(storageRoot, row.rows[0].file_key as string));
+      expect(raw[0]).toBe(0); // envelope mode byte: 0 = shared server key, now that the tenant key is disabled
+
+      const download = await request(app.getHttpServer())
+        .get(`/platform/companies/${companyId}/exports/${res.body.id}/download`)
+        .set("Authorization", `Bearer ${platformAdminToken}`);
+      expect(download.status).toBe(200);
+      expect(download.text.split("\n")[0]).toBe("id,employee_number,first_name,last_name,employment_status,hire_date");
+
+      // The export made BEFORE disabling, under the tenant's (now-disabled)
+      // key, must still be downloadable — disabling only affects future
+      // exports, never already-encrypted ones.
+      const stillDownloads = await request(app.getHttpServer())
+        .get(`/platform/companies/${companyId}/exports/${firstExportId}/download`)
+        .set("Authorization", `Bearer ${platformAdminToken}`);
+      expect(stillDownloads.status).toBe(200);
+    });
+
+    it("an explicit per-export password still takes priority over an enabled tenant key", async () => {
+      await request(app.getHttpServer())
+        .post(`/platform/companies/${companyId}/export-key/enable`)
+        .set("Authorization", `Bearer ${platformAdminToken}`);
+
+      const res = await request(app.getHttpServer())
+        .post(`/platform/companies/${companyId}/exports`)
+        .set("Authorization", `Bearer ${platformAdminToken}`)
+        .send({ scope: "employees", format: "csv", password: "requester-chosen-password" });
+      expect(res.status).toBe(201);
+
+      const row = await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query("SELECT file_key FROM tenant_data_exports WHERE id = $1", [res.body.id])
+      );
+      const fs = await import("fs/promises");
+      const path = await import("path");
+      const storageRoot = path.resolve(process.env.FILE_STORAGE_LOCAL_DIR ?? "./storage-data");
+      const raw = await fs.readFile(path.join(storageRoot, row.rows[0].file_key as string));
+      expect(raw[0]).toBe(1); // password mode wins over the tenant key
     });
   });
 });

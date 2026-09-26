@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { AuditModule } from "../audit/audit.module";
 import { EntitlementsModule } from "../entitlements/entitlements.module";
 import { MailerModule } from "../mailer/mailer.module";
 import { AuthController } from "./auth.controller";
@@ -10,7 +11,10 @@ import { StepUpService } from "./step-up.service";
 import { SessionSecurityModule } from "./session-security.module";
 
 @Module({
-  imports: [EntitlementsModule, MailerModule, SessionSecurityModule],
+  // AuditModule — Phase 3 item #8's `auth.suspicious_login` event, written
+  // in the same transaction as the `user_sessions` insert (see
+  // AuthService.issueSessionToken's doc comment).
+  imports: [EntitlementsModule, MailerModule, SessionSecurityModule, AuditModule],
   controllers: [AuthController],
   providers: [AuthService, PlatformAdminGuard, SessionGuard, StepUpGuard, StepUpService],
   exports: [AuthService, PlatformAdminGuard, SessionGuard, StepUpGuard, SessionSecurityModule],

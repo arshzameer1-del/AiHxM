@@ -164,12 +164,33 @@ describe("Auth HTTP surface (e2e)", () => {
       const enrollCode = await generateTotp({ secret: enrollLoginRes.body.secretForManualEntry });
       const confirmRes = await request(app.getHttpServer())
         .post("/auth/mfa/enroll/confirm")
-        .send({ mfaTicket: enrollLoginRes.body.mfaTicket, code: enrollCode });
+        .send({ mfaTicket: enrollLoginRes.body.mfaTicket, code: enrollCode })
+        // Phase 3 item #8 — real HTTP-level proof (not just the direct
+        // service call auth.service.spec.ts's own session-request-context
+        // suite already covers) that a login through the actual
+        // controller populates `user_sessions.ip_address`/`user_agent`,
+        // closing the real pre-existing gap AuthController's
+        // `sessionRequestContext()` helper documents. Piggybacked on this
+        // existing login rather than a fresh one, since this file already
+        // sits close to /auth/login's 10-req/min throttle.
+        .set("User-Agent", "AIHXM-E2E-Test-Agent/1.0");
 
       expect(confirmRes.status).toBe(201);
       expect(confirmRes.body.status).toBe("ok");
       expect(confirmRes.body.token).toEqual(expect.any(String));
       expect(confirmRes.body.recoveryCodes).toHaveLength(10);
+
+      const enrollJti = jwtDecode(confirmRes.body.token).jti;
+      const enrollSessionRow = await db.withClaims(
+        { is_platform_admin: true, company_id: null, sub: "auth-e2e-fixtures" },
+        (c) =>
+          c.query<{ ip_address: string | null; user_agent: string | null }>(
+            "SELECT ip_address, user_agent FROM user_sessions WHERE id = $1",
+            [enrollJti]
+          )
+      );
+      expect(enrollSessionRow.rows[0].ip_address).not.toBeNull();
+      expect(enrollSessionRow.rows[0].user_agent).toBe("AIHXM-E2E-Test-Agent/1.0");
 
       const secondLoginRes = await request(app.getHttpServer())
         .post("/auth/login")
@@ -303,3 +324,8 @@ describe("Auth HTTP surface (e2e)", () => {
     });
   });
 });
+
+function jwtDecode(token: string): { jti: string } {
+  const payload = token.split(".")[1];
+  return JSON.parse(Buffer.from(payload, "base64").toString("utf8"));
+}

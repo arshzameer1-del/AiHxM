@@ -1,0 +1,48 @@
+-- Phase 3 item #8 — "Security Policy (advanced)": the roadmap's original
+-- wording ("geo-velocity/impossible-travel detection, security posture
+-- scoring, device-trust fingerprinting") assumes a geo-IP database or a
+-- third-party IP-geolocation API this platform does not have and
+-- deliberately does not add — bundling a MaxMind-style database is a large
+-- binary asset with its own update/licensing burden, and calling an
+-- external geolocation API on every single login makes a third party's
+-- uptime and rate limits a dependency of the login-critical path, exactly
+-- the kind of thing this codebase has consistently avoided elsewhere (see
+-- e.g. SAML slice 2's SP deliberately not requiring a keypair-per-tenant
+-- most customers don't need, or Data Residency/DR's — migration 0063 —
+-- refusal to pretend at multi-region infrastructure this platform doesn't
+-- have). See auth.service.ts's own doc comment above issueSessionToken()
+-- for the full scoping writeup.
+--
+-- What IS honest and buildable with zero external data, both computed at
+-- session-issuance time and stored here for an accurate historical record
+-- (rather than recomputed on read, which would drift as new devices/IPs
+-- accumulate for the account):
+--
+--   is_new_device          — this login's User-Agent fingerprint has never
+--                             appeared before for this user_account_id.
+--   is_rapid_network_change — this login's IP differs from the account's
+--                             own immediately-preceding session AND the two
+--                             logins are implausibly close together in
+--                             time. This is NOT "impossible travel across
+--                             countries" (there is no geography here at
+--                             all, only IP-string identity) — it is named
+--                             for exactly what it detects: a legitimate
+--                             connection rarely changes its outbound IP
+--                             within minutes, so this is a real, useful
+--                             anomaly signal, but VPN reconnects and mobile
+--                             carrier IP rotation can trigger it too, so it
+--                             is a heuristic, not a hard security boundary.
+--
+-- Both default to false and need no backfill: every existing user_sessions
+-- row predates this feature, so there is no prior-session history to have
+-- compared any of them against in the first place — false is the correct
+-- (not merely convenient) value for every row that already exists.
+--
+-- Additive columns on the existing `user_sessions` table (migration 0042)
+-- only — no new table, so no new RLS policy is needed: `user_sessions`
+-- already has ENABLE/FORCE ROW LEVEL SECURITY and its own `user_sessions_all`
+-- policy (0042), which applies to every column on the row, present or
+-- future, with no per-column RLS in Postgres to separately grant.
+
+ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS is_new_device boolean NOT NULL DEFAULT false;
+ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS is_rapid_network_change boolean NOT NULL DEFAULT false;

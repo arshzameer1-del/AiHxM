@@ -5,6 +5,7 @@ import type {
   CompanyListFilters,
   CompanyStatus,
   PackageTier,
+  PlatformHealthSummary,
   PlatformSavedView,
 } from "@aihxm/shared-types";
 import { api } from "../api/client";
@@ -32,6 +33,8 @@ export function DashboardPage() {
   const { runWithStepUp, stepUpModal } = useStepUp();
   const [companies, setCompanies] = useState<CompanyDashboardRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [healthSummary, setHealthSummary] = useState<PlatformHealthSummary | null>(null);
+  const [healthError, setHealthError] = useState<string | null>(null);
   const [loginAsTarget, setLoginAsTarget] = useState<CompanyDashboardRow | null>(null);
 
   const [searchInput, setSearchInput] = useState("");
@@ -74,6 +77,16 @@ export function DashboardPage() {
 
   useEffect(() => {
     api.listSavedViews("tenant_directory").then(setSavedViews).catch(() => undefined);
+  }, []);
+
+  // Phase 3 item #9 — Monitoring. Loaded alongside the tenant list, not
+  // gated behind it — a Platform Admin should see "who's failing right
+  // now" as fast as the directory itself loads.
+  useEffect(() => {
+    api
+      .getPlatformHealthSummary()
+      .then(setHealthSummary)
+      .catch(() => setHealthError("Could not load platform health."));
   }, []);
 
   function toggle<T>(set: Set<T>, value: T, setter: (s: Set<T>) => void) {
@@ -151,6 +164,11 @@ export function DashboardPage() {
 
   const totalMrr = companies?.reduce((sum, c) => sum + c.mockMrrUsd, 0) ?? 0;
 
+  const downTenantCount =
+    healthSummary?.failingCompanies.filter((c) => c.failingChecks.some((ch) => ch.status === "down")).length ?? 0;
+  const degradedTenantCount =
+    healthSummary?.failingCompanies.filter((c) => !c.failingChecks.some((ch) => ch.status === "down")).length ?? 0;
+
   return (
     <div>
       {stepUpModal}
@@ -184,6 +202,78 @@ export function DashboardPage() {
           </div>
         </div>
       )}
+
+      {/* Phase 3 item #9 — Monitoring. Cross-tenant health "at a glance",
+          built on tenant_health_check_log via HealthService.getPlatformSummary.
+          A never-checked tenant is called out on its own — it is never
+          folded into "healthy". */}
+      <div className="bg-card rounded-card p-4 shadow-sm mb-6">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold">Platform Health</h2>
+          {healthSummary && (
+            <span className="text-xs text-label-tertiary">
+              Updated {new Date(healthSummary.generatedAt).toLocaleTimeString()}
+            </span>
+          )}
+        </div>
+
+        {healthError && <div className="text-danger text-sm">{healthError}</div>}
+
+        {!healthError && !healthSummary && <div className="text-sm text-label-tertiary">Loading…</div>}
+
+        {healthSummary && (
+          <>
+            <div className="flex flex-wrap gap-8 mb-3">
+              <div>
+                <div className="text-xs uppercase tracking-wide text-label-tertiary">Down</div>
+                <div className="text-xl font-bold text-danger">{downTenantCount}</div>
+              </div>
+              <div>
+                <div className="text-xs uppercase tracking-wide text-label-tertiary">Degraded</div>
+                <div className="text-xl font-bold text-warning">{degradedTenantCount}</div>
+              </div>
+              <div>
+                <div className="text-xs uppercase tracking-wide text-label-tertiary">Never checked</div>
+                <div className="text-xl font-bold">{healthSummary.companiesNeverChecked}</div>
+              </div>
+              <div>
+                <div className="text-xs uppercase tracking-wide text-label-tertiary">Tenants monitored</div>
+                <div className="text-xl font-bold">{healthSummary.totalCompanies}</div>
+              </div>
+            </div>
+
+            {healthSummary.failingCompanies.length === 0 ? (
+              <div className="text-sm text-label-secondary">All checked tenants healthy.</div>
+            ) : (
+              <ul className="divide-y divide-black/5">
+                {healthSummary.failingCompanies.slice(0, 5).map((c) => (
+                  <li key={c.companyId} className="py-2 flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <Link to={`/companies/${c.companyId}?tab=Health`} className="font-semibold text-sm hover:underline">
+                        {c.companyName}
+                      </Link>
+                      <div className="text-xs text-label-tertiary truncate">
+                        {c.failingChecks.map((ch) => `${ch.checkKey}: ${ch.status}`).join(", ")}
+                      </div>
+                    </div>
+                    <Link
+                      to={`/companies/${c.companyId}?tab=Health`}
+                      className="text-accent text-xs font-semibold whitespace-nowrap hover:underline"
+                    >
+                      View health →
+                    </Link>
+                  </li>
+                ))}
+                {healthSummary.failingCompanies.length > 5 && (
+                  <li className="pt-2 text-xs text-label-tertiary">
+                    +{healthSummary.failingCompanies.length - 5} more tenant(s) with failing checks.
+                  </li>
+                )}
+              </ul>
+            )}
+          </>
+        )}
+      </div>
 
       {error && <div className="text-danger text-sm mb-4">{error}</div>}
 

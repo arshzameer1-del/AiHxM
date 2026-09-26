@@ -1,10 +1,25 @@
-import { Controller, Get, Param, Post, Res, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Res, UseGuards } from "@nestjs/common";
 import type { Response } from "express";
+import { IsIn, IsISO8601, IsOptional, IsString, MaxLength } from "class-validator";
 import { PlatformAdminGuard } from "../auth/platform-admin.guard";
 import { ScopedCompanyParam } from "../auth/scoped-company-param.decorator";
 import { CurrentClaims } from "../auth/current-claims.decorator";
 import type { RequestClaims } from "../database/tenant-context";
+import type { DrTestOutcome } from "@aihxm/shared-types";
 import { BackupsService } from "./backups.service";
+
+class RecordDrTestDto {
+  @IsISO8601()
+  testedAt!: string;
+
+  @IsIn(["pass", "fail", "partial"])
+  outcome!: DrTestOutcome;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  notes?: string;
+}
 
 // TM-035 — Backups.
 @Controller("platform/companies/:companyId/backups")
@@ -34,5 +49,20 @@ export class BackupsController {
     res.setHeader("Content-Type", "application/json");
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
     res.send(buffer);
+  }
+
+  // Phase 3 item #7 — manual DR test evidence log (see BackupsService.recordDrTest's own doc comment).
+  @Get("dr-tests")
+  listDrTests(@CurrentClaims() claims: RequestClaims, @Param("companyId") companyId: string) {
+    return this.backups.listDrTests(claims, companyId);
+  }
+
+  @Post("dr-tests")
+  recordDrTest(
+    @CurrentClaims() claims: RequestClaims,
+    @Param("companyId") companyId: string,
+    @Body() dto: RecordDrTestDto
+  ) {
+    return this.backups.recordDrTest(claims, companyId, dto);
   }
 }
