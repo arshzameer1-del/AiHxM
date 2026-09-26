@@ -52,6 +52,12 @@ export class UpdateEmployeeDto {
   @IsString()
   location?: string;
 
+  /** Organization Management Phase 4 — see CreateEmployeeDto's own doc
+   * comment. */
+  @IsOptional()
+  @IsUUID()
+  locationId?: string;
+
   @IsOptional()
   @IsIn(["permanent", "contract", "probation", "intern"])
   employmentType?: EmploymentType;

@@ -104,6 +104,42 @@ const PositionWorkbenchPage = lazy(() =>
     default: m.PositionWorkbenchPage,
   })),
 );
+// Organization Management, Phase 3 — Assignment Workbench (org unit/
+// position assignment slots) and Relationship Explorer (typed reporting
+// relationships). See 0071_employee_org_assignments_and_relationships.sql
+// and employee-org-assignments.service.ts's/org-relationships.service.ts's
+// own header comments.
+const AssignmentWorkbenchPage = lazy(() =>
+  import("./portal/organization/AssignmentWorkbenchPage").then((m) => ({
+    default: m.AssignmentWorkbenchPage,
+  })),
+);
+const RelationshipExplorerPage = lazy(() =>
+  import("./portal/organization/RelationshipExplorerPage").then((m) => ({
+    default: m.RelationshipExplorerPage,
+  })),
+);
+// Organization Management, Phase 4 — the Location hierarchy explorer and
+// the combined Cost Center / Profit Center setup screen. See
+// 0073_locations_and_financial_centers.sql and locations.service.ts's/
+// cost-centers.service.ts's/profit-centers.service.ts's own header
+// comments.
+const LocationsPage = lazy(() =>
+  import("./portal/organization/LocationsPage").then((m) => ({
+    default: m.LocationsPage,
+  })),
+);
+const FinancialCentersPage = lazy(() =>
+  import("./portal/organization/FinancialCentersPage").then((m) => ({
+    default: m.FinancialCentersPage,
+  })),
+);
+// Organization Management Phase 5 — Reorganization workflow.
+const ReorganizationsPage = lazy(() =>
+  import("./portal/organization/ReorganizationsPage").then((m) => ({
+    default: m.ReorganizationsPage,
+  })),
+);
 const ConfigurationCenterPage = lazy(() =>
   import("./portal/admin/ConfigurationCenterPage").then((m) => ({
     default: m.ConfigurationCenterPage,
@@ -250,6 +286,24 @@ export default function App() {
                     here. */}
                   <Route path="organization/jobs" element={<JobsPage />} />
                   <Route path="organization/positions" element={<PositionWorkbenchPage />} />
+                  {/* Organization Management Phase 3 — Assignment Workbench +
+                    Relationship Explorer. employee_org_assignment.view.all/
+                    .manage.all and org_relationship.view.all/.manage.all
+                    (both seeded in 0072) are the real gates; PortalLayout's
+                    nav gates these the same courtesy way as every other
+                    route here. */}
+                  <Route path="organization/assignments" element={<AssignmentWorkbenchPage />} />
+                  <Route path="organization/relationships" element={<RelationshipExplorerPage />} />
+                  {/* Organization Management Phase 4 — the Location
+                    hierarchy explorer + the combined Cost Center/Profit
+                    Center setup screen. location.view.all/.manage.all and
+                    cost_center.view.all/.manage.all/profit_center.view.all/
+                    .manage.all (all seeded in 0074) are the real gates;
+                    PortalLayout's nav gates these the same courtesy way as
+                    every other route here. */}
+                  <Route path="organization/locations" element={<LocationsPage />} />
+                  <Route path="organization/financial-centers" element={<FinancialCentersPage />} />
+                  <Route path="organization/reorganizations" element={<ReorganizationsPage />} />
                   {/* Task #49 — Admin Center. hr_admin-only in PortalLayout's
                     nav (a courtesy); EmployeeGroupsService's own
                     employee_group.manage/leave_policy.manage gates are the

@@ -10,6 +10,7 @@ import { LocalFileStorageService } from "../file-storage/local-file-storage.serv
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
 import { RulesEngine } from "../rules-engine/rules-engine.engine";
 import { OrgUnitsService } from "../organization/org-units.service";
+import { LocationsService } from "../organization/locations.service";
 import { EmployeeGroupsService } from "./employee-groups.service";
 
 const FIXTURE_CLAIMS: RequestClaims = { is_platform_admin: true, company_id: null, sub: "employee-groups-spec-fixtures" };
@@ -30,6 +31,7 @@ describe("EmployeeGroupsService", () => {
   let groups: EmployeeGroupsService;
   let employees: EmployeesService;
   let orgUnits: OrgUnitsService;
+  let locations: LocationsService;
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: process.env.APP_DATABASE_URL });
@@ -40,6 +42,7 @@ describe("EmployeeGroupsService", () => {
     groups = new EmployeeGroupsService(db, rbac, entitlements, new EffectiveDatingEngine(), new RulesEngine());
     employees = new EmployeesService(db, rbac, entitlements, audit, new LocalFileStorageService());
     orgUnits = new OrgUnitsService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
+    locations = new LocationsService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
   });
 
   afterAll(async () => {
@@ -584,6 +587,102 @@ describe("EmployeeGroupsService", () => {
       // synced to "Sales" (the unit's name), so it matches the legacy
       // text-based Sales group instead.
       expect(resolved.policyId).toBe(salesPolicyId);
+    });
+  });
+
+  // Organization Management Phase 4 (0073_locations_and_financial_centers.sql):
+  // the exact same treatment as the `department`/`org_unit_id` block above,
+  // replicated for `location`/`location_id` — see buildMatchExpression()'s
+  // own doc comment.
+  describe("location condition resolves against location_id (Organization Management Phase 4)", () => {
+    let companyId: string;
+    let hrAdminClaims: RequestClaims;
+    let karachiLocationId: string;
+    let lahoreLocationId: string;
+    let linkedEmployeeId: string;
+    let legacyTextEmployeeId: string;
+    let locationLinkedLahoreEmployeeId: string;
+    let karachiPolicyId: string;
+    let lahorePolicyId: string;
+
+    beforeAll(async () => {
+      companyId = await createFixtureCompany("Location Match Co");
+      const stamp = Date.now();
+      const hrAdminUserId = await createUser(`location-match-hr-${stamp}@example.com`);
+      await assignRole(hrAdminUserId, companyId, "hr_admin");
+      hrAdminClaims = { is_platform_admin: false, company_id: companyId, sub: hrAdminUserId };
+
+      karachiLocationId = (await locations.create(hrAdminClaims, { name: "Karachi", locationType: "city" })).id;
+      lahoreLocationId = (await locations.create(hrAdminClaims, { name: "Lahore", locationType: "city" })).id;
+
+      // Linked via locationId — location text gets derived ("Karachi")
+      // rather than typed directly.
+      linkedEmployeeId = (
+        await employees.create(hrAdminClaims, { firstName: "Location", lastName: "Linked", locationId: karachiLocationId })
+      ).id;
+      // A pre-Phase-4-style employee — plain free text, never linked to any
+      // location at all. Must keep matching by text exactly as before.
+      legacyTextEmployeeId = (
+        await employees.create(hrAdminClaims, { firstName: "Legacy", lastName: "Text", location: "Lahore" })
+      ).id;
+      // Also linked by locationId, but to a DIFFERENT location than
+      // `linkedEmployeeId` — proves the id-based match doesn't fire for
+      // just any location-linked employee, only the right one.
+      locationLinkedLahoreEmployeeId = (
+        await employees.create(hrAdminClaims, { firstName: "Location", lastName: "Lahore", locationId: lahoreLocationId })
+      ).id;
+
+      await groups.createLeavePolicy(hrAdminClaims, { name: "Location Match Default", annualLeaveDays: 10, isDefault: true });
+      karachiPolicyId = (
+        await groups.createLeavePolicy(hrAdminClaims, { name: "Location Match Karachi", annualLeaveDays: 22 })
+      ).id;
+      lahorePolicyId = (
+        await groups.createLeavePolicy(hrAdminClaims, { name: "Location Match Lahore", annualLeaveDays: 16 })
+      ).id;
+
+      // Authored by LOCATION ID, not by name — the new, rename-proof way to
+      // configure a location condition.
+      const karachiByIdGroup = await groups.createGroup(hrAdminClaims, {
+        name: "Karachi (by location id)",
+        conditions: [{ field: "location", equals: karachiLocationId }],
+      });
+      await groups.assignPolicy(hrAdminClaims, karachiByIdGroup.id, { policyType: "leave", policyId: karachiPolicyId });
+
+      // Authored the legacy way, by free text — must still work unchanged.
+      const lahoreByTextGroup = await groups.createGroup(hrAdminClaims, {
+        name: "Lahore (by legacy text)",
+        conditions: [{ field: "location", equals: "Lahore" }],
+      });
+      await groups.assignPolicy(hrAdminClaims, lahoreByTextGroup.id, { policyType: "leave", policyId: lahorePolicyId });
+    });
+
+    it("a location condition authored with a location's id matches an employee linked to that location", async () => {
+      const resolved = await groups.resolvePolicy(hrAdminClaims, linkedEmployeeId, "leave");
+      expect(resolved.policyId).toBe(karachiPolicyId);
+      expect(resolved.isDefault).toBe(false);
+    });
+
+    it("a location condition authored the legacy way (free text) still matches an employee with no location link", async () => {
+      const resolved = await groups.resolvePolicy(hrAdminClaims, legacyTextEmployeeId, "leave");
+      expect(resolved.policyId).toBe(lahorePolicyId);
+      expect(resolved.isDefault).toBe(false);
+    });
+
+    it("resolveGroupMembers finds the location-linked employee via the id-based condition", async () => {
+      const groupsList = await groups.listGroups(hrAdminClaims);
+      const karachiByIdGroup = groupsList.find((g) => g.name === "Karachi (by location id)")!;
+      const memberIds = await groups.resolveGroupMembers(hrAdminClaims, karachiByIdGroup.id);
+      expect(memberIds).toContain(linkedEmployeeId);
+      expect(memberIds).not.toContain(legacyTextEmployeeId);
+    });
+
+    it("an employee linked to a DIFFERENT location resolves via that location's own (text-synced) match, never the other location's id-based group", async () => {
+      const resolved = await groups.resolvePolicy(hrAdminClaims, locationLinkedLahoreEmployeeId, "leave");
+      // Linked to lahoreLocationId, not karachiLocationId — so the "Karachi
+      // (by location id)" group must not match it; its location text was
+      // synced to "Lahore" (the location's name), so it matches the legacy
+      // text-based Lahore group instead.
+      expect(resolved.policyId).toBe(lahorePolicyId);
     });
   });
 });

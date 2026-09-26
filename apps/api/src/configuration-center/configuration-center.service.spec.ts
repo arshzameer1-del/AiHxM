@@ -14,6 +14,9 @@ import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engi
 import { RulesEngine } from "../rules-engine/rules-engine.engine";
 import { OrgUnitsService } from "../organization/org-units.service";
 import { JobsService } from "../organization/jobs.service";
+import { LocationsService } from "../organization/locations.service";
+import { CostCentersService } from "../organization/cost-centers.service";
+import { ProfitCentersService } from "../organization/profit-centers.service";
 import { ConfigurationCenterService } from "./configuration-center.service";
 
 const FIXTURE_CLAIMS: RequestClaims = { is_platform_admin: true, company_id: null, sub: "config-center-spec-fixtures" };
@@ -37,6 +40,9 @@ describe("ConfigurationCenterService", () => {
   let holidays: HolidaysService;
   let orgUnits: OrgUnitsService;
   let jobs: JobsService;
+  let locations: LocationsService;
+  let costCenters: CostCentersService;
+  let profitCenters: ProfitCentersService;
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: process.env.APP_DATABASE_URL });
@@ -52,6 +58,9 @@ describe("ConfigurationCenterService", () => {
     const customFields = new CustomFieldsService(db, rbac);
     orgUnits = new OrgUnitsService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
     jobs = new JobsService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
+    locations = new LocationsService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
+    costCenters = new CostCentersService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
+    profitCenters = new ProfitCentersService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
     configurationCenter = new ConfigurationCenterService(
       db,
       employeeGroups,
@@ -61,7 +70,10 @@ describe("ConfigurationCenterService", () => {
       payroll,
       customFields,
       orgUnits,
-      jobs
+      jobs,
+      locations,
+      costCenters,
+      profitCenters
     );
   });
 
@@ -150,6 +162,11 @@ describe("ConfigurationCenterService", () => {
       await holidays.createHoliday(hrAdminClaims, { name: "Config Center Test Holiday", holidayDate: "2026-11-11" });
       await orgUnits.create(hrAdminClaims, { name: "Config Center Test Unit", unitType: "department" });
       await jobs.create(hrAdminClaims, { title: "Config Center Test Job" });
+      // Organization Management Phase 4 — real Location/Cost Center/Profit
+      // Center rows so those three cards' counts are provably non-zero too.
+      await locations.create(hrAdminClaims, { name: "Config Center Test Location", locationType: "site" });
+      await costCenters.create(hrAdminClaims, { name: "Config Center Test Cost Center" });
+      await profitCenters.create(hrAdminClaims, { name: "Config Center Test Profit Center" });
     });
 
     it("includes every domain hr_admin can manage, with real counts, but omits Workflow Templates", async () => {
@@ -180,6 +197,17 @@ describe("ConfigurationCenterService", () => {
       expect(byKey.job.adminRoute).toBe("/app/organization/jobs");
       expect(byKey.job.supportsEffectiveDating).toBe(true);
       expect(byKey.position).toBeUndefined();
+
+      // Organization Management Phase 4 — Location/Cost Center/Profit
+      // Center cards, each backed by that domain's own list(), not a
+      // duplicated count query (0075's own header comment).
+      expect(byKey.location).toBeDefined();
+      expect(byKey.location.count).toBeGreaterThanOrEqual(1);
+      expect(byKey.location.supportsEffectiveDating).toBe(true);
+      expect(byKey.cost_center).toBeDefined();
+      expect(byKey.cost_center.count).toBeGreaterThanOrEqual(1);
+      expect(byKey.profit_center).toBeDefined();
+      expect(byKey.profit_center.count).toBeGreaterThanOrEqual(1);
 
       // hr_admin does not hold workflow_template.manage.all (that's
       // system_admin's job, per Decision #20) -- this proves the
@@ -275,7 +303,17 @@ describe("ConfigurationCenterService", () => {
 
       expect(domainKeys).not.toContain("tax_slab");
       expect(domainKeys).toEqual(
-        expect.arrayContaining(["leave_policy", "employee_group", "shift", "holiday", "org_unit", "job"])
+        expect.arrayContaining([
+          "leave_policy",
+          "employee_group",
+          "shift",
+          "holiday",
+          "org_unit",
+          "job",
+          "location",
+          "cost_center",
+          "profit_center",
+        ])
       );
     });
   });

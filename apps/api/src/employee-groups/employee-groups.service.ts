@@ -112,19 +112,34 @@ function rowToAssignment(row: any): EmployeeGroupPolicyAssignmentView {
  * in both call sites below) is computed over the ORIGINAL condition list,
  * so most-specific-match-wins is completely unaffected — this only changes
  * what a match means, not how many conditions a group has.
+ *
+ * Organization Management Phase 4 (0073_locations_and_financial_centers.sql)
+ * replicates the exact same treatment for `location`/`locationId`, since
+ * `employees.location` is now the same kind of "legacy free text, kept in
+ * sync from a canonical link when one exists" column `department` already
+ * was — see EmployeesService.resolveLocation().
  */
 function buildMatchExpression(conditions: ReadonlyArray<{ field: string; equals: unknown }>): RuleExpression {
   return {
-    all: conditions.map((c): RuleExpression =>
-      c.field === "department"
-        ? {
-            any: [
-              { field: "department", operator: "equals", value: c.equals },
-              { field: "orgUnitId", operator: "equals", value: c.equals },
-            ],
-          }
-        : { field: c.field, operator: "equals", value: c.equals }
-    ),
+    all: conditions.map((c): RuleExpression => {
+      if (c.field === "department") {
+        return {
+          any: [
+            { field: "department", operator: "equals", value: c.equals },
+            { field: "orgUnitId", operator: "equals", value: c.equals },
+          ],
+        };
+      }
+      if (c.field === "location") {
+        return {
+          any: [
+            { field: "location", operator: "equals", value: c.equals },
+            { field: "locationId", operator: "equals", value: c.equals },
+          ],
+        };
+      }
+      return { field: c.field, operator: "equals", value: c.equals };
+    }),
   };
 }
 
@@ -542,7 +557,7 @@ export class EmployeeGroupsService {
     }
     return this.db.withClaims(claims, async (client) => {
       const employeeResult = await client.query(
-        "SELECT department, org_unit_id, location, designation, employment_type, employment_status FROM employees WHERE id = $1",
+        "SELECT department, org_unit_id, location, location_id, designation, employment_type, employment_status FROM employees WHERE id = $1",
         [employeeId]
       );
       if (employeeResult.rowCount === 0) throw new NotFoundException("Employee not found");
@@ -574,7 +589,15 @@ export class EmployeeGroupsService {
       // RulesEngine, which knows nothing about `employees` or SQL columns —
       // same "engine stays generic, caller resolves its own facts" boundary
       // the engine's own doc comment establishes.
-      const employeeContext: Record<string, unknown> = { orgUnitId: employee.org_unit_id };
+      const employeeContext: Record<string, unknown> = {
+        orgUnitId: employee.org_unit_id,
+        // Organization Management Phase 4 — the same "resolved once,
+        // handed to the generic engine under its API-facing name" treatment
+        // `orgUnitId` above already gets, so `buildMatchExpression()` can OR
+        // a `location` condition against it the same way it already ORs
+        // `department` against `orgUnitId`.
+        locationId: employee.location_id,
+      };
       for (const [apiField, column] of Object.entries(CONDITION_FIELD_TO_COLUMN)) {
         employeeContext[apiField] = employee[column];
       }
@@ -634,13 +657,13 @@ export class EmployeeGroupsService {
       );
       if (conditions.rowCount === 0) return [];
       const employees = await client.query(
-        "SELECT id, department, org_unit_id, location, designation, employment_type, employment_status FROM employees WHERE employment_status = 'active'"
+        "SELECT id, department, org_unit_id, location, location_id, designation, employment_type, employment_status FROM employees WHERE employment_status = 'active'"
       );
       const expression = buildMatchExpression(conditions.rows);
       return employees.rows
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .filter((e: any) => {
-          const context: Record<string, unknown> = { orgUnitId: e.org_unit_id };
+          const context: Record<string, unknown> = { orgUnitId: e.org_unit_id, locationId: e.location_id };
           for (const [apiField, column] of Object.entries(CONDITION_FIELD_TO_COLUMN)) {
             context[apiField] = e[column];
           }

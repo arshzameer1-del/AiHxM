@@ -9,6 +9,9 @@ import { PayrollService } from "../payroll/payroll.service";
 import { CustomFieldsService } from "../custom-fields/custom-fields.service";
 import { OrgUnitsService } from "../organization/org-units.service";
 import { JobsService } from "../organization/jobs.service";
+import { LocationsService } from "../organization/locations.service";
+import { CostCentersService } from "../organization/cost-centers.service";
+import { ProfitCentersService } from "../organization/profit-centers.service";
 import type { ConfigurationDomainSummary } from "@aihxm/shared-types";
 
 type RegistryRow = {
@@ -45,7 +48,10 @@ export class ConfigurationCenterService {
     private readonly payroll: PayrollService,
     private readonly customFields: CustomFieldsService,
     private readonly orgUnits: OrgUnitsService,
-    private readonly jobs: JobsService
+    private readonly jobs: JobsService,
+    private readonly locations: LocationsService,
+    private readonly costCenters: CostCentersService,
+    private readonly profitCenters: ProfitCentersService
   ) {}
 
   async getSummary(claims: RequestClaims): Promise<ConfigurationDomainSummary[]> {
@@ -105,6 +111,23 @@ export class ConfigurationCenterService {
           // operational/transactional data, not a setup catalog, so there
           // is no corresponding "position" case.
           return (await this.jobs.list(claims)).length;
+        case "location":
+          // Organization Management Phase 4
+          // (0073_locations_and_financial_centers.sql) — LocationsService.list()
+          // applies the same entitlement-then-RBAC gate (`employee` module,
+          // then location.view.all/location.manage.all) as every other case
+          // here. Registered because, like Org Units, Locations are reusable
+          // setup data (a physical/virtual site catalog), not transactional.
+          return (await this.locations.list(claims)).length;
+        case "cost_center":
+          // Same phase — CostCentersService.list() gated on
+          // cost_center.view.all/cost_center.manage.all. A flat catalog like
+          // Job, so it's registered the same way Job is.
+          return (await this.costCenters.list(claims)).length;
+        case "profit_center":
+          // Same phase — ProfitCentersService.list() gated on
+          // profit_center.view.all/profit_center.manage.all.
+          return (await this.profitCenters.list(claims)).length;
         case "tax_slab":
           // listTaxSlabs lazily seeds the default FBR bracket table the
           // first time a payroll-enabled tenant has none -- an accepted

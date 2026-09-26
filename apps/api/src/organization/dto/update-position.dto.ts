@@ -30,6 +30,18 @@ export class UpdatePositionDto {
   @IsPositive()
   headcountFte?: number;
 
+  /** `null` clears the link; omitted leaves it unchanged — same three-way
+   * distinction `jobId` above already uses. */
+  @ValidateIf((o) => o.costCenterId !== null)
+  @IsOptional()
+  @IsUUID()
+  costCenterId?: string | null;
+
+  @ValidateIf((o) => o.profitCenterId !== null)
+  @IsOptional()
+  @IsUUID()
+  profitCenterId?: string | null;
+
   @IsOptional()
   @IsDateString()
   effectiveFrom?: string;

@@ -8,8 +8,12 @@ import { AuditService } from "../audit/audit.service";
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
 import { EmployeesService } from "../employees/employees.service";
 import { LocalFileStorageService } from "../file-storage/local-file-storage.service";
+import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
+import { IntegrationsService } from "../tenant-management/integrations.service";
 import { OrgUnitsService } from "./org-units.service";
 import { JobsService } from "./jobs.service";
+import { CostCentersService } from "./cost-centers.service";
+import { ProfitCentersService } from "./profit-centers.service";
 import { PositionsService } from "./positions.service";
 
 const FIXTURE_CLAIMS: RequestClaims = { is_platform_admin: true, company_id: null, sub: "positions-spec-fixtures" };
@@ -29,6 +33,8 @@ describe("PositionsService", () => {
   let db: DatabaseService;
   let orgUnits: OrgUnitsService;
   let jobs: JobsService;
+  let costCenters: CostCentersService;
+  let profitCenters: ProfitCentersService;
   let positions: PositionsService;
   let employees: EmployeesService;
 
@@ -40,6 +46,8 @@ describe("PositionsService", () => {
     const audit = new AuditService();
     orgUnits = new OrgUnitsService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
     jobs = new JobsService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
+    costCenters = new CostCentersService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
+    profitCenters = new ProfitCentersService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
     positions = new PositionsService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
     employees = new EmployeesService(db, rbac, entitlements, audit, new LocalFileStorageService());
   });
@@ -319,6 +327,81 @@ describe("PositionsService", () => {
       });
     });
 
+    describe("cost center / profit center tagging (Organization Management Phase 4)", () => {
+      let costCenterId: string;
+      let profitCenterId: string;
+
+      beforeAll(async () => {
+        costCenterId = (await costCenters.create(hrAdminClaims, { name: "Engineering Cost Center" })).id;
+        profitCenterId = (await profitCenters.create(hrAdminClaims, { name: "Engineering Profit Center" })).id;
+      });
+
+      it("create() tags a position with a cost center and a profit center", async () => {
+        const position = await positions.create(hrAdminClaims, {
+          orgUnitId: engineeringUnitId,
+          positionTitle: "Tagged Seat",
+          costCenterId,
+          profitCenterId,
+        });
+        expect(position.costCenterId).toBe(costCenterId);
+        expect(position.profitCenterId).toBe(profitCenterId);
+
+        const history = await positions.getHistory(hrAdminClaims, position.id);
+        expect(history[0]).toMatchObject({ costCenterId, profitCenterId });
+      });
+
+      it("404s when creating with a nonexistent costCenterId or profitCenterId", async () => {
+        await expect(
+          positions.create(hrAdminClaims, {
+            orgUnitId: engineeringUnitId,
+            positionTitle: "Bad Cost Center",
+            costCenterId: "00000000-0000-0000-0000-000000000000",
+          })
+        ).rejects.toThrow(NotFoundException);
+        await expect(
+          positions.create(hrAdminClaims, {
+            orgUnitId: engineeringUnitId,
+            positionTitle: "Bad Profit Center",
+            profitCenterId: "00000000-0000-0000-0000-000000000000",
+          })
+        ).rejects.toThrow(NotFoundException);
+      });
+
+      it("update() sets, then null clears, each link independently", async () => {
+        const position = await positions.create(hrAdminClaims, { orgUnitId: engineeringUnitId, positionTitle: "Retag Me" });
+        expect(position.costCenterId).toBeNull();
+        expect(position.profitCenterId).toBeNull();
+
+        const tagged = await positions.update(hrAdminClaims, position.id, { costCenterId, profitCenterId });
+        expect(tagged.costCenterId).toBe(costCenterId);
+        expect(tagged.profitCenterId).toBe(profitCenterId);
+
+        const costCleared = await positions.update(hrAdminClaims, position.id, { costCenterId: null });
+        expect(costCleared.costCenterId).toBeNull();
+        // profitCenterId was omitted, not nulled — it must be unaffected.
+        expect(costCleared.profitCenterId).toBe(profitCenterId);
+      });
+
+      it("freeze()/abolish()/assignEmployee()/unassignEmployee() preserve the cost/profit center tags across the transition", async () => {
+        const position = await positions.create(hrAdminClaims, {
+          orgUnitId: engineeringUnitId,
+          positionTitle: "Tagged Transition Seat",
+          costCenterId,
+          profitCenterId,
+        });
+        const employee = await employees.create(hrAdminClaims, { firstName: "Tagged", lastName: "Occupant" });
+
+        const filled = await positions.assignEmployee(hrAdminClaims, position.id, employee.id);
+        expect(filled).toMatchObject({ costCenterId, profitCenterId, status: "filled" });
+
+        const vacated = await positions.unassignEmployee(hrAdminClaims, position.id);
+        expect(vacated).toMatchObject({ costCenterId, profitCenterId, status: "vacant" });
+
+        const frozen = await positions.freeze(hrAdminClaims, position.id);
+        expect(frozen).toMatchObject({ costCenterId, profitCenterId, status: "frozen" });
+      });
+    });
+
     it("a Line Manager (position.view.all only) can read positions but not mutate them", async () => {
       const list = await positions.list(managerClaims);
       expect(Array.isArray(list)).toBe(true);
@@ -359,6 +442,100 @@ describe("PositionsService", () => {
       await expect(positions.get(claimsB, positionA.id)).rejects.toThrow(NotFoundException);
       const listB = await positions.list(claimsB);
       expect(listB.find((p) => p.id === positionA.id)).toBeUndefined();
+    });
+  });
+
+  /**
+   * Organization Management, Phase 6 — Events. Confirms
+   * `org.position.changed` really enqueues end to end through a real
+   * WebhookDispatchService, the same pattern as
+   * `employees.service.spec.ts`'s own "webhook events" block. `positions`
+   * above (this file's shared instance) is built WITHOUT a
+   * WebhookDispatchService — proving the optional-dependency design
+   * doesn't secretly break anything for it — so this uses its own instance
+   * instead.
+   */
+  describe("webhook events (Organization Management Phase 6)", () => {
+    let companyId: string;
+    let hrAdminClaims: RequestClaims;
+    let orgUnitId: string;
+    let positionsWithWebhooks: PositionsService;
+    const platformClaims: RequestClaims = { is_platform_admin: true, company_id: null, sub: "position-webhook-spec" };
+
+    beforeAll(async () => {
+      companyId = await createFixtureCompany("Position Webhook Co");
+      const hrAdminUserId = await createUser(`position-webhook-hr-${Date.now()}@example.com`);
+      await assignRole(hrAdminUserId, companyId, "hr_admin");
+      hrAdminClaims = { is_platform_admin: false, company_id: companyId, sub: hrAdminUserId };
+
+      await new IntegrationsService(db, new AuditService()).configure(platformClaims, companyId, "webhook", {
+        enabled: true,
+        config: { url: "http://127.0.0.1:1/hook", signingSecret: "position-trigger-secret" },
+      });
+
+      const rbac = new RbacService(db);
+      const entitlements = new EntitlementsService(db);
+      const audit = new AuditService();
+      orgUnitId = (
+        await new OrgUnitsService(db, rbac, entitlements, audit, new EffectiveDatingEngine()).create(hrAdminClaims, {
+          name: "Webhook Dept",
+          unitType: "department",
+        })
+      ).id;
+
+      positionsWithWebhooks = new PositionsService(
+        db,
+        rbac,
+        entitlements,
+        audit,
+        new EffectiveDatingEngine(),
+        new WebhookDispatchService(db, new AuditService())
+      );
+    });
+
+    async function latestEventFor(type: string) {
+      // enqueue() is fire-and-forget — give its own DB write a moment to
+      // land before asserting.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const result = await db.withClaims(platformClaims, (client) =>
+        client.query(
+          "SELECT * FROM webhook_events WHERE company_id = $1 AND event_type = $2 ORDER BY created_at DESC LIMIT 1",
+          [companyId, type]
+        )
+      );
+      return result.rows[0];
+    }
+
+    it("enqueues org.position.changed on create()", async () => {
+      const created = await positionsWithWebhooks.create(hrAdminClaims, { orgUnitId, positionTitle: "Webhook Seat" });
+      const event = await latestEventFor("org.position.changed");
+      expect(event).toBeDefined();
+      expect(event.payload.eventVersion).toBe(1);
+      expect(event.payload.changeType).toBe("create");
+      expect(event.payload.position.id).toBe(created.id);
+    });
+
+    it("enqueues org.position.changed with changeType 'position.freeze' on freeze()", async () => {
+      const created = await positionsWithWebhooks.create(hrAdminClaims, { orgUnitId, positionTitle: "Freeze Seat" });
+      await positionsWithWebhooks.freeze(hrAdminClaims, created.id);
+      const event = await latestEventFor("org.position.changed");
+      expect(event.payload.changeType).toBe("position.freeze");
+      expect(event.payload.position.status).toBe("frozen");
+    });
+
+    it("enqueues org.position.changed with changeType 'position.assign'/'position.unassign' on occupancy changes", async () => {
+      const created = await positionsWithWebhooks.create(hrAdminClaims, { orgUnitId, positionTitle: "Occupied Seat" });
+      const employee = await employees.create(hrAdminClaims, { firstName: "Webhook", lastName: "Occupant" });
+
+      await positionsWithWebhooks.assignEmployee(hrAdminClaims, created.id, employee.id);
+      const assignedEvent = await latestEventFor("org.position.changed");
+      expect(assignedEvent.payload.changeType).toBe("position.assign");
+      expect(assignedEvent.payload.position.status).toBe("filled");
+
+      await positionsWithWebhooks.unassignEmployee(hrAdminClaims, created.id);
+      const unassignedEvent = await latestEventFor("org.position.changed");
+      expect(unassignedEvent.payload.changeType).toBe("position.unassign");
+      expect(unassignedEvent.payload.position.status).toBe("vacant");
     });
   });
 });

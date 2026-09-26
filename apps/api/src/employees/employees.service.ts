@@ -78,6 +78,11 @@ function rowToEmployee(row: any): Record<string, unknown> {
     positionId: row.position_id ?? null,
     designation: row.designation,
     location: row.location,
+    // Organization Management Phase 4 (0073_locations_and_financial_centers.sql)
+    // — read-only from this service's rowToEmployee() perspective in the
+    // same sense `orgUnitId` is: EmployeesService itself is the one thing
+    // that WRITES it (via resolveLocation() below), on create/update.
+    locationId: row.location_id ?? null,
     employmentType: row.employment_type,
     managerId: row.manager_id,
     employmentStatus: row.employment_status,
@@ -195,14 +200,15 @@ export class EmployeesService {
     return this.db.withClaims(claims, async (client) => {
       const employeeNumber = await this.assignEmployeeNumber(client, claims.company_id!, input.employeeNumber);
       const department = await this.resolveDepartment(client, claims.company_id!, input.orgUnitId, input.department);
+      const location = await this.resolveLocation(client, claims.company_id!, input.locationId, input.location);
 
       const result = await client.query(
         `INSERT INTO employees
            (company_id, user_account_id, employee_number, first_name, last_name, email, phone, cnic,
-            date_of_birth, gender, marital_status, department, org_unit_id, designation, location, employment_type,
-            manager_id, date_of_joining, salary_band, bank_account_number)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-                 COALESCE($16, 'permanent'), $17, COALESCE($18, CURRENT_DATE), $19, $20)
+            date_of_birth, gender, marital_status, department, org_unit_id, designation, location, location_id,
+            employment_type, manager_id, date_of_joining, salary_band, bank_account_number)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+                 COALESCE($17, 'permanent'), $18, COALESCE($19, CURRENT_DATE), $20, $21)
          RETURNING *`,
         [
           claims.company_id,
@@ -219,7 +225,8 @@ export class EmployeesService {
           department,
           input.orgUnitId ?? null,
           input.designation ?? null,
-          input.location ?? null,
+          location,
+          input.locationId ?? null,
           input.employmentType ?? null,
           input.managerId ?? null,
           input.dateOfJoining ?? null,
@@ -355,6 +362,14 @@ export class EmployeesService {
       // the legacy free-text behavior unchanged.
       const department = await this.resolveDepartment(client, claims.company_id!, nextOrgUnitId, patch.department ?? before.department);
 
+      const nextLocationId = patch.locationId ?? before.location_id;
+      // Organization Management Phase 4: whenever a location is linked (new
+      // or pre-existing), `location` is DERIVED from it, not typed
+      // independently — the same `department`/`orgUnitId` relationship
+      // established above. An employee with no location link at all keeps
+      // the legacy free-text behavior unchanged.
+      const location = await this.resolveLocation(client, claims.company_id!, nextLocationId, patch.location ?? before.location);
+
       const next = {
         first_name: patch.firstName ?? before.first_name,
         last_name: patch.lastName ?? before.last_name,
@@ -367,7 +382,8 @@ export class EmployeesService {
         department,
         org_unit_id: nextOrgUnitId,
         designation: patch.designation ?? before.designation,
-        location: patch.location ?? before.location,
+        location,
+        location_id: nextLocationId,
         employment_type: patch.employmentType ?? before.employment_type,
         manager_id: patch.managerId ?? before.manager_id,
         employment_status: patch.employmentStatus ?? before.employment_status,
@@ -382,8 +398,8 @@ export class EmployeesService {
         `UPDATE employees SET
            first_name = $2, last_name = $3, email = $4, phone = $5, cnic = $6, date_of_birth = $7,
            gender = $8, marital_status = $9, department = $10, org_unit_id = $11, designation = $12, location = $13,
-           employment_type = $14, manager_id = $15, employment_status = $16, date_of_joining = $17,
-           termination_date = $18, termination_reason = $19, salary_band = $20, bank_account_number = $21,
+           location_id = $14, employment_type = $15, manager_id = $16, employment_status = $17, date_of_joining = $18,
+           termination_date = $19, termination_reason = $20, salary_band = $21, bank_account_number = $22,
            updated_at = now()
          WHERE id = $1
          RETURNING *`,
@@ -401,6 +417,7 @@ export class EmployeesService {
           next.org_unit_id,
           next.designation,
           next.location,
+          next.location_id,
           next.employment_type,
           next.manager_id,
           next.employment_status,
@@ -740,6 +757,36 @@ export class EmployeesService {
       throw new BadRequestException("Org unit not found");
     }
     return orgUnit.rows[0].name;
+  }
+
+  /**
+   * Organization Management Phase 4 (0073_locations_and_financial_centers.sql):
+   * the exact same backward-compatibility relationship `resolveDepartment()`
+   * above established for `department`/`orgUnitId`, replicated for
+   * `location`/`locationId`. `employees.location` stays a plain text column
+   * (legacy free-text, still read by reports/CSV import-export and by
+   * Employee Groups' `department`-style OR-matching), but once an employee
+   * is linked to a canonical location, that text is DERIVED from the
+   * location's current name rather than typed independently. An employee
+   * with no `locationId` at all keeps the pre-Phase-4 behavior completely
+   * unchanged: whatever free text was given (or already on the row) passes
+   * straight through.
+   */
+  private async resolveLocation(
+    client: PoolClient,
+    companyId: string,
+    locationId: string | null | undefined,
+    fallbackLocation: string | null | undefined
+  ): Promise<string | null> {
+    if (!locationId) return fallbackLocation ?? null;
+    const location = await client.query<{ name: string }>(
+      "SELECT name FROM locations WHERE id = $1 AND company_id = $2",
+      [locationId, companyId]
+    );
+    if (location.rowCount === 0) {
+      throw new BadRequestException("Location not found");
+    }
+    return location.rows[0].name;
   }
 
   private async requireModuleAndManagePermission(claims: RequestClaims): Promise<void> {

@@ -52,6 +52,28 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): 
     // org_unit.view.all (0069's seed), so they're gated identically.
     items.push({ to: "/app/organization/jobs", label: "Jobs" });
     items.push({ to: "/app/organization/positions", label: "Positions" });
+    // Organization Management Phase 3 — Assignment Workbench + Relationship
+    // Explorer, added as two more flat items for the same reason Jobs/
+    // Positions were (see this component's own comment just above):
+    // `NavItem` still has no sub-nav concept. employee_org_assignment.view.all/
+    // org_relationship.view.all are seeded to the same broad audience as
+    // org_unit.view.all/job.view.all/position.view.all (0072's seed).
+    items.push({ to: "/app/organization/assignments", label: "Assignments" });
+    items.push({ to: "/app/organization/relationships", label: "Reporting Lines" });
+    // Organization Management Phase 4 — Locations + Financial Centers,
+    // added as two more flat items for the same reason every prior phase's
+    // screens were (see this component's own comment above): `NavItem`
+    // still has no sub-nav concept. location.view.all/cost_center.view.all/
+    // profit_center.view.all are seeded to the same broad audience as
+    // every other Organization Management view permission (0074's seed).
+    items.push({ to: "/app/organization/locations", label: "Locations" });
+    items.push({ to: "/app/organization/financial-centers", label: "Financial Centers" });
+    // Organization Management Phase 5 — Reorganization workflow, one more
+    // flat item for the same reason every prior phase's screens were (see
+    // this component's own comment above). org_change.view.all is seeded
+    // to the same broad audience as every other Organization Management
+    // view permission (0077's seed).
+    items.push({ to: "/app/organization/reorganizations", label: "Reorganizations" });
   }
 
   // Configuration Center is a read-only index over config domains this

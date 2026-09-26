@@ -88,6 +88,37 @@ import type {
   PositionStatus,
   PositionVersionView,
   PositionView,
+  AssignmentStatus,
+  AssignmentType,
+  CreateEmployeeOrgAssignmentRequest,
+  UpdateEmployeeOrgAssignmentRequest,
+  EmployeeOrgAssignmentVersionView,
+  EmployeeOrgAssignmentView,
+  OrgRelationshipStatus,
+  OrgRelationshipType,
+  CreateOrgRelationshipRequest,
+  UpdateOrgRelationshipRequest,
+  OrgRelationshipVersionView,
+  OrgRelationshipView,
+  CreateLocationRequest,
+  UpdateLocationRequest,
+  MoveLocationRequest,
+  LocationTreeNode,
+  LocationVersionView,
+  LocationView,
+  CreateCostCenterRequest,
+  UpdateCostCenterRequest,
+  CostCenterVersionView,
+  CostCenterView,
+  CreateProfitCenterRequest,
+  UpdateProfitCenterRequest,
+  ProfitCenterVersionView,
+  ProfitCenterView,
+  CreateOrgChangeRequest,
+  OrgChangeImpactSummary,
+  OrgChangeValidationResult,
+  OrgChangeView,
+  OrganizationCommandCenterSummary,
   OffboardingChecklistItemView,
   OffboardingItemTemplateView,
   OfferView,
@@ -1143,6 +1174,167 @@ export const api = {
   reactivatePosition: (id: string) => request<PositionView>(`/organization/positions/${id}/reactivate`, { method: "POST" }),
 
   getPositionHistory: (id: string) => request<PositionVersionView[]>(`/organization/positions/${id}/history`),
+
+  // --- Organization Management, Phase 3
+  // (0071_employee_org_assignments_and_relationships.sql) ------------------
+  // Assignment Workbench (an employee's org unit/position assignment slots)
+  // and Relationship Explorer (typed reporting relationships) — same
+  // "list is the page's data source, the rest back its actions" shape every
+  // prior Organization Management phase's calls already established.
+  listEmployeeOrgAssignments: (filters?: {
+    employeeId?: string;
+    orgUnitId?: string;
+    assignmentType?: AssignmentType;
+    status?: AssignmentStatus;
+  }) => {
+    const params = new URLSearchParams();
+    if (filters?.employeeId) params.set("employeeId", filters.employeeId);
+    if (filters?.orgUnitId) params.set("orgUnitId", filters.orgUnitId);
+    if (filters?.assignmentType) params.set("assignmentType", filters.assignmentType);
+    if (filters?.status) params.set("status", filters.status);
+    const qs = params.toString();
+    return request<EmployeeOrgAssignmentView[]>(`/organization/employee-assignments${qs ? `?${qs}` : ""}`);
+  },
+
+  getEmployeeOrgAssignment: (id: string) => request<EmployeeOrgAssignmentView>(`/organization/employee-assignments/${id}`),
+
+  createEmployeeOrgAssignment: (input: CreateEmployeeOrgAssignmentRequest) =>
+    request<EmployeeOrgAssignmentView>("/organization/employee-assignments", { method: "POST", body: JSON.stringify(input) }),
+
+  updateEmployeeOrgAssignment: (id: string, patch: UpdateEmployeeOrgAssignmentRequest) =>
+    request<EmployeeOrgAssignmentView>(`/organization/employee-assignments/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+
+  endEmployeeOrgAssignment: (id: string, effectiveFrom?: string) =>
+    request<EmployeeOrgAssignmentView>(`/organization/employee-assignments/${id}/end`, {
+      method: "POST",
+      body: JSON.stringify({ effectiveFrom }),
+    }),
+
+  getEmployeeOrgAssignmentHistory: (id: string) =>
+    request<EmployeeOrgAssignmentVersionView[]>(`/organization/employee-assignments/${id}/history`),
+
+  listOrgRelationships: (filters?: {
+    employeeId?: string;
+    managerEmployeeId?: string;
+    relationshipType?: OrgRelationshipType;
+    status?: OrgRelationshipStatus;
+  }) => {
+    const params = new URLSearchParams();
+    if (filters?.employeeId) params.set("employeeId", filters.employeeId);
+    if (filters?.managerEmployeeId) params.set("managerEmployeeId", filters.managerEmployeeId);
+    if (filters?.relationshipType) params.set("relationshipType", filters.relationshipType);
+    if (filters?.status) params.set("status", filters.status);
+    const qs = params.toString();
+    return request<OrgRelationshipView[]>(`/organization/relationships${qs ? `?${qs}` : ""}`);
+  },
+
+  getOrgRelationship: (id: string) => request<OrgRelationshipView>(`/organization/relationships/${id}`),
+
+  createOrgRelationship: (input: CreateOrgRelationshipRequest) =>
+    request<OrgRelationshipView>("/organization/relationships", { method: "POST", body: JSON.stringify(input) }),
+
+  updateOrgRelationship: (id: string, patch: UpdateOrgRelationshipRequest) =>
+    request<OrgRelationshipView>(`/organization/relationships/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  endOrgRelationship: (id: string, effectiveFrom?: string) =>
+    request<OrgRelationshipView>(`/organization/relationships/${id}/end`, {
+      method: "POST",
+      body: JSON.stringify({ effectiveFrom }),
+    }),
+
+  getOrgRelationshipHistory: (id: string) =>
+    request<OrgRelationshipVersionView[]>(`/organization/relationships/${id}/history`),
+
+  // --- Organization Management, Phase 4
+  // (0073_locations_and_financial_centers.sql) -----------------------------
+  // Location hierarchy (LocationsPage.tsx — a tree explorer, exactly
+  // OrgHierarchyPage.tsx's own shape) and Cost/Profit Centers
+  // (FinancialCentersPage.tsx — two flat catalogs, exactly JobsPage.tsx's
+  // own shape), the same "list/tree is the page's data source, the rest
+  // back its actions" convention every prior phase's calls established.
+  getLocationTree: () => request<LocationTreeNode[]>("/organization/locations/tree"),
+
+  listLocations: () => request<LocationView[]>("/organization/locations"),
+
+  getLocation: (id: string) => request<LocationView>(`/organization/locations/${id}`),
+
+  createLocation: (input: CreateLocationRequest) =>
+    request<LocationView>("/organization/locations", { method: "POST", body: JSON.stringify(input) }),
+
+  updateLocation: (id: string, patch: UpdateLocationRequest) =>
+    request<LocationView>(`/organization/locations/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  moveLocation: (id: string, input: MoveLocationRequest) =>
+    request<LocationView>(`/organization/locations/${id}/move`, { method: "POST", body: JSON.stringify(input) }),
+
+  archiveLocation: (id: string) => request<LocationView>(`/organization/locations/${id}/archive`, { method: "POST" }),
+
+  activateLocation: (id: string) => request<LocationView>(`/organization/locations/${id}/activate`, { method: "POST" }),
+
+  getLocationHistory: (id: string) => request<LocationVersionView[]>(`/organization/locations/${id}/history`),
+
+  listCostCenters: () => request<CostCenterView[]>("/organization/cost-centers"),
+
+  getCostCenter: (id: string) => request<CostCenterView>(`/organization/cost-centers/${id}`),
+
+  createCostCenter: (input: CreateCostCenterRequest) =>
+    request<CostCenterView>("/organization/cost-centers", { method: "POST", body: JSON.stringify(input) }),
+
+  updateCostCenter: (id: string, patch: UpdateCostCenterRequest) =>
+    request<CostCenterView>(`/organization/cost-centers/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  archiveCostCenter: (id: string) => request<CostCenterView>(`/organization/cost-centers/${id}/archive`, { method: "POST" }),
+
+  activateCostCenter: (id: string) => request<CostCenterView>(`/organization/cost-centers/${id}/activate`, { method: "POST" }),
+
+  getCostCenterHistory: (id: string) => request<CostCenterVersionView[]>(`/organization/cost-centers/${id}/history`),
+
+  listProfitCenters: () => request<ProfitCenterView[]>("/organization/profit-centers"),
+
+  getProfitCenter: (id: string) => request<ProfitCenterView>(`/organization/profit-centers/${id}`),
+
+  createProfitCenter: (input: CreateProfitCenterRequest) =>
+    request<ProfitCenterView>("/organization/profit-centers", { method: "POST", body: JSON.stringify(input) }),
+
+  updateProfitCenter: (id: string, patch: UpdateProfitCenterRequest) =>
+    request<ProfitCenterView>(`/organization/profit-centers/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  archiveProfitCenter: (id: string) =>
+    request<ProfitCenterView>(`/organization/profit-centers/${id}/archive`, { method: "POST" }),
+
+  activateProfitCenter: (id: string) =>
+    request<ProfitCenterView>(`/organization/profit-centers/${id}/activate`, { method: "POST" }),
+
+  getProfitCenterHistory: (id: string) => request<ProfitCenterVersionView[]>(`/organization/profit-centers/${id}/history`),
+
+  // --- Organization Management Phase 5: Reorganization workflow -------------
+  listOrgChanges: () => request<OrgChangeView[]>("/organization/reorganizations"),
+
+  getOrgChange: (id: string) => request<OrgChangeView>(`/organization/reorganizations/${id}`),
+
+  createOrgChange: (input: CreateOrgChangeRequest) =>
+    request<OrgChangeView>("/organization/reorganizations", { method: "POST", body: JSON.stringify(input) }),
+
+  validateOrgChange: (id: string) =>
+    request<OrgChangeValidationResult>(`/organization/reorganizations/${id}/validate`, { method: "POST" }),
+
+  analyzeOrgChangeImpact: (id: string) =>
+    request<OrgChangeImpactSummary>(`/organization/reorganizations/${id}/impact`, { method: "POST" }),
+
+  submitOrgChangeForApproval: (id: string) =>
+    request<OrgChangeView>(`/organization/reorganizations/${id}/submit`, { method: "POST" }),
+
+  decideOrgChange: (id: string, dto: { decision: "approved" | "rejected"; comment?: string }) =>
+    request<OrgChangeView>(`/organization/reorganizations/${id}/decide`, { method: "POST", body: JSON.stringify(dto) }),
+
+  executeOrgChange: (id: string) => request<OrgChangeView>(`/organization/reorganizations/${id}/execute`, { method: "POST" }),
+
+  // --- Organization Management Phase 6: Command Center panel ----------------
+  getOrganizationCommandCenterSummary: () =>
+    request<OrganizationCommandCenterSummary>("/organization/command-center"),
 
   // --- Employee Groups & Leave Policies (Task #49) --------------------------
   // Admin Center's own screen for the Phase 8 resolver: the API already

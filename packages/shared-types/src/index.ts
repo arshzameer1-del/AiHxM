@@ -1503,7 +1503,35 @@ export type EmployeeView = {
   positionId: string | null;
   designation: string | null;
   location: string | null;
+  /**
+   * Organization Management Phase 4 addition
+   * (0073_locations_and_financial_centers.sql) — nullable, additive. When
+   * set, `location` above is kept in sync with this location's current
+   * name by EmployeesService (see `resolveLocation()`), the same
+   * `orgUnitId`/`department` relationship Phase 1 established. `null`
+   * means this employee hasn't been linked to the canonical location
+   * hierarchy yet — `location` is then whatever free text was typed
+   * directly, same as before this phase.
+   */
+  locationId: string | null;
   employmentType: EmploymentType;
+  /**
+   * Untyped self-reference (0010_employee_core.sql) — kept working exactly
+   * as-is for backward compatibility (still writable directly via
+   * `CreateEmployeeRequest`/`UpdateEmployeeRequest`'s own `managerId`
+   * field below). Organization Management Phase 3
+   * (0071_employee_org_assignments_and_relationships.sql) adds the
+   * canonical, TYPED alternative — `org_relationships` with
+   * `relationshipType: 'direct'` — and OrgRelationshipsService syncs THIS
+   * field, point-in-time, on every direct-relationship create/update/end
+   * (plain SQL across the table boundary, exactly PositionsService's own
+   * `employees.positionId` precedent — see that service's class doc
+   * comment). This is a WRITE-ONLY, point-in-time sync, not a live view:
+   * editing this field directly (the legacy path, still supported) does
+   * NOT create or update a corresponding `org_relationships` row — a
+   * documented, deliberate gap, not an oversight (see
+   * org-relationships.service.ts's own header comment).
+   */
   managerId: string | null;
   employmentStatus: EmploymentStatus;
   dateOfJoining: string;
@@ -1534,6 +1562,10 @@ export type CreateEmployeeRequest = {
   orgUnitId?: string;
   designation?: string;
   location?: string;
+  /** Organization Management Phase 4 — set this instead of (or alongside)
+   * `location` to link the employee to a canonical location; the server
+   * derives/overwrites `location`'s text from it. */
+  locationId?: string;
   employmentType?: EmploymentType;
   managerId?: string;
   dateOfJoining?: string;
@@ -3070,6 +3102,12 @@ export type PositionView = {
   companyId: string;
   orgUnitId: string;
   jobId: string | null;
+  /** Organization Management Phase 4 additions
+   * (0073_locations_and_financial_centers.sql) — nullable, additive. A
+   * position can carry a financial-dimension assignment alongside its
+   * structural one (org unit) and its work-definition one (job). */
+  costCenterId: string | null;
+  profitCenterId: string | null;
   positionCode: string | null;
   positionTitle: string;
   headcountFte: number;
@@ -3081,6 +3119,8 @@ export type PositionView = {
 export type CreatePositionRequest = {
   orgUnitId: string;
   jobId?: string;
+  costCenterId?: string;
+  profitCenterId?: string;
   /** Defaults to the linked job's current title when omitted and a
    * `jobId` is given; required when no `jobId` is given. Independently
    * editable afterward either way — a position's title does not stay
@@ -3099,6 +3139,11 @@ export type CreatePositionRequest = {
 export type UpdatePositionRequest = {
   orgUnitId?: string;
   jobId?: string | null;
+  /** `null` clears the link; omitted leaves it unchanged — the same
+   * three-way "set / clear / leave alone" distinction `jobId` above
+   * already established. */
+  costCenterId?: string | null;
+  profitCenterId?: string | null;
   positionTitle?: string;
   positionCode?: string;
   headcountFte?: number;
@@ -3115,6 +3160,8 @@ export type PositionVersionView = {
   positionId: string;
   orgUnitId: string;
   jobId: string | null;
+  costCenterId: string | null;
+  profitCenterId: string | null;
   positionCode: string | null;
   positionTitle: string;
   headcountFte: number;
@@ -3122,4 +3169,402 @@ export type PositionVersionView = {
   effectiveFrom: string;
   effectiveTo: string | null;
   createdAt: string;
+};
+
+// --- Organization Management, Phase 3: Employee Organizational
+// Assignment + Reporting Relationships -----------------------------
+// See the Master Engineering Instruction doc's Section 11 (Employee
+// Organizational Assignment) + Section 12 (Reporting Relationships), and
+// 0071_employee_org_assignments_and_relationships.sql's own header comment
+// for the full design writeup. `EmployeeOrgAssignmentView`/
+// `OrgRelationshipView` are the CURRENT (denormalized-cache) state the API
+// returns for reads; `EmployeeOrgAssignmentVersionView`/
+// `OrgRelationshipVersionView` are one entry of each entity's
+// effective-dated history — the same split `OrgUnitView`/`JobView`/
+// `PositionView` already established, applied a third time.
+
+/** `primary` — the one canonical assignment every employee should have at
+ * most one open of at a time (DB-enforced). The other five may coexist,
+ * any number at once, alongside a `primary` assignment or each other. */
+export type AssignmentType = "primary" | "secondary" | "concurrent" | "temporary" | "acting" | "secondment";
+
+export type AssignmentStatus = "active" | "ended";
+
+export type EmployeeOrgAssignmentView = {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  assignmentType: AssignmentType;
+  orgUnitId: string;
+  positionId: string | null;
+  /** Phase 5 (Location) placeholder — no canonical Location entity exists
+   * yet, so this is an opaque, unvalidated id for now. See this phase's
+   * migration header comment. */
+  locationId: string | null;
+  status: AssignmentStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateEmployeeOrgAssignmentRequest = {
+  employeeId: string;
+  assignmentType: AssignmentType;
+  orgUnitId: string;
+  positionId?: string;
+  locationId?: string;
+  /** Defaults to today (server date) when omitted, same as every other
+   * EffectiveDatingEngine consumer's `effectiveFrom`. */
+  effectiveFrom?: string;
+};
+
+/** Moves this assignment to a different org unit/position/location in
+ * place — `assignmentType` is immutable once created (create a new
+ * assignment slot instead of retyping an existing one) and `status` is a
+ * dedicated action (`POST .../:id/end`), not a plain field patch, the same
+ * "the one edit that needs its own endpoint" split `MoveOrgUnitRequest`/
+ * `AssignPositionRequest` already established. */
+export type UpdateEmployeeOrgAssignmentRequest = {
+  orgUnitId?: string;
+  /** `null` clears the position link; omitted leaves it unchanged. */
+  positionId?: string | null;
+  /** `null` clears the location link; omitted leaves it unchanged. */
+  locationId?: string | null;
+  effectiveFrom?: string;
+};
+
+export type EmployeeOrgAssignmentVersionView = {
+  id: string;
+  employeeOrgAssignmentId: string;
+  employeeId: string;
+  assignmentType: AssignmentType;
+  orgUnitId: string;
+  positionId: string | null;
+  locationId: string | null;
+  status: AssignmentStatus;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  createdAt: string;
+};
+
+/** `direct` — the one canonical "solid-line manager" relationship every
+ * employee should have at most one open of at a time (DB-enforced),
+ * synced point-in-time onto `employees.managerId` on every write (see
+ * `EmployeeView.managerId`'s own doc comment). The other four may coexist,
+ * any number at once, alongside a `direct` relationship or each other. */
+export type OrgRelationshipType = "direct" | "dotted_line" | "matrix" | "temporary" | "acting";
+
+export type OrgRelationshipStatus = "active" | "ended";
+
+export type OrgRelationshipView = {
+  id: string;
+  companyId: string;
+  /** The report. */
+  employeeId: string;
+  /** The manager (or dotted-line/matrix/temporary/acting counterpart). */
+  managerEmployeeId: string;
+  relationshipType: OrgRelationshipType;
+  status: OrgRelationshipStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateOrgRelationshipRequest = {
+  employeeId: string;
+  managerEmployeeId: string;
+  relationshipType: OrgRelationshipType;
+  effectiveFrom?: string;
+};
+
+/** Reassigns the manager/counterpart side of this relationship in place —
+ * `relationshipType`/`employeeId` are immutable once created (create a new
+ * relationship instead of retyping an existing one); `status` is a
+ * dedicated action (`POST .../:id/end`), not a plain field patch. */
+export type UpdateOrgRelationshipRequest = {
+  managerEmployeeId?: string;
+  effectiveFrom?: string;
+};
+
+export type OrgRelationshipVersionView = {
+  id: string;
+  orgRelationshipId: string;
+  employeeId: string;
+  managerEmployeeId: string;
+  relationshipType: OrgRelationshipType;
+  status: OrgRelationshipStatus;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  createdAt: string;
+};
+
+// --- Organization Management, Phase 4: Locations & Cost/Profit Centers ---
+// See the Master Engineering Instruction doc's Section 14 (Location
+// Management), and 0073_locations_and_financial_centers.sql's own header
+// comment for the full design writeup. `LocationView`/`CostCenterView`/
+// `ProfitCenterView` are the CURRENT (denormalized-cache) state the API
+// returns for reads; their `*VersionView` counterparts are one entry of
+// each entity's effective-dated history — the same split `OrgUnitView`/
+// `JobView`/`PositionView` already established, applied a fourth/fifth/
+// sixth time.
+
+/** A validated-but-open set, never a fixed number of hierarchy levels —
+ * exactly `OrgUnitType`'s own posture. A single-site tenant might give
+ * every location `locationType: 'site'` with no parent at all; a
+ * multi-country enterprise nests all five. */
+export type LocationType = "country" | "region" | "city" | "site" | "building";
+
+export type LocationStatus = "active" | "archived";
+
+export type LocationView = {
+  id: string;
+  companyId: string;
+  parentId: string | null;
+  locationType: LocationType;
+  code: string | null;
+  name: string;
+  address: string | null;
+  status: LocationStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** Server-built (LocationsService.getTree()), the same shape
+ * `OrgUnitTreeNode` already established for the org unit hierarchy. */
+export type LocationTreeNode = LocationView & {
+  children: LocationTreeNode[];
+};
+
+export type CreateLocationRequest = {
+  parentId?: string;
+  locationType: LocationType;
+  code?: string;
+  name: string;
+  address?: string;
+  effectiveFrom?: string;
+};
+
+export type UpdateLocationRequest = {
+  locationType?: LocationType;
+  code?: string;
+  name?: string;
+  address?: string;
+  effectiveFrom?: string;
+};
+
+/** The one edit that needs the cycle guard — kept as its own dedicated
+ * action, exactly `MoveOrgUnitRequest`'s own split from `UpdateOrgUnitRequest`. */
+export type MoveLocationRequest = {
+  /** `null` moves the location to become a root. */
+  parentId: string | null;
+  effectiveFrom?: string;
+};
+
+export type LocationVersionView = {
+  id: string;
+  locationId: string;
+  parentId: string | null;
+  locationType: LocationType;
+  code: string | null;
+  name: string;
+  address: string | null;
+  status: LocationStatus;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  createdAt: string;
+};
+
+export type CostCenterStatus = "active" | "archived";
+
+export type CostCenterView = {
+  id: string;
+  companyId: string;
+  code: string | null;
+  name: string;
+  orgUnitId: string | null;
+  status: CostCenterStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateCostCenterRequest = {
+  code?: string;
+  name: string;
+  orgUnitId?: string;
+  effectiveFrom?: string;
+};
+
+export type UpdateCostCenterRequest = {
+  code?: string;
+  name?: string;
+  /** `null` clears the org unit link; omitted leaves it unchanged. */
+  orgUnitId?: string | null;
+  effectiveFrom?: string;
+};
+
+export type CostCenterVersionView = {
+  id: string;
+  costCenterId: string;
+  code: string | null;
+  name: string;
+  orgUnitId: string | null;
+  status: CostCenterStatus;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  createdAt: string;
+};
+
+/** Structurally identical to CostCenter — a distinct entity (own table,
+ * own type), not a `type` discriminator on one shared shape, matching
+ * 0073's own header comment on why the two are separate tables. */
+export type ProfitCenterStatus = "active" | "archived";
+
+export type ProfitCenterView = {
+  id: string;
+  companyId: string;
+  code: string | null;
+  name: string;
+  orgUnitId: string | null;
+  status: ProfitCenterStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateProfitCenterRequest = {
+  code?: string;
+  name: string;
+  orgUnitId?: string;
+  effectiveFrom?: string;
+};
+
+export type UpdateProfitCenterRequest = {
+  code?: string;
+  name?: string;
+  orgUnitId?: string | null;
+  effectiveFrom?: string;
+};
+
+export type ProfitCenterVersionView = {
+  id: string;
+  profitCenterId: string;
+  code: string | null;
+  name: string;
+  orgUnitId: string | null;
+  status: ProfitCenterStatus;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  createdAt: string;
+};
+
+// -----------------------------------------------------------------------
+// Organization Management, Phase 5 — Reorganization workflow & data
+// quality. See 0076_reorganization_changes.sql's own header comment for
+// the full design writeup (scope, validation approach, why no stable-
+// identity+version split this time).
+// -----------------------------------------------------------------------
+
+export type OrgChangeStatus =
+  | "draft"
+  | "validated"
+  | "pending_approval"
+  | "approved"
+  | "rejected"
+  | "published"
+  | "failed";
+
+export type OrgChangeItemAction = "move" | "rename" | "retype" | "archive" | "activate";
+
+export type OrgChangeItemView = {
+  id: string;
+  orgChangeId: string;
+  sequence: number;
+  orgUnitId: string;
+  action: OrgChangeItemAction;
+  newParentId: string | null;
+  newName: string | null;
+  newUnitType: string | null;
+  appliedAt: string | null;
+  createdAt: string;
+};
+
+export type OrgChangeImpactSummary = {
+  affectedOrgUnitCount: number;
+  affectedPositionCount: number;
+  affectedEmployeeCount: number;
+  warnings: string[];
+};
+
+export type OrgChangeView = {
+  id: string;
+  companyId: string;
+  title: string;
+  description: string | null;
+  status: OrgChangeStatus;
+  effectiveDate: string;
+  createdByUserAccountId: string;
+  workflowInstanceId: string | null;
+  validationErrors: string[] | null;
+  validationWarnings: string[] | null;
+  impactSummary: OrgChangeImpactSummary | null;
+  failureReason: string | null;
+  validatedAt: string | null;
+  executedAt: string | null;
+  publishedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  items: OrgChangeItemView[];
+};
+
+export type CreateOrgChangeItemRequest = {
+  orgUnitId: string;
+  action: OrgChangeItemAction;
+  newParentId?: string;
+  newName?: string;
+  newUnitType?: string;
+};
+
+export type CreateOrgChangeRequest = {
+  title: string;
+  description?: string;
+  effectiveDate: string;
+  items: CreateOrgChangeItemRequest[];
+};
+
+export type OrgChangeValidationResult = {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+};
+
+// -----------------------------------------------------------------------
+// Organization Management, Phase 6 — Events, integration contract, and
+// core reporting. `OrganizationCommandCenterSummary` backs the scoped
+// Command Center panel on the portal home page (see
+// organization-command-center.service.ts's own header comment); the
+// `org.unit.changed`/`org.position.changed`/`org.assignment.changed`
+// domain events themselves are plain `WebhookEvent` rows (already typed)
+// with an `{ eventVersion: 1, changeType, ... }` payload shape documented
+// in each firing service's own `publishChanged()` — not given their own
+// named types here since nothing in this codebase consumes a webhook
+// payload's shape at the type level (the receiving end is always an
+// external tenant integration).
+// -----------------------------------------------------------------------
+
+export type OrganizationCommandCenterRecentChange = {
+  id: string;
+  title: string;
+  status: OrgChangeStatus;
+  effectiveDate: string;
+  updatedAt: string;
+};
+
+export type OrganizationCommandCenterSummary = {
+  generatedAt: string;
+  totalOrgUnits: number;
+  totalPositions: number;
+  vacantPositions: number;
+  filledPositions: number;
+  frozenPositions: number;
+  abolishedPositions: number;
+  activeAssignments: number;
+  reorganizationsInFlight: number;
+  recentReorganizations: OrganizationCommandCenterRecentChange[];
 };

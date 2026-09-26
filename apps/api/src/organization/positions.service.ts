@@ -6,6 +6,7 @@ import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
+import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
 import type {
   CreatePositionRequest,
   PositionStatus,
@@ -29,6 +30,12 @@ type PositionRow = {
   position_title: string;
   headcount_fte: string; // numeric comes back as a driver string
   status: string;
+  // Organization Management Phase 4 (0073_locations_and_financial_centers.sql)
+  // — nullable, additive: a position may optionally be tagged with one
+  // cost center and/or one profit center, the reusable financial
+  // dimensions Payroll/Reporting will eventually roll up by.
+  cost_center_id: string | null;
+  profit_center_id: string | null;
   created_at: unknown;
   updated_at: unknown;
 };
@@ -49,6 +56,8 @@ function rowToPosition(row: any): PositionView {
     positionTitle: row.position_title,
     headcountFte: Number(row.headcount_fte),
     status: row.status,
+    costCenterId: row.cost_center_id ?? null,
+    profitCenterId: row.profit_center_id ?? null,
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
   };
@@ -65,6 +74,8 @@ function rowToVersion(row: any): PositionVersionView {
     positionTitle: row.position_title,
     headcountFte: Number(row.headcount_fte),
     status: row.status,
+    costCenterId: row.cost_center_id ?? null,
+    profitCenterId: row.profit_center_id ?? null,
     effectiveFrom: toIso(row.effective_from).slice(0, 10),
     effectiveTo: row.effective_to ? toIso(row.effective_to).slice(0, 10) : null,
     createdAt: toIso(row.created_at),
@@ -116,8 +127,22 @@ export class PositionsService {
     private readonly rbac: RbacService,
     private readonly entitlements: EntitlementsService,
     private readonly audit: AuditService,
-    private readonly effectiveDating: EffectiveDatingEngine
+    private readonly effectiveDating: EffectiveDatingEngine,
+    // Optional for the same reason EmployeesService's own `webhooks` field
+    // is (see that class's own doc comment): a large number of unrelated
+    // spec files hand-construct `PositionsService` directly with no
+    // interest in webhooks at all. Organization Management Phase 6 — the
+    // `org.position.changed` domain event, fired at every one of this
+    // service's own already-audited mutation points (create/update/
+    // freeze/unfreeze/abolish/reactivate/assign/unassign).
+    private readonly webhooks?: WebhookDispatchService
   ) {}
+
+  private publishChanged(claims: RequestClaims, changeType: string, position: PositionView): void {
+    this.webhooks
+      ?.enqueue(claims.company_id!, "org.position.changed", { eventVersion: 1, changeType, position })
+      .catch(() => undefined);
+  }
 
   async create(claims: RequestClaims, input: CreatePositionRequest): Promise<PositionView> {
     await this.requireManage(claims);
@@ -146,12 +171,27 @@ export class PositionsService {
           throw new ConflictException(`A position with code "${input.positionCode}" already exists`);
         }
       }
+      if (input.costCenterId) {
+        await this.mustExistCostCenter(client, claims.company_id!, input.costCenterId);
+      }
+      if (input.profitCenterId) {
+        await this.mustExistProfitCenter(client, claims.company_id!, input.profitCenterId);
+      }
 
       const headcountFte = input.headcountFte ?? 1.0;
       const inserted = await client.query(
-        `INSERT INTO positions (company_id, org_unit_id, job_id, position_code, position_title, headcount_fte, status)
-         VALUES ($1, $2, $3, $4, $5, $6, 'vacant') RETURNING *`,
-        [claims.company_id, input.orgUnitId, input.jobId ?? null, input.positionCode ?? null, title, headcountFte]
+        `INSERT INTO positions (company_id, org_unit_id, job_id, position_code, position_title, headcount_fte, status, cost_center_id, profit_center_id)
+         VALUES ($1, $2, $3, $4, $5, $6, 'vacant', $7, $8) RETURNING *`,
+        [
+          claims.company_id,
+          input.orgUnitId,
+          input.jobId ?? null,
+          input.positionCode ?? null,
+          title,
+          headcountFte,
+          input.costCenterId ?? null,
+          input.profitCenterId ?? null,
+        ]
       );
       const position = inserted.rows[0];
 
@@ -166,6 +206,8 @@ export class PositionsService {
           position_title: position.position_title,
           headcount_fte: position.headcount_fte,
           status: position.status,
+          cost_center_id: position.cost_center_id,
+          profit_center_id: position.profit_center_id,
         },
         effectiveFrom: input.effectiveFrom,
       });
@@ -177,7 +219,9 @@ export class PositionsService {
         metadata: { orgUnitId: input.orgUnitId, jobId: input.jobId ?? null, positionTitle: title },
       });
 
-      return rowToPosition(position);
+      const view = rowToPosition(position);
+      this.publishChanged(claims, "create", view);
+      return view;
     });
   }
 
@@ -236,6 +280,12 @@ export class PositionsService {
           throw new ConflictException(`A position with code "${patch.positionCode}" already exists`);
         }
       }
+      if (patch.costCenterId) {
+        await this.mustExistCostCenter(client, claims.company_id!, patch.costCenterId);
+      }
+      if (patch.profitCenterId) {
+        await this.mustExistProfitCenter(client, claims.company_id!, patch.profitCenterId);
+      }
 
       const next = {
         org_unit_id: patch.orgUnitId ?? before.org_unit_id,
@@ -247,6 +297,10 @@ export class PositionsService {
         position_title: patch.positionTitle ?? before.position_title,
         headcount_fte: patch.headcountFte ?? Number(before.headcount_fte),
         status: before.status,
+        // Same three-way "set / clear / leave alone" distinction as jobId
+        // above.
+        cost_center_id: patch.costCenterId === null ? null : patch.costCenterId ?? before.cost_center_id,
+        profit_center_id: patch.profitCenterId === null ? null : patch.profitCenterId ?? before.profit_center_id,
       };
 
       const position = await this.applyVersionAndSync(client, claims, id, next, patch.effectiveFrom);
@@ -258,7 +312,9 @@ export class PositionsService {
         metadata: { before: rowToPosition(before), after: rowToPosition(position) },
       });
 
-      return rowToPosition(position);
+      const view = rowToPosition(position);
+      this.publishChanged(claims, "update", view);
+      return view;
     });
   }
 
@@ -331,12 +387,16 @@ export class PositionsService {
         position_title: before.position_title,
         headcount_fte: Number(before.headcount_fte),
         status: nextStatus,
+        cost_center_id: before.cost_center_id,
+        profit_center_id: before.profit_center_id,
       };
       const position = await this.applyVersionAndSync(client, claims, id, data);
 
       await this.audit.record(client, claims, { companyId: claims.company_id ?? null, action, target: id });
 
-      return rowToPosition(position);
+      const view = rowToPosition(position);
+      this.publishChanged(claims, action, view);
+      return view;
     });
   }
 
@@ -393,6 +453,8 @@ export class PositionsService {
           position_title: position.position_title,
           headcount_fte: Number(position.headcount_fte),
           status: "filled",
+          cost_center_id: position.cost_center_id,
+          profit_center_id: position.profit_center_id,
         },
         effectiveFrom
       );
@@ -404,7 +466,9 @@ export class PositionsService {
         metadata: { employeeId },
       });
 
-      return rowToPosition(updated);
+      const view = rowToPosition(updated);
+      this.publishChanged(claims, "position.assign", view);
+      return view;
     });
   }
 
@@ -428,7 +492,9 @@ export class PositionsService {
         target: positionId,
       });
 
-      return rowToPosition(updated);
+      const view = rowToPosition(updated);
+      this.publishChanged(claims, "position.unassign", view);
+      return view;
     });
   }
 
@@ -459,6 +525,8 @@ export class PositionsService {
         position_title: before.position_title,
         headcount_fte: Number(before.headcount_fte),
         status: "vacant",
+        cost_center_id: before.cost_center_id,
+        profit_center_id: before.profit_center_id,
       },
       effectiveFrom
     );
@@ -494,6 +562,8 @@ export class PositionsService {
       position_title: string;
       headcount_fte: number;
       status: string;
+      cost_center_id: string | null;
+      profit_center_id: string | null;
     },
     effectiveFrom?: string
   ): Promise<Record<string, unknown>> {
@@ -507,9 +577,19 @@ export class PositionsService {
 
     const result = await client.query(
       `UPDATE positions SET org_unit_id = $2, job_id = $3, position_code = $4, position_title = $5,
-         headcount_fte = $6, status = $7, updated_at = now()
+         headcount_fte = $6, status = $7, cost_center_id = $8, profit_center_id = $9, updated_at = now()
        WHERE id = $1 RETURNING *`,
-      [id, data.org_unit_id, data.job_id, data.position_code, data.position_title, data.headcount_fte, data.status]
+      [
+        id,
+        data.org_unit_id,
+        data.job_id,
+        data.position_code,
+        data.position_title,
+        data.headcount_fte,
+        data.status,
+        data.cost_center_id,
+        data.profit_center_id,
+      ]
     );
     return result.rows[0];
   }
@@ -526,6 +606,22 @@ export class PositionsService {
       companyId,
     ]);
     if (result.rowCount === 0) throw new NotFoundException("Org unit not found");
+  }
+
+  private async mustExistCostCenter(client: PoolClient, companyId: string, costCenterId: string): Promise<void> {
+    const result = await client.query("SELECT 1 FROM cost_centers WHERE id = $1 AND company_id = $2", [
+      costCenterId,
+      companyId,
+    ]);
+    if (result.rowCount === 0) throw new NotFoundException("Cost center not found");
+  }
+
+  private async mustExistProfitCenter(client: PoolClient, companyId: string, profitCenterId: string): Promise<void> {
+    const result = await client.query("SELECT 1 FROM profit_centers WHERE id = $1 AND company_id = $2", [
+      profitCenterId,
+      companyId,
+    ]);
+    if (result.rowCount === 0) throw new NotFoundException("Profit center not found");
   }
 
   private async requireManage(claims: RequestClaims): Promise<void> {

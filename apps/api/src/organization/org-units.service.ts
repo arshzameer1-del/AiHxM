@@ -6,6 +6,7 @@ import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
+import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
 import type {
   CreateOrgUnitRequest,
   MoveOrgUnitRequest,
@@ -96,8 +97,21 @@ export class OrgUnitsService {
     private readonly rbac: RbacService,
     private readonly entitlements: EntitlementsService,
     private readonly audit: AuditService,
-    private readonly effectiveDating: EffectiveDatingEngine
+    private readonly effectiveDating: EffectiveDatingEngine,
+    // Optional for the same reason EmployeesService's own `webhooks` field
+    // is (see that class's own doc comment) — a large number of unrelated
+    // spec files hand-construct `OrgUnitsService` directly. Organization
+    // Management Phase 6 — the `org.unit.changed` domain event, fired at
+    // every one of this service's own already-audited mutation points
+    // (create/update/move/archive/activate).
+    private readonly webhooks?: WebhookDispatchService
   ) {}
+
+  private publishChanged(claims: RequestClaims, changeType: string, unit: OrgUnitView): void {
+    this.webhooks
+      ?.enqueue(claims.company_id!, "org.unit.changed", { eventVersion: 1, changeType, orgUnit: unit })
+      .catch(() => undefined);
+  }
 
   async create(claims: RequestClaims, input: CreateOrgUnitRequest): Promise<OrgUnitView> {
     await this.requireManage(claims);
@@ -143,7 +157,9 @@ export class OrgUnitsService {
         metadata: { name: input.name, unitType: input.unitType, parentId: input.parentId ?? null },
       });
 
-      return rowToOrgUnit(unit);
+      const view = rowToOrgUnit(unit);
+      this.publishChanged(claims, "create", view);
+      return view;
     });
   }
 
@@ -288,7 +304,9 @@ export class OrgUnitsService {
         metadata: { before: rowToOrgUnit(before), after: rowToOrgUnit(unit) },
       });
 
-      return rowToOrgUnit(unit);
+      const view = rowToOrgUnit(unit);
+      this.publishChanged(claims, "update", view);
+      return view;
     });
   }
 
@@ -339,7 +357,9 @@ export class OrgUnitsService {
         metadata: { fromParentId: before.parent_id, toParentId: input.parentId ?? null },
       });
 
-      return rowToOrgUnit(unit);
+      const view = rowToOrgUnit(unit);
+      this.publishChanged(claims, "move", view);
+      return view;
     });
   }
 
@@ -372,7 +392,9 @@ export class OrgUnitsService {
         target: id,
       });
 
-      return rowToOrgUnit(unit);
+      const view = rowToOrgUnit(unit);
+      this.publishChanged(claims, status === "archived" ? "archive" : "activate", view);
+      return view;
     });
   }
 

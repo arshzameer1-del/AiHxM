@@ -53,6 +53,13 @@ export class CreateEmployeeDto {
   @IsString()
   location?: string;
 
+  /** Organization Management Phase 4 — links this employee to a canonical
+   * location; `location`'s text is then derived from it server-side (see
+   * EmployeesService.resolveLocation()). */
+  @IsOptional()
+  @IsUUID()
+  locationId?: string;
+
   @IsOptional()
   @IsIn(["permanent", "contract", "probation", "intern"])
   employmentType?: EmploymentType;

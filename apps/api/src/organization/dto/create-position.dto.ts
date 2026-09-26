@@ -25,6 +25,17 @@ export class CreatePositionDto {
   @IsPositive()
   headcountFte?: number;
 
+  /** Organization Management Phase 4 — tags this position with a
+   * reusable financial dimension; see PositionsService.create()'s own
+   * existence check. */
+  @IsOptional()
+  @IsUUID()
+  costCenterId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  profitCenterId?: string;
+
   @IsOptional()
   @IsDateString()
   effectiveFrom?: string;

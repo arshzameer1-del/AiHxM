@@ -8,6 +8,8 @@ import { AuditService } from "../audit/audit.service";
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
 import { EmployeesService } from "../employees/employees.service";
 import { LocalFileStorageService } from "../file-storage/local-file-storage.service";
+import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
+import { IntegrationsService } from "../tenant-management/integrations.service";
 import { OrgUnitsService } from "./org-units.service";
 
 const FIXTURE_CLAIMS: RequestClaims = { is_platform_admin: true, company_id: null, sub: "org-units-spec-fixtures" };
@@ -325,6 +327,98 @@ describe("OrgUnitsService", () => {
       await expect(
         employees.create(hrAdminClaims, { firstName: "Bad", lastName: "Link", orgUnitId: "00000000-0000-0000-0000-000000000000" })
       ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  /**
+   * Organization Management, Phase 6 — Events. Confirms `org.unit.changed`
+   * really enqueues end to end through a real WebhookDispatchService, the
+   * same pattern `employees.service.spec.ts`'s own "webhook events" block
+   * proved for `employee.created`/`employee.terminated`. `orgUnits` above
+   * (this file's shared instance) is built WITHOUT a WebhookDispatchService
+   * — proving the optional-dependency design doesn't secretly break
+   * anything for it — so this uses its own instance instead.
+   */
+  describe("webhook events (Organization Management Phase 6)", () => {
+    let companyId: string;
+    let hrAdminClaims: RequestClaims;
+    let orgUnitsWithWebhooks: OrgUnitsService;
+    const platformClaims: RequestClaims = { is_platform_admin: true, company_id: null, sub: "org-unit-webhook-spec" };
+
+    beforeAll(async () => {
+      companyId = await createFixtureCompany("Org Unit Webhook Co");
+      const hrAdminUserId = await createUser(`org-unit-webhook-hr-${Date.now()}@example.com`);
+      await assignRole(hrAdminUserId, companyId, "hr_admin");
+      hrAdminClaims = { is_platform_admin: false, company_id: companyId, sub: hrAdminUserId };
+
+      await new IntegrationsService(db, new AuditService()).configure(platformClaims, companyId, "webhook", {
+        enabled: true,
+        config: { url: "http://127.0.0.1:1/hook", signingSecret: "org-unit-trigger-secret" },
+      });
+
+      orgUnitsWithWebhooks = new OrgUnitsService(
+        db,
+        new RbacService(db),
+        new EntitlementsService(db),
+        new AuditService(),
+        new EffectiveDatingEngine(),
+        new WebhookDispatchService(db, new AuditService())
+      );
+    });
+
+    async function latestEventFor(type: string) {
+      // enqueue() is fire-and-forget — give its own DB write a moment to
+      // land before asserting.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      // webhook_events RLS gates on is_platform_admin() OR is_service() —
+      // read it back with platformClaims, not the tenant-side hrAdminClaims
+      // that drove the create()/update()/move() calls above.
+      const result = await db.withClaims(platformClaims, (client) =>
+        client.query(
+          "SELECT * FROM webhook_events WHERE company_id = $1 AND event_type = $2 ORDER BY created_at DESC LIMIT 1",
+          [companyId, type]
+        )
+      );
+      return result.rows[0];
+    }
+
+    it("enqueues org.unit.changed on create()", async () => {
+      const created = await orgUnitsWithWebhooks.create(hrAdminClaims, { name: "Engineering", unitType: "department" });
+      const event = await latestEventFor("org.unit.changed");
+      expect(event).toBeDefined();
+      expect(event.payload.eventVersion).toBe(1);
+      expect(event.payload.changeType).toBe("create");
+      expect(event.payload.orgUnit.id).toBe(created.id);
+    });
+
+    it("enqueues org.unit.changed with changeType 'update' on update()", async () => {
+      const created = await orgUnitsWithWebhooks.create(hrAdminClaims, { name: "Sales", unitType: "department" });
+      await orgUnitsWithWebhooks.update(hrAdminClaims, created.id, { name: "Sales & Marketing" });
+      const event = await latestEventFor("org.unit.changed");
+      expect(event.payload.changeType).toBe("update");
+      expect(event.payload.orgUnit.name).toBe("Sales & Marketing");
+    });
+
+    it("enqueues org.unit.changed with changeType 'move' on move()", async () => {
+      const parent = await orgUnitsWithWebhooks.create(hrAdminClaims, { name: "Operations", unitType: "department" });
+      const child = await orgUnitsWithWebhooks.create(hrAdminClaims, { name: "Logistics", unitType: "department" });
+      await orgUnitsWithWebhooks.move(hrAdminClaims, child.id, { parentId: parent.id });
+      const event = await latestEventFor("org.unit.changed");
+      expect(event.payload.changeType).toBe("move");
+      expect(event.payload.orgUnit.parentId).toBe(parent.id);
+    });
+
+    it("enqueues org.unit.changed with changeType 'archive'/'activate' on setStatus()", async () => {
+      const unit = await orgUnitsWithWebhooks.create(hrAdminClaims, { name: "Temp Unit", unitType: "department" });
+      await orgUnitsWithWebhooks.archive(hrAdminClaims, unit.id);
+      const archivedEvent = await latestEventFor("org.unit.changed");
+      expect(archivedEvent.payload.changeType).toBe("archive");
+      expect(archivedEvent.payload.orgUnit.status).toBe("archived");
+
+      await orgUnitsWithWebhooks.activate(hrAdminClaims, unit.id);
+      const activatedEvent = await latestEventFor("org.unit.changed");
+      expect(activatedEvent.payload.changeType).toBe("activate");
+      expect(activatedEvent.payload.orgUnit.status).toBe("active");
     });
   });
 });
