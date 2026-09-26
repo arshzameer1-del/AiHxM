@@ -72,6 +72,12 @@ import type {
   ModuleCatalogEntry,
   ModuleKey,
   MoveApplicationStageRequest,
+  MoveOrgUnitRequest,
+  CreateOrgUnitRequest,
+  UpdateOrgUnitRequest,
+  OrgUnitTreeNode,
+  OrgUnitVersionView,
+  OrgUnitView,
   OffboardingChecklistItemView,
   OffboardingItemTemplateView,
   OfferView,
@@ -1052,6 +1058,29 @@ export const api = {
     }),
 
   listJobHistory: (id: string) => request<JobHistoryEntryView[]>(`/employees/${id}/job-history`),
+
+  // --- Organization Management, Phase 1 (0065_organization_units.sql) ------
+  // The canonical Org Unit hierarchy — the Hierarchy Explorer's own data
+  // source. `getTree()` is the one call the page actually renders from;
+  // the rest back its create/edit/move/archive actions.
+  getOrgUnitTree: () => request<OrgUnitTreeNode[]>("/organization/units/tree"),
+
+  listOrgUnits: () => request<OrgUnitView[]>("/organization/units"),
+
+  createOrgUnit: (input: CreateOrgUnitRequest) =>
+    request<OrgUnitView>("/organization/units", { method: "POST", body: JSON.stringify(input) }),
+
+  updateOrgUnit: (id: string, patch: UpdateOrgUnitRequest) =>
+    request<OrgUnitView>(`/organization/units/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  moveOrgUnit: (id: string, input: MoveOrgUnitRequest) =>
+    request<OrgUnitView>(`/organization/units/${id}/move`, { method: "POST", body: JSON.stringify(input) }),
+
+  archiveOrgUnit: (id: string) => request<OrgUnitView>(`/organization/units/${id}/archive`, { method: "POST" }),
+
+  activateOrgUnit: (id: string) => request<OrgUnitView>(`/organization/units/${id}/activate`, { method: "POST" }),
+
+  getOrgUnitHistory: (id: string) => request<OrgUnitVersionView[]>(`/organization/units/${id}/history`),
 
   // --- Employee Groups & Leave Policies (Task #49) --------------------------
   // Admin Center's own screen for the Phase 8 resolver: the API already

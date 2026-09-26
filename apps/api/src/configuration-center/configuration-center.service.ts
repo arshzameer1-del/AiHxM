@@ -7,6 +7,7 @@ import { HolidaysService } from "../holidays/holidays.service";
 import { WorkflowService } from "../workflow/workflow.service";
 import { PayrollService } from "../payroll/payroll.service";
 import { CustomFieldsService } from "../custom-fields/custom-fields.service";
+import { OrgUnitsService } from "../organization/org-units.service";
 import type { ConfigurationDomainSummary } from "@aihxm/shared-types";
 
 type RegistryRow = {
@@ -41,7 +42,8 @@ export class ConfigurationCenterService {
     private readonly holidays: HolidaysService,
     private readonly workflow: WorkflowService,
     private readonly payroll: PayrollService,
-    private readonly customFields: CustomFieldsService
+    private readonly customFields: CustomFieldsService,
+    private readonly orgUnits: OrgUnitsService
   ) {}
 
   async getSummary(claims: RequestClaims): Promise<ConfigurationDomainSummary[]> {
@@ -85,6 +87,13 @@ export class ConfigurationCenterService {
           return (await this.workflow.listTemplates(claims)).length;
         case "custom_field":
           return await this.customFields.countAllDefinitions(claims);
+        case "org_unit":
+          // Organization Management Phase 1 (0065_organization_units.sql)
+          // — OrgUnitsService.list() already applies entitlement-then-RBAC
+          // (`employee` module, then org_unit.view.all/org_unit.manage.all)
+          // exactly like every other case here; this counts every unit in
+          // the tenant's hierarchy (flat, not just roots).
+          return (await this.orgUnits.list(claims)).length;
         case "tax_slab":
           // listTaxSlabs lazily seeds the default FBR bracket table the
           // first time a payroll-enabled tenant has none -- an accepted

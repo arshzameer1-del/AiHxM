@@ -21,6 +21,7 @@ import { ImportExportModule } from "./import-export/import-export.module";
 import { FileStorageModule } from "./file-storage/file-storage.module";
 import { EmployeesModule } from "./employees/employees.module";
 import { EmployeeGroupsModule } from "./employee-groups/employee-groups.module";
+import { OrganizationModule } from "./organization/organization.module";
 import { ShiftsModule } from "./shifts/shifts.module";
 import { HolidaysModule } from "./holidays/holidays.module";
 import { LeaveModule } from "./leave/leave.module";
@@ -72,6 +73,7 @@ import { ScimModule } from "./scim/scim.module";
     DocumentTemplatesModule,
     ImportExportModule,
     FileStorageModule,
+    OrganizationModule,
     EmployeesModule,
     EmployeeGroupsModule,
     ShiftsModule,

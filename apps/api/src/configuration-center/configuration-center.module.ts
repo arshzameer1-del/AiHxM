@@ -7,9 +7,10 @@ import { HolidaysModule } from "../holidays/holidays.module";
 import { WorkflowModule } from "../workflow/workflow.module";
 import { PayrollModule } from "../payroll/payroll.module";
 import { CustomFieldsModule } from "../custom-fields/custom-fields.module";
+import { OrganizationModule } from "../organization/organization.module";
 
 @Module({
-  imports: [EmployeeGroupsModule, ShiftsModule, HolidaysModule, WorkflowModule, PayrollModule, CustomFieldsModule],
+  imports: [EmployeeGroupsModule, ShiftsModule, HolidaysModule, WorkflowModule, PayrollModule, CustomFieldsModule, OrganizationModule],
   controllers: [ConfigurationCenterController],
   providers: [ConfigurationCenterService],
 })

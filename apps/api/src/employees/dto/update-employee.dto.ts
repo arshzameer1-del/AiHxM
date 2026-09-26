@@ -38,6 +38,12 @@ export class UpdateEmployeeDto {
   @IsString()
   department?: string;
 
+  /** Organization Management Phase 1 — see CreateEmployeeDto's own doc
+   * comment. */
+  @IsOptional()
+  @IsUUID()
+  orgUnitId?: string;
+
   @IsOptional()
   @IsString()
   designation?: string;

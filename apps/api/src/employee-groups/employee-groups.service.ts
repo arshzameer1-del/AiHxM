@@ -4,7 +4,8 @@ import type { RequestClaims } from "../database/tenant-context";
 import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
-import { RulesEngine, allEqual } from "../rules-engine/rules-engine.engine";
+import { RulesEngine } from "../rules-engine/rules-engine.engine";
+import type { RuleExpression } from "../rules-engine/rules-engine.engine";
 import { EMPLOYEE_CONDITION_FIELD_TO_COLUMN as CONDITION_FIELD_TO_COLUMN } from "../employees/employee-condition-fields.util";
 import type {
   AssignGroupPolicyRequest,
@@ -91,6 +92,39 @@ function rowToAssignment(row: any): EmployeeGroupPolicyAssignmentView {
     policyType: row.policy_type,
     policyId: row.policy_id,
     createdAt: toIso(row.created_at),
+  };
+}
+
+/**
+ * Organization Management Phase 1 (0065_organization_units.sql): a
+ * `department` condition should keep matching the legacy free-text value
+ * (unchanged behavior for every group configured before this phase — and
+ * for any employee not yet linked to a canonical org unit, since
+ * `employees.department` is still kept in sync from the linked unit's
+ * name when one exists — see EmployeesService.resolveDepartment()), but
+ * now ALSO matches when `equals` is the employee's `orgUnitId` directly —
+ * the more robust way to author a NEW condition, since it survives the
+ * unit being renamed later (a text match wouldn't). This is the smallest
+ * correct change to the resolver: every other field's condition still
+ * becomes a single `equals` leaf exactly as `allEqual()` (rules-engine.
+ * engine.ts) already built it; only `department` becomes an `any` (OR) of
+ * the two possible representations. Specificity (`entry.conditions.length`
+ * in both call sites below) is computed over the ORIGINAL condition list,
+ * so most-specific-match-wins is completely unaffected — this only changes
+ * what a match means, not how many conditions a group has.
+ */
+function buildMatchExpression(conditions: ReadonlyArray<{ field: string; equals: unknown }>): RuleExpression {
+  return {
+    all: conditions.map((c): RuleExpression =>
+      c.field === "department"
+        ? {
+            any: [
+              { field: "department", operator: "equals", value: c.equals },
+              { field: "orgUnitId", operator: "equals", value: c.equals },
+            ],
+          }
+        : { field: c.field, operator: "equals", value: c.equals }
+    ),
   };
 }
 
@@ -508,7 +542,7 @@ export class EmployeeGroupsService {
     }
     return this.db.withClaims(claims, async (client) => {
       const employeeResult = await client.query(
-        "SELECT department, location, designation, employment_type, employment_status FROM employees WHERE id = $1",
+        "SELECT department, org_unit_id, location, designation, employment_type, employment_status FROM employees WHERE id = $1",
         [employeeId]
       );
       if (employeeResult.rowCount === 0) throw new NotFoundException("Employee not found");
@@ -540,7 +574,7 @@ export class EmployeeGroupsService {
       // RulesEngine, which knows nothing about `employees` or SQL columns —
       // same "engine stays generic, caller resolves its own facts" boundary
       // the engine's own doc comment establishes.
-      const employeeContext: Record<string, unknown> = {};
+      const employeeContext: Record<string, unknown> = { orgUnitId: employee.org_unit_id };
       for (const [apiField, column] of Object.entries(CONDITION_FIELD_TO_COLUMN)) {
         employeeContext[apiField] = employee[column];
       }
@@ -548,7 +582,7 @@ export class EmployeeGroupsService {
       let winner: { groupId: string; policyId: string; specificity: number } | null = null;
       for (const [groupId, entry] of byGroup) {
         if (!entry.policyId) continue; // matches structurally, but no assignment for this policyType
-        const allMatch = this.rulesEngine.evaluate(allEqual(entry.conditions), employeeContext);
+        const allMatch = this.rulesEngine.evaluate(buildMatchExpression(entry.conditions), employeeContext);
         if (!allMatch) continue;
         if (!winner || entry.conditions.length > winner.specificity) {
           winner = { groupId, policyId: entry.policyId, specificity: entry.conditions.length };
@@ -600,13 +634,13 @@ export class EmployeeGroupsService {
       );
       if (conditions.rowCount === 0) return [];
       const employees = await client.query(
-        "SELECT id, department, location, designation, employment_type, employment_status FROM employees WHERE employment_status = 'active'"
+        "SELECT id, department, org_unit_id, location, designation, employment_type, employment_status FROM employees WHERE employment_status = 'active'"
       );
-      const expression = allEqual(conditions.rows);
+      const expression = buildMatchExpression(conditions.rows);
       return employees.rows
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .filter((e: any) => {
-          const context: Record<string, unknown> = {};
+          const context: Record<string, unknown> = { orgUnitId: e.org_unit_id };
           for (const [apiField, column] of Object.entries(CONDITION_FIELD_TO_COLUMN)) {
             context[apiField] = e[column];
           }

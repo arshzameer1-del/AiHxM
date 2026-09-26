@@ -34,6 +34,15 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): 
     items.push({ to: "/app/profile", label: "My Profile" });
   }
 
+  // Organization Management Phase 1 — org_unit.view.all is seeded broadly
+  // (hr_admin/line_manager/employee_self_service, 0066_organization_units_seed.sql),
+  // same audience as the Employees/My Profile split above; org_unit.manage.all
+  // (hr_admin only) is what actually gates the create/edit/move/archive
+  // actions the page itself renders.
+  if (hasModule("employee") && roleKeys.length > 0) {
+    items.push({ to: "/app/organization", label: "Organization" });
+  }
+
   // Configuration Center is a read-only index over config domains this
   // login can already reach some other way (Admin Center, System Admin,
   // Payroll Settings) — shown to the same roles that see at least one of

@@ -70,6 +70,7 @@ function rowToEmployee(row: any): Record<string, unknown> {
     gender: row.gender,
     maritalStatus: row.marital_status,
     department: row.department,
+    orgUnitId: row.org_unit_id,
     designation: row.designation,
     location: row.location,
     employmentType: row.employment_type,
@@ -188,14 +189,15 @@ export class EmployeesService {
 
     return this.db.withClaims(claims, async (client) => {
       const employeeNumber = await this.assignEmployeeNumber(client, claims.company_id!, input.employeeNumber);
+      const department = await this.resolveDepartment(client, claims.company_id!, input.orgUnitId, input.department);
 
       const result = await client.query(
         `INSERT INTO employees
            (company_id, user_account_id, employee_number, first_name, last_name, email, phone, cnic,
-            date_of_birth, gender, marital_status, department, designation, location, employment_type,
+            date_of_birth, gender, marital_status, department, org_unit_id, designation, location, employment_type,
             manager_id, date_of_joining, salary_band, bank_account_number)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-                 COALESCE($15, 'permanent'), $16, COALESCE($17, CURRENT_DATE), $18, $19)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+                 COALESCE($16, 'permanent'), $17, COALESCE($18, CURRENT_DATE), $19, $20)
          RETURNING *`,
         [
           claims.company_id,
@@ -209,7 +211,8 @@ export class EmployeesService {
           input.dateOfBirth ?? null,
           input.gender ?? null,
           input.maritalStatus ?? null,
-          input.department ?? null,
+          department,
+          input.orgUnitId ?? null,
           input.designation ?? null,
           input.location ?? null,
           input.employmentType ?? null,
@@ -338,6 +341,15 @@ export class EmployeesService {
         throw new BadRequestException("terminationDate is required when setting employmentStatus to terminated");
       }
 
+      const nextOrgUnitId = patch.orgUnitId ?? before.org_unit_id;
+      // Organization Management Phase 1: whenever an org unit is linked
+      // (new or pre-existing), `department` is DERIVED from it, not typed
+      // independently — a plain `patch.department` alongside an org-unit-
+      // linked employee would otherwise silently drift out of sync with
+      // the canonical hierarchy. An employee with no org unit at all keeps
+      // the legacy free-text behavior unchanged.
+      const department = await this.resolveDepartment(client, claims.company_id!, nextOrgUnitId, patch.department ?? before.department);
+
       const next = {
         first_name: patch.firstName ?? before.first_name,
         last_name: patch.lastName ?? before.last_name,
@@ -347,7 +359,8 @@ export class EmployeesService {
         date_of_birth: patch.dateOfBirth ?? before.date_of_birth,
         gender: patch.gender ?? before.gender,
         marital_status: patch.maritalStatus ?? before.marital_status,
-        department: patch.department ?? before.department,
+        department,
+        org_unit_id: nextOrgUnitId,
         designation: patch.designation ?? before.designation,
         location: patch.location ?? before.location,
         employment_type: patch.employmentType ?? before.employment_type,
@@ -363,9 +376,9 @@ export class EmployeesService {
       const result = await client.query(
         `UPDATE employees SET
            first_name = $2, last_name = $3, email = $4, phone = $5, cnic = $6, date_of_birth = $7,
-           gender = $8, marital_status = $9, department = $10, designation = $11, location = $12,
-           employment_type = $13, manager_id = $14, employment_status = $15, date_of_joining = $16,
-           termination_date = $17, termination_reason = $18, salary_band = $19, bank_account_number = $20,
+           gender = $8, marital_status = $9, department = $10, org_unit_id = $11, designation = $12, location = $13,
+           employment_type = $14, manager_id = $15, employment_status = $16, date_of_joining = $17,
+           termination_date = $18, termination_reason = $19, salary_band = $20, bank_account_number = $21,
            updated_at = now()
          WHERE id = $1
          RETURNING *`,
@@ -380,6 +393,7 @@ export class EmployeesService {
           next.gender,
           next.marital_status,
           next.department,
+          next.org_unit_id,
           next.designation,
           next.location,
           next.employment_type,
@@ -692,6 +706,35 @@ export class EmployeesService {
       const updated = await client.query("SELECT * FROM employees WHERE id = $1", [employeeId]);
       return { employee: rowToEmployee(updated.rows[0]) as EmployeeView, rolesGranted: uniqueRoleKeys };
     });
+  }
+
+  /**
+   * Organization Management Phase 1 (0065_organization_units.sql):
+   * `employees.department` stays a plain text column for backward
+   * compatibility (Employee Groups' legacy free-text condition matching,
+   * reports, CSV import/export), but once an employee is linked to a
+   * canonical org unit, that text is DERIVED from the unit's current
+   * name rather than typed independently — otherwise the two would
+   * silently drift apart the moment either one changed alone. An
+   * employee with no `orgUnitId` at all keeps the pre-Phase-1 behavior
+   * completely unchanged: whatever free text was given (or already on
+   * the row) passes straight through.
+   */
+  private async resolveDepartment(
+    client: PoolClient,
+    companyId: string,
+    orgUnitId: string | null | undefined,
+    fallbackDepartment: string | null | undefined
+  ): Promise<string | null> {
+    if (!orgUnitId) return fallbackDepartment ?? null;
+    const orgUnit = await client.query<{ name: string }>(
+      "SELECT name FROM org_units WHERE id = $1 AND company_id = $2",
+      [orgUnitId, companyId]
+    );
+    if (orgUnit.rowCount === 0) {
+      throw new BadRequestException("Org unit not found");
+    }
+    return orgUnit.rows[0].name;
   }
 
   private async requireModuleAndManagePermission(claims: RequestClaims): Promise<void> {

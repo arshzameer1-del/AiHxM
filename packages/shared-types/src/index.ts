@@ -1480,6 +1480,16 @@ export type EmployeeView = {
   gender: string | null;
   maritalStatus: string | null;
   department: string | null;
+  /**
+   * Organization Management Phase 1 addition (0065_organization_units.sql)
+   * — nullable, additive. When set, `department` above is kept in sync
+   * with this unit's current name by EmployeesService (see
+   * `syncDepartmentFromOrgUnit()`), so anything still reading the legacy
+   * free-text field never breaks. `null` means this employee hasn't been
+   * migrated onto the canonical hierarchy yet — `department` is then
+   * whatever free text was typed directly, same as before this phase.
+   */
+  orgUnitId: string | null;
   designation: string | null;
   location: string | null;
   employmentType: EmploymentType;
@@ -1507,6 +1517,10 @@ export type CreateEmployeeRequest = {
   gender?: string;
   maritalStatus?: string;
   department?: string;
+  /** Organization Management Phase 1 — set this instead of (or alongside)
+   * `department` to link the employee to a canonical org unit; the
+   * server derives/overwrites `department`'s text from it. */
+  orgUnitId?: string;
   designation?: string;
   location?: string;
   employmentType?: EmploymentType;
@@ -2876,4 +2890,81 @@ export type SecurityPostureScore = {
   maxScore: number;
   signals: SecurityPostureSignal[];
   computedAt: string;
+};
+
+// --- Organization Management, Phase 1: canonical Org Unit hierarchy ---
+// See claude/organization-management-4000-gap-analysis-and-roadmap.md's
+// "Phase 1 — Foundation" row and 0065_organization_units.sql's own header
+// comment for the full design writeup. `OrgUnitView` is the CURRENT
+// (denormalized-cache) state the API actually returns for hierarchy
+// reads; `OrgUnitVersionView` is one entry of its effective-dated history
+// (`GET /organization/units/:id/history`), the same split
+// `LeavePolicyView`/`LeavePolicyVersionView` already established.
+
+/** A free but validated set (CHECK-enforced in 0065) — never a fixed
+ * depth/level. Depth comes only from how many `parentId` hops a tenant
+ * actually creates. */
+export type OrgUnitType = "department" | "division" | "business_unit" | "function";
+
+export type OrgUnitStatus = "active" | "archived";
+
+export type OrgUnitView = {
+  id: string;
+  companyId: string;
+  parentId: string | null;
+  unitType: OrgUnitType;
+  code: string | null;
+  name: string;
+  status: OrgUnitStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** `GET /organization/units/tree` — the whole company's hierarchy,
+ * nested. Built server-side (OrgUnitsService.getTree()) off the same
+ * recursive-CTE primitive `getDescendants()` uses, the same "server
+ * decides scope/shape, client just renders it" split
+ * `EmployeesService.orgChart()` already established for the manager
+ * self-reference. */
+export type OrgUnitTreeNode = OrgUnitView & {
+  children: OrgUnitTreeNode[];
+};
+
+export type CreateOrgUnitRequest = {
+  name: string;
+  unitType: OrgUnitType;
+  code?: string;
+  parentId?: string;
+  /** Defaults to today (server date) when omitted, same as every other
+   * EffectiveDatingEngine consumer's `effectiveFrom`. */
+  effectiveFrom?: string;
+};
+
+/** Renames/retypes/recodes a unit in place — reparenting is a distinct
+ * action (`POST /organization/units/:id/move`) since it's the one edit
+ * that needs the cycle guard, not a plain field patch. */
+export type UpdateOrgUnitRequest = {
+  name?: string;
+  unitType?: OrgUnitType;
+  code?: string;
+  effectiveFrom?: string;
+};
+
+export type MoveOrgUnitRequest = {
+  /** `null` moves the unit to become a root. */
+  parentId: string | null;
+  effectiveFrom?: string;
+};
+
+export type OrgUnitVersionView = {
+  id: string;
+  orgUnitId: string;
+  parentId: string | null;
+  unitType: OrgUnitType;
+  code: string | null;
+  name: string;
+  status: OrgUnitStatus;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  createdAt: string;
 };

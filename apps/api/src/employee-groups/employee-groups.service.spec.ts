@@ -9,6 +9,7 @@ import { EmployeesService } from "../employees/employees.service";
 import { LocalFileStorageService } from "../file-storage/local-file-storage.service";
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
 import { RulesEngine } from "../rules-engine/rules-engine.engine";
+import { OrgUnitsService } from "../organization/org-units.service";
 import { EmployeeGroupsService } from "./employee-groups.service";
 
 const FIXTURE_CLAIMS: RequestClaims = { is_platform_admin: true, company_id: null, sub: "employee-groups-spec-fixtures" };
@@ -28,6 +29,7 @@ describe("EmployeeGroupsService", () => {
   let db: DatabaseService;
   let groups: EmployeeGroupsService;
   let employees: EmployeesService;
+  let orgUnits: OrgUnitsService;
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: process.env.APP_DATABASE_URL });
@@ -37,6 +39,7 @@ describe("EmployeeGroupsService", () => {
     const audit = new AuditService();
     groups = new EmployeeGroupsService(db, rbac, entitlements, new EffectiveDatingEngine(), new RulesEngine());
     employees = new EmployeesService(db, rbac, entitlements, audit, new LocalFileStorageService());
+    orgUnits = new OrgUnitsService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
   });
 
   afterAll(async () => {
@@ -482,6 +485,105 @@ describe("EmployeeGroupsService", () => {
       await expect(groups.getLeavePolicyHistory(hrAdminClaims, "00000000-0000-0000-0000-000000000000")).rejects.toThrow(
         NotFoundException
       );
+    });
+  });
+
+  // Organization Management Phase 1 (0065_organization_units.sql): the
+  // smallest correct change to the resolver — a `department` condition
+  // now ALSO matches an employee's `orgUnitId` directly, on top of (never
+  // instead of) the legacy free-text match. Most-specific-match-wins stays
+  // completely unchanged (see buildMatchExpression()'s own doc comment).
+  describe("department condition resolves against org_unit_id (Organization Management Phase 1)", () => {
+    let companyId: string;
+    let hrAdminClaims: RequestClaims;
+    let engineeringUnitId: string;
+    let salesUnitId: string;
+    let linkedEmployeeId: string;
+    let legacyTextEmployeeId: string;
+    let orgLinkedSalesEmployeeId: string;
+    let orgUnitPolicyId: string;
+    let salesPolicyId: string;
+
+    beforeAll(async () => {
+      companyId = await createFixtureCompany("Org Unit Match Co");
+      const stamp = Date.now();
+      const hrAdminUserId = await createUser(`org-match-hr-${stamp}@example.com`);
+      await assignRole(hrAdminUserId, companyId, "hr_admin");
+      hrAdminClaims = { is_platform_admin: false, company_id: companyId, sub: hrAdminUserId };
+
+      engineeringUnitId = (
+        await orgUnits.create(hrAdminClaims, { name: "Engineering", unitType: "department" })
+      ).id;
+      salesUnitId = (await orgUnits.create(hrAdminClaims, { name: "Sales", unitType: "department" })).id;
+
+      // Linked via orgUnitId — department text gets derived ("Engineering")
+      // rather than typed directly.
+      linkedEmployeeId = (
+        await employees.create(hrAdminClaims, { firstName: "Org", lastName: "Linked", orgUnitId: engineeringUnitId })
+      ).id;
+      // A pre-Phase-1-style employee — plain free text, never linked to any
+      // org unit at all. Must keep matching by text exactly as before.
+      legacyTextEmployeeId = (
+        await employees.create(hrAdminClaims, { firstName: "Legacy", lastName: "Text", department: "Sales" })
+      ).id;
+      // Also linked by orgUnitId, but to a DIFFERENT unit than
+      // `linkedEmployeeId` — proves the id-based match doesn't fire for
+      // just any org-unit-linked employee, only the right one.
+      orgLinkedSalesEmployeeId = (
+        await employees.create(hrAdminClaims, { firstName: "Org", lastName: "Sales", orgUnitId: salesUnitId })
+      ).id;
+
+      await groups.createLeavePolicy(hrAdminClaims, { name: "Org Match Default", annualLeaveDays: 10, isDefault: true });
+      orgUnitPolicyId = (
+        await groups.createLeavePolicy(hrAdminClaims, { name: "Org Match Engineering", annualLeaveDays: 22 })
+      ).id;
+      salesPolicyId = (
+        await groups.createLeavePolicy(hrAdminClaims, { name: "Org Match Sales", annualLeaveDays: 16 })
+      ).id;
+
+      // Authored by ORG UNIT ID, not by name — the new, rename-proof way to
+      // configure a department condition.
+      const engineeringByIdGroup = await groups.createGroup(hrAdminClaims, {
+        name: "Engineering (by org unit id)",
+        conditions: [{ field: "department", equals: engineeringUnitId }],
+      });
+      await groups.assignPolicy(hrAdminClaims, engineeringByIdGroup.id, { policyType: "leave", policyId: orgUnitPolicyId });
+
+      // Authored the legacy way, by free text — must still work unchanged.
+      const salesByTextGroup = await groups.createGroup(hrAdminClaims, {
+        name: "Sales (by legacy text)",
+        conditions: [{ field: "department", equals: "Sales" }],
+      });
+      await groups.assignPolicy(hrAdminClaims, salesByTextGroup.id, { policyType: "leave", policyId: salesPolicyId });
+    });
+
+    it("a department condition authored with an org unit's id matches an employee linked to that unit", async () => {
+      const resolved = await groups.resolvePolicy(hrAdminClaims, linkedEmployeeId, "leave");
+      expect(resolved.policyId).toBe(orgUnitPolicyId);
+      expect(resolved.isDefault).toBe(false);
+    });
+
+    it("a department condition authored the legacy way (free text) still matches an employee with no org unit link", async () => {
+      const resolved = await groups.resolvePolicy(hrAdminClaims, legacyTextEmployeeId, "leave");
+      expect(resolved.policyId).toBe(salesPolicyId);
+      expect(resolved.isDefault).toBe(false);
+    });
+
+    it("resolveGroupMembers finds the org-unit-linked employee via the id-based condition", async () => {
+      const groupsList = await groups.listGroups(hrAdminClaims);
+      const engineeringByIdGroup = groupsList.find((g) => g.name === "Engineering (by org unit id)")!;
+      const memberIds = await groups.resolveGroupMembers(hrAdminClaims, engineeringByIdGroup.id);
+      expect(memberIds).toContain(linkedEmployeeId);
+      expect(memberIds).not.toContain(legacyTextEmployeeId);
+    });
+
+    it("an employee linked to a DIFFERENT org unit resolves via that unit's own (text-synced) match, never the other unit's id-based group", async () => {
+      const resolved = await groups.resolvePolicy(hrAdminClaims, orgLinkedSalesEmployeeId, "leave");
+      // Linked to salesUnitId, not engineeringUnitId — so the "Engineering
+      // (by org unit id)" group must not match it; its department text was
+      // synced to "Sales" (the unit's name), so it matches the legacy
+      // text-based Sales group instead.
+      expect(resolved.policyId).toBe(salesPolicyId);
     });
   });
 });

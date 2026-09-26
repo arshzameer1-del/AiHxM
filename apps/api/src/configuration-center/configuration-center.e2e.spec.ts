@@ -97,13 +97,25 @@ describe("Configuration Center HTTP surface (e2e)", () => {
       .expect(200);
 
     const domainKeys = res.body.map((row: { domainKey: string }) => row.domainKey);
-    expect(domainKeys).toEqual(expect.arrayContaining(["leave_policy", "employee_group", "shift", "holiday", "tax_slab"]));
+    expect(domainKeys).toEqual(
+      expect.arrayContaining(["leave_policy", "employee_group", "shift", "holiday", "tax_slab", "org_unit"])
+    );
     // hr_admin does not hold workflow_template.manage.all (System Admin's job).
     expect(domainKeys).not.toContain("workflow_template");
 
     const holidayRow = res.body.find((row: { domainKey: string }) => row.domainKey === "holiday");
     expect(holidayRow.adminRoute).toBe("/app/admin?tab=holidays");
     expect(typeof holidayRow.count).toBe("number");
+
+    // Organization Management Phase 1's Configuration Center registration
+    // (0067_configuration_center_org_units.sql) — proves the real HTTP
+    // route surfaces the new card with its real admin route and a live
+    // count, not just that the service method does.
+    const orgUnitRow = res.body.find((row: { domainKey: string }) => row.domainKey === "org_unit");
+    expect(orgUnitRow).toBeDefined();
+    expect(orgUnitRow.adminRoute).toBe("/app/organization");
+    expect(orgUnitRow.supportsEffectiveDating).toBe(true);
+    expect(typeof orgUnitRow.count).toBe("number");
   });
 
   it("returns a narrower list for a plain employee_self_service login", async () => {

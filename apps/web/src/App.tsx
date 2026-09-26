@@ -81,6 +81,15 @@ const AdminCenterPage = lazy(() =>
     default: m.AdminCenterPage,
   })),
 );
+// Organization Management, Phase 1 — the Hierarchy Explorer, this
+// product's first real tree/hierarchy UI. See
+// claude/organization-management-4000-gap-analysis-and-roadmap.md and
+// 0065_organization_units.sql.
+const OrgHierarchyPage = lazy(() =>
+  import("./portal/organization/OrgHierarchyPage").then((m) => ({
+    default: m.OrgHierarchyPage,
+  })),
+);
 const ConfigurationCenterPage = lazy(() =>
   import("./portal/admin/ConfigurationCenterPage").then((m) => ({
     default: m.ConfigurationCenterPage,
@@ -213,6 +222,12 @@ export default function App() {
                     path="employees/:id"
                     element={<EmployeeDetailPage />}
                   />
+                  {/* Organization Management Phase 1 — the Hierarchy
+                    Explorer. org_unit.view.all/org_unit.manage.all (both
+                    seeded in 0066) are the real gates, enforced server-
+                    side; PortalLayout's nav gates it the same courtesy way
+                    as every other route here. */}
+                  <Route path="organization" element={<OrgHierarchyPage />} />
                   {/* Task #49 — Admin Center. hr_admin-only in PortalLayout's
                     nav (a courtesy); EmployeeGroupsService's own
                     employee_group.manage/leave_policy.manage gates are the

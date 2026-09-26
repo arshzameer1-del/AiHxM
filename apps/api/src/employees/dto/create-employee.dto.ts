@@ -38,6 +38,13 @@ export class CreateEmployeeDto {
   @IsString()
   department?: string;
 
+  /** Organization Management Phase 1 — links this employee to a canonical
+   * org unit; `department`'s text is then derived from it server-side
+   * (see EmployeesService.resolveDepartment()). */
+  @IsOptional()
+  @IsUUID()
+  orgUnitId?: string;
+
   @IsOptional()
   @IsString()
   designation?: string;

@@ -12,6 +12,7 @@ import { PayrollService } from "../payroll/payroll.service";
 import { CustomFieldsService } from "../custom-fields/custom-fields.service";
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
 import { RulesEngine } from "../rules-engine/rules-engine.engine";
+import { OrgUnitsService } from "../organization/org-units.service";
 import { ConfigurationCenterService } from "./configuration-center.service";
 
 const FIXTURE_CLAIMS: RequestClaims = { is_platform_admin: true, company_id: null, sub: "config-center-spec-fixtures" };
@@ -33,6 +34,7 @@ describe("ConfigurationCenterService", () => {
   let configurationCenter: ConfigurationCenterService;
   let employeeGroups: EmployeeGroupsService;
   let holidays: HolidaysService;
+  let orgUnits: OrgUnitsService;
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: process.env.APP_DATABASE_URL });
@@ -46,7 +48,17 @@ describe("ConfigurationCenterService", () => {
     const workflow = new WorkflowService(db, rbac, audit);
     const payroll = new PayrollService(db, rbac, entitlements, audit, {} as never, new EffectiveDatingEngine());
     const customFields = new CustomFieldsService(db, rbac);
-    configurationCenter = new ConfigurationCenterService(db, employeeGroups, shifts, holidays, workflow, payroll, customFields);
+    orgUnits = new OrgUnitsService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
+    configurationCenter = new ConfigurationCenterService(
+      db,
+      employeeGroups,
+      shifts,
+      holidays,
+      workflow,
+      payroll,
+      customFields,
+      orgUnits
+    );
   });
 
   afterAll(async () => {
@@ -100,6 +112,7 @@ describe("ConfigurationCenterService", () => {
     let hrAdminClaims: RequestClaims;
     let hrAdminAndSystemAdminClaims: RequestClaims;
     let staffClaims: RequestClaims;
+    let systemAdminOnlyClaims: RequestClaims;
 
     beforeAll(async () => {
       companyId = await createFixtureCompany("Config Center Co");
@@ -117,10 +130,21 @@ describe("ConfigurationCenterService", () => {
       await assignRole(staffUserId, companyId, "employee_self_service");
       staffClaims = { is_platform_admin: false, company_id: companyId, sub: staffUserId };
 
+      // Holds NEITHER org_unit.view.all NOR org_unit.manage.all (0066's
+      // seed grants those only to hr_admin/line_manager/employee_self_
+      // service) — the one seeded role combination that can prove the
+      // org_unit card is really gated by OrgUnitsService's own RBAC check,
+      // the same way workflow_template's own test below proves it for
+      // WorkflowService.
+      const systemAdminOnlyUserId = await createUser(`config-center-sysadmin-only-${Date.now()}@example.com`);
+      await assignRole(systemAdminOnlyUserId, companyId, "system_admin");
+      systemAdminOnlyClaims = { is_platform_admin: false, company_id: companyId, sub: systemAdminOnlyUserId };
+
       // Real data in a couple of domains so counts are provably non-zero,
       // not just "didn't throw".
       await employeeGroups.createLeavePolicy(hrAdminClaims, { name: "Config Center Test Policy" });
       await holidays.createHoliday(hrAdminClaims, { name: "Config Center Test Holiday", holidayDate: "2026-11-11" });
+      await orgUnits.create(hrAdminClaims, { name: "Config Center Test Unit", unitType: "department" });
     });
 
     it("includes every domain hr_admin can manage, with real counts, but omits Workflow Templates", async () => {
@@ -135,6 +159,12 @@ describe("ConfigurationCenterService", () => {
       expect(byKey.shift).toBeDefined();
       expect(byKey.tax_slab).toBeDefined();
       expect(byKey.custom_field).toBeDefined();
+      // Organization Management Phase 1 — the Org Units card, backed by
+      // OrgUnitsService.list(), not a duplicated count query.
+      expect(byKey.org_unit).toBeDefined();
+      expect(byKey.org_unit.count).toBeGreaterThanOrEqual(1);
+      expect(byKey.org_unit.adminRoute).toBe("/app/organization");
+      expect(byKey.org_unit.supportsEffectiveDating).toBe(true);
 
       // hr_admin does not hold workflow_template.manage.all (that's
       // system_admin's job, per Decision #20) -- this proves the
@@ -165,6 +195,23 @@ describe("ConfigurationCenterService", () => {
       expect(domainKeys).not.toContain("tax_slab");
       expect(domainKeys).not.toContain("workflow_template");
       expect(domainKeys).toEqual(expect.arrayContaining(["holiday", "custom_field"]));
+    });
+
+    it("still includes org_unit for a plain employee_self_service login (org_unit.view.all is seeded broadly)", async () => {
+      const summary = await configurationCenter.getSummary(staffClaims);
+      const orgUnitRow = summary.find((s) => s.domainKey === "org_unit");
+      expect(orgUnitRow).toBeDefined();
+      expect(typeof orgUnitRow?.count).toBe("number");
+    });
+
+    it("omits org_unit for a role holding neither org_unit.view.all nor org_unit.manage.all", async () => {
+      const summary = await configurationCenter.getSummary(systemAdminOnlyClaims);
+      const domainKeys = summary.map((s) => s.domainKey);
+      expect(domainKeys).not.toContain("org_unit");
+      // Same caller DOES see workflow_template — proves this is a
+      // domain-specific gate (OrgUnitsService's own RBAC check), not this
+      // login being denied the whole summary.
+      expect(domainKeys).toContain("workflow_template");
     });
 
     it("every returned summary row carries a real admin route and label from the registry", async () => {
@@ -198,7 +245,7 @@ describe("ConfigurationCenterService", () => {
       const domainKeys = summary.map((s) => s.domainKey);
 
       expect(domainKeys).not.toContain("tax_slab");
-      expect(domainKeys).toEqual(expect.arrayContaining(["leave_policy", "employee_group", "shift", "holiday"]));
+      expect(domainKeys).toEqual(expect.arrayContaining(["leave_policy", "employee_group", "shift", "holiday", "org_unit"]));
     });
   });
 });
