@@ -6,6 +6,8 @@ import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
+import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
+import { buildOrgEventPayload } from "../webhooks/org-event-payload.util";
 import type { CostCenterVersionView, CostCenterView, CreateCostCenterRequest, UpdateCostCenterRequest } from "@aihxm/shared-types";
 
 // Cost Centers are gated under the same `employee` module every other
@@ -13,6 +15,11 @@ import type { CostCenterVersionView, CostCenterView, CreateCostCenterRequest, Up
 const MODULE_KEY = "employee" as const;
 const MANAGE_PERMISSION = "cost_center.manage.all";
 const VIEW_PERMISSION = "cost_center.view.all";
+// Organization Management Phase 11 (Section 19) — see
+// OrgUnitsService's SCOPED_VIEW_PERMISSION_BASE for the full writeup. Cost
+// Center is a flat catalog (Phase 4), so unlike org unit/location there is
+// no subtree to expand — an assignment's `scope_entity_id` is used as-is.
+const SCOPED_VIEW_PERMISSION_BASE = "cost_center.view";
 
 type CostCenterRow = {
   id: string;
@@ -73,8 +80,27 @@ export class CostCentersService {
     private readonly rbac: RbacService,
     private readonly entitlements: EntitlementsService,
     private readonly audit: AuditService,
-    private readonly effectiveDating: EffectiveDatingEngine
+    private readonly effectiveDating: EffectiveDatingEngine,
+    // Optional for the same reason every other Organization Management
+    // service's own `webhooks` field is. Organization Management Phase 7
+    // (Unified Integration & Synchronization Requirements, Section 14) —
+    // the shared `org.financial_center.changed` event this service and
+    // `ProfitCentersService` both fire (distinguished by the payload's own
+    // `centerType` field, per that section's single named event covering
+    // both Cost and Profit Centers), fired at every one of this service's
+    // own already-audited mutation points (create/update/archive/activate).
+    private readonly webhooks?: WebhookDispatchService
   ) {}
+
+  private publishChanged(claims: RequestClaims, changeType: string, costCenter: CostCenterView): void {
+    this.webhooks
+      ?.enqueue(
+        claims.company_id!,
+        "org.financial_center.changed",
+        buildOrgEventPayload(claims, changeType, "costCenter", costCenter, { centerType: "cost_center" })
+      )
+      .catch(() => undefined);
+  }
 
   async create(claims: RequestClaims, input: CreateCostCenterRequest): Promise<CostCenterView> {
     await this.requireManage(claims);
@@ -114,24 +140,41 @@ export class CostCentersService {
         metadata: { name: input.name, orgUnitId: input.orgUnitId ?? null },
       });
 
-      return rowToCostCenter(costCenter);
+      const view = rowToCostCenter(costCenter);
+      this.publishChanged(claims, "create", view);
+      return view;
     });
   }
 
-  /** Every cost center in the tenant's catalog, flat, alphabetical. */
+  /** Every cost center in the tenant's catalog, flat, alphabetical. A
+   * caller who only holds `cost_center.view.scoped` (Phase 11, Section
+   * 19) instead sees only their assigned cost center(s). */
   async list(claims: RequestClaims): Promise<CostCenterView[]> {
-    await this.requireView(claims);
+    const scope = await this.resolveViewAccess(claims);
     return this.db.withClaims(claims, async (client) => {
-      const result = await client.query("SELECT * FROM cost_centers WHERE company_id = $1 ORDER BY name", [
-        claims.company_id,
-      ]);
+      const conditions = ["company_id = $1"];
+      const values: unknown[] = [claims.company_id];
+      if (!scope.unrestricted) {
+        values.push(scope.allowedIds);
+        conditions.push(`id = ANY($${values.length}::uuid[])`);
+      }
+      const result = await client.query(
+        `SELECT * FROM cost_centers WHERE ${conditions.join(" AND ")} ORDER BY name`,
+        values
+      );
       return result.rows.map(rowToCostCenter);
     });
   }
 
   async get(claims: RequestClaims, id: string): Promise<CostCenterView> {
-    await this.requireView(claims);
-    return this.db.withClaims(claims, async (client) => rowToCostCenter(await this.mustExist(client, id)));
+    const scope = await this.resolveViewAccess(claims);
+    return this.db.withClaims(claims, async (client) => {
+      const row = await this.mustExist(client, id);
+      if (!scope.unrestricted && !scope.allowedIds.includes(id)) {
+        throw new NotFoundException("Cost center not found");
+      }
+      return rowToCostCenter(row);
+    });
   }
 
   async update(claims: RequestClaims, id: string, patch: UpdateCostCenterRequest): Promise<CostCenterView> {
@@ -172,7 +215,9 @@ export class CostCentersService {
         metadata: { before: rowToCostCenter(before), after: rowToCostCenter(costCenter) },
       });
 
-      return rowToCostCenter(costCenter);
+      const view = rowToCostCenter(costCenter);
+      this.publishChanged(claims, "update", view);
+      return view;
     });
   }
 
@@ -199,7 +244,9 @@ export class CostCentersService {
         target: id,
       });
 
-      return rowToCostCenter(costCenter);
+      const view = rowToCostCenter(costCenter);
+      this.publishChanged(claims, status === "archived" ? "archive" : "activate", view);
+      return view;
     });
   }
 
@@ -271,5 +318,26 @@ export class CostCentersService {
     if (!canView && !canManage) {
       throw new ForbiddenException("Not permitted to view cost centers");
     }
+  }
+
+  /** Organization Management Phase 11 (Section 19) — scope-aware sibling
+   * of `requireView()`; see `OrgUnitsService`'s own version for the full
+   * writeup. No subtree expansion here — Cost Center is flat. */
+  private async resolveViewAccess(claims: RequestClaims): Promise<{ unrestricted: boolean; allowedIds: string[] }> {
+    if (!(await this.entitlements.isModuleEnabled(claims, MODULE_KEY))) {
+      throw new NotFoundException();
+    }
+    const [canView, canManage] = await Promise.all([
+      this.rbac.can(claims, VIEW_PERMISSION),
+      this.rbac.can(claims, MANAGE_PERMISSION),
+    ]);
+    if (canView || canManage) {
+      return { unrestricted: true, allowedIds: [] };
+    }
+    if (!(await this.rbac.hasScopedPermission(claims, SCOPED_VIEW_PERMISSION_BASE))) {
+      throw new ForbiddenException("Not permitted to view cost centers");
+    }
+    const allowedIds = await this.rbac.resolveDataScopeEntityIds(claims, "cost_center");
+    return { unrestricted: false, allowedIds };
   }
 }

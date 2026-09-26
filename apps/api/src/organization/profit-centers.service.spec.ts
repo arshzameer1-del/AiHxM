@@ -6,6 +6,8 @@ import { RbacService } from "../rbac/rbac.service";
 import { EntitlementsService } from "../entitlements/entitlements.service";
 import { AuditService } from "../audit/audit.service";
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
+import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
+import { IntegrationsService } from "../tenant-management/integrations.service";
 import { OrgUnitsService } from "./org-units.service";
 import { ProfitCentersService } from "./profit-centers.service";
 
@@ -206,6 +208,68 @@ describe("ProfitCentersService", () => {
       await expect(profitCenters.get(claimsB, profitCenterA.id)).rejects.toThrow(NotFoundException);
       const listB = await profitCenters.list(claimsB);
       expect(listB.find((c) => c.id === profitCenterA.id)).toBeUndefined();
+    });
+  });
+
+  /**
+   * Organization Management, Phase 7 (Unified Integration & Synchronization
+   * Requirements, Section 14). Confirms the shared `org.financial_center.changed`
+   * event really enqueues end to end through a real WebhookDispatchService
+   * for this side (Profit Center), with `payload.centerType === "profit_center"`
+   * distinguishing it from Cost Center's own events on the same event
+   * type. `profitCenters` above (this file's shared instance) is built
+   * WITHOUT a WebhookDispatchService — proving the optional-dependency
+   * design doesn't secretly break anything for it — so this uses its own
+   * instance instead.
+   */
+  describe("webhook events (Organization Management Phase 7)", () => {
+    let companyId: string;
+    let hrAdminClaims: RequestClaims;
+    let profitCentersWithWebhooks: ProfitCentersService;
+    const platformClaims: RequestClaims = { is_platform_admin: true, company_id: null, sub: "profit-center-webhook-spec" };
+
+    beforeAll(async () => {
+      companyId = await createFixtureCompany("Profit Center Webhook Co");
+      const hrAdminUserId = await createUser(`profit-center-webhook-hr-${Date.now()}@example.com`);
+      await assignRole(hrAdminUserId, companyId, "hr_admin");
+      hrAdminClaims = { is_platform_admin: false, company_id: companyId, sub: hrAdminUserId };
+
+      await new IntegrationsService(db, new AuditService()).configure(platformClaims, companyId, "webhook", {
+        enabled: true,
+        config: { url: "http://127.0.0.1:1/hook", signingSecret: "profit-center-trigger-secret" },
+      });
+
+      profitCentersWithWebhooks = new ProfitCentersService(
+        db,
+        new RbacService(db),
+        new EntitlementsService(db),
+        new AuditService(),
+        new EffectiveDatingEngine(),
+        new WebhookDispatchService(db, new AuditService())
+      );
+    });
+
+    async function latestEventFor(type: string) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const result = await db.withClaims(platformClaims, (client) =>
+        client.query(
+          "SELECT * FROM webhook_events WHERE company_id = $1 AND event_type = $2 ORDER BY created_at DESC LIMIT 1",
+          [companyId, type]
+        )
+      );
+      return result.rows[0];
+    }
+
+    it("enqueues org.financial_center.changed with centerType 'profit_center' on create()", async () => {
+      const created = await profitCentersWithWebhooks.create(hrAdminClaims, { name: "Webhook Profit Center" });
+      const event = await latestEventFor("org.financial_center.changed");
+      expect(event).toBeDefined();
+      expect(event.payload.eventVersion).toBe(1);
+      expect(event.payload.changeType).toBe("create");
+      expect(event.payload.centerType).toBe("profit_center");
+      expect(event.payload.tenantId).toBe(companyId);
+      expect(event.payload.entityId).toBe(created.id);
+      expect(event.payload.profitCenter.id).toBe(created.id);
     });
   });
 });

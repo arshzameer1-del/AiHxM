@@ -8,6 +8,7 @@ import { AuditService } from "../audit/audit.service";
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
 import { WorkflowService } from "../workflow/workflow.service";
 import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
+import { buildOrgEventPayload } from "../webhooks/org-event-payload.util";
 import type {
   CreateOrgChangeRequest,
   OrgChangeImpactSummary,
@@ -369,6 +370,19 @@ export class OrgChangesService {
    * inside that affected set today. Requires `validated` or later — an
    * unvalidated batch's item set can't be trusted to compute a meaningful
    * blast radius from.
+   *
+   * Organization Management Phase 10 (Unified Integration & Synchronization
+   * Requirements, Section 18) deepened this from three counts to five:
+   * `affectedReportingRelationshipCount` (any open `direct`/dotted-line/
+   * matrix/temporary/acting relationship where EITHER the employee or the
+   * manager sits in the affected subtree — a reorg can orphan a relationship
+   * from either side) and `affectedFinancialCenterCount` (any cost or profit
+   * center tagged onto a position inside the affected subtree, counted as
+   * one shared number the same way Phase 7's `org.financial_center.changed`
+   * event already treats both center types as one concept). Section 18's
+   * third ask — affected Data Scope rules — is deliberately not represented
+   * here; no assignment-based Data Scope capability exists for a reorg to
+   * affect yet (see Phase 11).
    */
   async analyzeImpact(claims: RequestClaims, id: string): Promise<OrgChangeImpactSummary> {
     await this.requireManage(claims);
@@ -400,6 +414,40 @@ export class OrgChangesService {
         [claims.company_id, affectedIds]
       );
 
+      // Organization Management Phase 10 (Section 18) — the two additive
+      // counts beyond the original three. Both are computed the same way
+      // positionCount/employeeCount already are, off `employees.org_unit_id`
+      // (the denormalized current-state cache every other impact count here
+      // already reads), not `employee_org_assignments` — consistent with
+      // this method's own existing choice, not a new convention.
+      //
+      // A reporting relationship is "affected" if EITHER side of it sits in
+      // the affected subtree: moving/archiving a unit can just as easily
+      // orphan a relationship where the manager is inside it and the report
+      // is outside, as the reverse.
+      const relationshipCount = await client.query<{ c: string }>(
+        `SELECT count(*)::text AS c FROM org_relationships r
+         WHERE r.company_id = $1 AND r.status = 'active'
+           AND (
+             r.employee_id IN (SELECT id FROM employees WHERE company_id = $1 AND org_unit_id = ANY($2::uuid[]))
+             OR r.manager_employee_id IN (SELECT id FROM employees WHERE company_id = $1 AND org_unit_id = ANY($2::uuid[]))
+           )`,
+        [claims.company_id, affectedIds]
+      );
+      // A financial center is "affected" if any position inside the
+      // affected subtree is tagged with it — one shared count across cost
+      // and profit centers (mirroring the single `org.financial_center.changed`
+      // event Phase 7 already established for both), counted DISTINCT since
+      // several positions in the subtree commonly share the same center.
+      const financialCenterCount = await client.query<{ c: string }>(
+        `SELECT count(DISTINCT center_id)::text AS c FROM (
+           SELECT cost_center_id AS center_id FROM positions WHERE company_id = $1 AND org_unit_id = ANY($2::uuid[]) AND cost_center_id IS NOT NULL
+           UNION
+           SELECT profit_center_id AS center_id FROM positions WHERE company_id = $1 AND org_unit_id = ANY($2::uuid[]) AND profit_center_id IS NOT NULL
+         ) affected_centers`,
+        [claims.company_id, affectedIds]
+      );
+
       const warnings: string[] = [];
       if (affectedIds.length > 25) {
         warnings.push(`This change affects a large subtree (${affectedIds.length} org units) — review carefully before approving.`);
@@ -409,6 +457,8 @@ export class OrgChangesService {
         affectedOrgUnitCount: affectedIds.length,
         affectedPositionCount: Number(positionCount.rows[0].c),
         affectedEmployeeCount: Number(employeeCount.rows[0].c),
+        affectedReportingRelationshipCount: Number(relationshipCount.rows[0].c),
+        affectedFinancialCenterCount: Number(financialCenterCount.rows[0].c),
         warnings,
       };
 
@@ -453,6 +503,10 @@ export class OrgChangesService {
         affectedOrgUnitCount: change.impact_summary.affectedOrgUnitCount,
         affectedPositionCount: change.impact_summary.affectedPositionCount,
         affectedEmployeeCount: change.impact_summary.affectedEmployeeCount,
+        // Organization Management Phase 10 — surfaced to approvers the same
+        // way the original three counts already were.
+        affectedReportingRelationshipCount: change.impact_summary.affectedReportingRelationshipCount,
+        affectedFinancialCenterCount: change.impact_summary.affectedFinancialCenterCount,
       },
     });
 
@@ -597,12 +651,33 @@ export class OrgChangesService {
       return view;
     });
 
-    // Publish -> Events: the one event this phase itself fires. The full
-    // per-entity event catalog (org.unit.changed/org.position.changed/
-    // org.assignment.changed, for every downstream consumer named in the
-    // Integration Contract sheet) is Phase 6's own explicit scope, built
-    // on the individual org_units mutations `applyItem()` just made.
-    this.webhooks?.enqueue(change.company_id, "org_change.published", { orgChangeId: id, itemCount: items.length }).catch(() => undefined);
+    // Publish -> Events. `org_change.published` is this phase's own
+    // original event name, kept exactly as-is for any existing subscriber
+    // (Section 23's "never break existing behavior" — a rename would be a
+    // breaking change for zero benefit). Organization Management Phase 7
+    // (Unified Integration & Synchronization Requirements, Section 14)
+    // additionally fires `org.reorganization.published` — the name that
+    // section's own event catalog asks for — alongside it, same payload
+    // shape every other event in this catalog uses, built via
+    // `buildOrgEventPayload()` directly (not through a `publishChanged()`
+    // helper, since unlike every other entity here an org_change already
+    // carries its own real `effectiveDate`, distinct from "today", that
+    // this event should report instead of the helper's default).
+    const claimsForEvent: RequestClaims = { is_platform_admin: false, company_id: change.company_id, sub: claims.sub };
+    this.webhooks
+      ?.enqueue(change.company_id, "org_change.published", { orgChangeId: id, itemCount: items.length })
+      .catch(() => undefined);
+    this.webhooks
+      ?.enqueue(
+        change.company_id,
+        "org.reorganization.published",
+        {
+          ...buildOrgEventPayload(claimsForEvent, "published", "reorganization", publishedView),
+          effectiveDate: publishedView.effectiveDate,
+          itemCount: items.length,
+        }
+      )
+      .catch(() => undefined);
 
     return publishedView;
   }

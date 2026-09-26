@@ -20,12 +20,15 @@ import { OrgChangesController } from "./org-changes.controller";
 import { OrgChangesService } from "./org-changes.service";
 import { OrganizationCommandCenterController } from "./organization-command-center.controller";
 import { OrganizationCommandCenterService } from "./organization-command-center.service";
+import { LegacyReconciliationController } from "./legacy-reconciliation.controller";
+import { LegacyReconciliationService } from "./legacy-reconciliation.service";
 import { RbacModule } from "../rbac/rbac.module";
 import { EntitlementsModule } from "../entitlements/entitlements.module";
 import { AuditModule } from "../audit/audit.module";
 import { EffectiveDatingModule } from "../effective-dating/effective-dating.module";
 import { WorkflowModule } from "../workflow/workflow.module";
 import { WebhooksModule } from "../webhooks/webhooks.module";
+import { EmployeesModule } from "../employees/employees.module";
 
 /**
  * Organization Management, Phase 5 — wraps `OrgChangesService.executeDueChanges()`
@@ -93,9 +96,44 @@ class OrgChangeExecutionScheduler {
  * themselves, the `org.unit.changed`/`org.position.changed`/
  * `org.assignment.changed` domain events (fired via the already-imported
  * `WebhooksModule`, no new import needed).
+ *
+ * Phase 7 (Unified Integration & Synchronization Requirements) completes
+ * the event catalog that document's own Section 14 asks for: the same
+ * optional `WebhookDispatchService` injection pattern is now also on
+ * `OrgRelationshipsService` (`org.relationship.changed`),
+ * `LocationsService` (`org.location.changed`), and both
+ * `CostCentersService`/`ProfitCentersService` (the one shared
+ * `org.financial_center.changed`, distinguished by a `centerType` field) —
+ * again via the already-imported `WebhooksModule`, no new import needed.
+ * `OrgChangesService` additionally fires `org.reorganization.published`
+ * alongside its existing `org_change.published` (kept, not renamed, so no
+ * existing subscriber breaks). All seven events now share one payload
+ * builder, `buildOrgEventPayload()` in `webhooks/org-event-payload.util.ts`.
+ *
+ * Phase 8 (Unified Integration & Synchronization Requirements, Section
+ * 25 — Organization Integrity Dashboard) extends
+ * `OrganizationCommandCenterService` with three more composed counts
+ * (`totalLocations`/`totalCostCenters`/`totalProfitCenters`) and the
+ * seven data-quality warnings that section names — see that service's
+ * own header comment for what each warning checks and why. No new
+ * module import: `DatabaseService` is a `@Global()` provider already
+ * available everywhere.
+ *
+ * Phase 12 (Section 24 — Legacy Data Migration) adds
+ * `LegacyReconciliationController`/`...Service`, the report-and-backfill
+ * tool built on Phase 8's own `legacy_records_not_mapped` warning (see
+ * that service's own header comment). This is this module's first import
+ * of `EmployeesModule` — every prior phase's cross-module direction ran
+ * the other way (`EmployeesModule` -> raw SQL against `org_units`/
+ * `locations`, never a DI edge back into this module); `EmployeesModule`
+ * itself imports none of this module's exports, so this new edge does
+ * not create a cycle. `LegacyReconciliationService` calls
+ * `EmployeesService.update()`/`OrgRelationshipsService.create()` directly
+ * rather than duplicating either one's validation or audit trail — see
+ * that service's own header comment for the full rationale.
  */
 @Module({
-  imports: [RbacModule, EntitlementsModule, AuditModule, EffectiveDatingModule, WorkflowModule, WebhooksModule],
+  imports: [RbacModule, EntitlementsModule, AuditModule, EffectiveDatingModule, WorkflowModule, WebhooksModule, EmployeesModule],
   controllers: [
     OrgUnitsController,
     JobsController,
@@ -107,6 +145,7 @@ class OrgChangeExecutionScheduler {
     ProfitCentersController,
     OrgChangesController,
     OrganizationCommandCenterController,
+    LegacyReconciliationController,
   ],
   providers: [
     OrgUnitsService,
@@ -120,6 +159,7 @@ class OrgChangeExecutionScheduler {
     OrgChangesService,
     OrgChangeExecutionScheduler,
     OrganizationCommandCenterService,
+    LegacyReconciliationService,
   ],
   exports: [
     OrgUnitsService,

@@ -119,6 +119,7 @@ import type {
   OrgChangeValidationResult,
   OrgChangeView,
   OrganizationCommandCenterSummary,
+  LegacyReconciliationReport,
   OffboardingChecklistItemView,
   OffboardingItemTemplateView,
   OfferView,
@@ -1108,6 +1109,11 @@ export const api = {
 
   listOrgUnits: () => request<OrgUnitView[]>("/organization/units"),
 
+  // Organization Management Phase 9 — OrgUnitDetailPage's single-record
+  // fetch; the backend route has existed since Phase 1, this client method
+  // was simply never added until the unified workspace needed it.
+  getOrgUnit: (id: string) => request<OrgUnitView>(`/organization/units/${id}`),
+
   createOrgUnit: (input: CreateOrgUnitRequest) =>
     request<OrgUnitView>("/organization/units", { method: "POST", body: JSON.stringify(input) }),
 
@@ -1184,12 +1190,16 @@ export const api = {
   listEmployeeOrgAssignments: (filters?: {
     employeeId?: string;
     orgUnitId?: string;
+    // Organization Management Phase 9 — PositionDetailPage's "Assignment
+    // History" tab.
+    positionId?: string;
     assignmentType?: AssignmentType;
     status?: AssignmentStatus;
   }) => {
     const params = new URLSearchParams();
     if (filters?.employeeId) params.set("employeeId", filters.employeeId);
     if (filters?.orgUnitId) params.set("orgUnitId", filters.orgUnitId);
+    if (filters?.positionId) params.set("positionId", filters.positionId);
     if (filters?.assignmentType) params.set("assignmentType", filters.assignmentType);
     if (filters?.status) params.set("status", filters.status);
     const qs = params.toString();
@@ -1335,6 +1345,25 @@ export const api = {
   // --- Organization Management Phase 6: Command Center panel ----------------
   getOrganizationCommandCenterSummary: () =>
     request<OrganizationCommandCenterSummary>("/organization/command-center"),
+
+  // --- Organization Management Phase 12: Legacy Data Reconciliation ---------
+  getLegacyReconciliationReport: () =>
+    request<LegacyReconciliationReport>("/organization/legacy-reconciliation"),
+
+  linkLegacyOrgUnit: (employeeId: string, orgUnitId: string) =>
+    request<EmployeeView>(`/organization/legacy-reconciliation/${employeeId}/link-org-unit`, {
+      method: "POST",
+      body: JSON.stringify({ orgUnitId }),
+    }),
+
+  linkLegacyLocation: (employeeId: string, locationId: string) =>
+    request<EmployeeView>(`/organization/legacy-reconciliation/${employeeId}/link-location`, {
+      method: "POST",
+      body: JSON.stringify({ locationId }),
+    }),
+
+  linkLegacyManagerRelationship: (employeeId: string) =>
+    request<void>(`/organization/legacy-reconciliation/${employeeId}/link-manager-relationship`, { method: "POST" }),
 
   // --- Employee Groups & Leave Policies (Task #49) --------------------------
   // Admin Center's own screen for the Phase 8 resolver: the API already

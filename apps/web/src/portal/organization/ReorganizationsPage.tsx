@@ -337,7 +337,11 @@ function ChangeCard({ change, canManage, onChanged }: { change: OrgChangeView; c
           {change.impactSummary && (
             <div className="text-label-secondary">
               Impact: {change.impactSummary.affectedOrgUnitCount} org unit(s), {change.impactSummary.affectedPositionCount} position(s),{" "}
-              {change.impactSummary.affectedEmployeeCount} employee(s)
+              {change.impactSummary.affectedEmployeeCount} employee(s),{" "}
+              {/* Organization Management Phase 10 — the two counts
+                Section 18 added to the impact summary. */}
+              {change.impactSummary.affectedReportingRelationshipCount} reporting relationship(s),{" "}
+              {change.impactSummary.affectedFinancialCenterCount} financial center(s)
             </div>
           )}
           {change.failureReason && <div className="text-danger">Execution failed: {change.failureReason}</div>}

@@ -12,6 +12,7 @@ import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
 import { IntegrationsService } from "../tenant-management/integrations.service";
 import { OrgUnitsService } from "./org-units.service";
 import { PositionsService } from "./positions.service";
+import { LocationsService } from "./locations.service";
 import { EmployeeOrgAssignmentsService } from "./employee-org-assignments.service";
 
 const FIXTURE_CLAIMS: RequestClaims = { is_platform_admin: true, company_id: null, sub: "assignments-spec-fixtures" };
@@ -29,6 +30,7 @@ describe("EmployeeOrgAssignmentsService", () => {
   let db: DatabaseService;
   let orgUnits: OrgUnitsService;
   let positions: PositionsService;
+  let locations: LocationsService;
   let employees: EmployeesService;
   let assignments: EmployeeOrgAssignmentsService;
 
@@ -40,6 +42,7 @@ describe("EmployeeOrgAssignmentsService", () => {
     const audit = new AuditService();
     orgUnits = new OrgUnitsService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
     positions = new PositionsService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
+    locations = new LocationsService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
     employees = new EmployeesService(db, rbac, entitlements, audit, new LocalFileStorageService());
     assignments = new EmployeeOrgAssignmentsService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
   });
@@ -83,6 +86,17 @@ describe("EmployeeOrgAssignmentsService", () => {
       await client.query(
         "INSERT INTO user_role_assignments (user_account_id, company_id, role_id) VALUES ($1, $2, $3)",
         [userAccountId, companyId, role.rows[0].id]
+      );
+    });
+  }
+
+  /** Organization Management Phase 11 (Section 19) — same raw-SQL fixture
+   * convention `org-units.service.spec.ts` already established. */
+  async function assignDataScope(userAccountId: string, companyId: string, scopeType: string, scopeEntityId: string) {
+    await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+      await client.query(
+        "INSERT INTO data_scope_assignments (user_account_id, company_id, scope_type, scope_entity_id) VALUES ($1, $2, $3, $4)",
+        [userAccountId, companyId, scopeType, scopeEntityId]
       );
     });
   }
@@ -219,6 +233,37 @@ describe("EmployeeOrgAssignmentsService", () => {
 
       const filteredByType = await assignments.list(hrAdminClaims, { assignmentType: "primary" });
       expect(filteredByType.every((a) => a.assignmentType === "primary")).toBe(true);
+    });
+
+    // Organization Management Phase 9 — the new `positionId` filter,
+    // needed by PositionDetailPage's "Assignment History" tab (every
+    // assignment slot that has ever pointed at one specific position).
+    it("list() filters by positionId", async () => {
+      const seat = await positions.create(hrAdminClaims, { orgUnitId: engineeringUnitId, positionTitle: "Filter Seat" });
+      const otherSeat = await positions.create(hrAdminClaims, { orgUnitId: engineeringUnitId, positionTitle: "Other Seat" });
+      const seatHolder = await employees.create(hrAdminClaims, { firstName: "Seat", lastName: "Holder" });
+      const otherHolder = await employees.create(hrAdminClaims, { firstName: "Other", lastName: "Holder" });
+
+      const onSeat = await assignments.create(hrAdminClaims, {
+        employeeId: seatHolder.id,
+        assignmentType: "secondary",
+        orgUnitId: engineeringUnitId,
+        positionId: seat.id,
+      });
+      await assignments.create(hrAdminClaims, {
+        employeeId: otherHolder.id,
+        assignmentType: "secondary",
+        orgUnitId: engineeringUnitId,
+        positionId: otherSeat.id,
+      });
+      await assignments.create(hrAdminClaims, {
+        employeeId: otherHolder.id,
+        assignmentType: "concurrent",
+        orgUnitId: engineeringUnitId,
+      });
+
+      const filtered = await assignments.list(hrAdminClaims, { positionId: seat.id });
+      expect(filtered.map((a) => a.id)).toEqual([onSeat.id]);
     });
 
     it("update() moves an assignment to a different org unit in place, keeping the same id", async () => {
@@ -401,6 +446,77 @@ describe("EmployeeOrgAssignmentsService", () => {
       const event = await latestEventFor("org.assignment.changed");
       expect(event.payload.changeType).toBe("end");
       expect(event.payload.assignment.status).toBe("ended");
+    });
+  });
+
+  describe("Data Scope (Organization Management Phase 11, Section 19)", () => {
+    let companyId: string;
+    let hrAdminClaims: RequestClaims;
+    let regionalHrClaims: RequestClaims;
+    let assignedOrgUnitId: string;
+    let otherOrgUnitId: string;
+    let assignedLocationId: string;
+    let assignmentInScopeByOrgUnit: string;
+    let assignmentInScopeByLocationOnly: string;
+    let assignmentOutOfScope: string;
+
+    beforeAll(async () => {
+      companyId = await createFixtureCompany("Assignment Scope Co");
+      const stamp = Date.now();
+      const hrAdminUserId = await createUser(`assign-scope-hr-${stamp}@example.com`);
+      const regionalHrUserId = await createUser(`assign-scope-regional-${stamp}@example.com`);
+      await assignRole(hrAdminUserId, companyId, "hr_admin");
+      await assignRole(regionalHrUserId, companyId, "regional_hr");
+      hrAdminClaims = { is_platform_admin: false, company_id: companyId, sub: hrAdminUserId };
+      regionalHrClaims = { is_platform_admin: false, company_id: companyId, sub: regionalHrUserId };
+
+      assignedOrgUnitId = (await orgUnits.create(hrAdminClaims, { name: "Scoped Unit", unitType: "department" })).id;
+      otherOrgUnitId = (await orgUnits.create(hrAdminClaims, { name: "Other Unit", unitType: "department" })).id;
+      assignedLocationId = (await locations.create(hrAdminClaims, { name: "Scoped City", locationType: "city" })).id;
+
+      const employeeInOrgUnit = await employees.create(hrAdminClaims, { firstName: "In", lastName: "OrgUnitScope" });
+      const employeeInLocation = await employees.create(hrAdminClaims, { firstName: "In", lastName: "LocationScope" });
+      const employeeOutOfScope = await employees.create(hrAdminClaims, { firstName: "Out", lastName: "OfScope" });
+
+      assignmentInScopeByOrgUnit = (
+        await assignments.create(hrAdminClaims, {
+          employeeId: employeeInOrgUnit.id,
+          assignmentType: "primary",
+          orgUnitId: assignedOrgUnitId,
+        })
+      ).id;
+      assignmentInScopeByLocationOnly = (
+        await assignments.create(hrAdminClaims, {
+          employeeId: employeeInLocation.id,
+          assignmentType: "primary",
+          orgUnitId: otherOrgUnitId,
+          locationId: assignedLocationId,
+        })
+      ).id;
+      assignmentOutOfScope = (
+        await assignments.create(hrAdminClaims, {
+          employeeId: employeeOutOfScope.id,
+          assignmentType: "primary",
+          orgUnitId: otherOrgUnitId,
+        })
+      ).id;
+
+      await assignDataScope(regionalHrUserId, companyId, "org_unit", assignedOrgUnitId);
+      await assignDataScope(regionalHrUserId, companyId, "location", assignedLocationId);
+    });
+
+    it("list() is visible along EITHER the org-unit or the location dimension the caller holds assignments for", async () => {
+      const visible = await assignments.list(regionalHrClaims);
+      const ids = visible.map((a) => a.id);
+      expect(ids).toEqual(expect.arrayContaining([assignmentInScopeByOrgUnit, assignmentInScopeByLocationOnly]));
+      expect(ids).not.toContain(assignmentOutOfScope);
+    });
+
+    it("get() 404s on an assignment outside both dimensions", async () => {
+      await expect(assignments.get(regionalHrClaims, assignmentOutOfScope)).rejects.toThrow(NotFoundException);
+      await expect(assignments.get(regionalHrClaims, assignmentInScopeByLocationOnly)).resolves.toMatchObject({
+        id: assignmentInScopeByLocationOnly,
+      });
     });
   });
 });

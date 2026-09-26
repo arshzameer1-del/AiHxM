@@ -1208,6 +1208,124 @@ export type AssignRoleRequest = {
 };
 
 /**
+ * Organization Management Phase 11 (Unified Integration & Synchronization
+ * Requirements, Section 19 — assignment-based Data Scope). A row says
+ * "this user's `.scoped` view permission for this scope type is
+ * restricted to this entity (and, for org_unit/location, that entity's
+ * whole subtree)" — a user can hold several rows (e.g. two org units),
+ * and holding zero rows for a scope type their role's `.scoped`
+ * permission covers means seeing nothing along that dimension: Data
+ * Scope fails closed, not open. `scopeEntityId` is a bare id whose table
+ * depends on `scopeType` (org_units.id / locations.id / cost_centers.id)
+ * — kept generic here the same way the underlying `data_scope_assignments`
+ * table is, rather than three near-identical tables/types.
+ */
+export type DataScopeType = "org_unit" | "location" | "cost_center";
+
+export type DataScopeAssignmentView = {
+  id: string;
+  userAccountId: string;
+  companyId: string;
+  scopeType: DataScopeType;
+  scopeEntityId: string;
+  createdAt: string;
+};
+
+export type AssignDataScopeRequest = {
+  userAccountId: string;
+  companyId: string;
+  scopeType: DataScopeType;
+  scopeEntityId: string;
+};
+
+/**
+ * Organization Management Phase 12 (Unified Integration & Synchronization
+ * Requirements, Section 24 — Legacy Data Migration), building directly on
+ * the `legacy_records_not_mapped` warning Phase 8's
+ * `OrganizationCommandCenterService` already computes: that warning is a
+ * COUNT ONLY (Section 25's own mockup shows counts, not lists — see that
+ * service's own class doc comment), deliberately left as "this report's
+ * read-only first half; the actual backfill tool is Phase 12's own
+ * scope." This is that second half — the actual list of affected active
+ * employees, one entry per employee, each carrying every gap that
+ * employee currently has (an employee can have more than one: a legacy
+ * department AND a legacy location, for instance).
+ *
+ * Scope is intentionally the exact three cases Phase 8's own query
+ * already checks — department/orgUnitId, location/locationId,
+ * managerId/direct-relationship — not also `designation`/`positionId`
+ * (Section 24 lists `designation` among the legacy fields, but Section
+ * 25's warning, and therefore this report built on it, never included a
+ * `designation` check; extending detection to a fourth field is a
+ * separate, not-yet-scoped decision, not silently folded in here).
+ */
+export type LegacyReconciliationGapType = "department" | "location" | "manager";
+
+/**
+ * A candidate canonical entity a `department`/`location` gap's free text
+ * might refer to, resolved by this codebase's own two-tier match (see
+ * `legacy-reconciliation.service.ts`'s `suggestMatches()`): `"exact"`
+ * means the free text equals the candidate's name once both are trimmed
+ * and lowercased; `"fuzzy"` means one contains the other as a substring
+ * under the same normalization. Deliberately NOT `pg_trgm`/`similarity()`
+ * — this codebase has never taken a dependency on that extension, and a
+ * human reviews every suggestion before it's applied (this list informs,
+ * it never auto-applies), so a simple, dependency-free heuristic is
+ * enough.
+ */
+export type LegacyReconciliationSuggestion = {
+  id: string;
+  name: string;
+  matchType: "exact" | "fuzzy";
+};
+
+/**
+ * A `"manager"` gap is never ambiguous the way `department`/`location`
+ * gaps are — `employees.managerId` already points at a real, existing
+ * employee row (a live FK, `ON DELETE SET NULL`); what's missing is only
+ * the canonical, TYPED `org_relationships` row Phase 3 introduced
+ * alongside it (see `OrgRelationshipsService`'s own class doc comment for
+ * why the legacy field and the typed row can drift apart). So this gap
+ * carries the already-known `managerEmployeeId`/`managerName` directly,
+ * not a `suggestions` list — there is nothing to choose between, only a
+ * single action to take (`POST .../link-manager-relationship`).
+ */
+export type LegacyReconciliationGap =
+  | { gapType: "department"; legacyValue: string; suggestions: LegacyReconciliationSuggestion[] }
+  | { gapType: "location"; legacyValue: string; suggestions: LegacyReconciliationSuggestion[] }
+  | { gapType: "manager"; legacyValue: string; managerEmployeeId: string };
+
+export type LegacyReconciliationEmployeeView = {
+  employeeId: string;
+  employeeNumber: string;
+  fullName: string;
+  gaps: LegacyReconciliationGap[];
+};
+
+/** `GET /organization/legacy-reconciliation`. `totalAffectedEmployees`
+ * counts EMPLOYEES (matching how many rows the admin screen will render),
+ * not gaps — one employee with two gaps still counts once, distinct from
+ * `OrganizationCommandCenterSummary.integrityWarnings`' own
+ * `legacy_records_not_mapped` count, which is a query-row count over the
+ * same WHERE clause and can therefore be equal to or less than the sum of
+ * every employee's gap count here (it never double-counts a multi-gap
+ * employee either, since that warning's query also counts rows, not
+ * gaps — the two numbers agree). */
+export type LegacyReconciliationReport = {
+  generatedAt: string;
+  totalAffectedEmployees: number;
+  employees: LegacyReconciliationEmployeeView[];
+};
+
+export type LinkOrgUnitRequest = {
+  orgUnitId: string;
+};
+
+export type LinkLocationRequest = {
+  locationId: string;
+};
+
+/**
  * dummy_records, filtered through RbacService.filterRecordFields before it
  * ever reaches the client — `testField`/`secretField` are simply absent
  * from the object (not present-but-null) when the caller's role doesn't
@@ -3489,6 +3607,18 @@ export type OrgChangeImpactSummary = {
   affectedOrgUnitCount: number;
   affectedPositionCount: number;
   affectedEmployeeCount: number;
+  /**
+   * Organization Management Phase 10 (Unified Integration & Synchronization
+   * Requirements, Section 18) — the two additive counts that section asks
+   * for beyond the original three above. "Affected data scope rules" is
+   * Section 18's third ask; deliberately not represented here since no
+   * assignment-based Data Scope capability exists yet for a reorganization
+   * to affect (see Phase 11's own scope) — adding a field for a capability
+   * that doesn't exist would just always read 0, which is worse than
+   * omitting it and documenting why.
+   */
+  affectedReportingRelationshipCount: number;
+  affectedFinancialCenterCount: number;
   warnings: string[];
 };
 
@@ -3567,4 +3697,34 @@ export type OrganizationCommandCenterSummary = {
   activeAssignments: number;
   reorganizationsInFlight: number;
   recentReorganizations: OrganizationCommandCenterRecentChange[];
+  totalLocations: number;
+  totalCostCenters: number;
+  totalProfitCenters: number;
+  dataQualityIssues: number;
+  integrityWarnings: OrganizationIntegrityWarning[];
+};
+
+// -----------------------------------------------------------------------
+// Organization Management, Phase 8 (Unified Integration & Synchronization
+// Requirements, Section 25 — "Organization Integrity Dashboard"). Each
+// warning is a real, computed count against data that already exists —
+// see `organization-command-center.service.ts`'s own header comment for
+// exactly what each code checks and why. `dataQualityIssues` on the
+// summary above is the sum of every warning's `count`, matching Section
+// 25's own mockup ("Data Quality Issues  12").
+// -----------------------------------------------------------------------
+
+export type OrganizationIntegrityWarningCode =
+  | "employees_without_primary_assignment"
+  | "positions_without_org_unit"
+  | "employees_without_reporting_line"
+  | "invalid_expired_locations"
+  | "conflicting_assignments"
+  | "orphaned_organizational_references"
+  | "legacy_records_not_mapped";
+
+export type OrganizationIntegrityWarning = {
+  code: OrganizationIntegrityWarningCode;
+  label: string;
+  count: number;
 };

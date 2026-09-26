@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import type { OrgUnitTreeNode, OrgUnitType, OrgUnitView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
@@ -254,22 +255,32 @@ function UnitRow({
           {node.status}
         </span>
 
-        {canManage && (
-          <div className="ml-auto flex gap-3 shrink-0 text-xs">
-            <button onClick={() => setMode(mode === "add-child" ? "none" : "add-child")} className="font-semibold text-accent hover:underline">
-              + Sub-unit
-            </button>
-            <button onClick={() => setMode(mode === "edit" ? "none" : "edit")} className="font-semibold text-accent hover:underline">
-              Edit
-            </button>
-            <button onClick={() => setMode(mode === "move" ? "none" : "move")} className="font-medium text-label-secondary hover:underline">
-              Move
-            </button>
-            <button onClick={handleToggleStatus} disabled={busy} className="font-medium text-label-tertiary hover:text-danger disabled:opacity-50">
-              {node.status === "active" ? "Archive" : "Activate"}
-            </button>
-          </div>
-        )}
+        <div className="ml-auto flex gap-3 shrink-0 text-xs">
+          {/* Organization Management Phase 9 — the "View" link into
+            OrgUnitDetailPage, deliberately ungated by `canManage` since
+            viewing is not a management action (every role that can see
+            this row at all can already read the underlying record via
+            `org_unit.view.all`). */}
+          <Link to={`/app/organization/units/${node.id}`} className="font-medium text-label-secondary hover:underline">
+            View
+          </Link>
+          {canManage && (
+            <>
+              <button onClick={() => setMode(mode === "add-child" ? "none" : "add-child")} className="font-semibold text-accent hover:underline">
+                + Sub-unit
+              </button>
+              <button onClick={() => setMode(mode === "edit" ? "none" : "edit")} className="font-semibold text-accent hover:underline">
+                Edit
+              </button>
+              <button onClick={() => setMode(mode === "move" ? "none" : "move")} className="font-medium text-label-secondary hover:underline">
+                Move
+              </button>
+              <button onClick={handleToggleStatus} disabled={busy} className="font-medium text-label-tertiary hover:text-danger disabled:opacity-50">
+                {node.status === "active" ? "Archive" : "Activate"}
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {error && <div className="text-xs text-danger" style={{ paddingLeft: depth * 20 + 24 }}>{error}</div>}

@@ -95,6 +95,17 @@ describe("PositionsService", () => {
     });
   }
 
+  /** Organization Management Phase 11 (Section 19) — same raw-SQL fixture
+   * convention `org-units.service.spec.ts` already established. */
+  async function assignDataScope(userAccountId: string, companyId: string, scopeType: string, scopeEntityId: string) {
+    await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+      await client.query(
+        "INSERT INTO data_scope_assignments (user_account_id, company_id, scope_type, scope_entity_id) VALUES ($1, $2, $3, $4)",
+        [userAccountId, companyId, scopeType, scopeEntityId]
+      );
+    });
+  }
+
   describe("CRUD, effective-dating, lifecycle transitions, and RBAC", () => {
     let companyId: string;
     let hrAdminClaims: RequestClaims;
@@ -536,6 +547,75 @@ describe("PositionsService", () => {
       const unassignedEvent = await latestEventFor("org.position.changed");
       expect(unassignedEvent.payload.changeType).toBe("position.unassign");
       expect(unassignedEvent.payload.position.status).toBe("vacant");
+    });
+  });
+
+  describe("Data Scope (Organization Management Phase 11, Section 19)", () => {
+    let companyId: string;
+    let hrAdminClaims: RequestClaims;
+    let regionalHrClaims: RequestClaims;
+    let regionalFinanceClaims: RequestClaims;
+    let assignedOrgUnitId: string;
+    let otherOrgUnitId: string;
+    let assignedCostCenterId: string;
+    let positionInScopeByOrgUnit: string;
+    let positionInScopeByCostCenterOnly: string;
+    let positionOutOfScope: string;
+
+    beforeAll(async () => {
+      companyId = await createFixtureCompany("Position Scope Co");
+      const stamp = Date.now();
+      const hrAdminUserId = await createUser(`pos-scope-hr-${stamp}@example.com`);
+      const regionalHrUserId = await createUser(`pos-scope-regional-hr-${stamp}@example.com`);
+      const regionalFinanceUserId = await createUser(`pos-scope-regional-finance-${stamp}@example.com`);
+      await assignRole(hrAdminUserId, companyId, "hr_admin");
+      await assignRole(regionalHrUserId, companyId, "regional_hr");
+      await assignRole(regionalFinanceUserId, companyId, "regional_finance");
+      hrAdminClaims = { is_platform_admin: false, company_id: companyId, sub: hrAdminUserId };
+      regionalHrClaims = { is_platform_admin: false, company_id: companyId, sub: regionalHrUserId };
+      regionalFinanceClaims = { is_platform_admin: false, company_id: companyId, sub: regionalFinanceUserId };
+
+      assignedOrgUnitId = (await orgUnits.create(hrAdminClaims, { name: "Scoped Division", unitType: "division" })).id;
+      otherOrgUnitId = (await orgUnits.create(hrAdminClaims, { name: "Other Division", unitType: "division" })).id;
+      assignedCostCenterId = (await costCenters.create(hrAdminClaims, { name: "Scoped CC" })).id;
+
+      positionInScopeByOrgUnit = (
+        await positions.create(hrAdminClaims, { orgUnitId: assignedOrgUnitId, positionTitle: "In-Scope by Org Unit" })
+      ).id;
+      positionInScopeByCostCenterOnly = (
+        await positions.create(hrAdminClaims, {
+          orgUnitId: otherOrgUnitId,
+          positionTitle: "In-Scope by Cost Center Only",
+          costCenterId: assignedCostCenterId,
+        })
+      ).id;
+      positionOutOfScope = (
+        await positions.create(hrAdminClaims, { orgUnitId: otherOrgUnitId, positionTitle: "Out of Scope" })
+      ).id;
+
+      await assignDataScope(regionalHrUserId, companyId, "org_unit", assignedOrgUnitId);
+      await assignDataScope(regionalFinanceUserId, companyId, "cost_center", assignedCostCenterId);
+    });
+
+    it("regional_hr (org-unit scope) sees positions in their unit but not elsewhere, regardless of cost center", async () => {
+      const visible = await positions.list(regionalHrClaims);
+      const ids = visible.map((p) => p.id);
+      expect(ids).toContain(positionInScopeByOrgUnit);
+      expect(ids).not.toContain(positionInScopeByCostCenterOnly);
+      expect(ids).not.toContain(positionOutOfScope);
+    });
+
+    it("regional_finance (cost-center scope) sees positions tagged with their cost center regardless of org unit, but nothing else", async () => {
+      const visible = await positions.list(regionalFinanceClaims);
+      const ids = visible.map((p) => p.id);
+      expect(ids).toContain(positionInScopeByCostCenterOnly);
+      expect(ids).not.toContain(positionInScopeByOrgUnit);
+      expect(ids).not.toContain(positionOutOfScope);
+    });
+
+    it("get() 404s a scoped caller on a position outside every dimension they hold", async () => {
+      await expect(positions.get(regionalHrClaims, positionOutOfScope)).rejects.toThrow(NotFoundException);
+      await expect(positions.get(regionalFinanceClaims, positionOutOfScope)).rejects.toThrow(NotFoundException);
     });
   });
 });

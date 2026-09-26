@@ -30,10 +30,13 @@ export class EmployeeOrgAssignmentsController {
     @CurrentClaims() claims: RequestClaims,
     @Query("employeeId") employeeId?: string,
     @Query("orgUnitId") orgUnitId?: string,
+    // Organization Management Phase 9 — PositionDetailPage's "Assignment
+    // History" tab filters by positionId.
+    @Query("positionId") positionId?: string,
     @Query("assignmentType") assignmentType?: AssignmentType,
     @Query("status") status?: AssignmentStatus
   ) {
-    return this.assignments.list(claims, { employeeId, orgUnitId, assignmentType, status });
+    return this.assignments.list(claims, { employeeId, orgUnitId, positionId, assignmentType, status });
   }
 
   @Get(":id")

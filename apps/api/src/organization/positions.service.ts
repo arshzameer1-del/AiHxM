@@ -7,6 +7,7 @@ import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
 import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
+import { buildOrgEventPayload } from "../webhooks/org-event-payload.util";
 import type {
   CreatePositionRequest,
   PositionStatus,
@@ -20,6 +21,14 @@ import type {
 const MODULE_KEY = "employee" as const;
 const MANAGE_PERMISSION = "position.manage.all";
 const VIEW_PERMISSION = "position.view.all";
+// Organization Management Phase 11 (Section 19) — the alternative to
+// VIEW_PERMISSION a role can hold instead: restricted to positions inside
+// the caller's assigned org-unit data scope (expanded to subtree) OR
+// tagged with one of the caller's assigned cost centers — a position is
+// visible along EITHER dimension a caller has assignments for (Regional
+// HR is scoped by org unit, Regional Finance by cost center, and both
+// permissions ride on this same `position.view.scoped` key).
+const SCOPED_VIEW_PERMISSION_BASE = "position.view";
 
 type PositionRow = {
   id: string;
@@ -140,7 +149,7 @@ export class PositionsService {
 
   private publishChanged(claims: RequestClaims, changeType: string, position: PositionView): void {
     this.webhooks
-      ?.enqueue(claims.company_id!, "org.position.changed", { eventVersion: 1, changeType, position })
+      ?.enqueue(claims.company_id!, "org.position.changed", buildOrgEventPayload(claims, changeType, "position", position))
       .catch(() => undefined);
   }
 
@@ -228,8 +237,13 @@ export class PositionsService {
   /** Every position in the tenant, optionally filtered by status/org
    * unit — the raw material the Position Workbench's list view renders
    * from. */
+  /** Every position in the tenant, optionally filtered by status/org
+   * unit — the raw material the Position Workbench's list view renders
+   * from. A caller who only holds `position.view.scoped` (Phase 11,
+   * Section 19) instead sees only positions inside their assigned org
+   * unit(s)' subtree or tagged with one of their assigned cost centers. */
   async list(claims: RequestClaims, filters: PositionListFilters = {}): Promise<PositionView[]> {
-    await this.requireView(claims);
+    const scope = await this.resolveViewAccess(claims);
     return this.db.withClaims(claims, async (client) => {
       const conditions = ["company_id = $1"];
       const values: unknown[] = [claims.company_id];
@@ -241,6 +255,15 @@ export class PositionsService {
         values.push(filters.orgUnitId);
         conditions.push(`org_unit_id = $${values.length}`);
       }
+      if (!scope.unrestricted) {
+        values.push(scope.orgUnitIds);
+        const orgUnitParam = values.length;
+        values.push(scope.costCenterIds);
+        const costCenterParam = values.length;
+        conditions.push(
+          `(org_unit_id = ANY($${orgUnitParam}::uuid[]) OR cost_center_id = ANY($${costCenterParam}::uuid[]))`
+        );
+      }
       const result = await client.query(
         `SELECT * FROM positions WHERE ${conditions.join(" AND ")} ORDER BY position_title`,
         values
@@ -250,8 +273,18 @@ export class PositionsService {
   }
 
   async get(claims: RequestClaims, id: string): Promise<PositionView> {
-    await this.requireView(claims);
-    return this.db.withClaims(claims, async (client) => rowToPosition(await this.mustExist(client, id)));
+    const scope = await this.resolveViewAccess(claims);
+    return this.db.withClaims(claims, async (client) => {
+      const row = await this.mustExist(client, id);
+      if (!scope.unrestricted) {
+        const inOrgUnitScope = scope.orgUnitIds.includes(row.org_unit_id);
+        const inCostCenterScope = Boolean(row.cost_center_id) && scope.costCenterIds.includes(row.cost_center_id as string);
+        if (!inOrgUnitScope && !inCostCenterScope) {
+          throw new NotFoundException("Position not found");
+        }
+      }
+      return rowToPosition(row);
+    });
   }
 
   /** Retitle/recode/reassign-job/reparent-org-unit/adjust-headcount in
@@ -644,5 +677,69 @@ export class PositionsService {
     if (!canView && !canManage) {
       throw new ForbiddenException("Not permitted to view positions");
     }
+  }
+
+  /**
+   * Organization Management Phase 11 (Section 19) — scope-aware sibling
+   * of `requireView()`. Two independent dimensions instead of one: an
+   * org-unit assignment (expanded to subtree, via this method's own
+   * inline recursive CTE — the same duplication `OrgChangesService.
+   * analyzeImpact()` already established rather than injecting
+   * `OrgUnitsService` here just for this one query) and a cost-center
+   * assignment (used flat, Cost Center has no hierarchy). `list()`/`get()`
+   * treat a position as visible if it matches EITHER dimension the caller
+   * holds assignments for.
+   */
+  private async resolveViewAccess(
+    claims: RequestClaims
+  ): Promise<{ unrestricted: boolean; orgUnitIds: string[]; costCenterIds: string[] }> {
+    if (!(await this.entitlements.isModuleEnabled(claims, MODULE_KEY))) {
+      throw new NotFoundException();
+    }
+    const [canView, canManage] = await Promise.all([
+      this.rbac.can(claims, VIEW_PERMISSION),
+      this.rbac.can(claims, MANAGE_PERMISSION),
+    ]);
+    if (canView || canManage) {
+      return { unrestricted: true, orgUnitIds: [], costCenterIds: [] };
+    }
+    if (!(await this.rbac.hasScopedPermission(claims, SCOPED_VIEW_PERMISSION_BASE))) {
+      throw new ForbiddenException("Not permitted to view positions");
+    }
+    const [assignedOrgUnitIds, costCenterIds] = await Promise.all([
+      this.rbac.resolveDataScopeEntityIds(claims, "org_unit"),
+      this.rbac.resolveDataScopeEntityIds(claims, "cost_center"),
+    ]);
+    const orgUnitIds = await this.expandOrgUnitIdsToSubtree(claims, assignedOrgUnitIds);
+    return { unrestricted: false, orgUnitIds, costCenterIds };
+  }
+
+  /** Every assigned org-unit id plus all of its descendants — exactly
+   * `OrgUnitsService.expandToSubtreeIds()`'s own shape, duplicated here
+   * rather than injected (see `resolveViewAccess()`'s own doc comment). */
+  private async expandOrgUnitIdsToSubtree(claims: RequestClaims, rootIds: string[]): Promise<string[]> {
+    if (rootIds.length === 0) return [];
+    return this.db.withClaims(claims, async (client) => {
+      const ids = new Set<string>();
+      for (const rootId of rootIds) {
+        const exists = await client.query("SELECT 1 FROM org_units WHERE id = $1 AND company_id = $2", [
+          rootId,
+          claims.company_id,
+        ]);
+        if (exists.rowCount === 0) continue;
+        ids.add(rootId);
+        const descendants = await client.query<{ id: string }>(
+          `WITH RECURSIVE subtree AS (
+             SELECT id FROM org_units WHERE company_id = $1 AND id = $2
+             UNION ALL
+             SELECT ou.id FROM org_units ou JOIN subtree s ON ou.parent_id = s.id WHERE ou.company_id = $1
+           )
+           SELECT id FROM subtree WHERE id != $2`,
+          [claims.company_id, rootId]
+        );
+        for (const row of descendants.rows) ids.add(row.id);
+      }
+      return Array.from(ids);
+    });
   }
 }

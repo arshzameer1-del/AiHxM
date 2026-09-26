@@ -6,6 +6,8 @@ import { RbacService } from "../rbac/rbac.service";
 import { EntitlementsService } from "../entitlements/entitlements.service";
 import { AuditService } from "../audit/audit.service";
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
+import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
+import { IntegrationsService } from "../tenant-management/integrations.service";
 import { OrgUnitsService } from "./org-units.service";
 import { CostCentersService } from "./cost-centers.service";
 
@@ -73,6 +75,17 @@ describe("CostCentersService", () => {
       await client.query(
         "INSERT INTO user_role_assignments (user_account_id, company_id, role_id) VALUES ($1, $2, $3)",
         [userAccountId, companyId, role.rows[0].id]
+      );
+    });
+  }
+
+  /** Organization Management Phase 11 (Section 19) — same raw-SQL fixture
+   * convention `org-units.service.spec.ts` already established. */
+  async function assignDataScope(userAccountId: string, companyId: string, scopeType: string, scopeEntityId: string) {
+    await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+      await client.query(
+        "INSERT INTO data_scope_assignments (user_account_id, company_id, scope_type, scope_entity_id) VALUES ($1, $2, $3, $4)",
+        [userAccountId, companyId, scopeType, scopeEntityId]
       );
     });
   }
@@ -206,6 +219,106 @@ describe("CostCentersService", () => {
       await expect(costCenters.get(claimsB, costCenterA.id)).rejects.toThrow(NotFoundException);
       const listB = await costCenters.list(claimsB);
       expect(listB.find((c) => c.id === costCenterA.id)).toBeUndefined();
+    });
+  });
+
+  /**
+   * Organization Management, Phase 7 (Unified Integration & Synchronization
+   * Requirements, Section 14). Confirms the shared `org.financial_center.changed`
+   * event really enqueues end to end through a real WebhookDispatchService
+   * for this side (Cost Center), with `payload.centerType === "cost_center"`
+   * distinguishing it from Profit Center's own events on the same event
+   * type, plus the new flat `tenantId`/`entityId`/`effectiveDate`/
+   * `occurredAt` fields per `buildOrgEventPayload()`'s contract.
+   * `costCenters` above (this file's shared instance) is built WITHOUT a
+   * WebhookDispatchService — proving the optional-dependency design
+   * doesn't secretly break anything for it — so this uses its own instance
+   * instead.
+   */
+  describe("webhook events (Organization Management Phase 7)", () => {
+    let companyId: string;
+    let hrAdminClaims: RequestClaims;
+    let costCentersWithWebhooks: CostCentersService;
+    const platformClaims: RequestClaims = { is_platform_admin: true, company_id: null, sub: "cost-center-webhook-spec" };
+
+    beforeAll(async () => {
+      companyId = await createFixtureCompany("Cost Center Webhook Co");
+      const hrAdminUserId = await createUser(`cost-center-webhook-hr-${Date.now()}@example.com`);
+      await assignRole(hrAdminUserId, companyId, "hr_admin");
+      hrAdminClaims = { is_platform_admin: false, company_id: companyId, sub: hrAdminUserId };
+
+      await new IntegrationsService(db, new AuditService()).configure(platformClaims, companyId, "webhook", {
+        enabled: true,
+        config: { url: "http://127.0.0.1:1/hook", signingSecret: "cost-center-trigger-secret" },
+      });
+
+      costCentersWithWebhooks = new CostCentersService(
+        db,
+        new RbacService(db),
+        new EntitlementsService(db),
+        new AuditService(),
+        new EffectiveDatingEngine(),
+        new WebhookDispatchService(db, new AuditService())
+      );
+    });
+
+    async function latestEventFor(type: string) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const result = await db.withClaims(platformClaims, (client) =>
+        client.query(
+          "SELECT * FROM webhook_events WHERE company_id = $1 AND event_type = $2 ORDER BY created_at DESC LIMIT 1",
+          [companyId, type]
+        )
+      );
+      return result.rows[0];
+    }
+
+    it("enqueues org.financial_center.changed with centerType 'cost_center' on create()", async () => {
+      const created = await costCentersWithWebhooks.create(hrAdminClaims, { name: "Webhook Cost Center" });
+      const event = await latestEventFor("org.financial_center.changed");
+      expect(event).toBeDefined();
+      expect(event.payload.eventVersion).toBe(1);
+      expect(event.payload.changeType).toBe("create");
+      expect(event.payload.centerType).toBe("cost_center");
+      expect(event.payload.tenantId).toBe(companyId);
+      expect(event.payload.entityId).toBe(created.id);
+      expect(event.payload.costCenter.id).toBe(created.id);
+    });
+  });
+
+  describe("Data Scope (Organization Management Phase 11, Section 19)", () => {
+    let companyId: string;
+    let hrAdminClaims: RequestClaims;
+    let regionalFinanceClaims: RequestClaims;
+    let assignedCostCenterId: string;
+    let otherCostCenterId: string;
+
+    beforeAll(async () => {
+      companyId = await createFixtureCompany("Finance Scope Co");
+      const stamp = Date.now();
+      const hrAdminUserId = await createUser(`cc-scope-hr-${stamp}@example.com`);
+      const regionalFinanceUserId = await createUser(`cc-scope-finance-${stamp}@example.com`);
+      await assignRole(hrAdminUserId, companyId, "hr_admin");
+      await assignRole(regionalFinanceUserId, companyId, "regional_finance");
+      hrAdminClaims = { is_platform_admin: false, company_id: companyId, sub: hrAdminUserId };
+      regionalFinanceClaims = { is_platform_admin: false, company_id: companyId, sub: regionalFinanceUserId };
+
+      // Cost Center is a flat catalog (Phase 4) — no subtree to expand,
+      // the assignment applies to exactly the one center.
+      assignedCostCenterId = (await costCenters.create(hrAdminClaims, { name: "North Region CC" })).id;
+      otherCostCenterId = (await costCenters.create(hrAdminClaims, { name: "South Region CC" })).id;
+
+      await assignDataScope(regionalFinanceUserId, companyId, "cost_center", assignedCostCenterId);
+    });
+
+    it("list()/get() restrict a regional_finance caller to their assigned cost center only (flat, no expansion)", async () => {
+      const visible = await costCenters.list(regionalFinanceClaims);
+      expect(visible.map((c) => c.id)).toEqual([assignedCostCenterId]);
+
+      await expect(costCenters.get(regionalFinanceClaims, otherCostCenterId)).rejects.toThrow(NotFoundException);
+      await expect(costCenters.get(regionalFinanceClaims, assignedCostCenterId)).resolves.toMatchObject({
+        id: assignedCostCenterId,
+      });
     });
   });
 });

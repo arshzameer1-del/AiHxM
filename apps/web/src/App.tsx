@@ -90,6 +90,15 @@ const OrgHierarchyPage = lazy(() =>
     default: m.OrgHierarchyPage,
   })),
 );
+// Organization Management Phase 9 (Unified Integration & Synchronization
+// Requirements, Section 2 — the unified Organization workspace) — one
+// detail page per Org Unit/Position/Assignment, reached via a "View" link
+// from their own list page. See each page's own header comment.
+const OrgUnitDetailPage = lazy(() =>
+  import("./portal/organization/OrgUnitDetailPage").then((m) => ({
+    default: m.OrgUnitDetailPage,
+  })),
+);
 // Organization Management, Phase 2 — Job Catalog (a setup screen) and
 // Position Workbench (occupancy/lifecycle). See
 // 0068_job_position_architecture.sql and jobs.service.ts's/
@@ -104,6 +113,11 @@ const PositionWorkbenchPage = lazy(() =>
     default: m.PositionWorkbenchPage,
   })),
 );
+const PositionDetailPage = lazy(() =>
+  import("./portal/organization/PositionDetailPage").then((m) => ({
+    default: m.PositionDetailPage,
+  })),
+);
 // Organization Management, Phase 3 — Assignment Workbench (org unit/
 // position assignment slots) and Relationship Explorer (typed reporting
 // relationships). See 0071_employee_org_assignments_and_relationships.sql
@@ -112,6 +126,11 @@ const PositionWorkbenchPage = lazy(() =>
 const AssignmentWorkbenchPage = lazy(() =>
   import("./portal/organization/AssignmentWorkbenchPage").then((m) => ({
     default: m.AssignmentWorkbenchPage,
+  })),
+);
+const AssignmentDetailPage = lazy(() =>
+  import("./portal/organization/AssignmentDetailPage").then((m) => ({
+    default: m.AssignmentDetailPage,
   })),
 );
 const RelationshipExplorerPage = lazy(() =>
@@ -138,6 +157,14 @@ const FinancialCentersPage = lazy(() =>
 const ReorganizationsPage = lazy(() =>
   import("./portal/organization/ReorganizationsPage").then((m) => ({
     default: m.ReorganizationsPage,
+  })),
+);
+// Organization Management Phase 12 (Section 24) — the legacy department/
+// location/manager backfill tool built on Phase 8's own
+// `legacy_records_not_mapped` warning.
+const LegacyReconciliationPage = lazy(() =>
+  import("./portal/organization/LegacyReconciliationPage").then((m) => ({
+    default: m.LegacyReconciliationPage,
   })),
 );
 const ConfigurationCenterPage = lazy(() =>
@@ -278,6 +305,10 @@ export default function App() {
                     side; PortalLayout's nav gates it the same courtesy way
                     as every other route here. */}
                   <Route path="organization" element={<OrgHierarchyPage />} />
+                  {/* Organization Management Phase 9 — the unified workspace's
+                    Org Unit detail page. Same courtesy-nav gate; view-only,
+                    so no `manage` permission is even relevant here. */}
+                  <Route path="organization/units/:id" element={<OrgUnitDetailPage />} />
                   {/* Organization Management Phase 2 — Job Catalog +
                     Position Workbench. job.view.all/job.manage.all and
                     position.view.all/position.manage.all (both seeded in
@@ -286,6 +317,8 @@ export default function App() {
                     here. */}
                   <Route path="organization/jobs" element={<JobsPage />} />
                   <Route path="organization/positions" element={<PositionWorkbenchPage />} />
+                  {/* Organization Management Phase 9 — Position detail page. */}
+                  <Route path="organization/positions/:id" element={<PositionDetailPage />} />
                   {/* Organization Management Phase 3 — Assignment Workbench +
                     Relationship Explorer. employee_org_assignment.view.all/
                     .manage.all and org_relationship.view.all/.manage.all
@@ -293,6 +326,8 @@ export default function App() {
                     nav gates these the same courtesy way as every other
                     route here. */}
                   <Route path="organization/assignments" element={<AssignmentWorkbenchPage />} />
+                  {/* Organization Management Phase 9 — Assignment detail page. */}
+                  <Route path="organization/assignments/:id" element={<AssignmentDetailPage />} />
                   <Route path="organization/relationships" element={<RelationshipExplorerPage />} />
                   {/* Organization Management Phase 4 — the Location
                     hierarchy explorer + the combined Cost Center/Profit
@@ -304,6 +339,14 @@ export default function App() {
                   <Route path="organization/locations" element={<LocationsPage />} />
                   <Route path="organization/financial-centers" element={<FinancialCentersPage />} />
                   <Route path="organization/reorganizations" element={<ReorganizationsPage />} />
+                  {/* Organization Management Phase 12 — Legacy Data
+                    Reconciliation (Section 24). `employee.manage.all` is
+                    the real, server-side gate (the same permission the
+                    department/location fixes on this screen delegate
+                    into via EmployeesService.update()); PortalLayout's
+                    nav gates this the same hr_admin courtesy way as every
+                    other route here. */}
+                  <Route path="organization/legacy-reconciliation" element={<LegacyReconciliationPage />} />
                   {/* Task #49 — Admin Center. hr_admin-only in PortalLayout's
                     nav (a courtesy); EmployeeGroupsService's own
                     employee_group.manage/leave_policy.manage gates are the

@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import type { EmployeeView, JobView, OrgUnitView, PositionStatus, PositionView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
@@ -284,40 +285,48 @@ function PositionRow({
           </span>
         )}
 
-        {canManage && (
-          <div className="ml-auto flex gap-3 shrink-0 text-xs">
-            {position.status === "vacant" && (
-              <button onClick={() => setMode(mode === "assign" ? "none" : "assign")} className="font-semibold text-accent hover:underline">
-                Assign
-              </button>
-            )}
-            {position.status === "filled" && (
-              <button onClick={() => runAction(() => api.unassignPosition(position.id))} disabled={busy} className="font-semibold text-accent hover:underline disabled:opacity-50">
-                Unassign
-              </button>
-            )}
-            {position.status === "vacant" && (
-              <button onClick={() => runAction(() => api.freezePosition(position.id))} disabled={busy} className="font-medium text-label-secondary hover:underline disabled:opacity-50">
-                Freeze
-              </button>
-            )}
-            {position.status === "frozen" && (
-              <button onClick={() => runAction(() => api.unfreezePosition(position.id))} disabled={busy} className="font-medium text-label-secondary hover:underline disabled:opacity-50">
-                Unfreeze
-              </button>
-            )}
-            {(position.status === "vacant" || position.status === "frozen") && (
-              <button onClick={() => runAction(() => api.abolishPosition(position.id))} disabled={busy} className="font-medium text-label-tertiary hover:text-danger disabled:opacity-50">
-                Abolish
-              </button>
-            )}
-            {position.status === "abolished" && (
-              <button onClick={() => runAction(() => api.reactivatePosition(position.id))} disabled={busy} className="font-medium text-label-tertiary hover:text-accent disabled:opacity-50">
-                Reactivate
-              </button>
-            )}
-          </div>
-        )}
+        <div className="ml-auto flex gap-3 shrink-0 text-xs">
+          {/* Organization Management Phase 9 — the "View" link into
+            PositionDetailPage, ungated by `canManage` for the same reason
+            OrgHierarchyPage's own "View" link is (see that file's comment). */}
+          <Link to={`/app/organization/positions/${position.id}`} className="font-medium text-label-secondary hover:underline">
+            View
+          </Link>
+          {canManage && (
+            <>
+              {position.status === "vacant" && (
+                <button onClick={() => setMode(mode === "assign" ? "none" : "assign")} className="font-semibold text-accent hover:underline">
+                  Assign
+                </button>
+              )}
+              {position.status === "filled" && (
+                <button onClick={() => runAction(() => api.unassignPosition(position.id))} disabled={busy} className="font-semibold text-accent hover:underline disabled:opacity-50">
+                  Unassign
+                </button>
+              )}
+              {position.status === "vacant" && (
+                <button onClick={() => runAction(() => api.freezePosition(position.id))} disabled={busy} className="font-medium text-label-secondary hover:underline disabled:opacity-50">
+                  Freeze
+                </button>
+              )}
+              {position.status === "frozen" && (
+                <button onClick={() => runAction(() => api.unfreezePosition(position.id))} disabled={busy} className="font-medium text-label-secondary hover:underline disabled:opacity-50">
+                  Unfreeze
+                </button>
+              )}
+              {(position.status === "vacant" || position.status === "frozen") && (
+                <button onClick={() => runAction(() => api.abolishPosition(position.id))} disabled={busy} className="font-medium text-label-tertiary hover:text-danger disabled:opacity-50">
+                  Abolish
+                </button>
+              )}
+              {position.status === "abolished" && (
+                <button onClick={() => runAction(() => api.reactivatePosition(position.id))} disabled={busy} className="font-medium text-label-tertiary hover:text-accent disabled:opacity-50">
+                  Reactivate
+                </button>
+              )}
+            </>
+          )}
+        </div>
       </div>
 
       {error && <div className="text-xs text-danger py-1">{error}</div>}

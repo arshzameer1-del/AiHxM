@@ -6,6 +6,8 @@ import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
+import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
+import { buildOrgEventPayload } from "../webhooks/org-event-payload.util";
 import type {
   CreateLocationRequest,
   LocationTreeNode,
@@ -20,6 +22,10 @@ import type {
 const MODULE_KEY = "employee" as const;
 const MANAGE_PERMISSION = "location.manage.all";
 const VIEW_PERMISSION = "location.view.all";
+// Organization Management Phase 11 (Section 19) — see
+// OrgUnitsService's own SCOPED_VIEW_PERMISSION_BASE for the full writeup;
+// same idea, applied to the Location hierarchy.
+const SCOPED_VIEW_PERMISSION_BASE = "location.view";
 
 type LocationRow = {
   id: string;
@@ -95,8 +101,21 @@ export class LocationsService {
     private readonly rbac: RbacService,
     private readonly entitlements: EntitlementsService,
     private readonly audit: AuditService,
-    private readonly effectiveDating: EffectiveDatingEngine
+    private readonly effectiveDating: EffectiveDatingEngine,
+    // Optional for the same reason every other Organization Management
+    // service's own `webhooks` field is. Organization Management Phase 7
+    // (Unified Integration & Synchronization Requirements, Section 14) —
+    // the `org.location.changed` domain event, fired at every one of this
+    // service's own already-audited mutation points (create/update/move/
+    // archive/activate).
+    private readonly webhooks?: WebhookDispatchService
   ) {}
+
+  private publishChanged(claims: RequestClaims, changeType: string, location: LocationView): void {
+    this.webhooks
+      ?.enqueue(claims.company_id!, "org.location.changed", buildOrgEventPayload(claims, changeType, "location", location))
+      .catch(() => undefined);
+  }
 
   async create(claims: RequestClaims, input: CreateLocationRequest): Promise<LocationView> {
     await this.requireManage(claims);
@@ -143,24 +162,41 @@ export class LocationsService {
         metadata: { name: input.name, locationType: input.locationType, parentId: input.parentId ?? null },
       });
 
-      return rowToLocation(location);
+      const view = rowToLocation(location);
+      this.publishChanged(claims, "create", view);
+      return view;
     });
   }
 
-  /** Every location in the tenant, flat, alphabetical. */
+  /** Every location in the tenant, flat, alphabetical. A caller who only
+   * holds `location.view.scoped` (Phase 11, Section 19) instead sees only
+   * their assigned location(s) and those locations' descendants. */
   async list(claims: RequestClaims): Promise<LocationView[]> {
-    await this.requireView(claims);
+    const scope = await this.resolveViewAccess(claims);
     return this.db.withClaims(claims, async (client) => {
-      const result = await client.query("SELECT * FROM locations WHERE company_id = $1 ORDER BY name", [
-        claims.company_id,
-      ]);
+      const conditions = ["company_id = $1"];
+      const values: unknown[] = [claims.company_id];
+      if (!scope.unrestricted) {
+        values.push(scope.allowedIds);
+        conditions.push(`id = ANY($${values.length}::uuid[])`);
+      }
+      const result = await client.query(
+        `SELECT * FROM locations WHERE ${conditions.join(" AND ")} ORDER BY name`,
+        values
+      );
       return result.rows.map(rowToLocation);
     });
   }
 
   async get(claims: RequestClaims, id: string): Promise<LocationView> {
-    await this.requireView(claims);
-    return this.db.withClaims(claims, async (client) => rowToLocation(await this.mustExist(client, id)));
+    const scope = await this.resolveViewAccess(claims);
+    return this.db.withClaims(claims, async (client) => {
+      const row = await this.mustExist(client, id);
+      if (!scope.unrestricted && !scope.allowedIds.includes(id)) {
+        throw new NotFoundException("Location not found");
+      }
+      return rowToLocation(row);
+    });
   }
 
   /** Every descendant of `id` (not including `id` itself) — exactly
@@ -246,7 +282,9 @@ export class LocationsService {
         metadata: { before: rowToLocation(before), after: rowToLocation(location) },
       });
 
-      return rowToLocation(location);
+      const view = rowToLocation(location);
+      this.publishChanged(claims, "update", view);
+      return view;
     });
   }
 
@@ -286,7 +324,9 @@ export class LocationsService {
         metadata: { fromParentId: before.parent_id, toParentId: input.parentId ?? null },
       });
 
-      return rowToLocation(location);
+      const view = rowToLocation(location);
+      this.publishChanged(claims, "move", view);
+      return view;
     });
   }
 
@@ -320,7 +360,9 @@ export class LocationsService {
         target: id,
       });
 
-      return rowToLocation(location);
+      const view = rowToLocation(location);
+      this.publishChanged(claims, status === "archived" ? "archive" : "activate", view);
+      return view;
     });
   }
 
@@ -393,5 +435,48 @@ export class LocationsService {
     if (!canView && !canManage) {
       throw new ForbiddenException("Not permitted to view the location hierarchy");
     }
+  }
+
+  /** Organization Management Phase 11 (Section 19) — scope-aware sibling
+   * of `requireView()`, same shape as `OrgUnitsService`'s own version;
+   * see that method's doc comment for the full writeup. */
+  private async resolveViewAccess(claims: RequestClaims): Promise<{ unrestricted: boolean; allowedIds: string[] }> {
+    if (!(await this.entitlements.isModuleEnabled(claims, MODULE_KEY))) {
+      throw new NotFoundException();
+    }
+    const [canView, canManage] = await Promise.all([
+      this.rbac.can(claims, VIEW_PERMISSION),
+      this.rbac.can(claims, MANAGE_PERMISSION),
+    ]);
+    if (canView || canManage) {
+      return { unrestricted: true, allowedIds: [] };
+    }
+    if (!(await this.rbac.hasScopedPermission(claims, SCOPED_VIEW_PERMISSION_BASE))) {
+      throw new ForbiddenException("Not permitted to view the location hierarchy");
+    }
+    const assignedIds = await this.rbac.resolveDataScopeEntityIds(claims, "location");
+    const allowedIds = await this.expandToSubtreeIds(claims, assignedIds);
+    return { unrestricted: false, allowedIds };
+  }
+
+  /** Every id in `rootIds` plus all of their descendants — exactly
+   * `OrgUnitsService.expandToSubtreeIds()`'s own shape, applied to the
+   * Location hierarchy's own `descendantRows()`. */
+  async expandToSubtreeIds(claims: RequestClaims, rootIds: string[]): Promise<string[]> {
+    if (rootIds.length === 0) return [];
+    return this.db.withClaims(claims, async (client) => {
+      const ids = new Set<string>();
+      for (const rootId of rootIds) {
+        const exists = await client.query("SELECT 1 FROM locations WHERE id = $1 AND company_id = $2", [
+          rootId,
+          claims.company_id,
+        ]);
+        if (exists.rowCount === 0) continue;
+        ids.add(rootId);
+        const descendants = await this.descendantRows(client, claims.company_id!, rootId);
+        for (const row of descendants) ids.add(row.id as string);
+      }
+      return Array.from(ids);
+    });
   }
 }

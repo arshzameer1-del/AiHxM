@@ -7,6 +7,7 @@ import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
 import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
+import { buildOrgEventPayload } from "../webhooks/org-event-payload.util";
 import type {
   CreateOrgUnitRequest,
   MoveOrgUnitRequest,
@@ -23,6 +24,11 @@ import type {
 const MODULE_KEY = "employee" as const;
 const MANAGE_PERMISSION = "org_unit.manage.all";
 const VIEW_PERMISSION = "org_unit.view.all";
+// Organization Management Phase 11 (Section 19) — the alternative to
+// VIEW_PERMISSION a role can hold instead: restricted to the caller's own
+// `data_scope_assignments` org-unit rows, expanded to each assigned
+// unit's subtree, rather than every org unit in the tenant.
+const SCOPED_VIEW_PERMISSION_BASE = "org_unit.view";
 
 type OrgUnitRow = {
   id: string;
@@ -109,7 +115,7 @@ export class OrgUnitsService {
 
   private publishChanged(claims: RequestClaims, changeType: string, unit: OrgUnitView): void {
     this.webhooks
-      ?.enqueue(claims.company_id!, "org.unit.changed", { eventVersion: 1, changeType, orgUnit: unit })
+      ?.enqueue(claims.company_id!, "org.unit.changed", buildOrgEventPayload(claims, changeType, "orgUnit", unit))
       .catch(() => undefined);
   }
 
@@ -164,13 +170,22 @@ export class OrgUnitsService {
   }
 
   /** Every org unit in the tenant, flat, alphabetical — the raw material
-   * an admin table or a tree-building client renders from. */
+   * an admin table or a tree-building client renders from. A caller who
+   * only holds `org_unit.view.scoped` (Phase 11, Section 19) instead sees
+   * only their assigned unit(s) and those units' descendants. */
   async list(claims: RequestClaims): Promise<OrgUnitView[]> {
-    await this.requireView(claims);
+    const scope = await this.resolveViewAccess(claims);
     return this.db.withClaims(claims, async (client) => {
-      const result = await client.query("SELECT * FROM org_units WHERE company_id = $1 ORDER BY name", [
-        claims.company_id,
-      ]);
+      const conditions = ["company_id = $1"];
+      const values: unknown[] = [claims.company_id];
+      if (!scope.unrestricted) {
+        values.push(scope.allowedIds);
+        conditions.push(`id = ANY($${values.length}::uuid[])`);
+      }
+      const result = await client.query(
+        `SELECT * FROM org_units WHERE ${conditions.join(" AND ")} ORDER BY name`,
+        values
+      );
       return result.rows.map(rowToOrgUnit);
     });
   }
@@ -262,8 +277,17 @@ export class OrgUnitsService {
   }
 
   async get(claims: RequestClaims, id: string): Promise<OrgUnitView> {
-    await this.requireView(claims);
-    return this.db.withClaims(claims, async (client) => rowToOrgUnit(await this.mustExist(client, id)));
+    const scope = await this.resolveViewAccess(claims);
+    return this.db.withClaims(claims, async (client) => {
+      const row = await this.mustExist(client, id);
+      if (!scope.unrestricted && !scope.allowedIds.includes(id)) {
+        // Same NotFoundException a nonexistent id gets — a Data Scope
+        // rejection shouldn't confirm to an out-of-scope caller that the
+        // unit exists at all.
+        throw new NotFoundException("Org unit not found");
+      }
+      return rowToOrgUnit(row);
+    });
   }
 
   /**
@@ -474,5 +498,63 @@ export class OrgUnitsService {
     if (!canView && !canManage) {
       throw new ForbiddenException("Not permitted to view the org unit hierarchy");
     }
+  }
+
+  /**
+   * Organization Management Phase 11 (Section 19) — the scope-aware
+   * sibling of `requireView()` that `list()`/`get()` use instead: same
+   * entitlement + `.all` gate, but a caller who instead only holds
+   * `org_unit.view.scoped` gets `{ unrestricted: false, allowedIds }`
+   * (their assigned unit(s) plus every descendant) rather than an outright
+   * ForbiddenException. Every other view-only method on this service
+   * (`listRoots`/`listChildren`/`getDescendants`) still calls the plain
+   * `requireView()` above and stays `.all`-only for now — deliberately
+   * out of this phase's scope, see the Phase 11 roadmap note on why tree
+   * navigation is a documented follow-on rather than built here.
+   */
+  private async resolveViewAccess(claims: RequestClaims): Promise<{ unrestricted: boolean; allowedIds: string[] }> {
+    if (!(await this.entitlements.isModuleEnabled(claims, MODULE_KEY))) {
+      throw new NotFoundException();
+    }
+    const [canView, canManage] = await Promise.all([
+      this.rbac.can(claims, VIEW_PERMISSION),
+      this.rbac.can(claims, MANAGE_PERMISSION),
+    ]);
+    if (canView || canManage) {
+      return { unrestricted: true, allowedIds: [] };
+    }
+    if (!(await this.rbac.hasScopedPermission(claims, SCOPED_VIEW_PERMISSION_BASE))) {
+      throw new ForbiddenException("Not permitted to view the org unit hierarchy");
+    }
+    const assignedIds = await this.rbac.resolveDataScopeEntityIds(claims, "org_unit");
+    const allowedIds = await this.expandToSubtreeIds(claims, assignedIds);
+    return { unrestricted: false, allowedIds };
+  }
+
+  /**
+   * Every id in `rootIds` plus all of their descendants — Data Scope
+   * expansion (Phase 11, Section 19): a caller assigned org unit A is
+   * meant to see A's whole subtree, not just A itself. Reuses this
+   * service's own `descendantRows()` recursive CTE per root; a stale
+   * assignment pointing at a unit that no longer exists (or belongs to a
+   * different company) is skipped rather than thrown on, and overlapping
+   * assignments just produce a deduplicated union, which is harmless.
+   */
+  async expandToSubtreeIds(claims: RequestClaims, rootIds: string[]): Promise<string[]> {
+    if (rootIds.length === 0) return [];
+    return this.db.withClaims(claims, async (client) => {
+      const ids = new Set<string>();
+      for (const rootId of rootIds) {
+        const exists = await client.query("SELECT 1 FROM org_units WHERE id = $1 AND company_id = $2", [
+          rootId,
+          claims.company_id,
+        ]);
+        if (exists.rowCount === 0) continue;
+        ids.add(rootId);
+        const descendants = await this.descendantRows(client, claims.company_id!, rootId);
+        for (const row of descendants) ids.add(row.id as string);
+      }
+      return Array.from(ids);
+    });
   }
 }

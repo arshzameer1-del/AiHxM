@@ -7,6 +7,7 @@ import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
 import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
+import { buildOrgEventPayload } from "../webhooks/org-event-payload.util";
 import type {
   AssignmentType,
   CreateEmployeeOrgAssignmentRequest,
@@ -20,6 +21,14 @@ import type {
 const MODULE_KEY = "employee" as const;
 const MANAGE_PERMISSION = "employee_org_assignment.manage.all";
 const VIEW_PERMISSION = "employee_org_assignment.view.all";
+// Organization Management Phase 11 (Section 19) — the alternative to
+// VIEW_PERMISSION a role can hold instead: restricted to assignments
+// inside the caller's assigned org-unit data scope (expanded to subtree)
+// OR at one of the caller's assigned locations (also expanded to
+// subtree) — visible along EITHER dimension the caller has assignments
+// for, same "either dimension" rule PositionsService's own
+// `position.view.scoped` uses.
+const SCOPED_VIEW_PERMISSION_BASE = "employee_org_assignment.view";
 
 type AssignmentRow = {
   id: string;
@@ -75,6 +84,10 @@ function rowToVersion(row: any): EmployeeOrgAssignmentVersionView {
 export type AssignmentListFilters = {
   employeeId?: string;
   orgUnitId?: string;
+  // Organization Management Phase 9 — needed by PositionDetailPage's
+  // "Assignment History" tab (every assignment slot ever pointed at this
+  // position, not just the one employee currently holding it).
+  positionId?: string;
   assignmentType?: AssignmentType;
   status?: "active" | "ended";
 };
@@ -130,7 +143,7 @@ export class EmployeeOrgAssignmentsService {
 
   private publishChanged(claims: RequestClaims, changeType: string, assignment: EmployeeOrgAssignmentView): void {
     this.webhooks
-      ?.enqueue(claims.company_id!, "org.assignment.changed", { eventVersion: 1, changeType, assignment })
+      ?.enqueue(claims.company_id!, "org.assignment.changed", buildOrgEventPayload(claims, changeType, "assignment", assignment))
       .catch(() => undefined);
   }
 
@@ -198,8 +211,12 @@ export class EmployeeOrgAssignmentsService {
     });
   }
 
+  /** A caller who only holds `employee_org_assignment.view.scoped`
+   * (Phase 11, Section 19) instead sees only assignments inside their
+   * assigned org unit(s)' subtree or at one of their assigned locations
+   * (also expanded to subtree). */
   async list(claims: RequestClaims, filters: AssignmentListFilters = {}): Promise<EmployeeOrgAssignmentView[]> {
-    await this.requireView(claims);
+    const scope = await this.resolveViewAccess(claims);
     return this.db.withClaims(claims, async (client) => {
       const conditions = ["company_id = $1"];
       const values: unknown[] = [claims.company_id];
@@ -211,6 +228,10 @@ export class EmployeeOrgAssignmentsService {
         values.push(filters.orgUnitId);
         conditions.push(`org_unit_id = $${values.length}`);
       }
+      if (filters.positionId) {
+        values.push(filters.positionId);
+        conditions.push(`position_id = $${values.length}`);
+      }
       if (filters.assignmentType) {
         values.push(filters.assignmentType);
         conditions.push(`assignment_type = $${values.length}`);
@@ -218,6 +239,15 @@ export class EmployeeOrgAssignmentsService {
       if (filters.status) {
         values.push(filters.status);
         conditions.push(`status = $${values.length}`);
+      }
+      if (!scope.unrestricted) {
+        values.push(scope.orgUnitIds);
+        const orgUnitParam = values.length;
+        values.push(scope.locationIds);
+        const locationParam = values.length;
+        conditions.push(
+          `(org_unit_id = ANY($${orgUnitParam}::uuid[]) OR location_id = ANY($${locationParam}::uuid[]))`
+        );
       }
       const result = await client.query(
         `SELECT * FROM employee_org_assignments WHERE ${conditions.join(" AND ")} ORDER BY created_at`,
@@ -228,8 +258,18 @@ export class EmployeeOrgAssignmentsService {
   }
 
   async get(claims: RequestClaims, id: string): Promise<EmployeeOrgAssignmentView> {
-    await this.requireView(claims);
-    return this.db.withClaims(claims, async (client) => rowToAssignment(await this.mustExist(client, id)));
+    const scope = await this.resolveViewAccess(claims);
+    return this.db.withClaims(claims, async (client) => {
+      const row = await this.mustExist(client, id);
+      if (!scope.unrestricted) {
+        const inOrgUnitScope = scope.orgUnitIds.includes(row.org_unit_id);
+        const inLocationScope = Boolean(row.location_id) && scope.locationIds.includes(row.location_id as string);
+        if (!inOrgUnitScope && !inLocationScope) {
+          throw new NotFoundException("Employee org assignment not found");
+        }
+      }
+      return rowToAssignment(row);
+    });
   }
 
   /** Moves this assignment to a different org unit/position/location in
@@ -392,5 +432,77 @@ export class EmployeeOrgAssignmentsService {
     if (!canView && !canManage) {
       throw new ForbiddenException("Not permitted to view employee organizational assignments");
     }
+  }
+
+  /**
+   * Organization Management Phase 11 (Section 19) — scope-aware sibling
+   * of `requireView()`. Two independent dimensions, same "either
+   * dimension" rule `PositionsService.resolveViewAccess()` uses: an
+   * org-unit assignment (expanded to subtree) and a location assignment
+   * (also expanded to subtree) — both via this method's own inline
+   * recursive CTEs, the same duplication-over-injection choice
+   * `PositionsService` already made for its own org-unit dimension.
+   */
+  private async resolveViewAccess(
+    claims: RequestClaims
+  ): Promise<{ unrestricted: boolean; orgUnitIds: string[]; locationIds: string[] }> {
+    if (!(await this.entitlements.isModuleEnabled(claims, MODULE_KEY))) {
+      throw new NotFoundException();
+    }
+    const [canView, canManage] = await Promise.all([
+      this.rbac.can(claims, VIEW_PERMISSION),
+      this.rbac.can(claims, MANAGE_PERMISSION),
+    ]);
+    if (canView || canManage) {
+      return { unrestricted: true, orgUnitIds: [], locationIds: [] };
+    }
+    if (!(await this.rbac.hasScopedPermission(claims, SCOPED_VIEW_PERMISSION_BASE))) {
+      throw new ForbiddenException("Not permitted to view employee organizational assignments");
+    }
+    const [assignedOrgUnitIds, assignedLocationIds] = await Promise.all([
+      this.rbac.resolveDataScopeEntityIds(claims, "org_unit"),
+      this.rbac.resolveDataScopeEntityIds(claims, "location"),
+    ]);
+    const [orgUnitIds, locationIds] = await Promise.all([
+      this.expandSubtreeIds(claims, "org_units", assignedOrgUnitIds),
+      this.expandSubtreeIds(claims, "locations", assignedLocationIds),
+    ]);
+    return { unrestricted: false, orgUnitIds, locationIds };
+  }
+
+  /** Every id in `rootIds` plus all of its descendants, in whichever
+   * hierarchy table `table` names (`org_units` or `locations` — both
+   * share the same `id`/`company_id`/`parent_id` shape this recursive CTE
+   * relies on). Duplicated here rather than injecting
+   * `OrgUnitsService`/`LocationsService`; see
+   * `PositionsService.resolveViewAccess()`'s own doc comment for why. */
+  private async expandSubtreeIds(
+    claims: RequestClaims,
+    table: "org_units" | "locations",
+    rootIds: string[]
+  ): Promise<string[]> {
+    if (rootIds.length === 0) return [];
+    return this.db.withClaims(claims, async (client) => {
+      const ids = new Set<string>();
+      for (const rootId of rootIds) {
+        const exists = await client.query(`SELECT 1 FROM ${table} WHERE id = $1 AND company_id = $2`, [
+          rootId,
+          claims.company_id,
+        ]);
+        if (exists.rowCount === 0) continue;
+        ids.add(rootId);
+        const descendants = await client.query<{ id: string }>(
+          `WITH RECURSIVE subtree AS (
+             SELECT id, parent_id FROM ${table} WHERE company_id = $1 AND id = $2
+             UNION ALL
+             SELECT t.id, t.parent_id FROM ${table} t JOIN subtree s ON t.parent_id = s.id WHERE t.company_id = $1
+           )
+           SELECT id FROM subtree WHERE id != $2`,
+          [claims.company_id, rootId]
+        );
+        for (const row of descendants.rows) ids.add(row.id);
+      }
+      return Array.from(ids);
+    });
   }
 }

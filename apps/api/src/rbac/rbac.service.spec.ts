@@ -268,4 +268,60 @@ describe("RbacService", () => {
       expect(filtered).toBeNull();
     });
   });
+
+  describe("hasScopedPermission()/resolveDataScopeEntityIds() (Organization Management Phase 11, Section 19)", () => {
+    let regionalHrUserId: string;
+    let regionalHrClaims: RequestClaims;
+    let assignedUnitId: string;
+    let otherUnitId: string;
+
+    beforeAll(async () => {
+      const stamp = Date.now();
+      await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const account = await client.query(
+          "INSERT INTO user_accounts (email, password_hash) VALUES ($1, 'x') RETURNING id",
+          [`regional-hr-${stamp}@example.com`]
+        );
+        regionalHrUserId = account.rows[0].id;
+        const role = await client.query("SELECT id FROM roles WHERE key = 'regional_hr'");
+        await client.query(
+          "INSERT INTO user_role_assignments (user_account_id, company_id, role_id) VALUES ($1, $2, $3)",
+          [regionalHrUserId, companyId, role.rows[0].id]
+        );
+        // data_scope_assignments carries no FK on scope_entity_id (it can
+        // point into org_units/locations/cost_centers depending on
+        // scope_type, see 0078's own header comment) — a bare random uuid
+        // is enough to exercise RbacService's own read path directly,
+        // independent of whether OrgUnitsService's own expansion logic
+        // (tested in org-units.service.spec.ts) is involved.
+        assignedUnitId = randomUUID();
+        otherUnitId = randomUUID();
+        await client.query(
+          "INSERT INTO data_scope_assignments (user_account_id, company_id, scope_type, scope_entity_id) VALUES ($1, $2, 'org_unit', $3)",
+          [regionalHrUserId, companyId, assignedUnitId]
+        );
+      });
+      regionalHrClaims = { is_platform_admin: false, company_id: companyId, sub: regionalHrUserId };
+    });
+
+    it("hasScopedPermission() is true only for a role holding the matching `.scoped` permission", async () => {
+      await expect(rbac.hasScopedPermission(regionalHrClaims, "org_unit.view")).resolves.toBe(true);
+      // regional_hr never got location.view.scoped's sibling for an
+      // object it doesn't cover in this test's fixture role membership
+      // shape — full_access/view_only hold neither `.scoped` permission
+      // at all (0004_rbac.sql's demo roles predate Phase 11 entirely).
+      await expect(rbac.hasScopedPermission(fullAccessClaims, "org_unit.view")).resolves.toBe(false);
+    });
+
+    it("resolveDataScopeEntityIds() returns exactly the caller's own assigned rows for that scope type, nothing more", async () => {
+      const ids = await rbac.resolveDataScopeEntityIds(regionalHrClaims, "org_unit");
+      expect(ids).toEqual([assignedUnitId]);
+      expect(ids).not.toContain(otherUnitId);
+    });
+
+    it("resolveDataScopeEntityIds() returns an empty array — not unrestricted — for a scope type the caller has no assignments in", async () => {
+      const ids = await rbac.resolveDataScopeEntityIds(regionalHrClaims, "cost_center");
+      expect(ids).toEqual([]);
+    });
+  });
 });

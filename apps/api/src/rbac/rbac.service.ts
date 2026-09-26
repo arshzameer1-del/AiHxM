@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
-import type { FieldAccess } from "@aihxm/shared-types";
+import type { DataScopeType, FieldAccess } from "@aihxm/shared-types";
 
 type FieldCondition = { field: string; equals: unknown };
 
@@ -337,6 +337,57 @@ export class RbacService {
       }
     }
     return result;
+  }
+
+  /**
+   * Organization Management Phase 11 (Unified Integration & Synchronization
+   * Requirements, Section 19) — whether the caller holds the `.scoped`
+   * variant of a view permission (e.g. `position.view.scoped`), the
+   * alternative to `.all` this phase introduces for Organization
+   * Management's list/view endpoints. Deliberately a separate check
+   * rather than a third suffix branch inside `can()` itself: `.self`/
+   * `.team` there check "does this one record's owner match the caller",
+   * a per-record comparison `can()` can make on its own. `.scoped`'s
+   * question — "is this record within one of the caller's assigned org
+   * units/locations/cost centers" — needs a whole id set resolved and,
+   * for hierarchical objects, a subtree expanded, which is each object's
+   * own domain knowledge (OrgUnitsService/LocationsService's own
+   * `expandToSubtreeIds()`), not something this generic engine should
+   * duplicate. Callers check this once per request (like
+   * `resolveViewScope()` above), not per record.
+   */
+  async hasScopedPermission(claims: RequestClaims, viewPermissionKeyBase: string): Promise<boolean> {
+    if (!claims.company_id) return false;
+    return this.hasPermission(claims, `${viewPermissionKeyBase}.scoped`);
+  }
+
+  /**
+   * Every `data_scope_assignments` row's raw `scope_entity_id` the caller
+   * holds for one scope type, UNEXPANDED. An `org_unit`/`location`
+   * assignment means "this entity and everything under it", but walking
+   * that hierarchy is each hierarchy's own recursive-CTE knowledge (see
+   * `OrgUnitsService.expandToSubtreeIds()`/
+   * `LocationsService.expandToSubtreeIds()`), which this generic RBAC
+   * engine deliberately does not duplicate or depend on. `cost_center`
+   * assignments are used exactly as returned — Cost Center is a flat
+   * catalog (Phase 4), nothing to expand.
+   *
+   * An empty array — not "no restriction" — is the correct return for a
+   * caller who holds a `.scoped` permission but has zero assignments:
+   * Data Scope fails closed. Whether "no restriction" applies at all is
+   * the separate `.all` check the calling service already makes before
+   * ever reaching this method.
+   */
+  async resolveDataScopeEntityIds(claims: RequestClaims, scopeType: DataScopeType): Promise<string[]> {
+    if (!claims.company_id) return [];
+    return this.db.withClaims(claims, async (client) => {
+      const result = await client.query<{ scope_entity_id: string }>(
+        `SELECT scope_entity_id FROM data_scope_assignments
+         WHERE user_account_id = $1 AND company_id = $2 AND scope_type = $3`,
+        [claims.sub, claims.company_id, scopeType]
+      );
+      return result.rows.map((row) => row.scope_entity_id);
+    });
   }
 
   private async hasPermission(claims: RequestClaims, permissionKey: string): Promise<boolean> {

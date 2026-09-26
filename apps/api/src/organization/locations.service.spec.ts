@@ -8,6 +8,8 @@ import { AuditService } from "../audit/audit.service";
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
 import { EmployeesService } from "../employees/employees.service";
 import { LocalFileStorageService } from "../file-storage/local-file-storage.service";
+import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
+import { IntegrationsService } from "../tenant-management/integrations.service";
 import { LocationsService } from "./locations.service";
 
 const FIXTURE_CLAIMS: RequestClaims = { is_platform_admin: true, company_id: null, sub: "locations-spec-fixtures" };
@@ -75,6 +77,17 @@ describe("LocationsService", () => {
       await client.query(
         "INSERT INTO user_role_assignments (user_account_id, company_id, role_id) VALUES ($1, $2, $3)",
         [userAccountId, companyId, role.rows[0].id]
+      );
+    });
+  }
+
+  /** Organization Management Phase 11 (Section 19) — same raw-SQL fixture
+   * convention `org-units.service.spec.ts` already established. */
+  async function assignDataScope(userAccountId: string, companyId: string, scopeType: string, scopeEntityId: string) {
+    await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+      await client.query(
+        "INSERT INTO data_scope_assignments (user_account_id, company_id, scope_type, scope_entity_id) VALUES ($1, $2, $3, $4)",
+        [userAccountId, companyId, scopeType, scopeEntityId]
       );
     });
   }
@@ -292,6 +305,117 @@ describe("LocationsService", () => {
       await expect(
         employees.create(hrAdminClaims, { firstName: "Bad", lastName: "Link", locationId: "00000000-0000-0000-0000-000000000000" })
       ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  /**
+   * Organization Management, Phase 7 (Unified Integration & Synchronization
+   * Requirements, Section 14). Confirms `org.location.changed` really
+   * enqueues end to end through a real WebhookDispatchService, and that
+   * its payload carries the new flat `tenantId`/`entityId`/`effectiveDate`/
+   * `occurredAt` fields per `buildOrgEventPayload()`'s contract. `locations`
+   * above (this file's shared instance) is built WITHOUT a
+   * WebhookDispatchService — proving the optional-dependency design
+   * doesn't secretly break anything for it — so this uses its own instance
+   * instead.
+   */
+  describe("webhook events (Organization Management Phase 7)", () => {
+    let companyId: string;
+    let hrAdminClaims: RequestClaims;
+    let locationsWithWebhooks: LocationsService;
+    const platformClaims: RequestClaims = { is_platform_admin: true, company_id: null, sub: "location-webhook-spec" };
+
+    beforeAll(async () => {
+      companyId = await createFixtureCompany("Location Webhook Co");
+      const hrAdminUserId = await createUser(`location-webhook-hr-${Date.now()}@example.com`);
+      await assignRole(hrAdminUserId, companyId, "hr_admin");
+      hrAdminClaims = { is_platform_admin: false, company_id: companyId, sub: hrAdminUserId };
+
+      await new IntegrationsService(db, new AuditService()).configure(platformClaims, companyId, "webhook", {
+        enabled: true,
+        config: { url: "http://127.0.0.1:1/hook", signingSecret: "location-trigger-secret" },
+      });
+
+      locationsWithWebhooks = new LocationsService(
+        db,
+        new RbacService(db),
+        new EntitlementsService(db),
+        new AuditService(),
+        new EffectiveDatingEngine(),
+        new WebhookDispatchService(db, new AuditService())
+      );
+    });
+
+    async function latestEventFor(type: string) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const result = await db.withClaims(platformClaims, (client) =>
+        client.query(
+          "SELECT * FROM webhook_events WHERE company_id = $1 AND event_type = $2 ORDER BY created_at DESC LIMIT 1",
+          [companyId, type]
+        )
+      );
+      return result.rows[0];
+    }
+
+    it("enqueues org.location.changed on create(), with the full payload contract", async () => {
+      const created = await locationsWithWebhooks.create(hrAdminClaims, { name: "Webhook City", locationType: "city" });
+      const event = await latestEventFor("org.location.changed");
+      expect(event).toBeDefined();
+      expect(event.payload.eventVersion).toBe(1);
+      expect(event.payload.changeType).toBe("create");
+      expect(event.payload.tenantId).toBe(companyId);
+      expect(event.payload.entityId).toBe(created.id);
+      expect(typeof event.payload.effectiveDate).toBe("string");
+      expect(typeof event.payload.occurredAt).toBe("string");
+      expect(event.payload.location.id).toBe(created.id);
+    });
+
+    it("enqueues org.location.changed with changeType 'archive'/'activate' on setStatus()", async () => {
+      const created = await locationsWithWebhooks.create(hrAdminClaims, { name: "Temp Site", locationType: "site" });
+      await locationsWithWebhooks.archive(hrAdminClaims, created.id);
+      const archivedEvent = await latestEventFor("org.location.changed");
+      expect(archivedEvent.payload.changeType).toBe("archive");
+
+      await locationsWithWebhooks.activate(hrAdminClaims, created.id);
+      const activatedEvent = await latestEventFor("org.location.changed");
+      expect(activatedEvent.payload.changeType).toBe("activate");
+    });
+  });
+
+  describe("Data Scope (Organization Management Phase 11, Section 19)", () => {
+    let companyId: string;
+    let hrAdminClaims: RequestClaims;
+    let regionalHrClaims: RequestClaims;
+    let punjabId: string;
+    let lahoreId: string;
+    let sindhId: string;
+
+    beforeAll(async () => {
+      companyId = await createFixtureCompany("Location Scope Co");
+      const stamp = Date.now();
+      const hrAdminUserId = await createUser(`loc-scope-hr-${stamp}@example.com`);
+      const regionalHrUserId = await createUser(`loc-scope-regional-${stamp}@example.com`);
+      await assignRole(hrAdminUserId, companyId, "hr_admin");
+      await assignRole(regionalHrUserId, companyId, "regional_hr");
+      hrAdminClaims = { is_platform_admin: false, company_id: companyId, sub: hrAdminUserId };
+      regionalHrClaims = { is_platform_admin: false, company_id: companyId, sub: regionalHrUserId };
+
+      // Punjab (assigned) -> Lahore; Sindh — a sibling region, out of scope.
+      punjabId = (await locations.create(hrAdminClaims, { name: "Punjab", locationType: "region" })).id;
+      lahoreId = (await locations.create(hrAdminClaims, { name: "Lahore", locationType: "city", parentId: punjabId })).id;
+      sindhId = (await locations.create(hrAdminClaims, { name: "Sindh", locationType: "region" })).id;
+
+      await assignDataScope(regionalHrUserId, companyId, "location", punjabId);
+    });
+
+    it("list()/get() restrict a regional_hr caller to their assigned location's subtree", async () => {
+      const visible = await locations.list(regionalHrClaims);
+      const ids = visible.map((l) => l.id);
+      expect(ids).toEqual(expect.arrayContaining([punjabId, lahoreId]));
+      expect(ids).not.toContain(sindhId);
+
+      await expect(locations.get(regionalHrClaims, sindhId)).rejects.toThrow(NotFoundException);
+      await expect(locations.get(regionalHrClaims, lahoreId)).resolves.toMatchObject({ id: lahoreId });
     });
   });
 });

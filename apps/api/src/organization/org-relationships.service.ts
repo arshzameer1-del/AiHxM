@@ -6,6 +6,8 @@ import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
+import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
+import { buildOrgEventPayload } from "../webhooks/org-event-payload.util";
 import type {
   CreateOrgRelationshipRequest,
   OrgRelationshipType,
@@ -140,8 +142,26 @@ export class OrgRelationshipsService {
     private readonly rbac: RbacService,
     private readonly entitlements: EntitlementsService,
     private readonly audit: AuditService,
-    private readonly effectiveDating: EffectiveDatingEngine
+    private readonly effectiveDating: EffectiveDatingEngine,
+    // Optional for the same reason every other Organization Management
+    // service's own `webhooks` field is (see OrgUnitsService's own doc
+    // comment) — a large number of unrelated spec files hand-construct
+    // this service directly. Organization Management Phase 7 (Unified
+    // Integration & Synchronization Requirements, Section 14) — the
+    // `org.relationship.changed` domain event, fired at every one of this
+    // service's own already-audited mutation points (create/update/end).
+    private readonly webhooks?: WebhookDispatchService
   ) {}
+
+  private publishChanged(claims: RequestClaims, changeType: string, relationship: OrgRelationshipView): void {
+    this.webhooks
+      ?.enqueue(
+        claims.company_id!,
+        "org.relationship.changed",
+        buildOrgEventPayload(claims, changeType, "relationship", relationship)
+      )
+      .catch(() => undefined);
+  }
 
   async create(claims: RequestClaims, input: CreateOrgRelationshipRequest): Promise<OrgRelationshipView> {
     await this.requireManage(claims);
@@ -200,7 +220,9 @@ export class OrgRelationshipsService {
         },
       });
 
-      return rowToRelationship(relationship);
+      const view = rowToRelationship(relationship);
+      this.publishChanged(claims, "create", view);
+      return view;
     });
   }
 
@@ -271,7 +293,9 @@ export class OrgRelationshipsService {
         metadata: { before: rowToRelationship(before), after: rowToRelationship(relationship) },
       });
 
-      return rowToRelationship(relationship);
+      const view = rowToRelationship(relationship);
+      this.publishChanged(claims, "update", view);
+      return view;
     });
   }
 
@@ -303,7 +327,9 @@ export class OrgRelationshipsService {
         target: id,
       });
 
-      return rowToRelationship(relationship);
+      const view = rowToRelationship(relationship);
+      this.publishChanged(claims, "end", view);
+      return view;
     });
   }
 

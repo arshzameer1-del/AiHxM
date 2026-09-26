@@ -6,6 +6,8 @@ import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
+import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
+import { buildOrgEventPayload } from "../webhooks/org-event-payload.util";
 import type { ProfitCenterVersionView, ProfitCenterView, CreateProfitCenterRequest, UpdateProfitCenterRequest } from "@aihxm/shared-types";
 
 // Profit Centers are gated under the same `employee` module every other
@@ -73,8 +75,26 @@ export class ProfitCentersService {
     private readonly rbac: RbacService,
     private readonly entitlements: EntitlementsService,
     private readonly audit: AuditService,
-    private readonly effectiveDating: EffectiveDatingEngine
+    private readonly effectiveDating: EffectiveDatingEngine,
+    // Optional for the same reason every other Organization Management
+    // service's own `webhooks` field is. Organization Management Phase 7
+    // (Unified Integration & Synchronization Requirements, Section 14) —
+    // the shared `org.financial_center.changed` event this service and
+    // `CostCentersService` both fire (distinguished by the payload's own
+    // `centerType` field), fired at every one of this service's own
+    // already-audited mutation points (create/update/archive/activate).
+    private readonly webhooks?: WebhookDispatchService
   ) {}
+
+  private publishChanged(claims: RequestClaims, changeType: string, profitCenter: ProfitCenterView): void {
+    this.webhooks
+      ?.enqueue(
+        claims.company_id!,
+        "org.financial_center.changed",
+        buildOrgEventPayload(claims, changeType, "profitCenter", profitCenter, { centerType: "profit_center" })
+      )
+      .catch(() => undefined);
+  }
 
   async create(claims: RequestClaims, input: CreateProfitCenterRequest): Promise<ProfitCenterView> {
     await this.requireManage(claims);
@@ -114,7 +134,9 @@ export class ProfitCentersService {
         metadata: { name: input.name, orgUnitId: input.orgUnitId ?? null },
       });
 
-      return rowToProfitCenter(profitCenter);
+      const view = rowToProfitCenter(profitCenter);
+      this.publishChanged(claims, "create", view);
+      return view;
     });
   }
 
@@ -172,7 +194,9 @@ export class ProfitCentersService {
         metadata: { before: rowToProfitCenter(before), after: rowToProfitCenter(profitCenter) },
       });
 
-      return rowToProfitCenter(profitCenter);
+      const view = rowToProfitCenter(profitCenter);
+      this.publishChanged(claims, "update", view);
+      return view;
     });
   }
 
@@ -199,7 +223,9 @@ export class ProfitCentersService {
         target: id,
       });
 
-      return rowToProfitCenter(profitCenter);
+      const view = rowToProfitCenter(profitCenter);
+      this.publishChanged(claims, status === "archived" ? "archive" : "activate", view);
+      return view;
     });
   }
 

@@ -112,7 +112,43 @@ export function PortalHomePage() {
               <div className="text-xs uppercase tracking-wide text-label-tertiary">Reorgs in flight</div>
               <div className="text-xl font-bold">{commandCenter.reorganizationsInFlight}</div>
             </div>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-label-tertiary">Locations</div>
+              <div className="text-xl font-bold">{commandCenter.totalLocations}</div>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-label-tertiary">Cost centers</div>
+              <div className="text-xl font-bold">{commandCenter.totalCostCenters}</div>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-label-tertiary">Profit centers</div>
+              <div className="text-xl font-bold">{commandCenter.totalProfitCenters}</div>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-label-tertiary">Data quality issues</div>
+              <div className={`text-xl font-bold ${commandCenter.dataQualityIssues > 0 ? "text-warning" : ""}`}>
+                {commandCenter.dataQualityIssues}
+              </div>
+            </div>
           </div>
+
+          {commandCenter.integrityWarnings.some((w) => w.count > 0) && (
+            <div className="mb-3">
+              <div className="text-xs uppercase tracking-wide text-label-tertiary mb-1.5">Warnings</div>
+              <ul className="space-y-1">
+                {commandCenter.integrityWarnings
+                  .filter((w) => w.count > 0)
+                  .map((w) => (
+                    <li key={w.code} className="flex items-center justify-between gap-4 text-sm">
+                      <span className="text-warning">
+                        <span aria-hidden="true">⚠</span> {w.label}
+                      </span>
+                      <span className="font-semibold tabular-nums">{w.count}</span>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          )}
 
           {commandCenter.recentReorganizations.length === 0 ? (
             <div className="text-sm text-label-secondary">No reorganizations yet.</div>

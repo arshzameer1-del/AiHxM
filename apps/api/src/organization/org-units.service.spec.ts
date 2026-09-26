@@ -81,6 +81,19 @@ describe("OrgUnitsService", () => {
     });
   }
 
+  /** Organization Management Phase 11 (Section 19) — raw-SQL fixture
+   * helper, same convention `org-changes.service.spec.ts` already
+   * established for cross-entity test data this suite doesn't otherwise
+   * need a whole service for. */
+  async function assignDataScope(userAccountId: string, companyId: string, scopeType: string, scopeEntityId: string) {
+    await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+      await client.query(
+        "INSERT INTO data_scope_assignments (user_account_id, company_id, scope_type, scope_entity_id) VALUES ($1, $2, $3, $4)",
+        [userAccountId, companyId, scopeType, scopeEntityId]
+      );
+    });
+  }
+
   describe("hierarchy CRUD, tree/descendant queries, and move/archive", () => {
     let companyId: string;
     let hrAdminClaims: RequestClaims;
@@ -419,6 +432,66 @@ describe("OrgUnitsService", () => {
       const activatedEvent = await latestEventFor("org.unit.changed");
       expect(activatedEvent.payload.changeType).toBe("activate");
       expect(activatedEvent.payload.orgUnit.status).toBe("active");
+    });
+  });
+
+  describe("Data Scope (Organization Management Phase 11, Section 19)", () => {
+    let companyId: string;
+    let hrAdminClaims: RequestClaims;
+    let regionalHrClaims: RequestClaims;
+    let engineeringId: string;
+    let backendId: string;
+    let salesId: string;
+
+    beforeAll(async () => {
+      companyId = await createFixtureCompany("Data Scope Co");
+      const stamp = Date.now();
+      const hrAdminUserId = await createUser(`org-unit-scope-hr-${stamp}@example.com`);
+      const regionalHrUserId = await createUser(`org-unit-scope-regional-${stamp}@example.com`);
+      await assignRole(hrAdminUserId, companyId, "hr_admin");
+      await assignRole(regionalHrUserId, companyId, "regional_hr");
+      hrAdminClaims = { is_platform_admin: false, company_id: companyId, sub: hrAdminUserId };
+      regionalHrClaims = { is_platform_admin: false, company_id: companyId, sub: regionalHrUserId };
+
+      // Engineering (assigned to the Regional HR user) -> Backend
+      // Sales — a sibling unit, outside the assignment entirely.
+      engineeringId = (await orgUnits.create(hrAdminClaims, { name: "Engineering", unitType: "division" })).id;
+      backendId = (
+        await orgUnits.create(hrAdminClaims, { name: "Backend", unitType: "department", parentId: engineeringId })
+      ).id;
+      salesId = (await orgUnits.create(hrAdminClaims, { name: "Sales", unitType: "department" })).id;
+
+      await assignDataScope(regionalHrUserId, companyId, "org_unit", engineeringId);
+    });
+
+    it("list() restricts a regional_hr caller to their assigned unit's subtree, not the whole tenant", async () => {
+      const visible = await orgUnits.list(regionalHrClaims);
+      const ids = visible.map((u) => u.id);
+      expect(ids).toEqual(expect.arrayContaining([engineeringId, backendId]));
+      expect(ids).not.toContain(salesId);
+
+      // hr_admin (holds org_unit.view.all) is completely unaffected.
+      const allVisible = await orgUnits.list(hrAdminClaims);
+      expect(allVisible.map((u) => u.id)).toEqual(expect.arrayContaining([engineeringId, backendId, salesId]));
+    });
+
+    it("get() 404s a regional_hr caller on a unit outside their assigned subtree", async () => {
+      await expect(orgUnits.get(regionalHrClaims, salesId)).rejects.toThrow(NotFoundException);
+      // But their own assigned unit, and its descendant, both resolve fine.
+      await expect(orgUnits.get(regionalHrClaims, engineeringId)).resolves.toMatchObject({ id: engineeringId });
+      await expect(orgUnits.get(regionalHrClaims, backendId)).resolves.toMatchObject({ id: backendId });
+    });
+
+    it("a caller with neither .all nor .scoped is still forbidden outright (fails closed)", async () => {
+      // system_admin deliberately holds no employee.*/org_unit.* rights at
+      // all (0024_system_admin.sql's own header comment) — the one seeded
+      // role with truly zero access to this object, unlike
+      // employee_self_service which already holds org_unit.view.all.
+      const stamp = Date.now();
+      const noRoleUserId = await createUser(`org-unit-scope-none-${stamp}@example.com`);
+      await assignRole(noRoleUserId, companyId, "system_admin");
+      const noScopeClaims: RequestClaims = { is_platform_admin: false, company_id: companyId, sub: noRoleUserId };
+      await expect(orgUnits.list(noScopeClaims)).rejects.toThrow(ForbiddenException);
     });
   });
 });

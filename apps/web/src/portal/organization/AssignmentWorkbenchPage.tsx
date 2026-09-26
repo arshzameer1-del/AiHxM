@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import type { AssignmentType, EmployeeOrgAssignmentView, EmployeeView, OrgUnitView, PositionView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
@@ -188,13 +189,20 @@ function AssignmentRow({
           {assignment.status}
         </span>
 
-        {canManage && assignment.status === "active" && (
-          <div className="ml-auto flex gap-3 shrink-0 text-xs">
+        <div className="ml-auto flex gap-3 shrink-0 text-xs">
+          {/* Organization Management Phase 9 — the "View" link into
+            AssignmentDetailPage, ungated by `canManage` for the same
+            reason OrgHierarchyPage's/PositionWorkbenchPage's own "View"
+            links are (see OrgHierarchyPage.tsx's comment). */}
+          <Link to={`/app/organization/assignments/${assignment.id}`} className="font-medium text-label-secondary hover:underline">
+            View
+          </Link>
+          {canManage && assignment.status === "active" && (
             <button onClick={handleEnd} disabled={busy} className="font-medium text-label-tertiary hover:text-danger disabled:opacity-50">
               End
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
       {error && <div className="text-xs text-danger py-1">{error}</div>}
     </div>

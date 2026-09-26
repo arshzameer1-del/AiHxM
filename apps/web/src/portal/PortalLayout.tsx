@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import type { ModuleKey, PublicTenantBranding, TenantRoleKey } from "@aihxm/shared-types";
 import { api, publicTenantBrandingAssetUrl } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
@@ -9,7 +9,14 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
     isActive ? "bg-accent text-white" : "text-label-secondary hover:bg-black/5"
   }`;
 
-type NavItem = { to: string; label: string; end?: boolean };
+// Organization Management Phase 9 (Unified Integration & Synchronization
+// Requirements, Section 2) — `NavItem` finally gets the sub-nav/grouping
+// concept every prior Organization Management phase's own comment here
+// flagged as missing (`children` is optional so every OTHER section of the
+// app, none of which needs grouping, is unaffected). Deliberately only ONE
+// level deep — a group's `children` are always plain leaf items, never
+// another nested group — since nothing in this app needs more than that.
+type NavItem = { to: string; label: string; end?: boolean; children?: NavItem[] };
 
 /**
  * Decision #13 — nav visibility is the union of every role this session
@@ -40,40 +47,39 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): 
   // (hr_admin only) is what actually gates the create/edit/move/archive
   // actions the page itself renders.
   if (hasModule("employee") && roleKeys.length > 0) {
-    items.push({ to: "/app/organization", label: "Organization" });
-    // Organization Management Phase 2 — Job Catalog + Position Workbench.
-    // `NavItem` here is a plain flat `{to, label}` with no sub-nav/nesting
-    // concept anywhere in this component (every existing entry, including
-    // Organization itself, is a top-level item) — inventing a nested nav
-    // shape for just these two would be new UI surface this component was
-    // never built to render, so they're added as two more flat items
-    // rather than "sub-items under Organization." job.view.all/
-    // position.view.all are seeded to the same broad audience as
-    // org_unit.view.all (0069's seed), so they're gated identically.
-    items.push({ to: "/app/organization/jobs", label: "Jobs" });
-    items.push({ to: "/app/organization/positions", label: "Positions" });
-    // Organization Management Phase 3 — Assignment Workbench + Relationship
-    // Explorer, added as two more flat items for the same reason Jobs/
-    // Positions were (see this component's own comment just above):
-    // `NavItem` still has no sub-nav concept. employee_org_assignment.view.all/
-    // org_relationship.view.all are seeded to the same broad audience as
-    // org_unit.view.all/job.view.all/position.view.all (0072's seed).
-    items.push({ to: "/app/organization/assignments", label: "Assignments" });
-    items.push({ to: "/app/organization/relationships", label: "Reporting Lines" });
-    // Organization Management Phase 4 — Locations + Financial Centers,
-    // added as two more flat items for the same reason every prior phase's
-    // screens were (see this component's own comment above): `NavItem`
-    // still has no sub-nav concept. location.view.all/cost_center.view.all/
-    // profit_center.view.all are seeded to the same broad audience as
-    // every other Organization Management view permission (0074's seed).
-    items.push({ to: "/app/organization/locations", label: "Locations" });
-    items.push({ to: "/app/organization/financial-centers", label: "Financial Centers" });
-    // Organization Management Phase 5 — Reorganization workflow, one more
-    // flat item for the same reason every prior phase's screens were (see
-    // this component's own comment above). org_change.view.all is seeded
-    // to the same broad audience as every other Organization Management
-    // view permission (0077's seed).
-    items.push({ to: "/app/organization/reorganizations", label: "Reorganizations" });
+    // Organization Management Phase 9 — collapses what Phases 2-5 each
+    // added as their own flat top-level item (Jobs/Positions/Assignments/
+    // Reporting Lines/Locations/Financial Centers/Reorganizations, all
+    // gated identically to org_unit.view.all's own broad seed audience —
+    // 0069/0072/0074/0077) into one grouped "Organization" nav entry, per
+    // the Unified Integration & Synchronization Requirements doc's Section
+    // 2. The Hierarchy Explorer itself stays the group's own `to` (clicking
+    // "Organization" still opens it, same as before this phase); every
+    // other Organization Management screen becomes a child. This is the
+    // one and only group `NavItem.children` is used for in this file —
+    // every other section of the app stays exactly as flat as it always
+    // was.
+    items.push({
+      to: "/app/organization",
+      label: "Organization",
+      end: true,
+      children: [
+        { to: "/app/organization/jobs", label: "Jobs" },
+        { to: "/app/organization/positions", label: "Positions" },
+        { to: "/app/organization/assignments", label: "Assignments" },
+        { to: "/app/organization/relationships", label: "Reporting Lines" },
+        { to: "/app/organization/locations", label: "Locations" },
+        { to: "/app/organization/financial-centers", label: "Financial Centers" },
+        { to: "/app/organization/reorganizations", label: "Reorganizations" },
+        // Organization Management Phase 12 — unlike every sibling above
+        // (all broadly seeded alongside org_unit.view.all), Legacy Data
+        // Reconciliation is gated server-side on `employee.manage.all`,
+        // hr_admin-only (0011_employee_seed.sql) — so, unlike its
+        // siblings, this one child is itself conditional rather than
+        // visible to the whole `roleKeys.length > 0` audience above.
+        ...(roleKeys.includes("hr_admin") ? [{ to: "/app/organization/legacy-reconciliation", label: "Legacy Data Reconciliation" }] : []),
+      ],
+    });
   }
 
   // Configuration Center is a read-only index over config domains this
@@ -167,6 +173,52 @@ function PortalMark({ companySlug, companyName }: { companySlug: string | null; 
 }
 
 /**
+ * Organization Management Phase 9 — renders one grouped nav entry: a
+ * top-level link (the Hierarchy Explorer, for "Organization") plus a
+ * disclosure toggle that shows/hides its `children`. Starts expanded
+ * whenever the current route is already inside the group (so following a
+ * deep link — or a "View" link from a detail page — never lands on a
+ * collapsed group hiding the very item that's active), collapsed
+ * otherwise, so the seven-item list Phases 2-5 each added doesn't
+ * dominate the sidebar for a viewer who hasn't opened it. This is the only
+ * place in the sidebar that renders a group; every flat `NavItem` still
+ * renders as a single `NavLink`, unchanged from before this phase.
+ */
+function NavGroup({ item }: { item: NavItem & { children: NavItem[] } }) {
+  const location = useLocation();
+  const isWithinGroup = location.pathname === item.to || location.pathname.startsWith(`${item.to}/`);
+  const [expanded, setExpanded] = useState(isWithinGroup);
+
+  return (
+    <div>
+      <div className="flex items-center gap-1">
+        <NavLink to={item.to} end={item.end} className={navLinkClass} style={{ flex: 1 }}>
+          {item.label}
+        </NavLink>
+        <button
+          type="button"
+          onClick={() => setExpanded((current) => !current)}
+          aria-expanded={expanded}
+          aria-label={expanded ? `Collapse ${item.label}` : `Expand ${item.label}`}
+          className="px-2 py-2 text-label-tertiary hover:text-label-primary shrink-0"
+        >
+          <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>
+        </button>
+      </div>
+      {expanded && (
+        <div className="ml-3 pl-2 border-l border-black/10 flex flex-col gap-1 mt-1 mb-1">
+          {item.children.map((child) => (
+            <NavLink key={child.to} to={child.to} end={child.end} className={navLinkClass}>
+              {child.label}
+            </NavLink>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * Tenant Management gap-fill Phase 1 item #4 — the persistent
  * "you're impersonating X" banner that makes a "Login As" session
  * impossible to forget you're in, per the original hardening request.
@@ -241,11 +293,15 @@ export function PortalLayout() {
           </div>
 
           <nav className="flex flex-col gap-1">
-            {navItems.map((item) => (
-              <NavLink key={item.to} to={item.to} end={item.end} className={navLinkClass}>
-                {item.label}
-              </NavLink>
-            ))}
+            {navItems.map((item) =>
+              item.children ? (
+                <NavGroup key={item.to} item={item as NavItem & { children: NavItem[] }} />
+              ) : (
+                <NavLink key={item.to} to={item.to} end={item.end} className={navLinkClass}>
+                  {item.label}
+                </NavLink>
+              )
+            )}
           </nav>
 
           <div className="mt-auto px-3">

@@ -8,6 +8,8 @@ import { AuditService } from "../audit/audit.service";
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
 import { EmployeesService } from "../employees/employees.service";
 import { LocalFileStorageService } from "../file-storage/local-file-storage.service";
+import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
+import { IntegrationsService } from "../tenant-management/integrations.service";
 import { OrgRelationshipsService } from "./org-relationships.service";
 
 const FIXTURE_CLAIMS: RequestClaims = { is_platform_admin: true, company_id: null, sub: "relationships-spec-fixtures" };
@@ -343,6 +345,92 @@ describe("OrgRelationshipsService", () => {
       await expect(relationships.get(claimsB, relationshipA.id)).rejects.toThrow(NotFoundException);
       const listB = await relationships.list(claimsB);
       expect(listB.find((r) => r.id === relationshipA.id)).toBeUndefined();
+    });
+  });
+
+  /**
+   * Organization Management, Phase 7 (Unified Integration & Synchronization
+   * Requirements, Section 14). Confirms `org.relationship.changed` really
+   * enqueues end to end through a real WebhookDispatchService, and that
+   * its payload carries the new flat `tenantId`/`entityId`/`effectiveDate`/
+   * `occurredAt` fields alongside `eventVersion`/`changeType`/the nested
+   * entity, per `buildOrgEventPayload()`'s own contract. `relationships`
+   * above (this file's shared instance) is built WITHOUT a
+   * WebhookDispatchService — proving the optional-dependency design
+   * doesn't secretly break anything for it — so this uses its own instance
+   * instead.
+   */
+  describe("webhook events (Organization Management Phase 7)", () => {
+    let companyId: string;
+    let hrAdminClaims: RequestClaims;
+    let alice: string;
+    let bob: string;
+    let relationshipsWithWebhooks: OrgRelationshipsService;
+    const platformClaims: RequestClaims = { is_platform_admin: true, company_id: null, sub: "relationship-webhook-spec" };
+
+    beforeAll(async () => {
+      companyId = await createFixtureCompany("Relationship Webhook Co");
+      const hrAdminUserId = await createUser(`relationship-webhook-hr-${Date.now()}@example.com`);
+      await assignRole(hrAdminUserId, companyId, "hr_admin");
+      hrAdminClaims = { is_platform_admin: false, company_id: companyId, sub: hrAdminUserId };
+
+      await new IntegrationsService(db, new AuditService()).configure(platformClaims, companyId, "webhook", {
+        enabled: true,
+        config: { url: "http://127.0.0.1:1/hook", signingSecret: "relationship-trigger-secret" },
+      });
+
+      alice = (await employees.create(hrAdminClaims, { firstName: "Webhook", lastName: "Report" })).id;
+      bob = (await employees.create(hrAdminClaims, { firstName: "Webhook", lastName: "Manager" })).id;
+
+      relationshipsWithWebhooks = new OrgRelationshipsService(
+        db,
+        new RbacService(db),
+        new EntitlementsService(db),
+        new AuditService(),
+        new EffectiveDatingEngine(),
+        new WebhookDispatchService(db, new AuditService())
+      );
+    });
+
+    async function latestEventFor(type: string) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const result = await db.withClaims(platformClaims, (client) =>
+        client.query(
+          "SELECT * FROM webhook_events WHERE company_id = $1 AND event_type = $2 ORDER BY created_at DESC LIMIT 1",
+          [companyId, type]
+        )
+      );
+      return result.rows[0];
+    }
+
+    it("enqueues org.relationship.changed on create(), with the full payload contract", async () => {
+      const created = await relationshipsWithWebhooks.create(hrAdminClaims, {
+        employeeId: alice,
+        managerEmployeeId: bob,
+        relationshipType: "direct",
+      });
+      const event = await latestEventFor("org.relationship.changed");
+      expect(event).toBeDefined();
+      expect(event.payload.eventVersion).toBe(1);
+      expect(event.payload.changeType).toBe("create");
+      expect(event.payload.tenantId).toBe(companyId);
+      expect(event.payload.entityId).toBe(created.id);
+      expect(typeof event.payload.effectiveDate).toBe("string");
+      expect(typeof event.payload.occurredAt).toBe("string");
+      expect(event.payload.relationship.id).toBe(created.id);
+    });
+
+    it("enqueues org.relationship.changed with changeType 'end' on end()", async () => {
+      const carol = (await employees.create(hrAdminClaims, { firstName: "Webhook", lastName: "Report2" })).id;
+      const created = await relationshipsWithWebhooks.create(hrAdminClaims, {
+        employeeId: carol,
+        managerEmployeeId: bob,
+        relationshipType: "matrix",
+      });
+      await relationshipsWithWebhooks.end(hrAdminClaims, created.id);
+      const event = await latestEventFor("org.relationship.changed");
+      expect(event.payload.changeType).toBe("end");
+      expect(event.payload.relationship.status).toBe("ended");
     });
   });
 });

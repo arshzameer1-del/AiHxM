@@ -7,6 +7,8 @@ import { EntitlementsService } from "../entitlements/entitlements.service";
 import { AuditService } from "../audit/audit.service";
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
 import { WorkflowService } from "../workflow/workflow.service";
+import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
+import { IntegrationsService } from "../tenant-management/integrations.service";
 import { OrgUnitsService } from "./org-units.service";
 import { OrgChangesService } from "./org-changes.service";
 
@@ -82,13 +84,66 @@ describe("OrgChangesService", () => {
     });
   }
 
-  async function createEmployeeRow(companyId: string, orgUnitId: string, employeeNumber: string) {
-    await db.withClaims(FIXTURE_CLAIMS, (client) =>
+  async function createEmployeeRow(companyId: string, orgUnitId: string, employeeNumber: string): Promise<string> {
+    const result = await db.withClaims(FIXTURE_CLAIMS, (client) =>
       client.query(
-        `INSERT INTO employees (company_id, employee_number, first_name, last_name, org_unit_id) VALUES ($1, $2, 'Test', 'Employee', $3)`,
+        `INSERT INTO employees (company_id, employee_number, first_name, last_name, org_unit_id) VALUES ($1, $2, 'Test', 'Employee', $3) RETURNING id`,
         [companyId, employeeNumber, orgUnitId]
       )
     );
+    return result.rows[0].id as string;
+  }
+
+  // Organization Management Phase 10 — raw-SQL fixture helpers for the two
+  // new impact counts, matching this file's own existing style
+  // (`createEmployeeRow` above is already a raw INSERT, not a service call)
+  // rather than pulling in OrgRelationshipsService/PositionsService/
+  // CostCentersService/ProfitCentersService purely to seed rows these tests
+  // never otherwise exercise the business logic of.
+  async function createRelationshipRow(companyId: string, employeeId: string, managerEmployeeId: string): Promise<void> {
+    await db.withClaims(FIXTURE_CLAIMS, (client) =>
+      client.query(
+        `INSERT INTO org_relationships (company_id, employee_id, manager_employee_id, relationship_type, status) VALUES ($1, $2, $3, 'direct', 'active')`,
+        [companyId, employeeId, managerEmployeeId]
+      )
+    );
+  }
+
+  async function createPositionWithCenters(
+    companyId: string,
+    orgUnitId: string,
+    costCenterId: string | null,
+    profitCenterId: string | null
+  ): Promise<void> {
+    await db.withClaims(FIXTURE_CLAIMS, (client) =>
+      client.query(
+        `INSERT INTO positions (company_id, org_unit_id, position_title, cost_center_id, profit_center_id, status)
+         VALUES ($1, $2, 'Impact Test Seat', $3, $4, 'vacant')`,
+        [companyId, orgUnitId, costCenterId, profitCenterId]
+      )
+    );
+  }
+
+  async function createCostCenterRow(companyId: string, code: string): Promise<string> {
+    const result = await db.withClaims(FIXTURE_CLAIMS, (client) =>
+      client.query(`INSERT INTO cost_centers (company_id, name, code, status) VALUES ($1, $2, $3, 'active') RETURNING id`, [
+        companyId,
+        `Cost Center ${code}`,
+        code,
+      ])
+    );
+    return result.rows[0].id as string;
+  }
+
+  async function createProfitCenterRow(companyId: string, code: string): Promise<string> {
+    const result = await db.withClaims(FIXTURE_CLAIMS, (client) =>
+      client.query(`INSERT INTO profit_centers (company_id, name, code, status) VALUES ($1, $2, $3, 'active') RETURNING id`, [
+        companyId,
+        `Profit Center ${code}`,
+        code,
+      ])
+    );
+    return result.rows[0].id as string;
   }
 
   describe("Draft -> Validate -> Impact Analysis -> Approval -> Execution -> Publish", () => {
@@ -264,6 +319,34 @@ describe("OrgChangesService", () => {
       expect(reloaded.impactSummary).toEqual(summary);
     });
 
+    // Organization Management Phase 10 — the two counts Section 18 added.
+    it("analyzeImpact() also counts affected reporting relationships and financial centers", async () => {
+      const insider = await createEmployeeRow(companyId, backendId, `EMP-${Date.now()}-3`);
+      const outsider = await createEmployeeRow(companyId, salesId, `EMP-${Date.now()}-4`);
+      // One relationship entirely inside the affected subtree (both sides
+      // in backendId), one crossing the boundary (manager outside, in
+      // salesId) — both should count, proving the "either side" rule.
+      const insider2 = await createEmployeeRow(companyId, backendId, `EMP-${Date.now()}-5`);
+      await createRelationshipRow(companyId, insider2, insider);
+      await createRelationshipRow(companyId, insider, outsider);
+
+      const costCenterId = await createCostCenterRow(companyId, `CC-${Date.now()}`);
+      const profitCenterId = await createProfitCenterRow(companyId, `PC-${Date.now()}`);
+      await createPositionWithCenters(companyId, backendId, costCenterId, null);
+      await createPositionWithCenters(companyId, backendId, null, profitCenterId);
+
+      const change = await orgChanges.create(hrAdminClaims, {
+        title: "Archive Backend (Phase 10 impact)",
+        effectiveDate: "2026-01-01",
+        items: [{ orgUnitId: backendId, action: "archive" }],
+      });
+      await orgChanges.validate(hrAdminClaims, change.id);
+      const summary = await orgChanges.analyzeImpact(hrAdminClaims, change.id);
+
+      expect(summary.affectedReportingRelationshipCount).toBeGreaterThanOrEqual(2);
+      expect(summary.affectedFinancialCenterCount).toBeGreaterThanOrEqual(2);
+    });
+
     it("submitForApproval() requires impact analysis first, then routes through the tenant's configured workflow", async () => {
       const change = await orgChanges.create(hrAdminClaims, {
         title: "Rename Frontend for approval flow",
@@ -388,6 +471,105 @@ describe("OrgChangesService", () => {
       });
 
       await expect(orgChanges.get(claimsB, change.id)).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  /**
+   * Organization Management, Phase 7 (Unified Integration & Synchronization
+   * Requirements, Section 14). Confirms `org.reorganization.published` — the
+   * new event name that section's own catalog asks for — really enqueues
+   * end to end alongside the pre-existing `org_change.published` (kept,
+   * not renamed, so no existing subscriber breaks), with the new event's
+   * payload carrying the change's own real `effectiveDate` (not "today" —
+   * see `execute()`'s own comment on why this event is built by hand
+   * rather than through `publishChanged()`/`buildOrgEventPayload()`'s
+   * generic default). `orgChanges` above (this file's shared instance) is
+   * built WITHOUT a WebhookDispatchService — proving the optional-
+   * dependency design doesn't secretly break anything for it — so this
+   * uses its own instance instead.
+   */
+  describe("webhook events (Organization Management Phase 7)", () => {
+    let companyId: string;
+    let hrAdminClaims: RequestClaims;
+    let engineeringId: string;
+    let orgChangesWithWebhooks: OrgChangesService;
+    const platformClaims: RequestClaims = { is_platform_admin: true, company_id: null, sub: "reorg-webhook-spec" };
+
+    beforeAll(async () => {
+      companyId = await createFixtureCompany("Reorg Webhook Co");
+      const hrAdminUserId = await createUser(`reorg-webhook-hr-${Date.now()}@example.com`);
+      await assignRole(hrAdminUserId, companyId, "hr_admin");
+      await assignRole(hrAdminUserId, companyId, "rbac_demo_full_access");
+      hrAdminClaims = { is_platform_admin: false, company_id: companyId, sub: hrAdminUserId };
+
+      engineeringId = (await orgUnits.create(hrAdminClaims, { name: "Engineering", unitType: "division" })).id;
+
+      const hrAdminRoleId = await db.withClaims(platformClaims, async (client) => {
+        const role = await client.query("SELECT id FROM roles WHERE key = $1", ["hr_admin"]);
+        return role.rows[0].id as string;
+      });
+
+      await workflow.createTemplate(hrAdminClaims, {
+        key: "org_reorganization",
+        name: "Reorganization Approval",
+        objectKey: "org_reorganization",
+        steps: [{ stepOrder: 1, name: "HR Admin approves", approvers: [{ approverType: "role", roleId: hrAdminRoleId }] }],
+      });
+
+      await new IntegrationsService(db, new AuditService()).configure(platformClaims, companyId, "webhook", {
+        enabled: true,
+        config: { url: "http://127.0.0.1:1/hook", signingSecret: "reorg-trigger-secret" },
+      });
+
+      const rbac = new RbacService(db);
+      const entitlements = new EntitlementsService(db);
+      const audit = new AuditService();
+      orgChangesWithWebhooks = new OrgChangesService(
+        db,
+        rbac,
+        entitlements,
+        audit,
+        new EffectiveDatingEngine(),
+        workflow,
+        new WebhookDispatchService(db, new AuditService())
+      );
+    });
+
+    async function latestEventFor(type: string) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const result = await db.withClaims(platformClaims, (client) =>
+        client.query(
+          "SELECT * FROM webhook_events WHERE company_id = $1 AND event_type = $2 ORDER BY created_at DESC LIMIT 1",
+          [companyId, type]
+        )
+      );
+      return result.rows[0];
+    }
+
+    it("enqueues both org_change.published and org.reorganization.published on publish", async () => {
+      const change = await orgChangesWithWebhooks.create(hrAdminClaims, {
+        title: "Rename Engineering (webhook test)",
+        effectiveDate: "2020-01-01",
+        items: [{ orgUnitId: engineeringId, action: "rename", newName: "Platform Engineering" }],
+      });
+      await orgChangesWithWebhooks.validate(hrAdminClaims, change.id);
+      await orgChangesWithWebhooks.analyzeImpact(hrAdminClaims, change.id);
+      const submitted = await orgChangesWithWebhooks.submitForApproval(hrAdminClaims, change.id);
+      const decided = await orgChangesWithWebhooks.decide(hrAdminClaims, submitted.id, { decision: "approved" });
+      expect(decided.status).toBe("published");
+
+      const legacyEvent = await latestEventFor("org_change.published");
+      expect(legacyEvent).toBeDefined();
+      expect(legacyEvent.payload.orgChangeId).toBe(change.id);
+
+      const newEvent = await latestEventFor("org.reorganization.published");
+      expect(newEvent).toBeDefined();
+      expect(newEvent.payload.eventVersion).toBe(1);
+      expect(newEvent.payload.changeType).toBe("published");
+      expect(newEvent.payload.tenantId).toBe(companyId);
+      expect(newEvent.payload.entityId).toBe(change.id);
+      expect(newEvent.payload.effectiveDate).toBe("2020-01-01");
+      expect(newEvent.payload.reorganization.id).toBe(change.id);
     });
   });
 });
