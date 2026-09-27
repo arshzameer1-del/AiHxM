@@ -1,4 +1,4 @@
-import type { CostCenterView, EmployeeView, LocationView, OrgUnitView, ShiftView } from "@aihxm/shared-types";
+import type { CostCenterView, EmployeeView, LocationView, OrgUnitView, PositionView, ShiftView } from "@aihxm/shared-types";
 import { FieldInput, type SubEntityFieldSpec } from "../subentities/SubEntityPanel";
 
 /**
@@ -26,6 +26,7 @@ export type HiringPickerOptions = {
   costCenters: CostCenterView[];
   colleagues: EmployeeView[];
   shifts: ShiftView[];
+  positions: PositionView[];
 };
 
 export type CardFormProps = {
@@ -188,11 +189,56 @@ const EMPLOYMENT_TYPES = ["permanent", "contract", "probation", "intern"];
 // row in `hire_process_card_data` — `HiringProcessService.complete()`
 // still reads it as its own card — this is a presentation-layer merge
 // only, not a backend/data-model change).
+// kumail's own SAP-modeled feedback (2026-09-27) — "in sap we are using
+// position as a designation." Position (Organization Management's own
+// PositionView) already carries a title AND a cost center
+// (`positionTitle`/`costCenterId`), the same bundle SAP's own Position
+// object carries — so picking a Position here fills Designation from its
+// title automatically, the same way EMPLOYMENT_TYPES's own dropdown works
+// one field over. Only `vacant` positions are offered (matching the exact
+// rule `organization-assignment-validator.ts` enforces server-side on
+// save: a filled/frozen/abolished position can't be assigned), narrowed to
+// the selected org unit once one is chosen — a position picked from a
+// different org unit is exactly the validator's own "position belongs to a
+// different organization unit" rejection, so filtering it out here means
+// kumail never hits that error rather than fixing it after the fact.
+// Actually reserving the position for this hire happens at
+// HiringWizardPage's own `handleCompleteHiring` (a call to
+// `PositionsService.assignEmployee()` via `api.assignPosition()`, the
+// SAME endpoint the standalone Position Workbench uses to fill any other
+// vacancy) — `HiringProcessService.complete()` itself deliberately never
+// touches `positions` (that method's own doc comment: cross-module writes
+// belong outside its single transaction, to avoid a circular
+// OrganizationModule<->EmployeesModule dependency).
+// Cost center is deliberately NOT a field here: `employees` has no single
+// cost-center column of its own — cost is always a percentage SPLIT across
+// one or more cost centers (`employee_cost_allocations`, this wizard's own
+// separate Cost Allocation card), never a single value this card could
+// hold. The selected position's own cost center (when it has one) is
+// surfaced below as a read-only hint for filling in that card, not
+// duplicated here as a second, disconnected field that would go nowhere.
 function OrganizationAssignmentForm({ data, onChange, options }: CardFormProps) {
+  const orgUnitId = str(data, "orgUnitId");
+  const positionId = str(data, "positionId");
+  const availablePositions = options.positions.filter((p) => p.status === "vacant" && (!orgUnitId || p.orgUnitId === orgUnitId));
+  const selectedPosition = options.positions.find((p) => p.id === positionId);
+  const selectedPositionCostCenter = selectedPosition?.costCenterId
+    ? options.costCenters.find((c) => c.id === selectedPosition.costCenterId)
+    : undefined;
+
+  function handlePositionChange(value: string) {
+    const position = options.positions.find((p) => p.id === value);
+    onChange({
+      ...data,
+      positionId: value,
+      ...(position ? { designation: position.positionTitle } : {}),
+    });
+  }
+
   return (
     <div className="grid grid-cols-2 gap-3">
       <Labeled label="Org unit">
-        <select value={str(data, "orgUnitId")} onChange={(e) => set(data, onChange, "orgUnitId", e.target.value)} className={inputClass()}>
+        <select value={orgUnitId} onChange={(e) => set(data, onChange, "orgUnitId", e.target.value)} className={inputClass()}>
           <option value="">Select…</option>
           {options.orgUnits.map((u) => (
             <option key={u.id} value={u.id}>
@@ -224,12 +270,28 @@ function OrganizationAssignmentForm({ data, onChange, options }: CardFormProps) 
       <Labeled label="Date of joining">
         <input type="date" value={str(data, "dateOfJoining")} onChange={(e) => set(data, onChange, "dateOfJoining", e.target.value)} className={inputClass()} />
       </Labeled>
+      <Labeled label="Position">
+        <select value={positionId} onChange={(e) => handlePositionChange(e.target.value)} className={inputClass()}>
+          <option value="">No position (designation only)</option>
+          {availablePositions.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.positionTitle}
+              {p.positionCode ? ` (${p.positionCode})` : ""}
+            </option>
+          ))}
+        </select>
+      </Labeled>
       <Labeled label="Designation">
         <input value={str(data, "designation")} onChange={(e) => set(data, onChange, "designation", e.target.value)} className={inputClass()} />
       </Labeled>
       <p className="col-span-2 text-xs text-label-tertiary">
-        Position and cost center are assigned separately after hiring, from the Position Workbench and this employee's own
-        Compensation &amp; Assets tab.
+        {selectedPosition
+          ? `Completing this hire reserves "${selectedPosition.positionTitle}" for them. ${
+              selectedPositionCostCenter
+                ? `This position's own cost center is ${selectedPositionCostCenter.name} — `
+                : "This position has no cost center of its own — "
+            }set how this employee's cost is actually split on the Cost Allocation card in this wizard.`
+          : "Picking a vacant position fills Designation in automatically and reserves it for this hire when you complete hiring. Leave it blank to enter a Designation by hand instead — cost is split on the Cost Allocation card in this wizard, not here."}
       </p>
     </div>
   );

@@ -7,6 +7,7 @@ import type {
   HireProcessView,
   LocationView,
   OrgUnitView,
+  PositionView,
   ShiftView,
 } from "@aihxm/shared-types";
 import { api, ApiError } from "../../../api/client";
@@ -85,6 +86,35 @@ function statusBadge(status: HireProcessCardView["status"]) {
   return <span className="text-[11px] px-2 py-0.5 rounded-full bg-black/5 text-label-tertiary">Not started</span>;
 }
 
+/** Shared by the page's own tile grid and both review surfaces (the
+ * Review & Completion tile and the popup below) so all three agree on
+ * what "done" means for the merged tile — folds Employment's own,
+ * otherwise-invisible completion into Organization Assignment's. */
+function combinedCardStatus(process: HireProcessView, cardKey: string): HireProcessCardView["status"] {
+  const own = process.cards.find((c) => c.cardKey === cardKey);
+  if (!own) return "pending";
+  if (cardKey !== MERGE_TARGET_CARD_KEY) return own.status;
+  const employment = process.cards.find((c) => c.cardKey === HIDDEN_CARD_KEY);
+  if (!employment) return own.status;
+  return STATUS_RANK[own.status] <= STATUS_RANK[employment.status] ? own.status : employment.status;
+}
+
+/** kumail's own instruction (2026-09-27): "if after first 2 cards if
+ * hiring admin click on save there should be a pop-up for review with
+ * done button." Personal Identity and Organization Assignment (which now
+ * carries Employment's own fields) are the only two REQUIRED, visible
+ * cards — every other card is optional, and `review_completion` itself
+ * has no form of its own. So "the first 2 cards" done means every
+ * required-and-enabled card except `review_completion` is complete —
+ * exactly the moment it's worth proactively offering to finish, instead
+ * of making kumail hunt down the last tile in the grid. */
+function requiredCardsDoneExceptReview(process: HireProcessView): boolean {
+  if (process.status === "hired" || process.status === "cancelled") return false;
+  return process.cards
+    .filter((c) => c.definition.isEnabled && c.definition.isRequired && c.cardKey !== "review_completion")
+    .every((c) => c.status === "complete");
+}
+
 export function HiringWizardPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -102,6 +132,7 @@ export function HiringWizardPage() {
   const [advancing, setAdvancing] = useState(false);
   const [completing, setCompleting] = useState(false);
   const [draftSaving, setDraftSaving] = useState(false);
+  const [showCompletionPopup, setShowCompletionPopup] = useState(false);
 
   const loadProcess = useCallback(() => {
     if (!id) return;
@@ -131,9 +162,25 @@ export function HiringWizardPage() {
       api.listCostCenters().catch(() => []),
       api.listEmployees().catch(() => []),
       api.listShifts().catch(() => []),
-    ]).then(([orgUnits, locations, costCenters, colleagues, shifts]: [OrgUnitView[], LocationView[], CostCenterView[], EmployeeView[], ShiftView[]]) => {
-      setOptions({ orgUnits, locations, costCenters, colleagues, shifts });
-    });
+      // kumail's own SAP-modeled feedback (2026-09-27) — Position should be
+      // pickable on Organization Assignment, the same "occupy a vacant slot"
+      // list the standalone Position Workbench already offers. Only vacant
+      // positions can ever be assigned (positions.service.ts's own
+      // `assignEmployee()` rejects anything else), so there's no reason to
+      // fetch filled/frozen/abolished ones here at all.
+      api.listPositions({ status: "vacant" }).catch(() => []),
+    ]).then(
+      ([orgUnits, locations, costCenters, colleagues, shifts, positions]: [
+        OrgUnitView[],
+        LocationView[],
+        CostCenterView[],
+        EmployeeView[],
+        ShiftView[],
+        PositionView[]
+      ]) => {
+        setOptions({ orgUnits, locations, costCenters, colleagues, shifts, positions });
+      }
+    );
   }, []);
 
   const hasEmploymentCard = useMemo(() => process?.cards.some((c) => c.cardKey === HIDDEN_CARD_KEY) ?? false, [process]);
@@ -183,12 +230,7 @@ export function HiringWizardPage() {
   );
 
   function combinedStatus(cardKey: string): HireProcessCardView["status"] {
-    const own = process?.cards.find((c) => c.cardKey === cardKey);
-    if (!own) return "pending";
-    if (cardKey !== MERGE_TARGET_CARD_KEY) return own.status;
-    const employment = process?.cards.find((c) => c.cardKey === HIDDEN_CARD_KEY);
-    if (!employment) return own.status;
-    return STATUS_RANK[own.status] <= STATUS_RANK[employment.status] ? own.status : employment.status;
+    return process ? combinedCardStatus(process, cardKey) : "pending";
   }
 
   const mergedIsCurrent = process?.currentCardKey === MERGE_TARGET_CARD_KEY || process?.currentCardKey === HIDDEN_CARD_KEY;
@@ -223,9 +265,10 @@ export function HiringWizardPage() {
         });
       }
 
+      let updated: HireProcessView;
       if (advanceAfter && isCurrentCard) {
         setAdvancing(true);
-        let updated = await api.advanceHireProcess(id, process.revision);
+        updated = await api.advanceHireProcess(id, process.revision);
         if (updated.currentCardKey === MERGE_TARGET_CARD_KEY) {
           // Landed back on the merged tile itself (this happens when the
           // process's real pointer was still on the hidden "employment"
@@ -237,8 +280,24 @@ export function HiringWizardPage() {
         setProcess(updated);
         setActiveCardKey(displayCardKey(updated.currentCardKey) ?? enabledCards.find((c) => c.cardKey !== activeCardKey)?.cardKey ?? null);
       } else {
-        loadProcess();
+        // Plain "Save" (no advance) still needs the process's fresh card
+        // statuses — not just this one card reloaded — to know whether the
+        // popup below should appear (kumail's own request: a Save click
+        // once the required cards are done should offer to finish, not
+        // only "Save & next").
+        updated = await api.getHireProcess(id);
+        setProcess(updated);
         loadCard(activeCardKey);
+      }
+
+      // kumail (2026-09-27): "if after first 2 cards if hiring admin click
+      // on save there should be a pop-up for review with done button" —
+      // Personal Identity + Organization Assignment are the only two
+      // required, visible cards, so this is the exact moment they're both
+      // done, on every Save click from then on (dismissing it costs one
+      // click and nothing is lost — the wizard itself is untouched).
+      if (requiredCardsDoneExceptReview(updated)) {
+        setShowCompletionPopup(true);
       }
     } catch (err) {
       setCardError(
@@ -275,6 +334,31 @@ export function HiringWizardPage() {
       if (current.status === "ready_for_completion") {
         const completed = await api.completeHireProcess(id);
         if (completed.employeeId) {
+          // Occupying the selected Position happens here, not inside
+          // HiringProcessService.complete() itself — that method's own doc
+          // comment is explicit that cross-module writes (Organization
+          // Management owns `positions`) stay off its single transaction to
+          // avoid a circular module dependency. `assignPosition` is the
+          // exact same endpoint the standalone Position Workbench uses, so
+          // this is real occupancy, not a second, disconnected write path.
+          // Read fresh rather than trusting local `cardData` — kumail may
+          // have completed from a card other than Organization Assignment.
+          const orgData = await api.getHireProcessCardData(id, MERGE_TARGET_CARD_KEY).catch(() => null);
+          const positionId = typeof orgData?.data?.positionId === "string" ? orgData.data.positionId : undefined;
+          if (positionId) {
+            try {
+              await api.assignPosition(positionId, { employeeId: completed.employeeId });
+            } catch (err) {
+              // The employee is already hired at this point — a lost race
+              // on the position (someone else took it in the meantime)
+              // shouldn't block navigation to their new profile, but it
+              // must not be silently dropped either.
+              window.alert(
+                `This employee was hired, but the selected position could not be reserved for them` +
+                  `${err instanceof ApiError ? `: ${err.message}` : ""}. Assign it by hand from Position Workbench instead.`
+              );
+            }
+          }
           navigate(`/app/employees/${completed.employeeId}`);
           return;
         }
@@ -412,8 +496,56 @@ export function HiringWizardPage() {
           </>
         )}
       </section>
+
+      {showCompletionPopup && (
+        <HireCompletionPopup
+          process={process}
+          onDismiss={() => setShowCompletionPopup(false)}
+          onComplete={handleCompleteHiring}
+          completing={completing}
+          completeError={cardError}
+        />
+      )}
     </div>
   );
+}
+
+/** The same per-card status list, shared by the Review & Completion tile
+ * and the completion popup below — one place computing "what's still
+ * incomplete," so the two surfaces can never disagree with each other. */
+function CardStatusList({ process }: { process: HireProcessView }) {
+  const visibleCards = process.cards
+    .filter((c) => c.definition.isEnabled && c.cardKey !== HIDDEN_CARD_KEY)
+    .sort((a, b) => a.definition.displayOrder - b.definition.displayOrder);
+  return (
+    <div className="divide-y divide-black/5">
+      {visibleCards.map((c) => (
+        <div key={c.cardKey} className="py-2 flex items-center justify-between text-sm">
+          <span>
+            {c.definition.label}
+            {c.definition.isRequired && <span className="text-danger"> *</span>}
+          </span>
+          {statusBadge(combinedCardStatus(process, c.cardKey))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Required-but-incomplete card labels, excluding `review_completion`
+ * itself (that's exactly what clicking Complete Hiring fixes) and folding
+ * Employment's own completion into Organization Assignment's — an
+ * incomplete Employment with a "done" Organization Assignment tile would
+ * otherwise show nothing wrong, even though kumail would never see an
+ * "Employment" row on screen to know it needed attention. */
+function incompleteRequiredLabels(process: HireProcessView): string[] {
+  const keys = new Set(
+    process.cards
+      .filter((c) => c.definition.isEnabled && c.definition.isRequired && c.cardKey !== "review_completion")
+      .filter((c) => c.status !== "complete")
+      .map((c) => (c.cardKey === HIDDEN_CARD_KEY ? MERGE_TARGET_CARD_KEY : c.cardKey))
+  );
+  return Array.from(keys).map((key) => process.cards.find((c) => c.cardKey === key)?.definition.label ?? key);
 }
 
 function ReviewCompletionCard({
@@ -427,23 +559,7 @@ function ReviewCompletionCard({
   completing: boolean;
   completeError: string | null;
 }) {
-  const visibleCards = process.cards
-    .filter((c) => c.definition.isEnabled && c.cardKey !== HIDDEN_CARD_KEY)
-    .sort((a, b) => a.definition.displayOrder - b.definition.displayOrder);
-
-  // Required-but-incomplete, excluding review_completion itself (that's
-  // exactly what clicking "Complete Hiring" below fixes) and folding
-  // Employment's own completion into Organization Assignment's — an
-  // incomplete Employment with a "done" Organization Assignment tile would
-  // otherwise show nothing wrong here, even though kumail would never see
-  // an "Employment" row to know it needed attention.
-  const requiredKeys = new Set(
-    process.cards
-      .filter((c) => c.definition.isEnabled && c.definition.isRequired && c.cardKey !== "review_completion")
-      .filter((c) => c.status !== "complete")
-      .map((c) => (c.cardKey === HIDDEN_CARD_KEY ? MERGE_TARGET_CARD_KEY : c.cardKey))
-  );
-  const incompleteLabels = Array.from(requiredKeys).map((key) => process.cards.find((c) => c.cardKey === key)?.definition.label ?? key);
+  const incompleteLabels = incompleteRequiredLabels(process);
   const canComplete = incompleteLabels.length === 0;
 
   return (
@@ -452,17 +568,7 @@ function ReviewCompletionCard({
         Review the cards below, then select "Complete Hiring" to create this employee's record. Required cards (marked
         with *) must be filled in first.
       </p>
-      <div className="divide-y divide-black/5">
-        {visibleCards.map((c) => (
-          <div key={c.cardKey} className="py-2 flex items-center justify-between text-sm">
-            <span>
-              {c.definition.label}
-              {c.definition.isRequired && <span className="text-danger"> *</span>}
-            </span>
-            {statusBadge(c.cardKey === MERGE_TARGET_CARD_KEY ? (process.cards.find((x) => x.cardKey === HIDDEN_CARD_KEY)?.status === "complete" || !process.cards.some((x) => x.cardKey === HIDDEN_CARD_KEY) ? c.status : "saved") : c.status)}
-          </div>
-        ))}
-      </div>
+      <CardStatusList process={process} />
       {!canComplete && <div className="text-warning text-xs">Still needed: {incompleteLabels.join(", ")}.</div>}
       {completeError && <div className="text-danger text-xs">{completeError}</div>}
       <button
@@ -472,6 +578,67 @@ function ReviewCompletionCard({
       >
         {completing ? "Completing…" : "Complete Hiring"}
       </button>
+    </div>
+  );
+}
+
+/** kumail's own instruction (2026-09-27): "if after first 2 cards if
+ * hiring admin click on save there should be a pop-up for review with
+ * done button if click on done employee hiring should be complete." Fired
+ * from `handleSaveCard` (see `requiredCardsDoneExceptReview`) rather than
+ * waiting for kumail to find the last tile in the grid himself. A hand-rolled
+ * overlay, not a third-party modal — the same `fixed inset-0 bg-black/40`
+ * pattern this app's other confirmation modals already use (e.g.
+ * `ReasonModal.tsx`), since this app has no modal library of its own.
+ * "Done" runs the exact same `handleCompleteHiring` the standalone Review &
+ * Completion tile's own button does — this is a shortcut to that same
+ * action, not a second, parallel completion path. */
+function HireCompletionPopup({
+  process,
+  onDismiss,
+  onComplete,
+  completing,
+  completeError,
+}: {
+  process: HireProcessView;
+  onDismiss: () => void;
+  onComplete: () => void;
+  completing: boolean;
+  completeError: string | null;
+}) {
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center px-4 z-50" onClick={completing ? undefined : onDismiss}>
+      <div onClick={(e) => e.stopPropagation()} className="bg-card rounded-card p-6 shadow-lg max-w-md w-full space-y-4">
+        <div>
+          <h2 className="font-bold text-lg">Ready to complete this hire?</h2>
+          <p className="text-sm text-label-secondary mt-1">
+            Personal Identity and Organization Assignment are both filled in — everything else here is optional. Select
+            "Done" to create this employee's record now, or close this to keep filling in optional cards first.
+          </p>
+        </div>
+        <div className="max-h-64 overflow-y-auto">
+          <CardStatusList process={process} />
+        </div>
+        {completeError && <div className="text-danger text-sm">{completeError}</div>}
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onDismiss}
+            disabled={completing}
+            className="rounded-lg px-4 py-2 text-sm font-semibold text-label-secondary hover:bg-black/5 disabled:opacity-50"
+          >
+            Keep filling in details
+          </button>
+          <button
+            type="button"
+            onClick={onComplete}
+            disabled={completing}
+            className="rounded-lg px-4 py-2 text-sm font-semibold text-white bg-accent disabled:opacity-50"
+          >
+            {completing ? "Completing…" : "Done"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
