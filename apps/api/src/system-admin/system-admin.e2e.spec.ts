@@ -172,14 +172,20 @@ describe("System Admin HTTP surface (e2e) — Roles & Access panel", () => {
   });
 
   describe("GET /system-admin/roles", () => {
-    it("returns the four real tenant roles, never the Phase 4 rbac_demo_* roles", async () => {
+    it("returns the five real tenant roles, never the Phase 4 rbac_demo_* roles", async () => {
       const res = await request(app.getHttpServer())
         .get("/system-admin/roles")
         .set("Authorization", `Bearer ${bilalToken}`);
 
       expect(res.status).toBe(200);
       const keys = (res.body as Array<{ key: string }>).map((r) => r.key).sort();
-      expect(keys).toEqual(["employee_self_service", "hr_admin", "line_manager", "system_admin"]);
+      expect(keys).toEqual([
+        "employee_self_service",
+        "hr_admin",
+        "line_manager",
+        "payroll_approver",
+        "system_admin",
+      ]);
     });
 
     it("rejects an unauthenticated request", async () => {

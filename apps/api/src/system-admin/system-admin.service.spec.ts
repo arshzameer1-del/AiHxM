@@ -146,10 +146,16 @@ describe("SystemAdminService", () => {
   });
 
   describe("listAssignableRoles", () => {
-    it("returns the four real tenant roles, never the Phase 4 rbac_demo_* roles", async () => {
+    it("returns the five real tenant roles, never the Phase 4 rbac_demo_* roles", async () => {
       const roles = await systemAdmin.listAssignableRoles(bilalClaims);
       const keys = roles.map((r) => r.key).sort();
-      expect(keys).toEqual(["employee_self_service", "hr_admin", "line_manager", "system_admin"]);
+      expect(keys).toEqual([
+        "employee_self_service",
+        "hr_admin",
+        "line_manager",
+        "payroll_approver",
+        "system_admin",
+      ]);
     });
 
     it("denies a caller with no role_assignment.manage.all", async () => {
@@ -188,6 +194,17 @@ describe("SystemAdminService", () => {
       await systemAdmin.revokeRole(bilalClaims, assignment.id);
       const usersAfter = await systemAdmin.listAssignableUsers(bilalClaims);
       expect(usersAfter.find((u) => u.employeeId === ayeshaId)!.roleKeys).toEqual(["hr_admin"]);
+    });
+
+    it("grants payroll_approver (regression: this role briefly existed in the roles table but was missing from ASSIGNABLE_ROLE_KEYS, so no System Admin could actually grant it)", async () => {
+      const assignment = await systemAdmin.assignRole(bilalClaims, { employeeId: ayeshaId, roleKey: "payroll_approver" });
+      expect(assignment.roleKey).toBe("payroll_approver");
+
+      const users = await systemAdmin.listAssignableUsers(bilalClaims);
+      const ayesha = users.find((u) => u.employeeId === ayeshaId)!;
+      expect(ayesha.roleKeys.sort()).toEqual(["hr_admin", "payroll_approver"]);
+
+      await systemAdmin.revokeRole(bilalClaims, assignment.id);
     });
 
     it("refuses to grant a role to an employee with no login yet", async () => {

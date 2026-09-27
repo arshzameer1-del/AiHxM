@@ -8,9 +8,21 @@ import type { AssignableUserView, Role, SystemAdminRoleAssignmentView, TenantRol
 const ROLE_ASSIGNMENT_PERMISSION = "role_assignment.manage.all";
 // Kept in sync with, but deliberately not imported from, employees.service.ts's
 // TENANT_ROLE_KEYS and assign-system-admin-role.dto.ts's ASSIGNABLE_ROLE_KEYS —
-// three independent lists that all happen to be "the four real tenant
-// roles" today (same pattern as the DTO's own comment explains).
-const ASSIGNABLE_ROLE_KEYS: TenantRoleKey[] = ["hr_admin", "line_manager", "employee_self_service", "system_admin"];
+// three independent lists that all happen to be "the real tenant roles"
+// today (same pattern as the DTO's own comment explains). `payroll_approver`
+// (0093_payroll_approval_workflow.sql) was added here after it briefly
+// shipped only in TENANT_ROLE_KEYS — a real gap caught during a live
+// production smoke test: the role existed in the database but no System
+// Admin could grant it or point a workflow template's approver step at it,
+// since this list is what both `listAssignableRoles()` (the workflow
+// template role-picker) and `assignRole()`'s own guard below draw from.
+const ASSIGNABLE_ROLE_KEYS: TenantRoleKey[] = [
+  "hr_admin",
+  "line_manager",
+  "employee_self_service",
+  "system_admin",
+  "payroll_approver",
+];
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function rowToAssignmentView(row: any): SystemAdminRoleAssignmentView {
