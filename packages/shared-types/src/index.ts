@@ -1256,10 +1256,19 @@ export type AssignDataScopeRequest = {
  * managerId/direct-relationship — not also `designation`/`positionId`
  * (Section 24 lists `designation` among the legacy fields, but Section
  * 25's warning, and therefore this report built on it, never included a
- * `designation` check; extending detection to a fourth field is a
- * separate, not-yet-scoped decision, not silently folded in here).
+ * `designation` check). Core Employee Enterprise Phase 11 picked exactly
+ * this one up (see `LegacyReconciliationService`'s own doc comment) —
+ * `"designation"` is the fourth gap type, matched against `positions`'
+ * own `position_title` the same way `"department"`/`"location"` match
+ * against `org_units`/`locations`. The rest of Core Employee Enterprise's
+ * own new sub-entities (Contact/Address/Family/Education/Qualifications/
+ * Cost-Allocation/Assets, Phases 6-9) are deliberately NOT extended here —
+ * they were built with real canonical foreign keys from day one, so there
+ * is no pre-existing free-text legacy value for any of them to reconcile
+ * against; this report only ever finds a gap where one field pair is
+ * free-text-only and another is canonical-id-only for the same fact.
  */
-export type LegacyReconciliationGapType = "department" | "location" | "manager";
+export type LegacyReconciliationGapType = "department" | "location" | "manager" | "designation";
 
 /**
  * A candidate canonical entity a `department`/`location` gap's free text
@@ -1293,7 +1302,12 @@ export type LegacyReconciliationSuggestion = {
 export type LegacyReconciliationGap =
   | { gapType: "department"; legacyValue: string; suggestions: LegacyReconciliationSuggestion[] }
   | { gapType: "location"; legacyValue: string; suggestions: LegacyReconciliationSuggestion[] }
-  | { gapType: "manager"; legacyValue: string; managerEmployeeId: string };
+  | { gapType: "manager"; legacyValue: string; managerEmployeeId: string }
+  // Phase 11 — suggestions here are VACANT positions only (a filled/
+  // frozen/abolished one can never be the target of
+  // PositionsService.assignEmployee(), the same write path this gap's own
+  // `link-position` action delegates to), matched by `position_title`.
+  | { gapType: "designation"; legacyValue: string; suggestions: LegacyReconciliationSuggestion[] };
 
 export type LegacyReconciliationEmployeeView = {
   employeeId: string;
@@ -1763,6 +1777,333 @@ export type CreateEmployeeLoginResponse = {
   rolesGranted: TenantRoleKey[];
 };
 
+// --- Core Employee Enterprise Phase 2: Hiring Process Engine -----------
+// See apps/api/migrations/0082_hiring_process_engine.sql and
+// employees/hiring/hiring-process.service.ts for the full design. Scoped
+// state machine (Section 10 of the spec, minus the approval branch —
+// deferred until a later phase wires real per-card Workflow approval).
+
+export type HireProcessStatus = "draft" | "in_progress" | "ready_for_completion" | "hired" | "cancelled";
+
+export type CardDefinitionView = {
+  cardKey: string;
+  label: string;
+  description: string | null;
+  dependsOnCardKey: string | null;
+  displayOrder: number;
+  isEnabled: boolean;
+  isRequired: boolean;
+};
+
+export type HireProcessCardView = {
+  cardKey: string;
+  /** "pending" (untouched) | "saved" (data persisted) | "complete" (satisfies this phase's completion rule — see HiringProcessService). */
+  status: "pending" | "saved" | "complete";
+  savedAt: string | null;
+  definition: CardDefinitionView;
+};
+
+export type HireProcessView = {
+  id: string;
+  companyId: string;
+  status: HireProcessStatus;
+  currentCardKey: string | null;
+  revision: number;
+  employeeId: string | null;
+  createdByUserAccountId: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  cancelledAt: string | null;
+  cards: HireProcessCardView[];
+};
+
+export type HireProcessCardDataView = {
+  cardKey: string;
+  data: Record<string, unknown>;
+  revision: number;
+  updatedAt: string;
+};
+
+export type SaveHireProcessCardRequest = {
+  data: Record<string, unknown>;
+  /**
+   * Optimistic-lock check (spec Section 25) — omit only for a card's
+   * very first save (no prior revision exists to conflict with).
+   * Mismatched against the stored revision throws a 409.
+   */
+  expectedRevision?: number;
+};
+
+/** Phase 3 — Configuration Center's own scoped admin surface: enable/disable and reorder, per kumail's scoping decision. Requiredness is also editable; per-field rules are not (deferred, per that same decision). */
+export type UpdateCardDefinitionRequest = {
+  isEnabled?: boolean;
+  isRequired?: boolean;
+  displayOrder?: number;
+};
+
+/** Phase 6 — Contact card (0084_core_employee_contact_address.sql). */
+export type EmployeeContactType = "business_email" | "personal_email" | "business_phone" | "personal_phone" | "emergency_contact";
+
+export type EmployeeContactView = {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  contactType: EmployeeContactType;
+  label: string | null;
+  value: string;
+  isPrimary: boolean;
+  status: "active" | "ended";
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateEmployeeContactRequest = {
+  employeeId: string;
+  contactType: EmployeeContactType;
+  value: string;
+  label?: string;
+  isPrimary?: boolean;
+};
+
+export type UpdateEmployeeContactRequest = {
+  value?: string;
+  label?: string | null;
+  isPrimary?: boolean;
+};
+
+/** Phase 6 — Addresses card. At most one open row per {employee, addressType} — see the migration's own header comment. */
+export type EmployeeAddressType = "permanent" | "current" | "mailing";
+
+export type EmployeeAddressView = {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  addressType: EmployeeAddressType;
+  line1: string;
+  line2: string | null;
+  city: string | null;
+  stateProvince: string | null;
+  postalCode: string | null;
+  country: string | null;
+  status: "active" | "ended";
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateEmployeeAddressRequest = {
+  employeeId: string;
+  addressType: EmployeeAddressType;
+  line1: string;
+  line2?: string;
+  city?: string;
+  stateProvince?: string;
+  postalCode?: string;
+  country?: string;
+};
+
+export type UpdateEmployeeAddressRequest = Partial<Omit<CreateEmployeeAddressRequest, "employeeId" | "addressType">>;
+
+/** Phase 7 — Important Dates card (0085_core_employee_important_dates.sql). At most one open row per {employee, dateType}, EXCEPT `document_expiry` which may have several. */
+export type EmployeeImportantDateType = "joining" | "confirmation" | "probation_end" | "contract_end" | "document_expiry";
+
+export type EmployeeImportantDateView = {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  dateType: EmployeeImportantDateType;
+  dateValue: string;
+  label: string | null;
+  status: "active" | "ended";
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateEmployeeImportantDateRequest = {
+  employeeId: string;
+  dateType: EmployeeImportantDateType;
+  dateValue: string;
+  label?: string;
+};
+
+export type UpdateEmployeeImportantDateRequest = {
+  dateValue?: string;
+  label?: string;
+};
+
+/** Phase 8 — Payment/Bank card (0086_core_employee_payment_cost_allocation.sql). At most one open primary per employee. */
+export type EmployeePaymentMethod = "bank_transfer" | "cash" | "cheque";
+
+export type EmployeePaymentAccountView = {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  paymentMethod: EmployeePaymentMethod;
+  bankName: string | null;
+  accountTitle: string | null;
+  accountNumber: string | null;
+  iban: string | null;
+  branchCode: string | null;
+  isPrimary: boolean;
+  status: "active" | "ended";
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateEmployeePaymentAccountRequest = {
+  employeeId: string;
+  paymentMethod: EmployeePaymentMethod;
+  bankName?: string;
+  accountTitle?: string;
+  accountNumber?: string;
+  iban?: string;
+  branchCode?: string;
+  isPrimary?: boolean;
+};
+
+export type UpdateEmployeePaymentAccountRequest = Partial<Omit<CreateEmployeePaymentAccountRequest, "employeeId">>;
+
+/** Phase 8 — Cost Allocation card. Multiple OPEN rows per employee are normal (split costing); at most one is primary. */
+export type EmployeeCostAllocationView = {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  costCenterId: string;
+  allocationPercentage: number;
+  isPrimary: boolean;
+  status: "active" | "ended";
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateEmployeeCostAllocationRequest = {
+  employeeId: string;
+  costCenterId: string;
+  allocationPercentage: number;
+  isPrimary?: boolean;
+};
+
+export type UpdateEmployeeCostAllocationRequest = {
+  allocationPercentage?: number;
+  isPrimary?: boolean;
+};
+
+/** Phase 9 — Family/Dependents card (0087_core_employee_family_education_qualifications_assets.sql). A list entity: no one-row-per-employee constraint. */
+export type EmployeeFamilyRelationship = "spouse" | "child" | "parent" | "sibling" | "other";
+
+export type EmployeeFamilyMemberView = {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  relationship: EmployeeFamilyRelationship;
+  fullName: string;
+  dateOfBirth: string | null;
+  cnic: string | null;
+  isDependent: boolean;
+  isBeneficiary: boolean;
+  status: "active" | "ended";
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateEmployeeFamilyMemberRequest = {
+  employeeId: string;
+  relationship: EmployeeFamilyRelationship;
+  fullName: string;
+  dateOfBirth?: string;
+  cnic?: string;
+  isDependent?: boolean;
+  isBeneficiary?: boolean;
+};
+
+export type UpdateEmployeeFamilyMemberRequest = Partial<Omit<CreateEmployeeFamilyMemberRequest, "employeeId">>;
+
+/** Phase 9 — Education card. A list entity (education history). */
+export type EmployeeEducationView = {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  degreeTitle: string;
+  institution: string | null;
+  fieldOfStudy: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  grade: string | null;
+  status: "active" | "ended";
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateEmployeeEducationRequest = {
+  employeeId: string;
+  degreeTitle: string;
+  institution?: string;
+  fieldOfStudy?: string;
+  startDate?: string;
+  endDate?: string;
+  grade?: string;
+};
+
+export type UpdateEmployeeEducationRequest = Partial<Omit<CreateEmployeeEducationRequest, "employeeId">>;
+
+/** Phase 9 — Qualifications/Skills card. A list entity. */
+export type EmployeeQualificationType = "certificate" | "license" | "skill";
+
+export type EmployeeQualificationView = {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  qualificationType: EmployeeQualificationType;
+  title: string;
+  issuingAuthority: string | null;
+  issueDate: string | null;
+  expiryDate: string | null;
+  proficiencyLevel: string | null;
+  status: "active" | "ended";
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateEmployeeQualificationRequest = {
+  employeeId: string;
+  qualificationType: EmployeeQualificationType;
+  title: string;
+  issuingAuthority?: string;
+  issueDate?: string;
+  expiryDate?: string;
+  proficiencyLevel?: string;
+};
+
+export type UpdateEmployeeQualificationRequest = Partial<Omit<CreateEmployeeQualificationRequest, "employeeId">>;
+
+/** Phase 9 — Assets card. A list entity; `status` tracks the assignment's own lifecycle (assigned/returned) on the same row. */
+export type EmployeeAssetView = {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  assetType: string;
+  assetTag: string | null;
+  description: string | null;
+  assignedDate: string;
+  returnedDate: string | null;
+  status: "assigned" | "returned";
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateEmployeeAssetRequest = {
+  employeeId: string;
+  assetType: string;
+  assetTag?: string;
+  description?: string;
+  assignedDate?: string;
+};
+
+export type UpdateEmployeeAssetRequest = {
+  assetTag?: string;
+  description?: string;
+};
+
 export type OrgChartNode = {
   id: string;
   employeeNumber: string;
@@ -1782,7 +2123,26 @@ export type EmployeeDocumentView = {
   createdAt: string;
 };
 
-export type JobHistoryEventType = "hire" | "promotion" | "transfer" | "salary_change" | "termination" | "rehire" | "other";
+// Core Employee Enterprise Phase 10 (0088_core_employee_lifecycle_transactions.sql)
+// widened this vocabulary with the 6 values below ('demotion' through
+// 'reactivation') for EmployeeLifecycleService's own explicit, named
+// transactions — see that migration's own header comment for why the
+// pre-existing 7 values (used by EmployeesService.autoRecordJobHistory()'s
+// field-diff inference, unchanged) keep working exactly as before.
+export type JobHistoryEventType =
+  | "hire"
+  | "promotion"
+  | "transfer"
+  | "salary_change"
+  | "termination"
+  | "rehire"
+  | "other"
+  | "demotion"
+  | "secondment"
+  | "acting"
+  | "manager_change"
+  | "location_change"
+  | "reactivation";
 
 export type JobHistoryEntryView = {
   id: string;
@@ -1794,6 +2154,9 @@ export type JobHistoryEntryView = {
   salaryBand?: string | null;
   notes: string | null;
   createdAt: string;
+  // Phase 10 — set only for 'secondment'/'acting' rows (both temporary by
+  // nature); null for every other event type.
+  endDate?: string | null;
 };
 
 export type RecordJobHistoryRequest = {
@@ -1803,6 +2166,143 @@ export type RecordJobHistoryRequest = {
   designation?: string;
   salaryBand?: string;
   notes?: string;
+};
+
+// --- Core Employee Enterprise Phase 10: Explicit Lifecycle Transactions ---
+// Each request below drives one EmployeeLifecycleService method. Unlike
+// EmployeesService.update()'s generic PATCH (which infers a job-history
+// event from whatever changed), each of these names its own intent up
+// front, so the employee_job_history row it writes records that intent
+// exactly rather than a guess — see EmployeeLifecycleService's own class
+// doc comment.
+
+export type TransferEmployeeRequest = {
+  orgUnitId?: string;
+  department?: string;
+  locationId?: string;
+  location?: string;
+  effectiveDate: string;
+  notes?: string;
+};
+
+export type PromoteEmployeeRequest = {
+  designation: string;
+  salaryBand?: string;
+  effectiveDate: string;
+  notes?: string;
+};
+
+export type DemoteEmployeeRequest = {
+  designation: string;
+  salaryBand?: string;
+  effectiveDate: string;
+  notes?: string;
+};
+
+// Secondment/Acting both name an end date (spec Section 26) — the
+// temporary posting/role reverts automatically in intent (not enforced by
+// a scheduler in this phase; `endDate` is a descriptive fact on the
+// history row, same scope decision as Section 26's other transactions).
+export type SecondEmployeeRequest = {
+  orgUnitId?: string;
+  department?: string;
+  designation?: string;
+  locationId?: string;
+  location?: string;
+  effectiveDate: string;
+  endDate: string;
+  notes?: string;
+};
+
+export type AssignActingRoleRequest = {
+  designation: string;
+  orgUnitId?: string;
+  department?: string;
+  effectiveDate: string;
+  endDate: string;
+  notes?: string;
+};
+
+export type ChangeEmployeeManagerRequest = {
+  managerId: string;
+  effectiveDate: string;
+  notes?: string;
+};
+
+export type ChangeEmployeeLocationRequest = {
+  locationId: string;
+  effectiveDate: string;
+  notes?: string;
+};
+
+export type TerminateEmployeeRequest = {
+  terminationDate: string;
+  terminationReason?: string;
+  notes?: string;
+};
+
+export type ReactivateEmployeeRequest = {
+  effectiveDate: string;
+  notes?: string;
+};
+
+export type LifecycleTransactionResult = {
+  employee: EmployeeView;
+  jobHistory: JobHistoryEntryView;
+};
+
+// --- Core Employee Enterprise Phase 11: Sensitivity Tier Classification ---
+// Gap #10 from the audit: a real flat role-based field permission engine
+// already exists (`field_permission_rules`, enforced by
+// `RbacService.filterRecordFields()`/`filterRecordFieldsWithScope()`) and
+// already applies to every one of `EmployeesService`'s `SENSITIVE_FIELDS`
+// — what was missing was a NAMED classification on top of it (so a field
+// is labeled "this is Restricted data," independent of which roles a
+// given tenant happens to grant view/edit on it) and view-audit-logging
+// for the two most sensitive tiers. This is a FIXED, spec-defined
+// vocabulary (Normal/Confidential/Restricted/Highly Restricted), not
+// tenant-configurable data — the same "closed vocabulary → union type,
+// not a lookup table" call every other closed list in this codebase
+// (job history event types, employee document types, ...) already made.
+export type FieldSensitivityTier = "normal" | "confidential" | "restricted" | "highly_restricted";
+
+export type EmployeeFieldSensitivityEntry = {
+  fieldKey: string;
+  tier: FieldSensitivityTier;
+};
+
+// --- Core Employee Enterprise Phase 12: Workforce Analytics ---------------
+// A single read-only summary, the same "one dashboard-shaped aggregate
+// query set, not a generic reporting engine" scope
+// `OrganizationCommandCenterService.getSummary()` already established for
+// Organization Management's own integrity dashboard. Every count/group
+// below is scoped to ACTIVE (non-terminated) employees except
+// `terminationsLast90Days` itself, which is exactly the opposite by
+// definition.
+export type EmployeeHeadcountBreakdown = {
+  key: string;
+  count: number;
+};
+
+export type EmployeeAnalyticsSummary = {
+  generatedAt: string;
+  totalActiveEmployees: number;
+  headcountByDepartment: EmployeeHeadcountBreakdown[];
+  headcountByEmploymentType: EmployeeHeadcountBreakdown[];
+  genderBreakdown: EmployeeHeadcountBreakdown[];
+  /** `null` when no active employee has a `dateOfJoining` set at all
+   * (nothing to average) rather than `0`, which would misleadingly read
+   * as "everyone joined today." */
+  averageTenureYears: number | null;
+  terminationsLast90Days: number;
+  /** Phase 7's Important Dates card (`joining`/`confirmation`/
+   * `probation_end`/`contract_end`/`document_expiry`) due in the next 30
+   * days — the same "surface it, don't silently let it lapse" purpose
+   * that card's own migration doc comment describes. */
+  upcomingImportantDatesNext30Days: number;
+  /** Phase 9's Assets card — how many `employee_assets` rows are
+   * currently `assigned` (not yet `returned`) company-wide. */
+  assetsCurrentlyAssigned: number;
 };
 
 // --- Phase 8: Employee Groups & Leave Policy Config -------------------

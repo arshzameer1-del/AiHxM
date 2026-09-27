@@ -1369,6 +1369,14 @@ export const api = {
   linkLegacyManagerRelationship: (employeeId: string) =>
     request<void>(`/organization/legacy-reconciliation/${employeeId}/link-manager-relationship`, { method: "POST" }),
 
+  // Core Employee Enterprise Phase 11 — the designation<->position gap
+  // `LegacyReconciliationService`'s own header comment describes.
+  linkLegacyPosition: (employeeId: string, positionId: string) =>
+    request<void>(`/organization/legacy-reconciliation/${employeeId}/link-position`, {
+      method: "POST",
+      body: JSON.stringify({ positionId }),
+    }),
+
   // --- Employee Groups & Leave Policies (Task #49) --------------------------
   // Admin Center's own screen for the Phase 8 resolver: the API already
   // decides who matches which group and which policy wins (most-specific

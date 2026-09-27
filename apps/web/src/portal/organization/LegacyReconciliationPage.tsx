@@ -16,6 +16,7 @@ const GAP_LABELS: Record<LegacyReconciliationGap["gapType"], string> = {
   department: "Department",
   location: "Location",
   manager: "Manager",
+  designation: "Designation",
 };
 
 /** One gap's own fix control — a row of suggestion buttons for
@@ -66,9 +67,11 @@ function GapRow({
                 key={s.id}
                 disabled={busy || !canManage}
                 onClick={() =>
-                  run(() =>
-                    gap.gapType === "department" ? api.linkLegacyOrgUnit(employeeId, s.id) : api.linkLegacyLocation(employeeId, s.id)
-                  )
+                  run(() => {
+                    if (gap.gapType === "department") return api.linkLegacyOrgUnit(employeeId, s.id);
+                    if (gap.gapType === "location") return api.linkLegacyLocation(employeeId, s.id);
+                    return api.linkLegacyPosition(employeeId, s.id);
+                  })
                 }
                 title={canManage ? undefined : "Requires HR Admin"}
                 className="bg-accent/10 text-accent rounded-full px-2.5 py-1 text-xs font-semibold hover:bg-accent/20 disabled:opacity-50"
@@ -79,7 +82,8 @@ function GapRow({
           </div>
         ) : (
           <div className="text-xs text-label-tertiary mt-1">
-            No matching {gap.gapType === "department" ? "org unit" : "location"} found — create one first.
+            No matching {gap.gapType === "department" ? "org unit" : gap.gapType === "location" ? "location" : "vacant position"} found —
+            create one first.
           </div>
         )
       ) : (
@@ -157,15 +161,15 @@ export function LegacyReconciliationPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Legacy Data Reconciliation</h1>
         <p className="text-sm text-label-tertiary mt-1">
-          Employees still carrying free-text department, location, or manager values with no canonical record linked behind
-          them. Pick a match to link it — the legacy text stays in sync automatically once linked.
+          Employees still carrying free-text department, location, designation, or manager values with no canonical record
+          linked behind them. Pick a match to link it — the legacy text stays in sync automatically once linked.
         </p>
       </div>
 
       {employees.length === 0 ? (
         <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-tertiary">
-          Nothing to reconcile — every active employee's department, location, and manager are already linked to a
-          canonical record.
+          Nothing to reconcile — every active employee's department, location, designation, and manager are already linked
+          to a canonical record.
         </div>
       ) : (
         <div className="space-y-3">
