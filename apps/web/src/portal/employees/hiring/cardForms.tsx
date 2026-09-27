@@ -1,4 +1,4 @@
-import type { CostCenterView, EmployeeView, LocationView, OrgUnitView, PositionView, ShiftView } from "@aihxm/shared-types";
+import type { CostCenterView, EmployeeView, HrReferenceCatalogItemView, LocationView, OrgUnitView, PositionView, ShiftView } from "@aihxm/shared-types";
 import { FieldInput, type SubEntityFieldSpec } from "../subentities/SubEntityPanel";
 
 /**
@@ -27,6 +27,10 @@ export type HiringPickerOptions = {
   colleagues: EmployeeView[];
   shifts: ShiftView[];
   positions: PositionView[];
+  /** HR Administration v2 (2026-09-27) — this company's own `employment_type`
+   * catalog items (active only). Empty on a load failure, in which case the
+   * Employment type dropdown below falls back to the old hardcoded list. */
+  employmentTypes: HrReferenceCatalogItemView[];
 };
 
 export type CardFormProps = {
@@ -175,7 +179,12 @@ function PersonalIdentityForm({ data, onChange }: CardFormProps) {
   );
 }
 
-const EMPLOYMENT_TYPES = ["permanent", "contract", "probation", "intern"];
+// HR Administration v2 (2026-09-27) — fallback only, used when this
+// company's `employment_type` catalog (`options.employmentTypes`, fetched
+// by HiringWizardPage.tsx) hasn't loaded or came back empty. The catalog
+// is otherwise the source of truth, so a tenant that edits its employment
+// types in HR Administration sees that change here without a code change.
+const FALLBACK_EMPLOYMENT_TYPES = ["permanent", "contract", "probation", "intern"];
 
 // kumail's own feedback on the live wizard (2026-09-27) — Employment and
 // Organization Assignment read as two separate steps for information that,
@@ -260,11 +269,17 @@ function OrganizationAssignmentForm({ data, onChange, options }: CardFormProps) 
       <Labeled label="Employment type">
         <select value={str(data, "employmentType")} onChange={(e) => set(data, onChange, "employmentType", e.target.value)} className={`${inputClass()} capitalize`}>
           <option value="">Select…</option>
-          {EMPLOYMENT_TYPES.map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
-          ))}
+          {options.employmentTypes.length > 0
+            ? options.employmentTypes.map((t) => (
+                <option key={t.code} value={t.code}>
+                  {t.label}
+                </option>
+              ))
+            : FALLBACK_EMPLOYMENT_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
         </select>
       </Labeled>
       <Labeled label="Date of joining">

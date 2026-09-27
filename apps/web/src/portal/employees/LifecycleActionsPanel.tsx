@@ -1,5 +1,5 @@
 import { FormEvent, ReactNode, useEffect, useState } from "react";
-import type { EmployeeView, LocationView, OrgUnitView } from "@aihxm/shared-types";
+import type { EmployeeView, HrReferenceCatalogItemView, LocationView, OrgUnitView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 
 /**
@@ -35,6 +35,25 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+// HR Administration v2 (2026-09-27) — the same `LIFECYCLE_EVENT_REASON_CATALOG`
+// mapping `catalog-type-registry.ts` defines server-side
+// (`EmployeeLifecycleService.execute()` validates against it), kept here so
+// each action's form knows which `lifecycle_reason:*` catalog to offer as a
+// dropdown. `reactivate` maps to `return_from_leave` — the closest existing
+// fit, the same judgment call the backend registry's own comment notes;
+// there is no dedicated "reactivation" catalog in this phase.
+const REASON_CATALOG_BY_ACTION: Record<ActionKey, string> = {
+  transfer: "lifecycle_reason:transfer",
+  promote: "lifecycle_reason:promotion",
+  demote: "lifecycle_reason:demotion",
+  second: "lifecycle_reason:secondment",
+  act: "lifecycle_reason:acting_assignment",
+  "change-manager": "lifecycle_reason:manager_change",
+  "change-location": "lifecycle_reason:location_change",
+  terminate: "lifecycle_reason:termination",
+  reactivate: "lifecycle_reason:return_from_leave",
+};
+
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>
@@ -63,7 +82,6 @@ export function LifecycleActionsPanel({
     api.listOrgUnits().then(setOrgUnits).catch(() => setOrgUnits([]));
     api.listLocations().then(setLocations).catch(() => setLocations([]));
     api.listEmployees().then((rows) => setColleagues(rows.filter((r) => r.id !== employee.id))).catch(() => setColleagues([]));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employee.id]);
 
   if (employee.employmentStatus === "terminated") {
@@ -176,10 +194,25 @@ function ActionForm({
   const [effectiveDate, setEffectiveDate] = useState(todayIso());
   const [endDate, setEndDate] = useState(todayIso());
   const [terminationDate, setTerminationDate] = useState(todayIso());
-  const [terminationReason, setTerminationReason] = useState("");
+  const [reasonCode, setReasonCode] = useState("");
+  const [reasonOptions, setReasonOptions] = useState<HrReferenceCatalogItemView[]>([]);
   const [notes, setNotes] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // HR Administration v2 — each action's reason dropdown is sourced from
+  // this company's own matching `lifecycle_reason:*` catalog (managed in
+  // HR Administration), refetched whenever the open action changes.
+  // Resets the previously-picked code, too — a code from "Transfer"'s
+  // catalog has no meaning once the panel switches to "Promote".
+  useEffect(() => {
+    setReasonCode("");
+    setReasonOptions([]);
+    api
+      .listHrCatalogItems(REASON_CATALOG_BY_ACTION[actionKey])
+      .then(setReasonOptions)
+      .catch(() => setReasonOptions([]));
+  }, [actionKey]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -193,6 +226,7 @@ function ActionForm({
             orgUnitId: orgUnitId || undefined,
             locationId: locationId || undefined,
             effectiveDate,
+            reasonCode: reasonCode || undefined,
             notes: notes || undefined,
           });
           break;
@@ -201,6 +235,7 @@ function ActionForm({
             designation,
             salaryBand: salaryBand || undefined,
             effectiveDate,
+            reasonCode: reasonCode || undefined,
             notes: notes || undefined,
           });
           break;
@@ -209,6 +244,7 @@ function ActionForm({
             designation,
             salaryBand: salaryBand || undefined,
             effectiveDate,
+            reasonCode: reasonCode || undefined,
             notes: notes || undefined,
           });
           break;
@@ -219,6 +255,7 @@ function ActionForm({
             locationId: locationId || undefined,
             effectiveDate,
             endDate,
+            reasonCode: reasonCode || undefined,
             notes: notes || undefined,
           });
           break;
@@ -228,24 +265,45 @@ function ActionForm({
             orgUnitId: orgUnitId || undefined,
             effectiveDate,
             endDate,
+            reasonCode: reasonCode || undefined,
             notes: notes || undefined,
           });
           break;
         case "change-manager":
-          result = await api.changeEmployeeManager(employee.id, { managerId, effectiveDate, notes: notes || undefined });
+          result = await api.changeEmployeeManager(employee.id, {
+            managerId,
+            effectiveDate,
+            reasonCode: reasonCode || undefined,
+            notes: notes || undefined,
+          });
           break;
         case "change-location":
-          result = await api.changeEmployeeLocation(employee.id, { locationId, effectiveDate, notes: notes || undefined });
+          result = await api.changeEmployeeLocation(employee.id, {
+            locationId,
+            effectiveDate,
+            reasonCode: reasonCode || undefined,
+            notes: notes || undefined,
+          });
           break;
         case "terminate":
           result = await api.terminateEmployeeLifecycle(employee.id, {
             terminationDate,
-            terminationReason: terminationReason || undefined,
+            // Upgraded from a free-text field to the `lifecycle_reason:
+            // termination` catalog dropdown (HR Administration v2) —
+            // `terminationReason` is still sent, filled from the picked
+            // item's own label, so the human-readable text this field
+            // already surfaced elsewhere keeps working unchanged.
+            terminationReason: reasonOptions.find((r) => r.code === reasonCode)?.label || undefined,
+            reasonCode: reasonCode || undefined,
             notes: notes || undefined,
           });
           break;
         case "reactivate":
-          result = await api.reactivateEmployee(employee.id, { effectiveDate, notes: notes || undefined });
+          result = await api.reactivateEmployee(employee.id, {
+            effectiveDate,
+            reasonCode: reasonCode || undefined,
+            notes: notes || undefined,
+          });
           break;
       }
       onChanged(result.employee);
@@ -325,11 +383,22 @@ function ActionForm({
             <input type="date" required value={endDate} onChange={(e) => setEndDate(e.target.value)} className={inputClass} />
           </Field>
         )}
-        {actionKey === "terminate" && (
-          <Field label="Reason">
-            <input value={terminationReason} onChange={(e) => setTerminationReason(e.target.value)} className={inputClass} placeholder="optional" />
-          </Field>
-        )}
+        {/* HR Administration v2 — sourced from this action's own
+          `lifecycle_reason:*` catalog (HR Administration), instead of
+          terminate's old free-text field. Optional (EmployeeLifecycleService
+          only validates a reasonCode when one is actually supplied), so an
+          empty catalog for this type just means an empty dropdown, not a
+          blocked submission. */}
+        <Field label="Reason">
+          <select value={reasonCode} onChange={(e) => setReasonCode(e.target.value)} className={inputClass}>
+            <option value="">{reasonOptions.length > 0 ? "Select…" : "— none available —"}</option>
+            {reasonOptions.map((r) => (
+              <option key={r.code} value={r.code}>
+                {r.label}
+              </option>
+            ))}
+          </select>
+        </Field>
         <div className="col-span-2">
           <Field label="Notes">
             <input value={notes} onChange={(e) => setNotes(e.target.value)} className={inputClass} placeholder="optional" />

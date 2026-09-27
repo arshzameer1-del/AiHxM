@@ -34,6 +34,7 @@ import { WebhooksModule } from "../webhooks/webhooks.module";
 import { ShiftsModule } from "../shifts/shifts.module";
 import { PayrollModule } from "../payroll/payroll.module";
 import { ImportExportModule } from "../import-export/import-export.module";
+import { HrAdministrationModule } from "../hr-administration/hr-administration.module";
 
 @Module({
   // Phase 3 item #4 — WebhooksModule is deliberately slim (exports only
@@ -53,7 +54,21 @@ import { ImportExportModule } from "../import-export/import-export.module";
   // EffectiveDatingModule only), so importing it here for
   // PayrollService.setCompensationWithinTransaction() is not circular
   // either.
-  imports: [RbacModule, EntitlementsModule, AuditModule, FileStorageModule, WebhooksModule, ShiftsModule, PayrollModule, ImportExportModule],
+  // HR Administration v2 — HrAdministrationModule imports nothing of
+  // EmployeesModule's own (see its own doc comment), so importing it here
+  // for EmployeesService/EmployeeLifecycleService's `employment_type`/
+  // `lifecycle_reason:*` validation is not circular either.
+  imports: [
+    RbacModule,
+    EntitlementsModule,
+    AuditModule,
+    FileStorageModule,
+    WebhooksModule,
+    ShiftsModule,
+    PayrollModule,
+    ImportExportModule,
+    HrAdministrationModule,
+  ],
   // Core Employee Enterprise Phase 2/3 — HiringController (the hire
   // process engine) and HiringConfigurationController (Phase 3's scoped
   // Configuration Center admin surface) live here, not their own module,

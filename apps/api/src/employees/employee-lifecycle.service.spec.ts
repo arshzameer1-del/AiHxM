@@ -8,6 +8,7 @@ import { AuditService } from "../audit/audit.service";
 import { LocalFileStorageService } from "../file-storage/local-file-storage.service";
 import { EmployeesService } from "./employees.service";
 import { EmployeeLifecycleService } from "./employee-lifecycle.service";
+import { HrReferenceCatalogService } from "../hr-administration/hr-reference-catalog.service";
 
 const FIXTURE_CLAIMS: RequestClaims = { is_platform_admin: true, company_id: null, sub: "lifecycle-spec-fixtures" };
 
@@ -294,5 +295,71 @@ describe("EmployeeLifecycleService", () => {
     await expect(
       lifecycle.transfer(noPermissionClaims, employeeId, { effectiveDate: "2026-10-01" })
     ).rejects.toThrow(ForbiddenException);
+  });
+
+  describe("reasonCode validation against the HR Administration catalog (v2, 2026-09-27)", () => {
+    // A SEPARATE EmployeeLifecycleService instance, wired with a real
+    // HrReferenceCatalogService — the top-level `lifecycle` instance above
+    // deliberately omits it (undefined, same optional shape as
+    // `webhooks?`), so every test above keeps exercising the
+    // no-catalog-wired path unchanged.
+    let lifecycleWithCatalog: EmployeeLifecycleService;
+
+    beforeAll(() => {
+      const rbac = new RbacService(db);
+      const entitlements = new EntitlementsService(db);
+      const audit = new AuditService();
+      const hrCatalog = new HrReferenceCatalogService(db, rbac, entitlements, audit);
+      lifecycleWithCatalog = new EmployeeLifecycleService(db, rbac, entitlements, audit, undefined, hrCatalog);
+    });
+
+    it("accepts a seeded default reason code and records it on the job history row", async () => {
+      const employeeId = await createEmployee();
+      const result = await lifecycleWithCatalog.transfer(hrAdminClaims, employeeId, {
+        orgUnitId: orgUnitBId,
+        effectiveDate: "2026-10-01",
+        reasonCode: "business_need",
+      });
+      expect(result.jobHistory.reasonCode).toBe("business_need");
+    });
+
+    it("rejects a reason code that isn't an active item in that transaction's mapped catalog", async () => {
+      const employeeId = await createEmployee();
+      await expect(
+        lifecycleWithCatalog.transfer(hrAdminClaims, employeeId, {
+          orgUnitId: orgUnitBId,
+          effectiveDate: "2026-10-01",
+          reasonCode: "not_a_real_reason",
+        })
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("terminate() and reactivate() each validate against their own mapped catalog", async () => {
+      const employeeId = await createEmployee();
+      await expect(
+        lifecycleWithCatalog.terminate(hrAdminClaims, employeeId, { terminationDate: "2026-10-01", reasonCode: "made_up" })
+      ).rejects.toThrow(BadRequestException);
+
+      const terminated = await lifecycleWithCatalog.terminate(hrAdminClaims, employeeId, {
+        terminationDate: "2026-10-01",
+        reasonCode: "resignation",
+      });
+      expect(terminated.jobHistory.reasonCode).toBe("resignation");
+
+      const reactivated = await lifecycleWithCatalog.reactivate(hrAdminClaims, employeeId, {
+        effectiveDate: "2026-11-01",
+        reasonCode: "leave_completed",
+      });
+      expect(reactivated.jobHistory.reasonCode).toBe("leave_completed");
+    });
+
+    it("leaves reasonCode null when none is supplied, exactly like before this phase", async () => {
+      const employeeId = await createEmployee();
+      const result = await lifecycleWithCatalog.transfer(hrAdminClaims, employeeId, {
+        orgUnitId: orgUnitBId,
+        effectiveDate: "2026-10-01",
+      });
+      expect(result.jobHistory.reasonCode).toBeNull();
+    });
   });
 });

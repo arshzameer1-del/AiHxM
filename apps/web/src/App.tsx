@@ -201,6 +201,14 @@ const ConfigurationCenterPage = lazy(() =>
     default: m.ConfigurationCenterPage,
   })),
 );
+// HR Administration v2 (2026-09-27) — the reference/lookup-data workspace
+// ("first 1" of kumail's "first 1 then 2"). See
+// claude/core-employee-configuration-hr-admin-v2-gap-analysis-and-roadmap.md.
+const HrAdministrationPage = lazy(() =>
+  import("./portal/hr-administration/HrAdministrationPage").then((m) => ({
+    default: m.HrAdministrationPage,
+  })),
+);
 const LeavePage = lazy(() =>
   import("./portal/leave/LeavePage").then((m) => ({ default: m.LeavePage })),
 );
@@ -390,6 +398,14 @@ export default function App() {
                     employee_group.manage/leave_policy.manage gates are the
                     real one, same split every portal screen follows. */}
                   <Route path="admin" element={<AdminCenterPage />} />
+                  {/* HR Administration v2 — the reference-catalog workspace
+                    (employment types, lifecycle reason catalogs).
+                    hr_admin-only in PortalLayout's nav (a courtesy);
+                    hr_reference_catalog.manage.all/.view.all are the real
+                    gates, enforced server-side in
+                    HrReferenceCatalogService, same split as every other
+                    route here. */}
+                  <Route path="hr-administration" element={<HrAdministrationPage />} />
                   {/* Foundation gap — Configuration Center. A read-only
                     index over the config domains above plus Payroll's tax
                     slabs and System Admin's workflow templates;

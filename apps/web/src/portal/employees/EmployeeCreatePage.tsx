@@ -1,9 +1,13 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import type { EmployeeView, EmploymentType } from "@aihxm/shared-types";
+import type { EmployeeView, EmploymentType, HrReferenceCatalogItemView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 
-const EMPLOYMENT_TYPES: EmploymentType[] = ["permanent", "contract", "probation", "intern"];
+// HR Administration v2 (2026-09-27) — fallback only, used until this
+// company's own `employment_type` catalog loads (or if it comes back
+// empty/errored). See HrAdministrationPage.tsx for where a tenant now
+// manages this list themselves.
+const FALLBACK_EMPLOYMENT_TYPES: EmploymentType[] = ["permanent", "contract", "probation", "intern"];
 
 export function EmployeeCreatePage() {
   const navigate = useNavigate();
@@ -18,6 +22,7 @@ export function EmployeeCreatePage() {
   const [managerId, setManagerId] = useState("");
   const [dateOfJoining, setDateOfJoining] = useState("");
   const [managers, setManagers] = useState<EmployeeView[]>([]);
+  const [employmentTypes, setEmploymentTypes] = useState<HrReferenceCatalogItemView[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -29,7 +34,25 @@ export function EmployeeCreatePage() {
       // A failed manager-list fetch shouldn't block creating an employee
       // with no manager set — the dropdown just stays empty.
     });
+    // HR Administration v2 — Employment type is this company's own
+    // `employment_type` reference catalog, not a hardcoded list; falls
+    // back to FALLBACK_EMPLOYMENT_TYPES below on any error.
+    api.listHrCatalogItems("employment_type").then(setEmploymentTypes).catch(() => {
+      // Falls through to the hardcoded fallback list below.
+    });
   }, []);
+
+  // If this company's catalog doesn't include the default "permanent"
+  // code (renamed or removed in HR Administration), fall the selection
+  // forward to whatever the catalog actually offers instead of silently
+  // submitting a code this tenant no longer has active.
+  useEffect(() => {
+    if (employmentTypes.length === 0) return;
+    if (!employmentTypes.some((t) => t.code === employmentType)) {
+      setEmploymentType(employmentTypes[0].code);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employmentTypes]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -145,11 +168,17 @@ export function EmployeeCreatePage() {
                 onChange={(e) => setEmploymentType(e.target.value as EmploymentType)}
                 className="w-full rounded-lg border border-black/10 px-3 py-2 capitalize focus:outline-none focus:ring-2 focus:ring-accent"
               >
-                {EMPLOYMENT_TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
+                {employmentTypes.length > 0
+                  ? employmentTypes.map((t) => (
+                      <option key={t.code} value={t.code}>
+                        {t.label}
+                      </option>
+                    ))
+                  : FALLBACK_EMPLOYMENT_TYPES.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
               </select>
             </div>
             <div>

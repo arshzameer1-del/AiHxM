@@ -13,6 +13,7 @@ import { ImportExportService } from "../import-export/import-export.service";
 import { PersonsService } from "./persons.service";
 import { formatEmployeeNumber, parseEmployeeNumberSequence } from "./employee-number.util";
 import { listFieldSensitivity, restrictedFieldsExposed } from "./employee-field-sensitivity";
+import { HrReferenceCatalogService } from "../hr-administration/hr-reference-catalog.service";
 import type {
   CreateEmployeeRequest,
   CsvImportResult,
@@ -231,8 +232,28 @@ export class EmployeesService {
     // not a stub, and every existing spec file that hand-constructs
     // `EmployeesService` with fewer than 8 positional arguments keeps
     // working unchanged.
-    private readonly importExport: ImportExportService = new ImportExportService()
+    private readonly importExport: ImportExportService = new ImportExportService(),
+    // HR Administration v2 (2026-09-27) — same `webhooks?` optional
+    // reasoning: a large number of unrelated spec files hand-construct
+    // EmployeesService directly and have nothing to do with catalog
+    // validation. `validateEmploymentType()` below no-ops when this is
+    // undefined, the same way `webhooks?.enqueue()` no-ops — every real
+    // caller (NestJS's DI container, EmployeesModule -> HrAdministrationModule)
+    // always gets a real instance.
+    private readonly hrCatalog?: HrReferenceCatalogService
   ) {}
+
+  /** `employment_type` used to be a hardcoded 4-value `CHECK` constraint
+   * (0090_hr_administration_reference_catalog.sql dropped it); this is the
+   * data-driven replacement — validates against the calling company's own
+   * active `employment_type` HR Administration catalog items. No-ops when
+   * `employmentType` is not supplied (the caller is leaving it unchanged
+   * or accepting the 'permanent' default) or when `hrCatalog` itself is
+   * unavailable (see the constructor's own comment). */
+  private async validateEmploymentType(client: PoolClient, companyId: string, employmentType: string | null | undefined): Promise<void> {
+    if (!employmentType || !this.hrCatalog) return;
+    await this.hrCatalog.validateActiveCode(client, companyId, "employment_type", employmentType);
+  }
 
   async create(claims: RequestClaims, input: CreateEmployeeRequest): Promise<EmployeeView> {
     await this.requireModuleAndManagePermission(claims);
@@ -260,6 +281,7 @@ export class EmployeesService {
    * reaching this method, so this method itself does not re-check them.
    */
   async createWithinTransaction(client: PoolClient, claims: RequestClaims, input: CreateEmployeeRequest): Promise<EmployeeView> {
+      await this.validateEmploymentType(client, claims.company_id!, input.employmentType);
       const employeeNumber = await this.assignEmployeeNumber(client, claims.company_id!, input.employeeNumber);
       const department = await this.resolveDepartment(client, claims.company_id!, input.orgUnitId, input.department);
       const location = await this.resolveLocation(client, claims.company_id!, input.locationId, input.location);
@@ -522,6 +544,8 @@ export class EmployeesService {
       if (patch.employmentStatus === "terminated" && !patch.terminationDate && !before.termination_date) {
         throw new BadRequestException("terminationDate is required when setting employmentStatus to terminated");
       }
+
+      await this.validateEmploymentType(client, claims.company_id!, patch.employmentType);
 
       const nextOrgUnitId = patch.orgUnitId ?? before.org_unit_id;
       // Organization Management Phase 1: whenever an org unit is linked

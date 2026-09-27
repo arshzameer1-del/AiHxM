@@ -6,6 +6,8 @@ import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
 import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
+import { HrReferenceCatalogService } from "../hr-administration/hr-reference-catalog.service";
+import { LIFECYCLE_EVENT_REASON_CATALOG } from "../hr-administration/catalog-type-registry";
 import type {
   AssignActingRoleRequest,
   ChangeEmployeeLocationRequest,
@@ -73,6 +75,7 @@ function rowToJobHistory(row: any): JobHistoryEntryView {
     notes: row.notes,
     createdAt: row.created_at?.toISOString ? row.created_at.toISOString() : row.created_at,
     endDate: toIsoDate(row.end_date),
+    reasonCode: row.reason_code,
   };
 }
 
@@ -132,7 +135,12 @@ export class EmployeeLifecycleService {
     // `webhooks?` — a large number of unrelated spec files may one day
     // hand-construct this service directly; NestJS's real DI container
     // always supplies a real instance in production and in every e2e test.
-    private readonly webhooks?: WebhookDispatchService
+    private readonly webhooks?: WebhookDispatchService,
+    // HR Administration v2 (2026-09-27) — same optional reasoning as
+    // `webhooks?` immediately above. `execute()` no-ops the reason-code
+    // validation when this is undefined, matching the pattern
+    // EmployeesService.validateEmploymentType() already established.
+    private readonly hrCatalog?: HrReferenceCatalogService
   ) {}
 
   async transfer(claims: RequestClaims, employeeId: string, input: TransferEmployeeRequest): Promise<LifecycleTransactionResult> {
@@ -279,7 +287,7 @@ export class EmployeeLifecycleService {
     claims: RequestClaims,
     employeeId: string,
     eventType: JobHistoryEventType,
-    input: { effectiveDate: string; notes?: string },
+    input: { effectiveDate: string; notes?: string; reasonCode?: string },
     build: (
       client: PoolClient,
       companyId: string,
@@ -301,6 +309,16 @@ export class EmployeeLifecycleService {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const before = current.rows[0] as any;
 
+      // HR Administration v2 — validate the supplied reason code (if any)
+      // against this transaction type's mapped `lifecycle_reason:*`
+      // catalog (LIFECYCLE_EVENT_REASON_CATALOG) before touching
+      // `employees` at all, the same "validate before you mutate" order
+      // every other check in this method already follows.
+      const reasonCatalogType = LIFECYCLE_EVENT_REASON_CATALOG[eventType];
+      if (input.reasonCode && reasonCatalogType) {
+        await this.hrCatalog?.validateActiveCode(client, companyId, reasonCatalogType, input.reasonCode);
+      }
+
       const built = await build(client, companyId, before);
 
       const updateResult = await client.query(
@@ -311,8 +329,8 @@ export class EmployeeLifecycleService {
 
       const historyResult = await client.query(
         `INSERT INTO employee_job_history
-           (company_id, employee_id, event_type, effective_date, department, designation, salary_band, notes, recorded_by_user_account_id, end_date)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+           (company_id, employee_id, event_type, effective_date, department, designation, salary_band, notes, recorded_by_user_account_id, end_date, reason_code)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          RETURNING *`,
         [
           companyId,
@@ -325,6 +343,7 @@ export class EmployeeLifecycleService {
           input.notes ?? null,
           claims.sub,
           built.endDate ?? null,
+          input.reasonCode ?? null,
         ]
       );
 
@@ -332,7 +351,7 @@ export class EmployeeLifecycleService {
         companyId,
         action: `employee.lifecycle.${eventType}`,
         target: employeeId,
-        metadata: { effectiveDate: input.effectiveDate, notes: input.notes ?? null },
+        metadata: { effectiveDate: input.effectiveDate, notes: input.notes ?? null, reasonCode: input.reasonCode ?? null },
       });
 
       const employee = rowToEmployee(after);

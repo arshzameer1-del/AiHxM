@@ -1598,7 +1598,20 @@ export type EmploymentStatus = "active" | "on_leave" | "terminated";
 // "location" and "employment type" as attributes a tenant would group
 // employees by) — a real employee attribute, not scaffolding invented only
 // to make Employee Groups have something to condition on.
-export type EmploymentType = "permanent" | "contract" | "probation" | "intern";
+//
+// Widened from a 4-value literal union to `string` as part of HR
+// Administration v2 (2026-09-27): `employment_type` used to be a
+// hardcoded `CHECK` constraint on `employees` (exactly these 4 values,
+// enforceable only by a migration) — the v2 spec's Section 38 explicitly
+// lists "tenant-specific requiredness" among what must never be
+// hard-coded. It's now a tenant-editable `hr_reference_catalog_items`
+// catalog (seeded with these same 4 values so no existing data changes
+// meaning), validated at the service layer instead of the database, so
+// the type can no longer promise a closed set. `permanent`/`contract`/
+// `probation`/`intern` remain every existing tenant's seeded starting
+// values — this comment is not a lie, just no longer enforced by the
+// compiler.
+export type EmploymentType = string;
 
 export type EmployeeView = {
   id: string;
@@ -2157,6 +2170,11 @@ export type JobHistoryEntryView = {
   // Phase 10 — set only for 'secondment'/'acting' rows (both temporary by
   // nature); null for every other event type.
   endDate?: string | null;
+  // HR Administration v2 — the selected `hr_reference_catalog_items.code`
+  // for this transaction's mapped `lifecycle_reason:*` catalog, when one
+  // was supplied. Null for older rows (the column is additive) and for
+  // any call that didn't supply a reason.
+  reasonCode?: string | null;
 };
 
 export type RecordJobHistoryRequest = {
@@ -2176,12 +2194,20 @@ export type RecordJobHistoryRequest = {
 // exactly rather than a guess — see EmployeeLifecycleService's own class
 // doc comment.
 
+// HR Administration v2 — every request below also accepts an optional
+// `reasonCode`, validated by EmployeeLifecycleService against that
+// transaction's mapped `lifecycle_reason:*` HR Administration catalog
+// (HrReferenceCatalogService) when supplied, and stored on the resulting
+// `employee_job_history` row. Optional and additive: a caller that omits
+// it behaves exactly as before this phase.
+
 export type TransferEmployeeRequest = {
   orgUnitId?: string;
   department?: string;
   locationId?: string;
   location?: string;
   effectiveDate: string;
+  reasonCode?: string;
   notes?: string;
 };
 
@@ -2189,6 +2215,7 @@ export type PromoteEmployeeRequest = {
   designation: string;
   salaryBand?: string;
   effectiveDate: string;
+  reasonCode?: string;
   notes?: string;
 };
 
@@ -2196,6 +2223,7 @@ export type DemoteEmployeeRequest = {
   designation: string;
   salaryBand?: string;
   effectiveDate: string;
+  reasonCode?: string;
   notes?: string;
 };
 
@@ -2211,6 +2239,7 @@ export type SecondEmployeeRequest = {
   location?: string;
   effectiveDate: string;
   endDate: string;
+  reasonCode?: string;
   notes?: string;
 };
 
@@ -2220,35 +2249,87 @@ export type AssignActingRoleRequest = {
   department?: string;
   effectiveDate: string;
   endDate: string;
+  reasonCode?: string;
   notes?: string;
 };
 
 export type ChangeEmployeeManagerRequest = {
   managerId: string;
   effectiveDate: string;
+  reasonCode?: string;
   notes?: string;
 };
 
 export type ChangeEmployeeLocationRequest = {
   locationId: string;
   effectiveDate: string;
+  reasonCode?: string;
   notes?: string;
 };
 
 export type TerminateEmployeeRequest = {
   terminationDate: string;
   terminationReason?: string;
+  reasonCode?: string;
   notes?: string;
 };
 
 export type ReactivateEmployeeRequest = {
   effectiveDate: string;
+  reasonCode?: string;
   notes?: string;
 };
 
 export type LifecycleTransactionResult = {
   employee: EmployeeView;
   jobHistory: JobHistoryEntryView;
+};
+
+// --- HR Administration Reference Catalog (Core Employee Configuration/
+// HR-Admin v2, 2026-09-27) ------------------------------------------------
+// See `hr-administration/catalog-type-registry.ts` on the API side for the
+// full list of registered `catalogType` values (currently `employment_type`
+// plus 19 `lifecycle_reason:*` types from spec Section 6.2) and their
+// group/display labels — deliberately not duplicated as a literal union
+// here, the same reasoning as `EmploymentType` above: new catalog types are
+// meant to be added to that registry alone, without a shared-types change.
+
+export type HrReferenceCatalogItemView = {
+  id: string;
+  companyId: string;
+  catalogType: string;
+  code: string;
+  label: string;
+  description: string | null;
+  sortOrder: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type HrReferenceCatalogTypeSummary = {
+  catalogType: string;
+  groupLabel: string;
+  label: string;
+  description: string;
+  activeCount: number;
+};
+
+export type CreateHrReferenceCatalogItemRequest = {
+  catalogType: string;
+  code: string;
+  label: string;
+  description?: string;
+};
+
+export type UpdateHrReferenceCatalogItemRequest = {
+  label?: string;
+  description?: string;
+  isActive?: boolean;
+};
+
+export type ReorderHrReferenceCatalogItemsRequest = {
+  orderedIds: string[];
 };
 
 // --- Core Employee Enterprise Phase 11: Sensitivity Tier Classification ---

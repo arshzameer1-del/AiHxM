@@ -13,6 +13,7 @@ import {
   Briefcase,
   Target,
   Wallet,
+  BookOpenCheck,
 } from "lucide-react";
 import type { ModuleKey, PublicTenantBranding, TenantRoleKey } from "@aihxm/shared-types";
 import { api, publicTenantBrandingAssetUrl } from "../api/client";
@@ -145,6 +146,19 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): 
 
   if (hasRole("hr_admin")) {
     items.push({ to: "/app/admin", label: "Admin Center", icon: ShieldCheck });
+  }
+
+  // HR Administration v2 (2026-09-27) — the reference/lookup-data
+  // workspace (employment types, lifecycle reason catalogs), deliberately
+  // its own top-level entry rather than a tab under Configuration Center
+  // or Admin Center, per the v2 spec's own Section 7/19 split and
+  // kumail's own "configuration means fields controls, not maintenance"
+  // correction. `hr_reference_catalog.manage.all`/`.view.all` are both
+  // hr_admin-only (0090_hr_administration_reference_catalog.sql), so this
+  // is gated the same courtesy way as Admin Center/System Admin above —
+  // the real gate is server-side in HrReferenceCatalogService.
+  if (hasRole("hr_admin") && hasModule("employee")) {
+    items.push({ to: "/app/hr-administration", label: "HR Administration", icon: BookOpenCheck });
   }
 
   // Decision #20 — deliberately not module-gated: workflow/role

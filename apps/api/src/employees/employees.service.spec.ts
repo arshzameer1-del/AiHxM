@@ -9,6 +9,7 @@ import { LocalFileStorageService } from "../file-storage/local-file-storage.serv
 import { EmployeesService } from "./employees.service";
 import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
 import { IntegrationsService } from "../tenant-management/integrations.service";
+import { HrReferenceCatalogService } from "../hr-administration/hr-reference-catalog.service";
 
 const FIXTURE_CLAIMS: RequestClaims = { is_platform_admin: true, company_id: null, sub: "employees-spec-fixtures" };
 
@@ -225,6 +226,73 @@ describe("EmployeesService", () => {
       const other = await employees.create(hrAdminClaims, { firstName: "Wants", lastName: "TheCnic" });
 
       await expect(employees.update(hrAdminClaims, other.id, { cnic: cnicInUse })).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe("employment type validation against the HR Administration catalog (v2, 2026-09-27)", () => {
+    let companyId: string;
+    let hrAdminClaims: RequestClaims;
+    // A SEPARATE EmployeesService instance, wired with a real
+    // HrReferenceCatalogService — the top-level `employees` instance
+    // constructed in this file's own `beforeAll` deliberately omits it
+    // (undefined, the same optional-dependency shape `webhooks?` already
+    // has), so every other describe block above keeps testing the
+    // no-catalog-wired code path unchanged. This block is the one that
+    // actually proves `employment_type` is enforced end to end.
+    let employeesWithCatalog: EmployeesService;
+
+    beforeAll(async () => {
+      companyId = await createFixtureCompany("Employment Type Co");
+      const hrAdminUserId = await createUser(`employment-type-hr-${Date.now()}@example.com`);
+      await assignRole(hrAdminUserId, companyId, "hr_admin");
+      hrAdminClaims = { is_platform_admin: false, company_id: companyId, sub: hrAdminUserId };
+
+      const rbac = new RbacService(db);
+      const entitlements = new EntitlementsService(db);
+      const audit = new AuditService();
+      const hrCatalog = new HrReferenceCatalogService(db, rbac, entitlements, audit);
+      employeesWithCatalog = new EmployeesService(
+        db,
+        rbac,
+        entitlements,
+        audit,
+        new LocalFileStorageService(),
+        undefined,
+        undefined,
+        undefined,
+        hrCatalog
+      );
+    });
+
+    it("accepts a seeded default employment type on create", async () => {
+      const created = await employeesWithCatalog.create(hrAdminClaims, { firstName: "Valid", lastName: "Type", employmentType: "contract" });
+      expect(created.employmentType).toBe("contract");
+    });
+
+    it("rejects an employment type that isn't an active catalog item for this company", async () => {
+      await expect(
+        employeesWithCatalog.create(hrAdminClaims, { firstName: "Bad", lastName: "Type", employmentType: "made_up_type" })
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("accepts a company-added custom employment type once an hr_admin adds it to the catalog", async () => {
+      await db.withClaims(hrAdminClaims, (client) =>
+        client.query(
+          "INSERT INTO hr_reference_catalog_items (company_id, catalog_type, code, label, sort_order) VALUES ($1, 'employment_type', 'seasonal', 'Seasonal', 4)",
+          [companyId]
+        )
+      );
+      const created = await employeesWithCatalog.create(hrAdminClaims, { firstName: "Custom", lastName: "Type", employmentType: "seasonal" });
+      expect(created.employmentType).toBe("seasonal");
+    });
+
+    it("also validates employmentType on update()", async () => {
+      const created = await employeesWithCatalog.create(hrAdminClaims, { firstName: "Update", lastName: "Target" });
+      await expect(employeesWithCatalog.update(hrAdminClaims, created.id, { employmentType: "not_real" })).rejects.toThrow(
+        BadRequestException
+      );
+      const updated = await employeesWithCatalog.update(hrAdminClaims, created.id, { employmentType: "intern" });
+      expect(updated.employmentType).toBe("intern");
     });
   });
 

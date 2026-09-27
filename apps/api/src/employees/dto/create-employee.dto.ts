@@ -1,4 +1,4 @@
-import { IsDateString, IsIn, IsOptional, IsString, IsUUID, MinLength } from "class-validator";
+import { IsDateString, IsOptional, IsString, IsUUID, MaxLength, MinLength } from "class-validator";
 import type { EmploymentType } from "@aihxm/shared-types";
 
 export class CreateEmployeeDto {
@@ -60,8 +60,15 @@ export class CreateEmployeeDto {
   @IsUUID()
   locationId?: string;
 
+  // HR Administration v2 (2026-09-27) — no longer a hardcoded `@IsIn`.
+  // `EmployeesService.validateEmploymentType()` checks this against the
+  // company's own active `employment_type` HR Administration catalog
+  // instead (0090_hr_administration_reference_catalog.sql); a tenant may
+  // add codes beyond the seeded 4, so a static decorator list can no
+  // longer describe every valid value.
   @IsOptional()
-  @IsIn(["permanent", "contract", "probation", "intern"])
+  @IsString()
+  @MaxLength(100)
   employmentType?: EmploymentType;
 
   @IsOptional()

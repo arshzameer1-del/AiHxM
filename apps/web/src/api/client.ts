@@ -261,6 +261,17 @@ import type {
   CsvImportResult,
 } from "@aihxm/shared-types";
 
+// HR Administration reference-catalog engine (Core Employee Configuration/
+// HR-Admin v2, 2026-09-27) — kept as its own import block for the same
+// reason the Phase 2-12 catch-up above is: a single reviewable diff rather
+// than a scatter of insertions through the alphabetical block at the top.
+import type {
+  HrReferenceCatalogItemView,
+  HrReferenceCatalogTypeSummary,
+  CreateHrReferenceCatalogItemRequest,
+  UpdateHrReferenceCatalogItemRequest,
+} from "@aihxm/shared-types";
+
 const TOKEN_KEY = "aihxm.platformAdminToken";
 
 export function getToken(): string | null {
@@ -1659,6 +1670,31 @@ export const api = {
 
   resolvedPolicy: (employeeId: string, policyType: PolicyType = "leave") =>
     request<ResolvedPolicyView>(`/employees/${employeeId}/resolved-policy?policyType=${policyType}`),
+
+  // --- HR Administration reference catalog (Core Employee Configuration/
+  // HR-Admin v2, 2026-09-27) — the registry-driven engine behind
+  // `employment_type` and every `lifecycle_reason:*` value. Deliberately
+  // under `/hr-administration`, not `/configuration/...` — see
+  // `hr-reference-catalog.service.ts`'s own class doc comment on the API
+  // side for why the two stay separate.
+  listHrCatalogTypes: () => request<HrReferenceCatalogTypeSummary[]>("/hr-administration/reference-catalog/types"),
+
+  listHrCatalogItems: (catalogType: string, includeInactive = false) =>
+    request<HrReferenceCatalogItemView[]>(
+      `/hr-administration/reference-catalog/${encodeURIComponent(catalogType)}${includeInactive ? "?includeInactive=true" : ""}`
+    ),
+
+  createHrCatalogItem: (input: CreateHrReferenceCatalogItemRequest) =>
+    request<HrReferenceCatalogItemView>("/hr-administration/reference-catalog", { method: "POST", body: JSON.stringify(input) }),
+
+  updateHrCatalogItem: (id: string, patch: UpdateHrReferenceCatalogItemRequest) =>
+    request<HrReferenceCatalogItemView>(`/hr-administration/reference-catalog/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  reorderHrCatalogItems: (catalogType: string, orderedIds: string[]) =>
+    request<HrReferenceCatalogItemView[]>(`/hr-administration/reference-catalog/${encodeURIComponent(catalogType)}/reorder`, {
+      method: "PATCH",
+      body: JSON.stringify({ orderedIds }),
+    }),
 
   // --- Shift Management (0026_shift_management.sql) ---------------------
   listShifts: () => request<ShiftView[]>("/shifts"),

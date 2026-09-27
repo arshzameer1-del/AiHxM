@@ -39,6 +39,7 @@ import { PlatformBrandingModule } from "./platform-branding/platform-branding.mo
 import { DataSubjectRequestsModule } from "./data-subject-requests/data-subject-requests.module";
 import { SsoModule } from "./sso/sso.module";
 import { ScimModule } from "./scim/scim.module";
+import { HrAdministrationModule } from "./hr-administration/hr-administration.module";
 
 /**
  * Phase 2/3/4/5 root module: health check, the Platform Provisioning Panel
@@ -74,6 +75,7 @@ import { ScimModule } from "./scim/scim.module";
     ImportExportModule,
     FileStorageModule,
     OrganizationModule,
+    HrAdministrationModule,
     EmployeesModule,
     EmployeeGroupsModule,
     ShiftsModule,

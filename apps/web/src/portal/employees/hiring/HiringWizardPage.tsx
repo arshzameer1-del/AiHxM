@@ -5,6 +5,7 @@ import type {
   EmployeeView,
   HireProcessCardView,
   HireProcessView,
+  HrReferenceCatalogItemView,
   LocationView,
   OrgUnitView,
   PositionView,
@@ -169,16 +170,26 @@ export function HiringWizardPage() {
       // `assignEmployee()` rejects anything else), so there's no reason to
       // fetch filled/frozen/abolished ones here at all.
       api.listPositions({ status: "vacant" }).catch(() => []),
+      // HR Administration v2 (2026-09-27) — Employment type is now this
+      // company's own `employment_type` reference catalog rather than a
+      // hardcoded 4-value list, so a tenant that has added/renamed/retired
+      // a type in HR Administration sees exactly that here. Falls back to
+      // `[]` on any error (module not licensed, brand-new company whose
+      // catalog hasn't been read yet) — `cardForms.tsx`'s own dropdown
+      // falls back to the old hardcoded list when this comes back empty,
+      // so a failure here never leaves the field with no options at all.
+      api.listHrCatalogItems("employment_type").catch(() => []),
     ]).then(
-      ([orgUnits, locations, costCenters, colleagues, shifts, positions]: [
+      ([orgUnits, locations, costCenters, colleagues, shifts, positions, employmentTypes]: [
         OrgUnitView[],
         LocationView[],
         CostCenterView[],
         EmployeeView[],
         ShiftView[],
-        PositionView[]
+        PositionView[],
+        HrReferenceCatalogItemView[]
       ]) => {
-        setOptions({ orgUnits, locations, costCenters, colleagues, shifts, positions });
+        setOptions({ orgUnits, locations, costCenters, colleagues, shifts, positions, employmentTypes });
       }
     );
   }, []);

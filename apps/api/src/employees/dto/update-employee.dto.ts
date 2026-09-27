@@ -1,4 +1,4 @@
-import { IsDateString, IsIn, IsOptional, IsString, IsUUID } from "class-validator";
+import { IsDateString, IsIn, IsOptional, IsString, IsUUID, MaxLength } from "class-validator";
 import type { EmploymentStatus, EmploymentType } from "@aihxm/shared-types";
 
 export class UpdateEmployeeDto {
@@ -58,8 +58,11 @@ export class UpdateEmployeeDto {
   @IsUUID()
   locationId?: string;
 
+  // HR Administration v2 — see CreateEmployeeDto's own comment on why this
+  // is no longer a hardcoded `@IsIn`.
   @IsOptional()
-  @IsIn(["permanent", "contract", "probation", "intern"])
+  @IsString()
+  @MaxLength(100)
   employmentType?: EmploymentType;
 
   @IsOptional()
