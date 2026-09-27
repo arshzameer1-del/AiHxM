@@ -2,16 +2,23 @@ import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { WorkflowTemplatesPanel } from "./WorkflowTemplatesPanel";
 import { RolesAccessPanel } from "./RolesAccessPanel";
+import { AllConfigurationPanel } from "./AllConfigurationPanel";
 
-type Tab = "workflows" | "access";
+type Tab = "workflows" | "access" | "configuration";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "workflows", label: "Workflow Templates" },
   { key: "access", label: "Roles & Access" },
+  // kumail's own instruction (2026-09-27): "all the configuration please
+  // add in system admin with there specific tile" — see
+  // AllConfigurationPanel.tsx's own doc comment for why this is a
+  // deliberately different, always-visible list rather than Configuration
+  // Center's own permission-filtered one.
+  { key: "configuration", label: "Configuration" },
 ];
 
 // Configuration Center links here with ?tab=workflows (0032_configuration_center.sql).
-const VALID_TABS: Tab[] = ["workflows", "access"];
+const VALID_TABS: Tab[] = ["workflows", "access", "configuration"];
 function initialTabFrom(searchParams: URLSearchParams): Tab {
   const requested = searchParams.get("tab");
   return (VALID_TABS as string[]).includes(requested ?? "") ? (requested as Tab) : "workflows";
@@ -50,7 +57,9 @@ export function SystemAdminPage() {
         ))}
       </div>
 
-      {tab === "workflows" ? <WorkflowTemplatesPanel /> : <RolesAccessPanel />}
+      {tab === "workflows" && <WorkflowTemplatesPanel />}
+      {tab === "access" && <RolesAccessPanel />}
+      {tab === "configuration" && <AllConfigurationPanel />}
     </div>
   );
 }
