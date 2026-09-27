@@ -58,7 +58,7 @@ const ALL_CONFIG_DOMAINS: ConfigDomainEntry[] = [
   { domainKey: "holiday", label: "Holidays", description: "The company holiday calendar, including which holidays are optional.", adminRoute: "/app/admin?tab=holidays" },
   { domainKey: "workflow_template", label: "Workflow Templates", description: "Approval chains: who approves what, in what order, with what SLA escalation.", adminRoute: "/app/system-admin?tab=workflows" },
   { domainKey: "custom_field", label: "Custom Fields", description: "Tenant-defined fields added to employees and other records.", adminRoute: "/app/admin?tab=custom-fields" },
-  { domainKey: "tax_slab", label: "Tax Slabs & Statutory Rates", description: "FBR income tax slabs and EOBI/social-security contribution rates.", adminRoute: "/app/payroll" },
+  { domainKey: "tax_slab", label: "Tax Slabs & Statutory Rates", description: "FBR income tax slabs and EOBI/social-security contribution rates.", adminRoute: "/app/payroll?section=tax-slabs" },
 ];
 
 export function AllConfigurationPanel() {

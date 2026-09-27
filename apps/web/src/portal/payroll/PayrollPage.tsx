@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import type { PayrollRunView, PayrollSettingsView, PayslipView, TaxSlabSetView, TaxSlabView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
@@ -249,20 +250,44 @@ function RunsSection({ refreshKey, onChanged }: { refreshKey: number; onChanged:
 
 /** Collapsible wrapper so Compensation/Settings/Tax Slabs don't compete
  * with Runs for vertical space by default — the run lifecycle is what an
- * hr_admin opens this page for most often; the other three are
- * infrequent, set-up-once configuration. */
+ * hr_admin opens this page for most often; the other two are
+ * infrequent, set-up-once configuration.
+ *
+ * `forceOpen` lets a deep link (`?section=tax-slabs`, see PayrollPage's
+ * own `focusSection`) land directly on an already-expanded section
+ * instead of the collapsed default — this is the direct fix for kumail's
+ * report (2026-09-27) that the System Admin "Tax Slabs & Statutory
+ * Rates" tile "routes me to payroll run": the route itself was always
+ * correct (tax slabs genuinely live on this page), but with no deep-link
+ * support it landed on the collapsed Runs-first view, which reads as
+ * "the wrong page" even though it isn't. `sectionId` is what that same
+ * effect scrolls into view once forced open. */
 function CollapsibleSection({
   title,
   defaultOpen = false,
+  forceOpen = false,
+  sectionId,
   children,
 }: {
   title: string;
   defaultOpen?: boolean;
+  forceOpen?: boolean;
+  sectionId?: string;
   children: React.ReactNode;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [open, setOpen] = useState(defaultOpen || forceOpen);
+  const ref = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (forceOpen) {
+      setOpen(true);
+      ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    // Only react to forceOpen turning on for this section, not to every render.
+  }, [forceOpen]);
+
   return (
-    <section className="bg-card rounded-card shadow-sm">
+    <section ref={ref} id={sectionId} className="bg-card rounded-card shadow-sm">
       <button
         className="w-full flex items-center justify-between px-5 py-4 text-left"
         onClick={() => setOpen((o) => !o)}
@@ -443,6 +468,11 @@ export function PayrollPage() {
   const { identity } = useAuth();
   const [refreshKey, setRefreshKey] = useState(0);
   const bump = () => setRefreshKey((k) => k + 1);
+  const [searchParams] = useSearchParams();
+  // System Admin's Configuration tile for "Tax Slabs & Statutory Rates"
+  // links here with ?section=tax-slabs; Compensation is included for the
+  // same reason, in case something ever deep-links to it too.
+  const focusSection = searchParams.get("section");
 
   const roleKeys = identity?.roleKeys ?? [];
   const isHrAdmin = roleKeys.includes("hr_admin");
@@ -463,11 +493,11 @@ export function PayrollPage() {
         <div className="space-y-6">
           <RunsSection refreshKey={refreshKey} onChanged={bump} />
 
-          <CollapsibleSection title="Compensation">
+          <CollapsibleSection title="Compensation" forceOpen={focusSection === "compensation"} sectionId="compensation">
             <CompensationForm onSaved={bump} />
           </CollapsibleSection>
 
-          <CollapsibleSection title="Settings & Tax Slabs">
+          <CollapsibleSection title="Settings & Tax Slabs" forceOpen={focusSection === "tax-slabs"} sectionId="tax-slabs">
             <SettingsAndSlabsSection />
           </CollapsibleSection>
         </div>
