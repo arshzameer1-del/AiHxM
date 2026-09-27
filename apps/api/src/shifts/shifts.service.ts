@@ -460,47 +460,61 @@ export class ShiftsService {
 
   async assignShift(claims: RequestClaims, input: AssignShiftRequest): Promise<ShiftAssignmentView> {
     await this.requireManage(claims);
-    return this.db.withClaims(claims, async (client) => {
-      const employee = await client.query(
-        "SELECT id, first_name, last_name, employee_number FROM employees WHERE id = $1",
-        [input.employeeId]
-      );
-      if (employee.rowCount === 0) throw new NotFoundException("Employee not found");
+    return this.db.withClaims(claims, (client) => this.assignShiftWithinTransaction(client, claims, input));
+  }
 
-      const shift = await client.query("SELECT id, name FROM shifts WHERE id = $1", [input.shiftId]);
-      if (shift.rowCount === 0) throw new NotFoundException("Shift not found");
+  /**
+   * Core Employee Enterprise Phase 7 — split out of `assignShift()` above
+   * for exactly the reason `EmployeesService.createWithinTransaction()`
+   * exists (see that method's own doc comment): HiringProcessService's
+   * `working_time` card calls this directly, inside the SAME transaction
+   * that creates the new employee and marks the hire process 'hired',
+   * rather than opening its own separate `db.withClaims()` transaction on
+   * a different pooled connection — which would let the shift assignment
+   * commit independently of whether the surrounding hire actually
+   * succeeds. `assignShift()` itself is unchanged for every existing
+   * caller; this is a pure control-flow extraction.
+   */
+  async assignShiftWithinTransaction(client: PoolClient, claims: RequestClaims, input: AssignShiftRequest): Promise<ShiftAssignmentView> {
+    const employee = await client.query(
+      "SELECT id, first_name, last_name, employee_number FROM employees WHERE id = $1",
+      [input.employeeId]
+    );
+    if (employee.rowCount === 0) throw new NotFoundException("Employee not found");
 
-      // Supersession (close-the-open-row-and-insert, with the same-day
-      // collapse guard) now lives once, in the shared
-      // EffectiveDatingEngine, rather than hand-written here. This also
-      // FIXES a latent gap the original hand-written version had: it
-      // never guarded against a same-day re-assignment, which would have
-      // attempted to close a row at (effectiveFrom - 1 day) even when
-      // that produces an invalid effective_to < effective_from range —
-      // see the roadmap doc's "Deliberately deferred" note.
-      const { row } = await this.effectiveDating.applyVersionedRow(client, {
-        table: "shift_assignments",
-        scope: { employee_id: input.employeeId },
-        extraInsertColumns: { company_id: claims.company_id, created_by_user_account_id: claims.sub },
-        data: { shift_id: input.shiftId },
-        effectiveFrom: input.effectiveFrom,
-        effectiveTo: input.effectiveTo ?? null,
-      });
-      await this.audit.record(client, claims, {
-        companyId: claims.company_id ?? null,
-        action: "shift.assign",
-        target: input.employeeId,
-        metadata: { shiftId: input.shiftId, effectiveFrom: input.effectiveFrom },
-      });
+    const shift = await client.query("SELECT id, name FROM shifts WHERE id = $1", [input.shiftId]);
+    if (shift.rowCount === 0) throw new NotFoundException("Shift not found");
 
-      const emp = employee.rows[0];
-      return rowToAssignment({
-        ...row,
-        first_name: emp.first_name,
-        last_name: emp.last_name,
-        employee_number: emp.employee_number,
-        shift_name: shift.rows[0].name,
-      });
+    // Supersession (close-the-open-row-and-insert, with the same-day
+    // collapse guard) now lives once, in the shared
+    // EffectiveDatingEngine, rather than hand-written here. This also
+    // FIXES a latent gap the original hand-written version had: it
+    // never guarded against a same-day re-assignment, which would have
+    // attempted to close a row at (effectiveFrom - 1 day) even when
+    // that produces an invalid effective_to < effective_from range —
+    // see the roadmap doc's "Deliberately deferred" note.
+    const { row } = await this.effectiveDating.applyVersionedRow(client, {
+      table: "shift_assignments",
+      scope: { employee_id: input.employeeId },
+      extraInsertColumns: { company_id: claims.company_id, created_by_user_account_id: claims.sub },
+      data: { shift_id: input.shiftId },
+      effectiveFrom: input.effectiveFrom,
+      effectiveTo: input.effectiveTo ?? null,
+    });
+    await this.audit.record(client, claims, {
+      companyId: claims.company_id ?? null,
+      action: "shift.assign",
+      target: input.employeeId,
+      metadata: { shiftId: input.shiftId, effectiveFrom: input.effectiveFrom },
+    });
+
+    const emp = employee.rows[0];
+    return rowToAssignment({
+      ...row,
+      first_name: emp.first_name,
+      last_name: emp.last_name,
+      employee_number: emp.employee_number,
+      shift_name: shift.rows[0].name,
     });
   }
 

@@ -213,25 +213,37 @@ export class PayrollService {
    */
   async setCompensation(claims: RequestClaims, input: SetCompensationRequest): Promise<CompensationView> {
     await this.requireHrManage(claims);
-    return this.db.withClaims(claims, async (client) => {
-      const employee = await this.loadEmployee(client, input.employeeId);
-      if (!employee) throw new NotFoundException("Employee not found");
+    return this.db.withClaims(claims, (client) => this.setCompensationWithinTransaction(client, claims, input));
+  }
 
-      const { row } = await this.effectiveDating.applyVersionedRow(client, {
-        table: "employee_compensation",
-        scope: { employee_id: input.employeeId },
-        extraInsertColumns: { company_id: claims.company_id, created_by_user_account_id: claims.sub },
-        data: { monthly_salary: input.monthlySalary },
-        effectiveFrom: input.effectiveFrom,
-      });
-      await this.audit.record(client, claims, {
-        companyId: claims.company_id ?? null,
-        action: "compensation.set",
-        target: input.employeeId,
-        metadata: { monthlySalary: input.monthlySalary, effectiveFrom: input.effectiveFrom },
-      });
-      return rowToCompensation(row);
+  /**
+   * Core Employee Enterprise Phase 8 — split out of `setCompensation()`
+   * above for exactly the reason `EmployeesService.createWithinTransaction()`
+   * exists (see that method's own doc comment): HiringProcessService's
+   * `compensation` card calls this directly, inside the SAME transaction
+   * that creates the new employee, rather than opening a second,
+   * independent transaction on a different pooled connection.
+   * `setCompensation()` itself is unchanged for every existing caller —
+   * this is a pure control-flow extraction, no behavior change.
+   */
+  async setCompensationWithinTransaction(client: PoolClient, claims: RequestClaims, input: SetCompensationRequest): Promise<CompensationView> {
+    const employee = await this.loadEmployee(client, input.employeeId);
+    if (!employee) throw new NotFoundException("Employee not found");
+
+    const { row } = await this.effectiveDating.applyVersionedRow(client, {
+      table: "employee_compensation",
+      scope: { employee_id: input.employeeId },
+      extraInsertColumns: { company_id: claims.company_id, created_by_user_account_id: claims.sub },
+      data: { monthly_salary: input.monthlySalary },
+      effectiveFrom: input.effectiveFrom,
     });
+    await this.audit.record(client, claims, {
+      companyId: claims.company_id ?? null,
+      action: "compensation.set",
+      target: input.employeeId,
+      metadata: { monthlySalary: input.monthlySalary, effectiveFrom: input.effectiveFrom },
+    });
+    return rowToCompensation(row);
   }
 
   async getCompensationHistory(claims: RequestClaims, employeeId: string): Promise<CompensationView[]> {

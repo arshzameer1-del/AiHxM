@@ -110,12 +110,18 @@ const IN_FLIGHT_STATUSES = new Set(["draft", "validated", "pending_approval", "a
  * - `legacy_records_not_mapped` — an active (non-terminated) employee who
  *   still carries legacy free-text data with no canonical ID behind it:
  *   `department` set but `org_unit_id` NULL, `location` set but
- *   `location_id` NULL, or `manager_id` set but no open `direct`
- *   `org_relationships` row exists for them. This is Section 24's own
- *   "legacy records not yet mapped to canonical IDs" case, and directly
- *   the gap Phase 7's audit flagged as having "no reconciliation report
- *   or backfill tool" — this warning is that report's first, read-only
- *   half; the actual backfill tool is Phase 12's own scope.
+ *   `location_id` NULL, `manager_id` set but no open `direct`
+ *   `org_relationships` row exists for them, or (Core Employee Enterprise
+ *   Phase 11) `designation` set but `position_id` NULL. This is Section
+ *   24's own "legacy records not yet mapped to canonical IDs" case, and
+ *   directly the gap Phase 7's audit flagged as having "no reconciliation
+ *   report or backfill tool" — this warning is that report's first,
+ *   read-only half; the actual backfill tool is Phase 12's own scope
+ *   (Core Employee Enterprise Phase 11 extended it to the `designation`
+ *   gap type — see `LegacyReconciliationService`'s own doc comment).
+ *   KEPT IN SYNC WITH `LegacyReconciliationService.getReport()`'s own
+ *   WHERE clause, character-for-character, on purpose — see that class's
+ *   own doc comment.
  */
 @Injectable()
 export class OrganizationCommandCenterService {
@@ -263,6 +269,7 @@ export class OrganizationCommandCenterService {
                  WHERE r.employee_id = e.id AND r.relationship_type = 'direct' AND r.status = 'active'
                )
              )
+             OR (e.designation IS NOT NULL AND e.designation <> '' AND e.position_id IS NULL)
            )`,
           [companyId]
         ),

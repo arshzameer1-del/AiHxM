@@ -5,6 +5,7 @@ import type { RequestClaims } from "../database/tenant-context";
 import { LegacyReconciliationService } from "./legacy-reconciliation.service";
 import { LinkOrgUnitDto } from "./dto/link-org-unit.dto";
 import { LinkLocationDto } from "./dto/link-location.dto";
+import { LinkPositionDto } from "./dto/link-position.dto";
 
 /** Organization Management Phase 12 (Section 24) — see
  * `LegacyReconciliationService`'s own class doc comment for the full
@@ -36,5 +37,11 @@ export class LegacyReconciliationController {
   @HttpCode(200)
   linkManagerRelationship(@CurrentClaims() claims: RequestClaims, @Param("employeeId") employeeId: string) {
     return this.legacyReconciliation.linkManagerRelationship(claims, employeeId);
+  }
+
+  @Post(":employeeId/link-position")
+  @HttpCode(200)
+  linkPosition(@CurrentClaims() claims: RequestClaims, @Param("employeeId") employeeId: string, @Body() dto: LinkPositionDto) {
+    return this.legacyReconciliation.linkPosition(claims, employeeId, dto.positionId);
   }
 }

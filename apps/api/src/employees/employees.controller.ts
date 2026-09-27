@@ -20,6 +20,7 @@ import { CreateEmployeeDto } from "./dto/create-employee.dto";
 import { UpdateEmployeeDto } from "./dto/update-employee.dto";
 import { CreateEmployeeLoginDto } from "./dto/create-employee-login.dto";
 import { RecordJobHistoryDto, UploadEmployeeDocumentDto } from "./dto/record-job-history.dto";
+import { BulkImportEmployeesDto } from "./dto/bulk-import-employees.dto";
 
 /**
  * Any real session (SessionGuard, same as DummyController) can call
@@ -49,6 +50,21 @@ export class EmployeesController {
   @Get("org-chart")
   orgChart(@CurrentClaims() claims: RequestClaims) {
     return this.employees.orgChart(claims);
+  }
+
+  // Phase 12 (Bulk Hiring) — declared before `:id` for the same reason
+  // `org-chart`/`field-sensitivity` are.
+  @Post("bulk-import")
+  bulkImport(@CurrentClaims() claims: RequestClaims, @Body() dto: BulkImportEmployeesDto) {
+    return this.employees.bulkImportEmployees(claims, dto.csv);
+  }
+
+  // Phase 11 (gap #10) — declared before `:id` for the same reason
+  // `org-chart` is: Nest matches routes in declaration order, and this
+  // literal path would otherwise be swallowed as a `:id` value.
+  @Get("field-sensitivity")
+  getFieldSensitivityClassification(@CurrentClaims() claims: RequestClaims) {
+    return this.employees.getFieldSensitivityClassification(claims);
   }
 
   @Get(":id")

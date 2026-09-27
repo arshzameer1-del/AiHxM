@@ -9,6 +9,7 @@ import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engi
 import { EmployeesService } from "../employees/employees.service";
 import { LocalFileStorageService } from "../file-storage/local-file-storage.service";
 import { OrgRelationshipsService } from "./org-relationships.service";
+import { PositionsService } from "./positions.service";
 import { LegacyReconciliationService } from "./legacy-reconciliation.service";
 
 const FIXTURE_CLAIMS: RequestClaims = { is_platform_admin: true, company_id: null, sub: "legacy-reconciliation-spec-fixtures" };
@@ -29,6 +30,7 @@ describe("LegacyReconciliationService", () => {
   let db: DatabaseService;
   let employees: EmployeesService;
   let relationships: OrgRelationshipsService;
+  let positions: PositionsService;
   let legacyReconciliation: LegacyReconciliationService;
 
   let companyId: string;
@@ -36,12 +38,14 @@ describe("LegacyReconciliationService", () => {
   let noPermissionClaims: RequestClaims;
   let orgUnitEngineeringId: string;
   let locationLahoreOfficeId: string;
+  let vacantPositionId: string;
   let managerId: string;
   let managerFullName: string;
   let deptGapEmployeeId: string;
   let locationGapEmployeeId: string;
   let managerGapEmployeeId: string;
   let noMatchGapEmployeeId: string;
+  let designationGapEmployeeId: string;
   let noGapEmployeeId: string;
 
   beforeAll(async () => {
@@ -52,7 +56,8 @@ describe("LegacyReconciliationService", () => {
     const audit = new AuditService();
     employees = new EmployeesService(db, rbac, entitlements, audit, new LocalFileStorageService());
     relationships = new OrgRelationshipsService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
-    legacyReconciliation = new LegacyReconciliationService(db, entitlements, rbac, employees, relationships);
+    positions = new PositionsService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
+    legacyReconciliation = new LegacyReconciliationService(db, entitlements, rbac, employees, relationships, positions);
 
     const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     companyId = await db.withClaims(FIXTURE_CLAIMS, async (client) => {
@@ -116,6 +121,12 @@ describe("LegacyReconciliationService", () => {
         [companyId]
       );
       locationLahoreOfficeId = location.rows[0].id;
+
+      const position = await client.query(
+        "INSERT INTO positions (company_id, org_unit_id, position_title) VALUES ($1, $2, 'Senior Engineer') RETURNING id",
+        [companyId, orgUnitEngineeringId]
+      );
+      vacantPositionId = position.rows[0].id;
     });
 
     const manager = await employees.create(hrAdminClaims, { firstName: "Manager", lastName: "Person" });
@@ -150,6 +161,13 @@ describe("LegacyReconciliationService", () => {
     });
     noMatchGapEmployeeId = noMatchGapEmployee.id;
 
+    const designationGapEmployee = await employees.create(hrAdminClaims, {
+      firstName: "Legacy",
+      lastName: "Designation",
+      designation: "Senior Engineer",
+    });
+    designationGapEmployeeId = designationGapEmployee.id;
+
     const noGapEmployee = await employees.create(hrAdminClaims, { firstName: "Fully", lastName: "Modern" });
     noGapEmployeeId = noGapEmployee.id;
   });
@@ -171,6 +189,7 @@ describe("LegacyReconciliationService", () => {
       expect(ids).toContain(locationGapEmployeeId);
       expect(ids).toContain(managerGapEmployeeId);
       expect(ids).toContain(noMatchGapEmployeeId);
+      expect(ids).toContain(designationGapEmployeeId);
       expect(ids).not.toContain(noGapEmployeeId);
       expect(ids).not.toContain(managerId);
     });
@@ -209,6 +228,17 @@ describe("LegacyReconciliationService", () => {
       const report = await legacyReconciliation.getReport(hrAdminClaims);
       const entry = report.employees.find((e) => e.employeeId === managerGapEmployeeId)!;
       expect(entry.gaps).toEqual([{ gapType: "manager", legacyValue: managerFullName, managerEmployeeId: managerId }]);
+    });
+
+    it("suggests an exact match against a VACANT position's title for a designation gap (Phase 11)", async () => {
+      const report = await legacyReconciliation.getReport(hrAdminClaims);
+      const entry = report.employees.find((e) => e.employeeId === designationGapEmployeeId)!;
+      expect(entry.gaps).toHaveLength(1);
+      expect(entry.gaps[0]).toMatchObject({
+        gapType: "designation",
+        legacyValue: "Senior Engineer",
+        suggestions: [{ id: vacantPositionId, name: "Senior Engineer", matchType: "exact" }],
+      });
     });
   });
 
@@ -278,6 +308,31 @@ describe("LegacyReconciliationService", () => {
     it("404s for a nonexistent employee", async () => {
       await expect(
         legacyReconciliation.linkManagerRelationship(hrAdminClaims, "00000000-0000-0000-0000-000000000000")
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe("linkPosition() (Phase 11)", () => {
+    it("assigns the vacant position via PositionsService.assignEmployee(), without touching the employee's own designation text", async () => {
+      await legacyReconciliation.linkPosition(hrAdminClaims, designationGapEmployeeId, vacantPositionId);
+
+      const updated = await employees.get(hrAdminClaims, designationGapEmployeeId);
+      expect(updated.positionId).toBe(vacantPositionId);
+      expect(updated.designation).toBe("Senior Engineer");
+
+      const report = await legacyReconciliation.getReport(hrAdminClaims);
+      expect(report.employees.map((e) => e.employeeId)).not.toContain(designationGapEmployeeId);
+    });
+
+    it("refuses to re-point an employee who is already linked to a position", async () => {
+      await expect(
+        legacyReconciliation.linkPosition(hrAdminClaims, designationGapEmployeeId, vacantPositionId)
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("404s for a nonexistent employee", async () => {
+      await expect(
+        legacyReconciliation.linkPosition(hrAdminClaims, "00000000-0000-0000-0000-000000000000", vacantPositionId)
       ).rejects.toThrow(NotFoundException);
     });
   });

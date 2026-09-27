@@ -114,6 +114,61 @@ describe("EmployeesService", () => {
   });
 
   /**
+   * Core Employee Enterprise Phase 12 — Bulk Hiring. Same "real
+   * Postgres, no mocks" discipline as every other describe block here,
+   * proving the real `ImportExportService.parseAndValidate()` +
+   * `create()` pipeline end to end, not a stubbed CSV parser.
+   */
+  describe("bulk hiring / CSV import (Phase 12)", () => {
+    let companyId: string;
+    let hrAdminClaims: RequestClaims;
+    let noPermissionClaims: RequestClaims;
+
+    beforeAll(async () => {
+      companyId = await createFixtureCompany("Bulk Hiring Co");
+      const hrAdminUserId = await createUser(`bulk-hr-${Date.now()}@example.com`);
+      await assignRole(hrAdminUserId, companyId, "hr_admin");
+      hrAdminClaims = { is_platform_admin: false, company_id: companyId, sub: hrAdminUserId };
+
+      const outsiderUserId = await createUser(`bulk-outsider-${Date.now()}@example.com`);
+      noPermissionClaims = { is_platform_admin: false, company_id: companyId, sub: outsiderUserId };
+    });
+
+    it("requires employee.manage.all", async () => {
+      await expect(employees.bulkImportEmployees(noPermissionClaims, "firstName,lastName\nA,B")).rejects.toThrow(
+        ForbiddenException
+      );
+    });
+
+    it("creates one real employee per valid row, reusing create()'s own number assignment/hire-history logic", async () => {
+      const csv = [
+        "firstName,lastName,department,designation,salaryBand",
+        "Bilal,Ahmed,Engineering,Software Engineer,E3",
+        "Sana,Khan,Finance,Accountant,F2",
+      ].join("\n");
+
+      const result = await employees.bulkImportEmployees(hrAdminClaims, csv);
+      expect(result.imported).toBe(2);
+      expect(result.errors).toEqual([]);
+      expect(result.rows.map((r) => r.firstName)).toEqual(["Bilal", "Sana"]);
+      expect(result.rows[0].employeeNumber).toMatch(/^EMP-\d{4}$/);
+      expect(result.rows[1].department).toBe("Finance");
+
+      const history = await employees.listJobHistory(hrAdminClaims, result.rows[0].id);
+      expect(history.map((h) => h.eventType)).toEqual(["hire"]);
+    });
+
+    it("reports a real per-row error for a structurally invalid row, without blocking the valid ones", async () => {
+      const csv = ["firstName,lastName", "OnlyFirst,", "Valid,Row"].join("\n");
+      const result = await employees.bulkImportEmployees(hrAdminClaims, csv);
+      expect(result.imported).toBe(1);
+      expect(result.rows[0].firstName).toBe("Valid");
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toMatchObject({ row: 2 });
+    });
+  });
+
+  /**
    * Core Employee Enterprise Phase 1 (0081_person_identity.sql /
    * persons.service.ts). Covers PersonsService's real matching behavior
    * end to end through EmployeesService.create()/update() — the same
@@ -274,6 +329,45 @@ describe("EmployeesService", () => {
     it("a caller with no role assignment sees nothing and gets 404 on a direct get", async () => {
       expect(await employees.list(outsiderClaims)).toEqual([]);
       await expect(employees.get(outsiderClaims, aliceEmployeeId)).rejects.toThrow(NotFoundException);
+    });
+
+    it("field sensitivity classification names the 5 tiered fields (Phase 11, gap #10)", async () => {
+      const classification = await employees.getFieldSensitivityClassification(hrAdminClaims);
+      const byKey = Object.fromEntries(classification.map((c) => [c.fieldKey, c.tier]));
+      expect(byKey.cnic).toBe("restricted");
+      expect(byKey.bankAccountNumber).toBe("highly_restricted");
+      expect(byKey.dateOfBirth).toBe("confidential");
+      expect(byKey.salaryBand).toBe("confidential");
+      expect(byKey.terminationReason).toBe("confidential");
+    });
+
+    it("get() audit-logs when a restricted-or-higher field is actually exposed, and stays silent when the viewer's role hides all of them (Phase 11)", async () => {
+      async function latestAuditAction(employeeId: string) {
+        return db.withClaims(FIXTURE_CLAIMS, async (client) => {
+          const result = await client.query(
+            "SELECT action, metadata FROM audit_log WHERE target = $1 ORDER BY created_at DESC LIMIT 1",
+            [employeeId]
+          );
+          return result.rows[0];
+        });
+      }
+
+      // HR Admin sees cnic (restricted) and bankAccountNumber (highly
+      // restricted) both — one audit entry naming both fields.
+      await employees.get(hrAdminClaims, aliceEmployeeId);
+      const hrAudit = await latestAuditAction(aliceEmployeeId);
+      expect(hrAudit.action).toBe("employee.sensitive_field_viewed");
+      expect(hrAudit.metadata.fields.sort()).toEqual(["bankAccountNumber", "cnic"]);
+      expect(hrAudit.metadata.tiers).toMatchObject({ cnic: "restricted", bankAccountNumber: "highly_restricted" });
+
+      // A Line Manager only ever sees `salaryBand` (Confidential, not
+      // Restricted/Highly Restricted) on a direct report — no new audit
+      // entry should be written for this view (the most recent one for
+      // Alice stays the HR Admin's own, from just above).
+      await employees.get(managerClaims, aliceEmployeeId);
+      const afterManagerView = await latestAuditAction(aliceEmployeeId);
+      expect(afterManagerView.action).toBe("employee.sensitive_field_viewed");
+      expect(afterManagerView.metadata.fields).not.toContain("salaryBand");
     });
 
     it("a disabled employee module 404s for list/get exactly like a licensing-gated module always does", async () => {

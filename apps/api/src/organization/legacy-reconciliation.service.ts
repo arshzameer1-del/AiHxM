@@ -6,6 +6,7 @@ import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
 import { EmployeesService } from "../employees/employees.service";
 import { OrgRelationshipsService } from "./org-relationships.service";
+import { PositionsService } from "./positions.service";
 import type {
   EmployeeView,
   LegacyReconciliationEmployeeView,
@@ -33,6 +34,10 @@ type GapRow = {
   manager_first_name: string | null;
   manager_last_name: string | null;
   manager_gap: boolean;
+  // Phase 11 — the designation<->position gap this class's own header
+  // comment now closes.
+  designation: string | null;
+  position_id: string | null;
 };
 
 type NameCandidate = { id: string; name: string };
@@ -104,6 +109,24 @@ type NameCandidate = { id: string; name: string };
  * `LegacyReconciliationSuggestion`'s own doc comment in shared-types for
  * why this is a plain trim+lowercase equality/substring heuristic rather
  * than a `pg_trgm` dependency this codebase has never taken elsewhere.
+ *
+ * CORE EMPLOYEE ENTERPRISE PHASE 11 — picked up the one gap type this
+ * class's own original header comment explicitly left out:
+ * `designation`/`positionId`. Same shape as `department`/`location`:
+ * `linkPosition()` delegates the actual write to
+ * `PositionsService.assignEmployee()` (the single existing write path for
+ * `employees.position_id`, per that service's own class doc comment),
+ * which already enforces the position being `vacant` — so
+ * `suggestMatches()` for this gap type is seeded from vacant positions
+ * only (a filled/frozen/abolished one could never be assigned anyway).
+ * `PositionsService` needed no new module import to add here —
+ * `OrganizationModule` already registers it alongside this service.
+ * Core Employee Enterprise's OTHER new sub-entities from Phases 6-9
+ * (Contact/Address/Family/Education/Qualifications/Cost-Allocation/
+ * Assets) are deliberately NOT extended into this report: every one of
+ * them was built with a real canonical foreign key from day one (no
+ * legacy free-text predecessor field ever existed for any of them), so
+ * there is nothing for a "legacy value with no canonical id" gap to find.
  */
 @Injectable()
 export class LegacyReconciliationService {
@@ -112,7 +135,8 @@ export class LegacyReconciliationService {
     private readonly entitlements: EntitlementsService,
     private readonly rbac: RbacService,
     private readonly employees: EmployeesService,
-    private readonly orgRelationships: OrgRelationshipsService
+    private readonly orgRelationships: OrgRelationshipsService,
+    private readonly positions: PositionsService
   ) {}
 
   async getReport(claims: RequestClaims): Promise<LegacyReconciliationReport> {
@@ -120,10 +144,11 @@ export class LegacyReconciliationService {
     return this.db.withClaims(claims, async (client) => {
       const companyId = claims.company_id;
 
-      const [gapRows, orgUnitCandidates, locationCandidates] = await Promise.all([
+      const [gapRows, orgUnitCandidates, locationCandidates, positionCandidates] = await Promise.all([
         client.query<GapRow>(
           `SELECT e.id, e.employee_number, e.first_name, e.last_name,
                   e.department, e.org_unit_id, e.location, e.location_id, e.manager_id,
+                  e.designation, e.position_id,
                   mgr.first_name AS manager_first_name, mgr.last_name AS manager_last_name,
                   (e.manager_id IS NOT NULL AND NOT EXISTS (
                     SELECT 1 FROM org_relationships r
@@ -141,6 +166,7 @@ export class LegacyReconciliationService {
                  WHERE r.employee_id = e.id AND r.relationship_type = 'direct' AND r.status = 'active'
                )
              )
+             OR (e.designation IS NOT NULL AND e.designation <> '' AND e.position_id IS NULL)
            )
            ORDER BY e.employee_number`,
           [companyId]
@@ -153,13 +179,20 @@ export class LegacyReconciliationService {
           `SELECT id, name FROM locations WHERE company_id = $1 AND status <> 'archived'`,
           [companyId]
         ),
+        // Phase 11 — only VACANT positions are real candidates, since
+        // `linkPosition()` delegates to `PositionsService.assignEmployee()`,
+        // which rejects a non-vacant one outright.
+        client.query<NameCandidate>(
+          `SELECT id, position_title AS name FROM positions WHERE company_id = $1 AND status = 'vacant'`,
+          [companyId]
+        ),
       ]);
 
       const employeesOut: LegacyReconciliationEmployeeView[] = gapRows.rows.map((row) => ({
         employeeId: row.id,
         employeeNumber: row.employee_number,
         fullName: `${row.first_name} ${row.last_name}`,
-        gaps: buildGaps(row, orgUnitCandidates.rows, locationCandidates.rows),
+        gaps: buildGaps(row, orgUnitCandidates.rows, locationCandidates.rows, positionCandidates.rows),
       }));
 
       return {
@@ -225,9 +258,35 @@ export class LegacyReconciliationService {
     });
   }
 
+  /** The designation-side counterpart of `linkOrgUnit()`/`linkLocation()`
+   * above — delegates to `PositionsService.assignEmployee()`, the single
+   * existing write path for `employees.position_id`. That method already
+   * enforces the position being `vacant`, so this method adds no
+   * duplicate check beyond "not already linked to a position," the same
+   * guard `linkOrgUnit()`/`linkLocation()` each already have. Unlike
+   * those two, `assignEmployee()` does NOT derive `designation` from the
+   * position's own title — Organization Management's `employees.designation`
+   * stays independently editable free text even once a canonical
+   * `positionId` exists (see `EmployeeView.positionId`'s own doc comment
+   * in shared-types), so this action only fills the missing link; it
+   * never overwrites the employee's existing designation text. */
+  async linkPosition(claims: RequestClaims, employeeId: string, positionId: string): Promise<void> {
+    await this.requireManage(claims);
+    await this.db.withClaims(claims, async (client) => {
+      const employee = await this.mustExistEmployee(client, claims.company_id!, employeeId);
+      if (employee.position_id) {
+        throw new BadRequestException(
+          "This employee is already linked to a position — use the Position Workbench to change it"
+        );
+      }
+    });
+    await this.positions.assignEmployee(claims, positionId, employeeId);
+  }
+
   private async mustExistEmployee(client: PoolClient, companyId: string, employeeId: string): Promise<GapRow> {
     const result = await client.query<GapRow>(
       `SELECT id, employee_number, first_name, last_name, department, org_unit_id, location, location_id, manager_id,
+              designation, position_id,
               NULL AS manager_first_name, NULL AS manager_last_name, false AS manager_gap
        FROM employees WHERE id = $1 AND company_id = $2`,
       [employeeId, companyId]
@@ -246,11 +305,12 @@ export class LegacyReconciliationService {
   }
 }
 
-/** One employee row -> its list of gaps (0-3). */
+/** One employee row -> its list of gaps (0-4). */
 function buildGaps(
   row: GapRow,
   orgUnitCandidates: NameCandidate[],
-  locationCandidates: NameCandidate[]
+  locationCandidates: NameCandidate[],
+  positionCandidates: NameCandidate[]
 ): LegacyReconciliationGap[] {
   const gaps: LegacyReconciliationGap[] = [];
 
@@ -266,6 +326,9 @@ function buildGaps(
       legacyValue: `${row.manager_first_name ?? ""} ${row.manager_last_name ?? ""}`.trim(),
       managerEmployeeId: row.manager_id,
     });
+  }
+  if (row.designation && row.designation !== "" && !row.position_id) {
+    gaps.push({ gapType: "designation", legacyValue: row.designation, suggestions: suggestMatches(row.designation, positionCandidates) });
   }
   return gaps;
 }

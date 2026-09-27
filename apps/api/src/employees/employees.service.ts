@@ -9,13 +9,18 @@ import { normalizeEmail } from "../auth/email.util";
 import { hashPassword } from "../auth/password";
 import { FILE_STORAGE, type FileStorageService } from "../file-storage/file-storage.interface";
 import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
+import { ImportExportService } from "../import-export/import-export.service";
 import { PersonsService } from "./persons.service";
 import { formatEmployeeNumber, parseEmployeeNumberSequence } from "./employee-number.util";
+import { listFieldSensitivity, restrictedFieldsExposed } from "./employee-field-sensitivity";
 import type {
   CreateEmployeeRequest,
+  CsvImportResult,
   EmployeeDocumentView,
+  EmployeeFieldSensitivityEntry,
   EmployeeNumberFormat,
   EmployeeView,
+  EmploymentType,
   JobHistoryEntryView,
   JobHistoryEventType,
   OrgChartNode,
@@ -217,14 +222,44 @@ export class EmployeesService {
     // default (see EmployeesModule) — the default only ever fires for a
     // test that constructs this service directly, in plain TypeScript,
     // with fewer than 7 positional arguments.
-    private readonly persons: PersonsService = new PersonsService()
+    private readonly persons: PersonsService = new PersonsService(),
+    // Core Employee Enterprise Phase 12 (Bulk Hiring) — same
+    // default-value reasoning as `persons` immediately above:
+    // `ImportExportService` takes no constructor dependencies of its own
+    // (a pure CSV parsing/generation utility, see its own class doc
+    // comment), so `new ImportExportService()` is a fully real instance,
+    // not a stub, and every existing spec file that hand-constructs
+    // `EmployeesService` with fewer than 8 positional arguments keeps
+    // working unchanged.
+    private readonly importExport: ImportExportService = new ImportExportService()
   ) {}
 
   async create(claims: RequestClaims, input: CreateEmployeeRequest): Promise<EmployeeView> {
     await this.requireModuleAndManagePermission(claims);
     if (!claims.company_id) throw new ForbiddenException();
 
-    return this.db.withClaims(claims, async (client) => {
+    return this.db.withClaims(claims, (client) => this.createWithinTransaction(client, claims, input));
+  }
+
+  /**
+   * Core Employee Enterprise Phase 2 (hiring-process.service.ts) — the
+   * actual create() body, split out so HiringProcessService.complete()
+   * can run it INSIDE its own already-open transaction (the same one
+   * that marks the hire process itself 'hired'), instead of in a second,
+   * separate transaction. Without this split, a failure marking the hire
+   * process complete after the employee insert already committed would
+   * leave a real employee behind a hire process that still claims to be
+   * incomplete — and a retry would call this a second time and create a
+   * duplicate employee, exactly what Section 17's idempotency requirement
+   * exists to prevent. The public `create()` above remains the only
+   * entry point for every other caller (the controller, every existing
+   * spec file) and is unchanged in behavior — it just now delegates its
+   * body here inside its own `withClaims` transaction as before.
+   * Permission/company-id checks stay in the public wrapper;
+   * HiringProcessService performs its own equivalent checks before ever
+   * reaching this method, so this method itself does not re-check them.
+   */
+  async createWithinTransaction(client: PoolClient, claims: RequestClaims, input: CreateEmployeeRequest): Promise<EmployeeView> {
       const employeeNumber = await this.assignEmployeeNumber(client, claims.company_id!, input.employeeNumber);
       const department = await this.resolveDepartment(client, claims.company_id!, input.orgUnitId, input.department);
       const location = await this.resolveLocation(client, claims.company_id!, input.locationId, input.location);
@@ -300,7 +335,67 @@ export class EmployeesService {
       this.webhooks?.enqueue(claims.company_id!, "employee.created", { employee }).catch(() => undefined);
 
       return employee;
-    });
+  }
+
+  /**
+   * Core Employee Enterprise Phase 12 — Bulk Hiring. Same shape as the
+   * one existing CSV-import precedent in this codebase
+   * (`DummyService.importCsv()`, Plan doc Section 6's "Conversions"
+   * WRICEF pillar): `ImportExportService.parseAndValidate()` handles
+   * STRUCTURAL validation only (required columns present, non-empty on
+   * every row) and returns a real per-row error report for those; each
+   * structurally-valid row is then created via the normal, single-row
+   * `create()` — reusing every one of its own real checks (employee
+   * number assignment, department/location resolution, person/CNIC
+   * matching, the 'hire' job-history row, the `employee.created`
+   * webhook) rather than a parallel bulk-only insert path.
+   *
+   * DELIBERATELY NOT ALSO A ROW-LEVEL "SKIP AND COLLECT" beyond that
+   * structural check, matching `DummyService.importCsv()`'s own
+   * precedent exactly: a `create()`-time failure (a duplicate
+   * `employeeNumber`, an unknown `orgUnitId`, ...) throws and fails the
+   * whole bulk import rather than silently completing a partial batch —
+   * for a HIRING action specifically (unlike Payroll's own
+   * `calculateRun()`, which deliberately DOES collect per-employee
+   * calculation errors) an admin re-running the same CSV after fixing the
+   * one bad row is the safer default than reconciling which of N new
+   * employees were actually created after a partial failure.
+   */
+  async bulkImportEmployees(claims: RequestClaims, csvText: string): Promise<CsvImportResult<EmployeeView>> {
+    await this.requireModuleAndManagePermission(claims);
+    if (!claims.company_id) throw new ForbiddenException();
+
+    const { rows: parsedRows, errors } = this.importExport.parseAndValidate(
+      csvText,
+      ["firstName", "lastName"] as const,
+      (record): CreateEmployeeRequest => ({
+        firstName: record.firstName,
+        lastName: record.lastName,
+        employeeNumber: record.employeeNumber || undefined,
+        email: record.email || undefined,
+        phone: record.phone || undefined,
+        cnic: record.cnic || undefined,
+        dateOfBirth: record.dateOfBirth || undefined,
+        gender: record.gender || undefined,
+        maritalStatus: record.maritalStatus || undefined,
+        department: record.department || undefined,
+        orgUnitId: record.orgUnitId || undefined,
+        designation: record.designation || undefined,
+        location: record.location || undefined,
+        locationId: record.locationId || undefined,
+        employmentType: (record.employmentType || undefined) as EmploymentType | undefined,
+        managerId: record.managerId || undefined,
+        dateOfJoining: record.dateOfJoining || undefined,
+        salaryBand: record.salaryBand || undefined,
+        bankAccountNumber: record.bankAccountNumber || undefined,
+      })
+    );
+
+    const imported: EmployeeView[] = [];
+    for (const row of parsedRows) {
+      imported.push(await this.create(claims, row));
+    }
+    return { imported: imported.length, rows: imported, errors };
   }
 
   async list(claims: RequestClaims): Promise<EmployeeView[]> {
@@ -346,6 +441,19 @@ export class EmployeesService {
     });
   }
 
+  /** `GET /employees/field-sensitivity` (Phase 11, gap #10) — the
+   * classification itself is metadata describing which fields carry a
+   * named sensitivity tier, not the sensitive data those fields hold, so
+   * this needs only the module to be licensed at all, the same gate
+   * `list()` uses — no `employee.manage.all`/`employee.view` check on
+   * top of it. */
+  async getFieldSensitivityClassification(claims: RequestClaims): Promise<EmployeeFieldSensitivityEntry[]> {
+    if (!(await this.entitlements.isModuleEnabled(claims, MODULE_KEY))) {
+      throw new NotFoundException();
+    }
+    return listFieldSensitivity();
+  }
+
   async get(claims: RequestClaims, id: string): Promise<EmployeeView> {
     if (!(await this.entitlements.isModuleEnabled(claims, MODULE_KEY))) {
       throw new NotFoundException("Employee not found");
@@ -376,6 +484,29 @@ export class EmployeesService {
         claims.sub
       );
       if (!filtered) throw new NotFoundException("Employee not found");
+
+      // Core Employee Enterprise Phase 11 (gap #10) — view-audit-logging
+      // for the two most sensitive tiers, scoped deliberately to get()
+      // (a single "open this employee's profile" action) and NOT list()
+      // (a table view of many rows at once) — the same "don't force a
+      // gap where the shape doesn't fit" scope-narrowing this codebase
+      // has made before (see organization-assignment-validator.ts's own
+      // doc comment): logging per-row on every list() call would make
+      // audit_log grow with every table render rather than every actual
+      // "someone looked at this person's CNIC" event. Only fires when the
+      // viewer's own role/scope actually exposed a restricted-or-higher
+      // field — most roles most of the time expose none, so most get()
+      // calls write nothing extra here.
+      const restricted = restrictedFieldsExposed(Object.keys(filtered));
+      if (restricted.length > 0) {
+        await this.audit.record(client, claims, {
+          companyId: claims.company_id ?? null,
+          action: "employee.sensitive_field_viewed",
+          target: id,
+          metadata: { fields: restricted.map((f) => f.fieldKey), tiers: Object.fromEntries(restricted.map((f) => [f.fieldKey, f.tier])) },
+        });
+      }
+
       return filtered as EmployeeView;
     });
   }
