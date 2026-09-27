@@ -17,6 +17,9 @@ import { JobsService } from "../organization/jobs.service";
 import { LocationsService } from "../organization/locations.service";
 import { CostCentersService } from "../organization/cost-centers.service";
 import { ProfitCentersService } from "../organization/profit-centers.service";
+import { EmployeesService } from "../employees/employees.service";
+import { HiringProcessService } from "../employees/hiring/hiring-process.service";
+import { LocalFileStorageService } from "../file-storage/local-file-storage.service";
 import { ConfigurationCenterService } from "./configuration-center.service";
 
 const FIXTURE_CLAIMS: RequestClaims = { is_platform_admin: true, company_id: null, sub: "config-center-spec-fixtures" };
@@ -43,6 +46,7 @@ describe("ConfigurationCenterService", () => {
   let locations: LocationsService;
   let costCenters: CostCentersService;
   let profitCenters: ProfitCentersService;
+  let hiring: HiringProcessService;
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: process.env.APP_DATABASE_URL });
@@ -54,13 +58,15 @@ describe("ConfigurationCenterService", () => {
     const shifts = new ShiftsService(db, rbac, entitlements, audit, new EffectiveDatingEngine(), new RulesEngine());
     holidays = new HolidaysService(db, rbac, entitlements, audit);
     const workflow = new WorkflowService(db, rbac, audit);
-    const payroll = new PayrollService(db, rbac, entitlements, audit, {} as never, new EffectiveDatingEngine());
+    const payroll = new PayrollService(db, rbac, entitlements, audit, {} as never, new EffectiveDatingEngine(), workflow);
     const customFields = new CustomFieldsService(db, rbac);
     orgUnits = new OrgUnitsService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
     jobs = new JobsService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
     locations = new LocationsService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
     costCenters = new CostCentersService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
     profitCenters = new ProfitCentersService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
+    const employees = new EmployeesService(db, rbac, entitlements, audit, new LocalFileStorageService());
+    hiring = new HiringProcessService(db, rbac, entitlements, audit, employees);
     configurationCenter = new ConfigurationCenterService(
       db,
       employeeGroups,
@@ -73,7 +79,8 @@ describe("ConfigurationCenterService", () => {
       jobs,
       locations,
       costCenters,
-      profitCenters
+      profitCenters,
+      hiring
     );
   });
 

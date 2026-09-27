@@ -22,6 +22,13 @@ export const KNOWN_WORKFLOWS = [
     label: "Recruitment requisition approval",
     description: "Routes every job requisition submitted for approval through Recruitment.",
   },
+  {
+    key: "payroll_run",
+    objectKey: "payroll_run",
+    label: "Payroll run approval",
+    description:
+      "Routes a calculated payroll run to whoever should sign off before it can be finalized and disbursed. Point this at the Payroll Approver role for real segregation of duties.",
+  },
 ] as const;
 
 export type ApproverTypeOption = "role" | "specific_user" | "manager_of_submitter";

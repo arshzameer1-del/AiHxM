@@ -38,13 +38,18 @@ const MANAGE_PERMISSION = "employee.manage.all";
 // HR-Admin employee-management rights. See requireModuleAndAccountPermission().
 const ACCOUNT_PERMISSION = "user_account.manage.all";
 const SENSITIVE_FIELDS = ["cnic", "dateOfBirth", "salaryBand", "bankAccountNumber", "terminationReason"] as const;
-// Decision #12, widened by Decision #20 — the only roles `createLogin()`
-// is allowed to grant. Deliberately excludes the Phase 4 `rbac_demo_*`
-// proof-of-concept roles. `system_admin` was added here so an HR Admin
-// creating a brand-new login can grant System Admin at the same time,
-// rather than needing a separate Platform-Admin-mediated step afterward —
-// see 0024_system_admin.sql's own "Bootstrap note".
-const TENANT_ROLE_KEYS = ["hr_admin", "line_manager", "employee_self_service", "system_admin"] as const;
+// Decision #12, widened by Decision #20 and Phase P2 — the only roles
+// `createLogin()` is allowed to grant. Deliberately excludes the Phase 4
+// `rbac_demo_*` proof-of-concept roles. `system_admin` was added here so
+// an HR Admin creating a brand-new login can grant System Admin at the
+// same time, rather than needing a separate Platform-Admin-mediated step
+// afterward — see 0024_system_admin.sql's own "Bootstrap note".
+// `payroll_approver` (0093_payroll_approval_workflow.sql) is added the
+// same way — an hr_admin needs to be able to grant the Payroll Approver
+// role to a colleague (or a second role to themselves, though that
+// defeats the segregation of duties the role exists for) without a
+// separate Platform-Admin step.
+const TENANT_ROLE_KEYS = ["hr_admin", "line_manager", "employee_self_service", "system_admin", "payroll_approver"] as const;
 const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024; // 10MB — see addDocument()'s doc comment.
 
 // Tenant Management gap-fill Phase 1 item #10 — Storage quota enforcement.

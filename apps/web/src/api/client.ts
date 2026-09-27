@@ -2151,6 +2151,14 @@ export const api = {
   finalizePayrollRun: (id: string) =>
     request<PayrollRunView>(`/payroll/runs/${id}/finalize`, { method: "POST" }),
 
+  // Phase P2 — approval workflow, same shape as submitRequisition/
+  // decideRequisition.
+  submitPayrollRunForApproval: (id: string) =>
+    request<PayrollRunView>(`/payroll/runs/${id}/submit-for-approval`, { method: "POST" }),
+
+  decidePayrollRunApproval: (id: string, input: DecideLeaveRequestRequest) =>
+    request<PayrollRunView>(`/payroll/runs/${id}/approval-decision`, { method: "PATCH", body: JSON.stringify(input) }),
+
   listPayslips: (params?: { payrollRunId?: string; employeeId?: string }) =>
     request<PayslipView[]>(
       `/payslips${

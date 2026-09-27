@@ -63,18 +63,34 @@ function PayslipRow({ payslip }: { payslip: PayslipView }) {
 }
 
 /**
- * Expanded run row for hr_admin: calculate (re-runnable until finalized,
- * PayrollService.calculateRun's own rule), finalize (one-way — no
- * "un-finalize" endpoint exists), and download the bank disbursement CSV,
- * which `generateDisbursementFile` refuses with a 400 unless the run is
- * already finalized, so that action only ever renders once it can succeed.
+ * Expanded run row. Phase P2 split this into two capabilities that no
+ * longer always belong to the same login: `canPrepare` (hr_admin — create,
+ * calculate/recalculate, submit for approval, finalize, download the
+ * disbursement CSV) and `canApprove` (the new, separate Payroll Approver
+ * role — approve/reject a `pending_approval` run). Calculate (re-runnable,
+ * PayrollService.calculateRun's own rule) and finalize (one-way — no
+ * "un-finalize" endpoint exists) are unchanged in spirit; finalize now
+ * additionally requires the run be `approved`, not just `calculated` —
+ * see PayrollService.finalizeRun's own updated guard.
  */
-function RunCard({ run, onChanged }: { run: PayrollRunView; onChanged: () => void }) {
+function RunCard({
+  run,
+  canPrepare,
+  canApprove,
+  onChanged,
+}: {
+  run: PayrollRunView;
+  canPrepare: boolean;
+  canApprove: boolean;
+  onChanged: () => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const [payslips, setPayslips] = useState<PayslipView[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [calcSummary, setCalcSummary] = useState<string | null>(null);
+  const [deciding, setDeciding] = useState<"approved" | "rejected" | null>(null);
+  const [comment, setComment] = useState("");
 
   useEffect(() => {
     if (!expanded) return;
@@ -121,6 +137,42 @@ function RunCard({ run, onChanged }: { run: PayrollRunView; onChanged: () => voi
     }
   }
 
+  async function handleSubmitForApproval() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.submitPayrollRunForApproval(run.id);
+      onChanged();
+    } catch (err) {
+      // A 404 here means no "Payroll run approval" workflow template has
+      // been configured yet for this tenant (System Admin > Configuration
+      // > Workflow Templates) — the same expected gap
+      // RequisitionsPanel's own comment documents for job_requisition.
+      setError(err instanceof ApiError ? err.message : "Could not submit this run for approval.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitDecision(decision: "approved" | "rejected") {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.decidePayrollRunApproval(run.id, { decision, comment: comment || undefined });
+      setDeciding(null);
+      setComment("");
+      onChanged();
+    } catch (err) {
+      // A real 403 here ("not permitted to approve payroll runs" or "not a
+      // resolved approver on this step") is the honest answer if this
+      // login's role assignment doesn't actually match — canApprove below
+      // is a cosmetic gate on top of the real, server-side one.
+      setError(err instanceof ApiError ? err.message : "Could not record this decision.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleDownload() {
     setBusy(true);
     setError(null);
@@ -148,7 +200,7 @@ function RunCard({ run, onChanged }: { run: PayrollRunView; onChanged: () => voi
           <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold ${RUN_STATUS_STYLES[run.status]}`}>
             {RUN_STATUS_LABELS[run.status]}
           </span>
-          {run.status !== "finalized" && (
+          {canPrepare && (run.status === "draft" || run.status === "calculated") && (
             <button
               onClick={handleCalculate}
               disabled={busy}
@@ -157,7 +209,16 @@ function RunCard({ run, onChanged }: { run: PayrollRunView; onChanged: () => voi
               {run.status === "draft" ? "Calculate" : "Recalculate"}
             </button>
           )}
-          {run.status === "calculated" && (
+          {canPrepare && run.status === "calculated" && (
+            <button
+              onClick={handleSubmitForApproval}
+              disabled={busy}
+              className="text-xs font-semibold text-accent hover:underline disabled:opacity-50"
+            >
+              Submit for approval
+            </button>
+          )}
+          {canPrepare && run.status === "approved" && (
             <button
               onClick={handleFinalize}
               disabled={busy}
@@ -166,7 +227,7 @@ function RunCard({ run, onChanged }: { run: PayrollRunView; onChanged: () => voi
               Finalize
             </button>
           )}
-          {run.status === "finalized" && (
+          {canPrepare && run.status === "finalized" && (
             <button
               onClick={handleDownload}
               disabled={busy}
@@ -175,8 +236,51 @@ function RunCard({ run, onChanged }: { run: PayrollRunView; onChanged: () => voi
               Download disbursement CSV
             </button>
           )}
+          {canApprove && run.status === "pending_approval" && !deciding && (
+            <>
+              <button
+                onClick={() => setDeciding("approved")}
+                disabled={busy}
+                className="text-xs font-semibold text-success hover:underline disabled:opacity-50"
+              >
+                Approve
+              </button>
+              <button
+                onClick={() => setDeciding("rejected")}
+                disabled={busy}
+                className="text-xs font-semibold text-danger hover:underline disabled:opacity-50"
+              >
+                Reject
+              </button>
+            </>
+          )}
         </div>
       </div>
+
+      {deciding && (
+        <div className="mt-3 pt-3 border-t border-black/5 space-y-2">
+          <input
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            placeholder="Comment (optional)"
+            className="w-full rounded-lg border border-black/10 px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-accent"
+          />
+          <div className="flex gap-3 items-center">
+            <button
+              onClick={() => submitDecision(deciding)}
+              disabled={busy}
+              className={`text-xs font-semibold rounded-lg px-3 py-1.5 text-white disabled:opacity-50 ${
+                deciding === "approved" ? "bg-success" : "bg-danger"
+              }`}
+            >
+              Confirm {deciding === "approved" ? "approval" : "rejection"}
+            </button>
+            <button onClick={() => setDeciding(null)} className="text-xs text-label-tertiary">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {calcSummary && <p className="text-xs text-label-secondary mt-2">{calcSummary}</p>}
       {error && <p className="text-xs text-danger mt-2">{error}</p>}
@@ -196,7 +300,17 @@ function RunCard({ run, onChanged }: { run: PayrollRunView; onChanged: () => voi
   );
 }
 
-function RunsSection({ refreshKey, onChanged }: { refreshKey: number; onChanged: () => void }) {
+function RunsSection({
+  refreshKey,
+  canPrepare,
+  canApprove,
+  onChanged,
+}: {
+  refreshKey: number;
+  canPrepare: boolean;
+  canApprove: boolean;
+  onChanged: () => void;
+}) {
   const [runs, setRuns] = useState<PayrollRunView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -214,7 +328,7 @@ function RunsSection({ refreshKey, onChanged }: { refreshKey: number; onChanged:
     <section>
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold">Payroll Runs</h2>
-        {!showForm && (
+        {canPrepare && !showForm && (
           <button onClick={() => setShowForm(true)} className="text-sm font-semibold text-accent hover:underline">
             New run
           </button>
@@ -240,7 +354,7 @@ function RunsSection({ refreshKey, onChanged }: { refreshKey: number; onChanged:
       ) : (
         <div className="space-y-3">
           {runs.map((r) => (
-            <RunCard key={r.id} run={r} onChanged={onChanged} />
+            <RunCard key={r.id} run={r} canPrepare={canPrepare} canApprove={canApprove} onChanged={onChanged} />
           ))}
         </div>
       )}
@@ -456,14 +570,17 @@ function MyPayslipsCard({ refreshKey }: { refreshKey: number }) {
 }
 
 /**
- * Task — Compensation & Payroll (Phase 12, Decision #14). Split strictly
- * along the two permissions 0023_payroll_seed.sql actually grants —
- * there is no partial-admin middle ground (no separate Finance Admin
- * role, per that migration's own header comment): hr_admin gets the
- * whole object graph (compensation, settings, tax slabs, run lifecycle,
- * every payslip); employee_self_service gets only their own finalized
- * payslip. A session holding neither sees neither section, same as a
- * line_manager on LeavePage's My Leave card.
+ * Task — Compensation & Payroll (Phase 12, Decision #14; run approval
+ * added Phase P2). hr_admin still gets the whole object graph
+ * (compensation, settings, tax slabs, run lifecycle, every payslip) and
+ * is the only role that can create/calculate/submit/finalize a run.
+ * Phase P2 adds a second, DISTINCT role — Payroll Approver — that sees
+ * only the Payroll Runs list (never Settings & Tax Slabs, never
+ * Compensation) and can only approve/reject a `pending_approval` run;
+ * see 0093_payroll_approval_workflow.sql for why this is deliberately not
+ * folded into `payroll.manage.all`. employee_self_service still gets only
+ * their own finalized payslip. A session holding none of these sees
+ * nothing, same as a line_manager on LeavePage's My Leave card.
  */
 export function PayrollPage() {
   const { identity } = useAuth();
@@ -477,6 +594,7 @@ export function PayrollPage() {
 
   const roleKeys = identity?.roleKeys ?? [];
   const isHrAdmin = roleKeys.includes("hr_admin");
+  const isPayrollApprover = roleKeys.includes("payroll_approver");
   const isSelfService = roleKeys.includes("employee_self_service");
 
   return (
@@ -485,16 +603,18 @@ export function PayrollPage() {
       <p className="text-label-tertiary text-sm mb-6">
         {isHrAdmin
           ? "Manage compensation, statutory rates, and run payroll end to end."
-          : "View your own payslips once a run has been finalized."}
+          : isPayrollApprover
+            ? "Review and decide on payroll runs submitted for your approval."
+            : "View your own payslips once a run has been finalized."}
       </p>
 
       {isSelfService && <MyPayslipsCard refreshKey={refreshKey} />}
 
-      {isHrAdmin && (
+      {(isHrAdmin || isPayrollApprover) && (
         <div className="space-y-6">
-          <RunsSection refreshKey={refreshKey} onChanged={bump} />
+          <RunsSection refreshKey={refreshKey} canPrepare={isHrAdmin} canApprove={isPayrollApprover} onChanged={bump} />
 
-          {focusSection === "compensation" && (
+          {isHrAdmin && focusSection === "compensation" && (
             <div className="bg-card rounded-card p-5 shadow-sm text-sm text-label-tertiary">
               Compensation now lives on each employee's own profile — open an
               employee and use the "Compensation & Assets" tab. This keeps
@@ -504,13 +624,15 @@ export function PayrollPage() {
             </div>
           )}
 
-          <CollapsibleSection title="Settings & Tax Slabs" forceOpen={focusSection === "tax-slabs"} sectionId="tax-slabs">
-            <SettingsAndSlabsSection />
-          </CollapsibleSection>
+          {isHrAdmin && (
+            <CollapsibleSection title="Settings & Tax Slabs" forceOpen={focusSection === "tax-slabs"} sectionId="tax-slabs">
+              <SettingsAndSlabsSection />
+            </CollapsibleSection>
+          )}
         </div>
       )}
 
-      {!isHrAdmin && !isSelfService && (
+      {!isHrAdmin && !isPayrollApprover && !isSelfService && (
         <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-tertiary">
           Nothing to show for your role here.
         </div>

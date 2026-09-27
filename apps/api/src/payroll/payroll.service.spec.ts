@@ -8,6 +8,7 @@ import { EntitlementsService } from "../entitlements/entitlements.service";
 import { AuditService } from "../audit/audit.service";
 import { ImportExportService } from "../import-export/import-export.service";
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
+import { WorkflowService } from "../workflow/workflow.service";
 import { PayrollService } from "./payroll.service";
 import { EmployeeCompensationService } from "../employees/employee-compensation.service";
 
@@ -94,12 +95,18 @@ describe("PayrollService", () => {
   let importExport: ImportExportService;
   let payroll: PayrollService;
   let compensation: EmployeeCompensationService;
+  let workflow: WorkflowService;
 
   // --- Primary company: compensation/run/payslip/disbursement flows ---
   let companyId: string;
   let hrAdminClaims: RequestClaims;
   let staffClaims: RequestClaims;
   let outsiderClaims: RequestClaims;
+  // Phase P2 — a distinct login holding ONLY `payroll_approver`, never
+  // `hr_admin`/`payroll.manage.all`, so approval tests genuinely exercise
+  // the segregation of duties rather than a role that happens to hold
+  // both permissions.
+  let approverClaims: RequestClaims;
   let staffUserId: string;
 
   let staffEmployeeId: string;
@@ -171,6 +178,16 @@ describe("PayrollService", () => {
     return createEmployeeIn(companyId, opts);
   }
 
+  /** Phase P2 helper: takes a freshly-`calculated` run all the way to
+   * `approved` via the real workflow engine (submit as the preparer,
+   * decide as the distinct approver) — every pre-existing test in this
+   * file that finalizes a run now needs this step first, since
+   * `finalizeRun()` no longer accepts a run straight off `calculated`. */
+  async function submitAndApprove(runId: string): Promise<void> {
+    await payroll.submitForApproval(hrAdminClaims, runId);
+    await payroll.decideApproval(approverClaims, runId, { decision: "approved" });
+  }
+
   async function insertUnpaidLeave(employeeId: string, startDate: string, endDate: string): Promise<void> {
     await db.withClaims(FIXTURE_CLAIMS, async (client) => {
       const days = Math.round((Date.parse(endDate) - Date.parse(startDate)) / (24 * 60 * 60 * 1000)) + 1;
@@ -189,7 +206,8 @@ describe("PayrollService", () => {
     entitlements = new EntitlementsService(db);
     audit = new AuditService();
     importExport = new ImportExportService();
-    payroll = new PayrollService(db, rbac, entitlements, audit, importExport, new EffectiveDatingEngine());
+    workflow = new WorkflowService(db, rbac, audit);
+    payroll = new PayrollService(db, rbac, entitlements, audit, importExport, new EffectiveDatingEngine(), workflow);
     compensation = new EmployeeCompensationService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
 
     const stamp = Date.now();
@@ -214,7 +232,31 @@ describe("PayrollService", () => {
 
     const hrAdminUserId = await makeUser(`payroll-hr-${stamp}@example.com`);
     await assignRole(hrAdminUserId, "hr_admin", companyId);
+    // Also holds rbac_demo_full_access purely to configure the payroll-run
+    // approval workflow template below — same fixture shortcut
+    // recruitment.service.spec.ts/leave-requests.service.spec.ts already
+    // use (a real tenant would do this via a System Admin login instead).
+    await assignRole(hrAdminUserId, "rbac_demo_full_access", companyId);
     hrAdminClaims = { is_platform_admin: false, company_id: companyId, sub: hrAdminUserId };
+
+    // A distinct login holding ONLY payroll_approver — never hr_admin —
+    // so decideApproval() tests genuinely exercise the segregation of
+    // duties 0093_payroll_approval_workflow.sql was built for.
+    const approverUserId = await makeUser(`payroll-approver-${stamp}@example.com`);
+    await assignRole(approverUserId, "payroll_approver", companyId);
+    approverClaims = { is_platform_admin: false, company_id: companyId, sub: approverUserId };
+
+    const payrollApproverRole = await db.withClaims(FIXTURE_CLAIMS, (client) =>
+      client.query("SELECT id FROM roles WHERE key = 'payroll_approver'")
+    );
+    await workflow.createTemplate(hrAdminClaims, {
+      key: "payroll_run",
+      name: "Payroll Run Approval",
+      objectKey: "payroll_run",
+      steps: [
+        { stepOrder: 1, name: "Payroll Approver reviews", approvers: [{ approverType: "role", roleId: payrollApproverRole.rows[0].id }] },
+      ],
+    });
 
     staffUserId = await makeUser(`payroll-staff-${stamp}@example.com`);
     await assignRole(staffUserId, "employee_self_service", companyId);
@@ -779,6 +821,7 @@ describe("PayrollService", () => {
       const second = await payroll.calculateRun(hrAdminClaims, run.id);
       expect(second.run.status).toBe("calculated");
 
+      await submitAndApprove(run.id);
       await payroll.finalizeRun(hrAdminClaims, run.id);
       await expect(payroll.calculateRun(hrAdminClaims, run.id)).rejects.toThrow(BadRequestException);
     });
@@ -799,6 +842,7 @@ describe("PayrollService", () => {
       // First run of tax year 2029 (Jul 2028): priorYtd is 0/0.
       const run1 = await payroll.createRun(hrAdminClaims, { periodStart: "2028-07-01", periodEnd: "2028-07-31" });
       await payroll.calculateRun(hrAdminClaims, run1.id);
+      await submitAndApprove(run1.id);
       await payroll.finalizeRun(hrAdminClaims, run1.id);
       const slip1 = (await payroll.listPayslips(hrAdminClaims, { payrollRunId: run1.id })).find((p) => p.employeeId === employee.id)!;
       const expectedTax1 = expectedIncomeTax({ periodEnd: "2028-07-31", daysInPeriod: 31, taxableGrossThisPeriod: 400000 });
@@ -826,6 +870,7 @@ describe("PayrollService", () => {
       // Last month of tax year 2028.
       const run1 = await payroll.createRun(hrAdminClaims, { periodStart: "2028-06-01", periodEnd: "2028-06-30" });
       await payroll.calculateRun(hrAdminClaims, run1.id);
+      await submitAndApprove(run1.id);
       await payroll.finalizeRun(hrAdminClaims, run1.id);
 
       // A later month of the NEXT tax year (2029) — must NOT see run1's YTD.
@@ -853,6 +898,76 @@ describe("PayrollService", () => {
     });
   });
 
+  // --- Phase P2: submitForApproval() / decideApproval() -------------------
+
+  describe("submitForApproval() / decideApproval() (Phase P2)", () => {
+    it("submitting moves a calculated run to pending_approval, and refuses a run that isn't freshly calculated", async () => {
+      const draftRun = await payroll.createRun(hrAdminClaims, { periodStart: "2027-06-01", periodEnd: "2027-06-01" });
+      await expect(payroll.submitForApproval(hrAdminClaims, draftRun.id)).rejects.toThrow(BadRequestException);
+
+      const run = await payroll.createRun(hrAdminClaims, { periodStart: "2027-06-02", periodEnd: "2027-06-02" });
+      await payroll.calculateRun(hrAdminClaims, run.id);
+      const submitted = await payroll.submitForApproval(hrAdminClaims, run.id);
+      expect(submitted.status).toBe("pending_approval");
+      expect(submitted.workflowInstanceId).not.toBeNull();
+
+      // Already pending — cannot resubmit.
+      await expect(payroll.submitForApproval(hrAdminClaims, run.id)).rejects.toThrow(BadRequestException);
+    });
+
+    it("denies submitForApproval to a caller without payroll.manage.all", async () => {
+      const run = await payroll.createRun(hrAdminClaims, { periodStart: "2027-06-03", periodEnd: "2027-06-03" });
+      await payroll.calculateRun(hrAdminClaims, run.id);
+      await expect(payroll.submitForApproval(outsiderClaims, run.id)).rejects.toThrow(ForbiddenException);
+      // The Payroll Approver role itself holds no payroll.manage.all
+      // either — segregation of duties cuts both ways.
+      await expect(payroll.submitForApproval(approverClaims, run.id)).rejects.toThrow(ForbiddenException);
+    });
+
+    it("approving moves the run to approved, which can then be finalized", async () => {
+      const run = await payroll.createRun(hrAdminClaims, { periodStart: "2027-06-04", periodEnd: "2027-06-04" });
+      await payroll.calculateRun(hrAdminClaims, run.id);
+      await payroll.submitForApproval(hrAdminClaims, run.id);
+      const decided = await payroll.decideApproval(approverClaims, run.id, { decision: "approved" });
+      expect(decided.status).toBe("approved");
+
+      const finalized = await payroll.finalizeRun(hrAdminClaims, run.id);
+      expect(finalized.status).toBe("finalized");
+    });
+
+    it("rejecting reverts the run to calculated, so it can be recalculated and resubmitted", async () => {
+      const run = await payroll.createRun(hrAdminClaims, { periodStart: "2027-06-05", periodEnd: "2027-06-05" });
+      await payroll.calculateRun(hrAdminClaims, run.id);
+      await payroll.submitForApproval(hrAdminClaims, run.id);
+      const decided = await payroll.decideApproval(approverClaims, run.id, { decision: "rejected", comment: "Wrong period" });
+      expect(decided.status).toBe("calculated");
+
+      // Not a dead end — HR can recalculate and resubmit the same run.
+      await payroll.calculateRun(hrAdminClaims, run.id);
+      const resubmitted = await payroll.submitForApproval(hrAdminClaims, run.id);
+      expect(resubmitted.status).toBe("pending_approval");
+    });
+
+    it("denies decideApproval to a caller without payroll.approve.all — segregation of duties, not just workflow routing", async () => {
+      const run = await payroll.createRun(hrAdminClaims, { periodStart: "2027-06-06", periodEnd: "2027-06-06" });
+      await payroll.calculateRun(hrAdminClaims, run.id);
+      await payroll.submitForApproval(hrAdminClaims, run.id);
+      // The preparer (hr_admin) cannot approve their own submission —
+      // holding payroll.manage.all is not enough, by design.
+      await expect(payroll.decideApproval(hrAdminClaims, run.id, { decision: "approved" })).rejects.toThrow(ForbiddenException);
+      await expect(payroll.decideApproval(outsiderClaims, run.id, { decision: "approved" })).rejects.toThrow(ForbiddenException);
+    });
+
+    it("refuses to finalize a run that is only pending_approval or merely calculated", async () => {
+      const run = await payroll.createRun(hrAdminClaims, { periodStart: "2027-06-07", periodEnd: "2027-06-07" });
+      await payroll.calculateRun(hrAdminClaims, run.id);
+      await expect(payroll.finalizeRun(hrAdminClaims, run.id)).rejects.toThrow(BadRequestException);
+
+      await payroll.submitForApproval(hrAdminClaims, run.id);
+      await expect(payroll.finalizeRun(hrAdminClaims, run.id)).rejects.toThrow(BadRequestException);
+    });
+  });
+
   // --- finalizeRun() ------------------------------------------------------
 
   describe("finalizeRun()", () => {
@@ -864,6 +979,7 @@ describe("PayrollService", () => {
     it("finalizes a calculated run, and refuses to finalize it twice", async () => {
       const run = await payroll.createRun(hrAdminClaims, { periodStart: "2027-11-02", periodEnd: "2027-11-02" });
       await payroll.calculateRun(hrAdminClaims, run.id);
+      await submitAndApprove(run.id);
       const finalized = await payroll.finalizeRun(hrAdminClaims, run.id);
       expect(finalized.status).toBe("finalized");
       expect(finalized.finalizedAt).not.toBeNull();
@@ -920,6 +1036,7 @@ describe("PayrollService", () => {
     });
 
     it("once finalized, the self-view employee sees only their own payslip", async () => {
+      await submitAndApprove(visRunId);
       await payroll.finalizeRun(hrAdminClaims, visRunId);
 
       const list = await payroll.listPayslips(staffClaims, { payrollRunId: visRunId });
@@ -975,6 +1092,7 @@ describe("PayrollService", () => {
     it("produces a CSV keyed by employee_number (never the internal UUID) for a finalized run", async () => {
       const run = await payroll.createRun(hrAdminClaims, { periodStart: "2028-01-02", periodEnd: "2028-01-02" });
       await payroll.calculateRun(hrAdminClaims, run.id);
+      await submitAndApprove(run.id);
       await payroll.finalizeRun(hrAdminClaims, run.id);
       const payslip = (await payroll.listPayslips(hrAdminClaims, { payrollRunId: run.id })).find((p) => p.employeeId === staffEmployeeId)!;
 
@@ -988,6 +1106,7 @@ describe("PayrollService", () => {
     it("denies a caller without payroll.manage.all", async () => {
       const run = await payroll.createRun(hrAdminClaims, { periodStart: "2028-01-03", periodEnd: "2028-01-03" });
       await payroll.calculateRun(hrAdminClaims, run.id);
+      await submitAndApprove(run.id);
       await payroll.finalizeRun(hrAdminClaims, run.id);
       await expect(payroll.generateDisbursementFile(outsiderClaims, run.id)).rejects.toThrow(ForbiddenException);
     });

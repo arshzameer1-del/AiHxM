@@ -12,15 +12,21 @@ export const pkr = new Intl.NumberFormat("en-PK", {
 export const RUN_STATUS_LABELS: Record<PayrollRunStatus, string> = {
   draft: "Draft",
   calculated: "Calculated",
+  pending_approval: "Pending approval",
+  approved: "Approved",
   finalized: "Finalized",
 };
 
-/** Mirrors LeavePage's STATUS_STYLES pattern — a run's lifecycle is
- * strictly one-directional (draft → calculated → finalized, per
- * PayrollService.finalizeRun's own guard), so these read left-to-right
- * as "not started yet" → "in review" → "locked". */
+/** Mirrors LeavePage's STATUS_STYLES pattern. Phase P2 widened the
+ * lifecycle to draft → calculated → pending_approval → approved →
+ * finalized (PayrollService.finalizeRun's own guard) — a rejection at
+ * pending_approval reverts to `calculated` rather than a terminal state
+ * (see 0093_payroll_approval_workflow.sql), so there's no "rejected" style
+ * here the way RequisitionStatus/leave request status need one. */
 export const RUN_STATUS_STYLES: Record<PayrollRunStatus, string> = {
   draft: "bg-black/5 text-label-tertiary",
   calculated: "bg-amber-100 text-amber-800",
+  pending_approval: "bg-amber-100 text-amber-800",
+  approved: "bg-blue-100 text-blue-800",
   finalized: "bg-success/15 text-green-700",
 };

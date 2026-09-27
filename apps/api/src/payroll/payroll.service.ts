@@ -7,9 +7,11 @@ import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
 import { ImportExportService } from "../import-export/import-export.service";
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
+import { WorkflowService } from "../workflow/workflow.service";
 import type {
   CalculatePayrollRunResponse,
   CreatePayrollRunRequest,
+  DecideLeaveRequestRequest,
   PayrollCalculationError,
   PayrollCalculationStep,
   PayrollRunView,
@@ -23,7 +25,13 @@ import type {
 
 const MODULE_KEY = "payroll" as const;
 const HR_MANAGE_PERMISSION = "payroll.manage.all";
+const APPROVE_PERMISSION = "payroll.approve.all";
 const SELF_VIEW_PERMISSION = "payroll_review.view.self";
+
+// Phase P2 — same "own constants per consumer module" pattern
+// RecruitmentService/LeaveRequestsService already use, not shared state.
+const WORKFLOW_TEMPLATE_KEY = "payroll_run";
+const WORKFLOW_OBJECT_KEY = "payroll_run";
 
 // The default FBR salaried-individual tax slabs (Tax Year 2027 / FY2026-27),
 // lazily seeded per-company the first time PayrollService needs a
@@ -162,6 +170,7 @@ function rowToRun(row: any): PayrollRunView {
     periodStart: toIsoDate(row.period_start),
     periodEnd: toIsoDate(row.period_end),
     status: row.status,
+    workflowInstanceId: row.workflow_instance_id,
     createdByUserAccountId: row.created_by_user_account_id,
     finalizedAt: toIso(row.finalized_at),
     createdAt: toIso(row.created_at) as string,
@@ -238,7 +247,8 @@ export class PayrollService {
     private readonly entitlements: EntitlementsService,
     private readonly audit: AuditService,
     private readonly importExport: ImportExportService,
-    private readonly effectiveDating: EffectiveDatingEngine
+    private readonly effectiveDating: EffectiveDatingEngine,
+    private readonly workflow: WorkflowService
   ) {}
 
   // --- Settings & tax slabs -----------------------------------------------
@@ -407,8 +417,12 @@ export class PayrollService {
     });
   }
 
+  /** Readable by either the preparer (`payroll.manage.all`) or the
+   * approver (`payroll.approve.all`, Phase P2) — a Payroll Approver needs
+   * to see the runs list to find the one awaiting their decision, even
+   * though they can't create/calculate/finalize any of them. */
   async listRuns(claims: RequestClaims): Promise<PayrollRunView[]> {
-    await this.requireHrManage(claims);
+    await this.requireViewRuns(claims);
     return this.db.withClaims(claims, async (client) => {
       const result = await client.query("SELECT * FROM payroll_runs ORDER BY period_start DESC");
       return result.rows.map(rowToRun);
@@ -416,7 +430,7 @@ export class PayrollService {
   }
 
   async getRun(claims: RequestClaims, id: string): Promise<PayrollRunView> {
-    await this.requireHrManage(claims);
+    await this.requireViewRuns(claims);
     return this.db.withClaims(claims, async (client) => {
       const run = await this.loadRun(client, id);
       return rowToRun(run);
@@ -532,15 +546,25 @@ export class PayrollService {
     });
   }
 
+  /**
+   * Phase P2: a run must be `approved` (submitted, then decided through
+   * the workflow engine) before it can be finalized — no more finalizing
+   * straight off a calculation. See this file's own header note and
+   * 0093_payroll_approval_workflow.sql for the full reasoning.
+   */
   async finalizeRun(claims: RequestClaims, id: string): Promise<PayrollRunView> {
     await this.requireHrManage(claims);
     return this.db.withClaims(claims, async (client) => {
       const run = await this.loadRun(client, id);
-      if (run.status === "draft") {
-        throw new BadRequestException("Cannot finalize a payroll run that has not been calculated yet");
-      }
       if (run.status === "finalized") {
         throw new BadRequestException("This payroll run is already finalized");
+      }
+      if (run.status !== "approved") {
+        throw new BadRequestException(
+          run.status === "pending_approval"
+            ? "This payroll run is still awaiting approval"
+            : "This payroll run must be calculated, submitted for approval, and approved before it can be finalized"
+        );
       }
       const result = await client.query(
         "UPDATE payroll_runs SET status = 'finalized', finalized_at = now(), updated_at = now() WHERE id = $1 RETURNING *",
@@ -551,12 +575,93 @@ export class PayrollService {
     });
   }
 
+  /**
+   * Routes the run through the tenant's configured approval chain — same
+   * pattern as `RecruitmentService.submitRequisition()`: a separate
+   * `WorkflowService` transaction (see KNOWN_ISSUES.md for the same
+   * cross-service non-atomicity tradeoff Decision #9 already documents),
+   * `NotFoundException` surfacing as-is if the tenant hasn't configured a
+   * `payroll_run` template yet (System Admin > Configuration > Workflow
+   * Templates), deliberately not auto-approved.
+   */
+  async submitForApproval(claims: RequestClaims, id: string): Promise<PayrollRunView> {
+    await this.requireHrManage(claims);
+    const run = await this.db.withClaims(claims, (client) => this.loadRun(client, id));
+    if (run.status !== "calculated") {
+      throw new BadRequestException(`Payroll run is ${run.status}, must be freshly calculated before it can be submitted for approval`);
+    }
+
+    const instance = await this.workflow.submitForApproval(claims, {
+      templateKey: WORKFLOW_TEMPLATE_KEY,
+      objectKey: WORKFLOW_OBJECT_KEY,
+      recordId: id,
+      record: { periodStart: toIsoDate(run.period_start), periodEnd: toIsoDate(run.period_end) },
+    });
+
+    return this.db.withClaims(claims, async (client) => {
+      const result = await client.query(
+        `UPDATE payroll_runs SET status = 'pending_approval', workflow_instance_id = $2, updated_at = now() WHERE id = $1 RETURNING *`,
+        [id, instance.id]
+      );
+      await this.audit.record(client, claims, { companyId: claims.company_id ?? null, action: "payroll_run.submit", target: id });
+      return rowToRun(result.rows[0]);
+    });
+  }
+
+  /**
+   * Gated by `payroll.approve.all` — deliberately NOT `payroll.manage.all`
+   * (the preparer's permission) — this is the actual segregation-of-duties
+   * enforcement kumail chose: a login without the Payroll Approver role
+   * gets a 403 here regardless of what the tenant's workflow template
+   * says, and `WorkflowService.decide()` itself separately verifies the
+   * caller resolves against that specific step's configured approver.
+   * Rejecting reverts the run to `calculated` (not a terminal `rejected`)
+   * so HR can review, recalculate if needed, and resubmit — see this
+   * file's header note.
+   */
+  async decideApproval(claims: RequestClaims, id: string, dto: DecideLeaveRequestRequest): Promise<PayrollRunView> {
+    await this.requirePayrollApprove(claims);
+    const run = await this.db.withClaims(claims, (client) => this.loadRun(client, id));
+    if (run.status !== "pending_approval") {
+      throw new BadRequestException(`Payroll run is ${run.status}, not awaiting approval`);
+    }
+    if (!run.workflow_instance_id) {
+      throw new BadRequestException("Payroll run has no workflow instance to decide on");
+    }
+
+    const instance = await this.workflow.getInstance(claims, run.workflow_instance_id);
+    const pendingStep = instance.steps.find((s) => s.status === "pending");
+    if (!pendingStep) throw new BadRequestException("No pending approval step found on this payroll run");
+    const decidedInstance = await this.workflow.decide(claims, pendingStep.id, dto);
+
+    return this.db.withClaims(claims, async (client) => {
+      let newStatus = run.status;
+      if (decidedInstance.status === "approved") newStatus = "approved";
+      else if (decidedInstance.status === "rejected") newStatus = "calculated";
+      const result = await client.query(
+        `UPDATE payroll_runs SET status = $2, updated_at = now() WHERE id = $1 RETURNING *`,
+        [id, newStatus]
+      );
+      await this.audit.record(client, claims, {
+        companyId: claims.company_id ?? null,
+        action: "payroll_run.decide",
+        target: id,
+        metadata: { decision: dto.decision },
+      });
+      return rowToRun(result.rows[0]);
+    });
+  }
+
   // --- Payslips ------------------------------------------------------------
 
+  /** Phase P2: a Payroll Approver (read-only here — this endpoint never
+   * writes) can see every payslip too, same as hr_admin — reviewing the
+   * actual numbers is the entire point of an approval step, not just the
+   * run's period dates. */
   async listPayslips(claims: RequestClaims, filter: { payrollRunId?: string; employeeId?: string }): Promise<PayslipView[]> {
     await this.requireModule(claims);
     return this.db.withClaims(claims, async (client) => {
-      const hasAll = await this.rbac.can(claims, HR_MANAGE_PERMISSION);
+      const hasAll = (await this.rbac.can(claims, HR_MANAGE_PERMISSION)) || (await this.rbac.can(claims, APPROVE_PERMISSION));
       const result = await client.query(
         `SELECT p.*, e.user_account_id AS employee_user_account_id, pr.status AS run_status
          FROM payslips p
@@ -595,7 +700,7 @@ export class PayrollService {
       if (result.rowCount === 0) throw new NotFoundException("Payslip not found");
       const row = result.rows[0];
 
-      const hasAll = await this.rbac.can(claims, HR_MANAGE_PERMISSION);
+      const hasAll = (await this.rbac.can(claims, HR_MANAGE_PERMISSION)) || (await this.rbac.can(claims, APPROVE_PERMISSION));
       if (hasAll) return rowToPayslip(row);
 
       const hasSelf = await this.rbac.can(claims, SELF_VIEW_PERMISSION, { ownerId: row.employee_user_account_id });
@@ -943,6 +1048,20 @@ export class PayrollService {
     await this.requireModule(claims);
     if (!(await this.rbac.can(claims, HR_MANAGE_PERMISSION))) {
       throw new ForbiddenException("Not permitted to manage payroll");
+    }
+  }
+
+  private async requirePayrollApprove(claims: RequestClaims): Promise<void> {
+    await this.requireModule(claims);
+    if (!(await this.rbac.can(claims, APPROVE_PERMISSION))) {
+      throw new ForbiddenException("Not permitted to approve payroll runs");
+    }
+  }
+
+  private async requireViewRuns(claims: RequestClaims): Promise<void> {
+    await this.requireModule(claims);
+    if (!(await this.rbac.can(claims, HR_MANAGE_PERMISSION)) && !(await this.rbac.can(claims, APPROVE_PERMISSION))) {
+      throw new ForbiddenException("Not permitted to view payroll runs");
     }
   }
 }

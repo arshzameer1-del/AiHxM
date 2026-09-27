@@ -7,6 +7,7 @@ import { PayrollService } from "./payroll.service";
 import { UpdatePayrollSettingsDto } from "./dto/update-payroll-settings.dto";
 import { SetTaxSlabsDto } from "./dto/set-tax-slabs.dto";
 import { CreatePayrollRunDto } from "./dto/create-payroll-run.dto";
+import { DecideLeaveRequestDto } from "../leave/dto/decide-leave-request.dto";
 
 /**
  * Any real session can call these (SessionGuard) — PayrollService's own
@@ -80,6 +81,19 @@ export class PayrollController {
   @Post("payroll/runs/:id/finalize")
   finalizeRun(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
     return this.payroll.finalizeRun(claims, id);
+  }
+
+  // Phase P2 — approval workflow. `DecideLeaveRequestDto` reused for the
+  // decision body, same {decision, comment?} shape RecruitmentController
+  // already reuses it for.
+  @Post("payroll/runs/:id/submit-for-approval")
+  submitForApproval(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.payroll.submitForApproval(claims, id);
+  }
+
+  @Patch("payroll/runs/:id/approval-decision")
+  decideApproval(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: DecideLeaveRequestDto) {
+    return this.payroll.decideApproval(claims, id, dto);
   }
 
   @Get("payroll/runs/:id/disbursement")

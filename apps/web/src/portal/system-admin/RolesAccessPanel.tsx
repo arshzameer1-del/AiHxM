@@ -7,6 +7,7 @@ const ROLE_LABELS: Record<TenantRoleKey, string> = {
   line_manager: "Line Manager",
   employee_self_service: "Employee (Self-Service)",
   system_admin: "System Admin",
+  payroll_approver: "Payroll Approver",
 };
 
 /**

@@ -1814,7 +1814,7 @@ export type UpdateEmployeeRequest = Partial<
  * added additively alongside the original three, not in place of any of
  * them.
  */
-export type TenantRoleKey = "hr_admin" | "line_manager" | "employee_self_service" | "system_admin";
+export type TenantRoleKey = "hr_admin" | "line_manager" | "employee_self_service" | "system_admin" | "payroll_approver";
 
 /**
  * Decision #12: before this, there was no way for an Employee record to
@@ -3406,7 +3406,13 @@ export type SetTaxSlabsRequest = {
   }>;
 };
 
-export type PayrollRunStatus = "draft" | "calculated" | "finalized";
+// Phase P2: pending_approval/approved are new — a run must be submitted
+// and approved before it can be finalized (PayrollService.finalizeRun()'s
+// own guard). A rejected run reverts to `calculated` rather than a
+// terminal `rejected` state — see 0093_payroll_approval_workflow.sql's
+// header comment for why this deliberately differs from
+// RequisitionStatus/leave request status.
+export type PayrollRunStatus = "draft" | "calculated" | "pending_approval" | "approved" | "finalized";
 
 export type PayrollRunView = {
   id: string;
@@ -3414,6 +3420,7 @@ export type PayrollRunView = {
   periodStart: string;
   periodEnd: string;
   status: PayrollRunStatus;
+  workflowInstanceId: string | null;
   createdByUserAccountId: string;
   finalizedAt: string | null;
   createdAt: string;

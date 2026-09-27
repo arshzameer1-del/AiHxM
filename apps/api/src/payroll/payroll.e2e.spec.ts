@@ -36,6 +36,9 @@ describe("Payroll HTTP surface (e2e)", () => {
   let hrAdminToken: string;
   let staffToken: string;
   let outsiderToken: string;
+  // Phase P2 — a distinct login holding ONLY payroll_approver, never
+  // hr_admin, exercising the real segregation-of-duties gate over HTTP.
+  let approverToken: string;
   let staffEmployeeId: string;
 
   function signSession(payload: { sub: string; is_platform_admin: boolean; company_id: string | null }): string {
@@ -101,6 +104,10 @@ describe("Payroll HTTP surface (e2e)", () => {
 
     const hrAdminUserId = await createUser(`payroll-hr-${stamp}@example.com`);
     await assignRole(hrAdminUserId, "hr_admin");
+    // Also holds rbac_demo_full_access purely to configure the payroll-run
+    // approval workflow template below via the real HTTP endpoint — same
+    // fixture shortcut the unit spec (payroll.service.spec.ts) uses.
+    await assignRole(hrAdminUserId, "rbac_demo_full_access");
     hrAdminToken = signSession({ sub: hrAdminUserId, is_platform_admin: false, company_id: companyId });
 
     const staffUserId = await createUser(`payroll-staff-${stamp}@example.com`);
@@ -109,6 +116,29 @@ describe("Payroll HTTP surface (e2e)", () => {
 
     const outsiderUserId = await createUser(`payroll-outsider-${stamp}@example.com`);
     outsiderToken = signSession({ sub: outsiderUserId, is_platform_admin: false, company_id: companyId });
+
+    const approverUserId = await createUser(`payroll-approver-${stamp}@example.com`);
+    await assignRole(approverUserId, "payroll_approver");
+    approverToken = signSession({ sub: approverUserId, is_platform_admin: false, company_id: companyId });
+
+    const payrollApproverRole = await db.withClaims(FIXTURE_CLAIMS, (client) =>
+      client.query("SELECT id FROM roles WHERE key = 'payroll_approver'")
+    );
+    await request(app.getHttpServer())
+      .post("/workflow/templates")
+      .set("Authorization", `Bearer ${hrAdminToken}`)
+      .send({
+        key: "payroll_run",
+        name: "Payroll Run Approval",
+        objectKey: "payroll_run",
+        steps: [
+          {
+            stepOrder: 1,
+            name: "Payroll Approver reviews",
+            approvers: [{ approverType: "role", roleId: payrollApproverRole.rows[0].id }],
+          },
+        ],
+      });
 
     const empRes = await request(app.getHttpServer())
       .post("/employees")
@@ -296,6 +326,36 @@ describe("Payroll HTTP surface (e2e)", () => {
         .set("Authorization", `Bearer ${staffToken}`);
       expect(listRes.status).toBe(200);
       expect(listRes.body).toEqual([]);
+    });
+
+    it("refuses to finalize before the run has been submitted for and granted approval (Phase P2)", async () => {
+      const res = await request(app.getHttpServer())
+        .post(`/payroll/runs/${runId}/finalize`)
+        .set("Authorization", `Bearer ${hrAdminToken}`);
+      expect(res.status).toBe(400);
+    });
+
+    it("submits for approval, and the preparer cannot decide their own submission", async () => {
+      const submitRes = await request(app.getHttpServer())
+        .post(`/payroll/runs/${runId}/submit-for-approval`)
+        .set("Authorization", `Bearer ${hrAdminToken}`);
+      expect(submitRes.status).toBe(201);
+      expect(submitRes.body.status).toBe("pending_approval");
+
+      const selfDecide = await request(app.getHttpServer())
+        .patch(`/payroll/runs/${runId}/approval-decision`)
+        .set("Authorization", `Bearer ${hrAdminToken}`)
+        .send({ decision: "approved" });
+      expect(selfDecide.status).toBe(403);
+    });
+
+    it("the Payroll Approver approves via PATCH /payroll/runs/:id/approval-decision", async () => {
+      const res = await request(app.getHttpServer())
+        .patch(`/payroll/runs/${runId}/approval-decision`)
+        .set("Authorization", `Bearer ${approverToken}`)
+        .send({ decision: "approved" });
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe("approved");
     });
 
     it("finalizes the run via POST /payroll/runs/:id/finalize, then refuses to finalize twice or recalculate", async () => {
