@@ -9,6 +9,7 @@ import { normalizeEmail } from "../auth/email.util";
 import { hashPassword } from "../auth/password";
 import { FILE_STORAGE, type FileStorageService } from "../file-storage/file-storage.interface";
 import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
+import { PersonsService } from "./persons.service";
 import { formatEmployeeNumber, parseEmployeeNumberSequence } from "./employee-number.util";
 import type {
   CreateEmployeeRequest,
@@ -63,6 +64,11 @@ function rowToEmployee(row: any): Record<string, unknown> {
     companyId: row.company_id,
     userAccountId: row.user_account_id,
     employeeNumber: row.employee_number,
+    // Core Employee Enterprise Phase 1 (0081_person_identity.sql) — see
+    // that migration's own header comment. `null` for any row inserted
+    // outside EmployeesService (test fixtures, etc.) rather than always
+    // present — the same nullable-until-linked shape as `orgUnitId`.
+    personId: row.person_id,
     firstName: row.first_name,
     lastName: row.last_name,
     email: row.email,
@@ -190,7 +196,28 @@ export class EmployeesService {
     // only a test that constructs this service BY HAND, and never calls
     // create()/update() in a way that would enqueue anything, ever sees it
     // as undefined.
-    private readonly webhooks?: WebhookDispatchService
+    private readonly webhooks?: WebhookDispatchService,
+    // Core Employee Enterprise Phase 1 (0081_person_identity.sql) —
+    // PersonsService takes no constructor dependencies of its own; every
+    // method takes the caller's own transaction `client` directly, the
+    // same shape resolveDepartment()/resolveLocation() below already use.
+    // A fresh `new PersonsService()` is therefore a fully real, working
+    // instance, not a stub — which is exactly why this is given a
+    // DEFAULT VALUE here rather than the `webhooks?` pattern above: the
+    // dozen-plus spec files across other feature areas that hand-
+    // construct EmployeesService without this argument keep working
+    // completely unchanged, AND `create()`/`update()` still always have a
+    // real PersonsService to call rather than silently skipping the
+    // person link the way a missing `webhooks` silently skips a
+    // notification. (`employees.person_id` itself stays nullable —
+    // 0081_person_identity.sql's own header comment covers why — but
+    // EmployeesService's own job is still to always populate it on every
+    // create/identity-changing update it handles.) NestJS's real DI container always
+    // injects the actual provider from this module regardless of this
+    // default (see EmployeesModule) — the default only ever fires for a
+    // test that constructs this service directly, in plain TypeScript,
+    // with fewer than 7 positional arguments.
+    private readonly persons: PersonsService = new PersonsService()
   ) {}
 
   async create(claims: RequestClaims, input: CreateEmployeeRequest): Promise<EmployeeView> {
@@ -201,19 +228,31 @@ export class EmployeesService {
       const employeeNumber = await this.assignEmployeeNumber(client, claims.company_id!, input.employeeNumber);
       const department = await this.resolveDepartment(client, claims.company_id!, input.orgUnitId, input.department);
       const location = await this.resolveLocation(client, claims.company_id!, input.locationId, input.location);
+      // Core Employee Enterprise Phase 1 (0081_person_identity.sql) — every
+      // hire resolves to a person, deterministically matched by CNIC
+      // (findOrCreateForHire()'s own doc comment covers why: a confirmed
+      // CNIC match is a rehire of the same person, not a new one).
+      const personId = await this.persons.findOrCreateForHire(client, claims.company_id!, {
+        firstName: input.firstName,
+        lastName: input.lastName,
+        cnic: input.cnic,
+        dateOfBirth: input.dateOfBirth,
+        gender: input.gender,
+      });
 
       const result = await client.query(
         `INSERT INTO employees
-           (company_id, user_account_id, employee_number, first_name, last_name, email, phone, cnic,
+           (company_id, user_account_id, employee_number, person_id, first_name, last_name, email, phone, cnic,
             date_of_birth, gender, marital_status, department, org_unit_id, designation, location, location_id,
             employment_type, manager_id, date_of_joining, salary_band, bank_account_number)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-                 COALESCE($17, 'permanent'), $18, COALESCE($19, CURRENT_DATE), $20, $21)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+                 COALESCE($18, 'permanent'), $19, COALESCE($20, CURRENT_DATE), $21, $22)
          RETURNING *`,
         [
           claims.company_id,
           input.userAccountId ?? null,
           employeeNumber,
+          personId,
           input.firstName,
           input.lastName,
           input.email ?? null,
@@ -370,14 +409,48 @@ export class EmployeesService {
       // the legacy free-text behavior unchanged.
       const location = await this.resolveLocation(client, claims.company_id!, nextLocationId, patch.location ?? before.location);
 
+      // Core Employee Enterprise Phase 1 (0081_person_identity.sql) — keep
+      // the derived `persons` shadow record in sync whenever an identity
+      // field it also carries actually changes (PersonsService.
+      // syncFromEmployee()'s own doc comment covers why only on an actual
+      // change, and why this never re-runs CNIC matching). Computed here,
+      // before the values below are folded into `next`, so it can compare
+      // patch-or-before against before directly. Guarded on
+      // `before.person_id` being set at all — a row inserted outside
+      // EmployeesService (see that field's own nullable-by-design doc
+      // comment) has nothing to sync yet; it stays unlinked until it's
+      // next recreated through this service, the same "no org unit at
+      // all keeps legacy behavior unchanged" shape resolveDepartment()
+      // already established.
+      const nextFirstName = patch.firstName ?? before.first_name;
+      const nextLastName = patch.lastName ?? before.last_name;
+      const nextCnic = patch.cnic ?? before.cnic;
+      const nextDateOfBirth = patch.dateOfBirth ?? before.date_of_birth;
+      const nextGender = patch.gender ?? before.gender;
+      const identityChanged =
+        nextFirstName !== before.first_name ||
+        nextLastName !== before.last_name ||
+        nextCnic !== before.cnic ||
+        nextDateOfBirth !== before.date_of_birth ||
+        nextGender !== before.gender;
+      if (identityChanged && before.person_id) {
+        await this.persons.syncFromEmployee(client, claims.company_id!, before.person_id, {
+          firstName: nextFirstName,
+          lastName: nextLastName,
+          cnic: nextCnic,
+          dateOfBirth: nextDateOfBirth,
+          gender: nextGender,
+        });
+      }
+
       const next = {
-        first_name: patch.firstName ?? before.first_name,
-        last_name: patch.lastName ?? before.last_name,
+        first_name: nextFirstName,
+        last_name: nextLastName,
         email: patch.email ?? before.email,
         phone: patch.phone ?? before.phone,
-        cnic: patch.cnic ?? before.cnic,
-        date_of_birth: patch.dateOfBirth ?? before.date_of_birth,
-        gender: patch.gender ?? before.gender,
+        cnic: nextCnic,
+        date_of_birth: nextDateOfBirth,
+        gender: nextGender,
         marital_status: patch.maritalStatus ?? before.marital_status,
         department,
         org_unit_id: nextOrgUnitId,

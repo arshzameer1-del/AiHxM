@@ -113,6 +113,66 @@ describe("EmployeesService", () => {
     });
   });
 
+  /**
+   * Core Employee Enterprise Phase 1 (0081_person_identity.sql /
+   * persons.service.ts). Covers PersonsService's real matching behavior
+   * end to end through EmployeesService.create()/update() — the same
+   * "exercise the real service, real Postgres, no mocks" discipline this
+   * whole spec file already follows for employee numbering and RBAC.
+   */
+  describe("person identity (Core Employee Enterprise Phase 1)", () => {
+    let companyId: string;
+    let hrAdminUserId: string;
+    let hrAdminClaims: RequestClaims;
+
+    beforeAll(async () => {
+      companyId = await createFixtureCompany("Person Identity Co");
+      hrAdminUserId = await createUser(`person-identity-hr-${Date.now()}@example.com`);
+      await assignRole(hrAdminUserId, companyId, "hr_admin");
+      hrAdminClaims = { is_platform_admin: false, company_id: companyId, sub: hrAdminUserId };
+    });
+
+    async function personRow(personId: string) {
+      const result = await db.withClaims(FIXTURE_CLAIMS, (client) => client.query("SELECT * FROM persons WHERE id = $1", [personId]));
+      return result.rows[0];
+    }
+
+    it("links two hires that share a CNIC to the same person (a rehire, or a data-entry duplicate), and gives a CNIC-less hire a person of their own", async () => {
+      const cnic = `${Date.now()}-REHIRE`;
+      const firstStint = await employees.create(hrAdminClaims, { firstName: "Rehired", lastName: "Once", cnic });
+      const secondStint = await employees.create(hrAdminClaims, { firstName: "Rehired", lastName: "Twice", cnic });
+      expect(firstStint.personId).not.toBeNull();
+      expect(secondStint.personId).toBe(firstStint.personId);
+
+      const noCnic = await employees.create(hrAdminClaims, { firstName: "No", lastName: "Cnic" });
+      expect(noCnic.personId).not.toBeNull();
+      expect(noCnic.personId).not.toBe(firstStint.personId);
+    });
+
+    it("keeps the derived person record's name in sync when an employee's own name is edited", async () => {
+      const created = await employees.create(hrAdminClaims, { firstName: "Typo", lastName: "Name" });
+      await employees.update(hrAdminClaims, created.id, { firstName: "Fixed", lastName: "Name" });
+      const person = await personRow(created.personId!);
+      expect(person.full_name).toBe("Fixed Name");
+    });
+
+    it("does not touch the person record when an update carries no identity-field change", async () => {
+      const created = await employees.create(hrAdminClaims, { firstName: "Untouched", lastName: "Person" });
+      const before = await personRow(created.personId!);
+      await employees.update(hrAdminClaims, created.id, { department: "Ops" });
+      const after = await personRow(created.personId!);
+      expect(after.updated_at).toEqual(before.updated_at);
+    });
+
+    it("rejects editing an employee's CNIC to one already on file for a different employee's person", async () => {
+      const cnicInUse = `${Date.now()}-INUSE`;
+      await employees.create(hrAdminClaims, { firstName: "Holds", lastName: "TheCnic", cnic: cnicInUse });
+      const other = await employees.create(hrAdminClaims, { firstName: "Wants", lastName: "TheCnic" });
+
+      await expect(employees.update(hrAdminClaims, other.id, { cnic: cnicInUse })).rejects.toThrow(BadRequestException);
+    });
+  });
+
   describe("org chart, RBAC field visibility, document vault, and job history", () => {
     let companyId: string;
     let hrAdminClaims: RequestClaims;

@@ -1591,6 +1591,28 @@ export type EmployeeView = {
   companyId: string;
   userAccountId: string | null;
   employeeNumber: string;
+  /**
+   * Core Employee Enterprise Phase 1 addition (0081_person_identity.sql)
+   * — a stable identity record standing behind this employee row, so a
+   * rehire (or, later, a genuine second concurrent employment) can be
+   * linked to the SAME person instead of creating an unrelated duplicate.
+   * Set for every employee created through EmployeesService.create()
+   * going forward. Nullable rather than always-present — deliberately,
+   * the same reason `orgUnitId`/`locationId` above are nullable: a
+   * number of employee rows across this codebase are written directly
+   * via raw SQL outside EmployeesService (test fixtures today; possibly
+   * other integrations later), and this migration doesn't chase down
+   * every one of those call sites. `null` means exactly what
+   * `orgUnitId: null` already means — this employee hasn't been linked
+   * to the canonical record yet. `employees` stays authoritative for
+   * identity fields below (firstName/lastName/cnic/dateOfBirth/gender)
+   * — `persons` is a derived shadow record kept in sync by
+   * PersonsService, not the other way around, until a real Person
+   * UI/API exists. See 0081_person_identity.sql's own header comment
+   * for why this is additive rather than the "employees becomes a view"
+   * shape originally proposed.
+   */
+  personId: string | null;
   firstName: string;
   lastName: string;
   email: string | null;
