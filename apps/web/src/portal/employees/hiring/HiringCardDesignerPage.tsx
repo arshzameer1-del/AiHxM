@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import type { CardDefinitionView, UpdateCardDefinitionRequest } from "@aihxm/shared-types";
 import { api, ApiError } from "../../../api/client";
 
@@ -178,6 +179,20 @@ export function HiringCardDesignerPage() {
               <div className="min-w-0">
                 <div className={`text-sm font-medium ${card.isEnabled ? "" : "text-label-tertiary"}`}>{card.label}</div>
                 {card.description && <div className="text-xs text-label-tertiary mt-0.5">{card.description}</div>}
+                {/* Hiring Card Field Configuration (2026-09-27) — one level
+                    deeper than this page's own card-level toggles. Not
+                    offered on `review_completion` — that card has no
+                    built-in fields of its own to configure and never goes
+                    through `CARD_FORM_REGISTRY` (see `card-field-catalog.ts`'s
+                    own header comment). */}
+                {card.cardKey !== "review_completion" && (
+                  <Link
+                    to={`/app/configuration-center/hiring/${card.cardKey}/fields`}
+                    className="text-xs font-medium text-accent hover:underline"
+                  >
+                    Configure fields
+                  </Link>
+                )}
               </div>
               <div className="flex items-center gap-4 shrink-0">
                 <label className="flex items-center gap-1.5 text-xs">

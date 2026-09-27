@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
 import { SessionGuard } from "../auth/session.guard";
 import { CurrentClaims } from "../auth/current-claims.decorator";
 import type { RequestClaims } from "../database/tenant-context";
@@ -16,8 +16,17 @@ export class CustomFieldsController {
   }
 
   @Get("definitions")
-  list(@CurrentClaims() claims: RequestClaims, @Query("objectKey") objectKey: string) {
-    return this.customFields.listDefinitions(claims, objectKey);
+  list(
+    @CurrentClaims() claims: RequestClaims,
+    @Query("objectKey") objectKey: string,
+    @Query("includeInactive") includeInactive?: string
+  ) {
+    return this.customFields.listDefinitions(claims, objectKey, includeInactive === "true");
+  }
+
+  @Delete("definitions/:objectKey/:fieldKey")
+  deactivate(@CurrentClaims() claims: RequestClaims, @Param("objectKey") objectKey: string, @Param("fieldKey") fieldKey: string) {
+    return this.customFields.deactivateField(claims, objectKey, fieldKey);
   }
 
   @Post("values")

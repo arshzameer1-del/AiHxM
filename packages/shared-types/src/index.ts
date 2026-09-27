@@ -1494,6 +1494,12 @@ export type CustomFieldDefinition = {
   fieldType: CustomFieldType;
   options?: string[];
   isRequired: boolean;
+  // Hiring Card Field Configuration (2026-09-27) — a custom field is never
+  // hard-deleted (values referencing it may already exist), only
+  // deactivated. Every pre-existing row defaults to `true` via the
+  // migration that added this column, so nothing already using this type
+  // needs to change.
+  isActive: boolean;
   createdAt: string;
 };
 
@@ -1511,6 +1517,49 @@ export type SetCustomFieldValueRequest = {
   recordId: string;
   fieldKey: string;
   value: unknown;
+};
+
+// --- Hiring Card Field Configuration (2026-09-27) -------------------------
+// kumail's own request, looking at the Hiring Card Designer's card-level
+// toggles: "there should be configuration available for their fields under
+// their respective tile — field enable/disable, add custom field option —
+// custom field once added will be visible in respective tile." This is the
+// field-level depth the v2 gap analysis flagged as "then 2" — see
+// claude/core-employee-configuration-hr-admin-v2-gap-analysis-and-roadmap.md.
+// Built-in field enable/disable/required is a NEW per-company catalog
+// (`core_employee_card_field_definitions`); "add custom field" reuses the
+// existing WRICEF custom-fields engine (`CustomFieldDefinition` above)
+// rather than forking a parallel one, scoped under `hiring_card:<cardKey>`
+// and mirrored under `employee` so the same field also shows on the
+// employee's own profile after hiring (kumail's second scoping choice).
+
+export type CardFieldDefinitionView = {
+  cardKey: string;
+  fieldKey: string;
+  label: string;
+  isEnabled: boolean;
+  isRequired: boolean;
+  sortOrder: number;
+};
+
+/** What one card's field-configuration screen (and the live Hiring Wizard) needs: this card's built-in fields plus whatever custom fields have been added to it. */
+export type CardFieldsConfigView = {
+  cardKey: string;
+  builtIn: CardFieldDefinitionView[];
+  custom: CustomFieldDefinition[];
+};
+
+export type UpdateCardFieldConfigRequest = {
+  isEnabled?: boolean;
+  isRequired?: boolean;
+};
+
+export type AddCardCustomFieldRequest = {
+  fieldKey: string;
+  label: string;
+  fieldType: CustomFieldType;
+  options?: string[];
+  isRequired?: boolean;
 };
 
 // --- Phase 6: WRICEF Framework Skeleton — Interfaces (notifications) -----

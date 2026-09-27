@@ -1,4 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable } from "@nestjs/common";
+import type { PoolClient } from "pg";
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
 import { RbacService } from "../rbac/rbac.service";
@@ -17,6 +18,7 @@ function toDefinition(row: any): CustomFieldDefinition {
     fieldType: row.field_type,
     options: row.options ?? undefined,
     isRequired: row.is_required,
+    isActive: row.is_active,
     createdAt: row.created_at?.toISOString ? row.created_at.toISOString() : row.created_at,
   };
 }
@@ -80,7 +82,13 @@ export class CustomFieldsService {
          VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
          ON CONFLICT (company_id, object_key, field_key)
          DO UPDATE SET label = EXCLUDED.label, field_type = EXCLUDED.field_type,
-                        options = EXCLUDED.options, is_required = EXCLUDED.is_required
+                        options = EXCLUDED.options, is_required = EXCLUDED.is_required,
+                        -- Re-defining a field brings it back if it had been
+                        -- deactivated — the same "redefine to reactivate"
+                        -- posture HrReferenceCatalogService's own catalog
+                        -- items take, rather than leaving a silently dead
+                        -- row behind that a caller has to separately notice.
+                        is_active = true
          RETURNING *`,
         [
           claims.company_id,
@@ -96,14 +104,38 @@ export class CustomFieldsService {
     });
   }
 
-  async listDefinitions(claims: RequestClaims, objectKey: string): Promise<CustomFieldDefinition[]> {
+  async listDefinitions(claims: RequestClaims, objectKey: string, includeInactive = false): Promise<CustomFieldDefinition[]> {
     if (!claims.company_id) return [];
     return this.db.withClaims(claims, async (client) => {
       const result = await client.query(
-        `SELECT * FROM custom_field_definitions WHERE company_id = $1 AND object_key = $2 ORDER BY created_at ASC`,
+        includeInactive
+          ? `SELECT * FROM custom_field_definitions WHERE company_id = $1 AND object_key = $2 ORDER BY created_at ASC`
+          : `SELECT * FROM custom_field_definitions WHERE company_id = $1 AND object_key = $2 AND is_active = true ORDER BY created_at ASC`,
         [claims.company_id, objectKey]
       );
       return result.rows.map(toDefinition);
+    });
+  }
+
+  /**
+   * Soft-deactivation — never a hard delete, since `custom_field_values`
+   * rows already written against this field must stay interpretable (same
+   * "reference masters aren't hard-deleted" posture as every other
+   * catalog this project has built). Deactivating hides the field from
+   * `listDefinitions()`'s default view and from `setValue()`'s validation
+   * (a caller can no longer write a NEW value against it), but existing
+   * values are left exactly as they are.
+   */
+  async deactivateField(claims: RequestClaims, objectKey: string, fieldKey: string): Promise<void> {
+    if (!claims.company_id) throw new ForbiddenException();
+    if (!(await this.rbac.can(claims, MANAGE_PERMISSION))) {
+      throw new ForbiddenException("Not permitted to manage custom fields");
+    }
+    await this.db.withClaims(claims, async (client) => {
+      await client.query(
+        `UPDATE custom_field_definitions SET is_active = false WHERE company_id = $1 AND object_key = $2 AND field_key = $3`,
+        [claims.company_id, objectKey, fieldKey]
+      );
     });
   }
 
@@ -119,30 +151,49 @@ export class CustomFieldsService {
     dto: { objectKey: string; recordId: string; fieldKey: string; value: unknown }
   ): Promise<void> {
     if (!claims.company_id) throw new ForbiddenException();
+    await this.db.withClaims(claims, (client) => this.setValueWithinTransaction(client, claims, dto));
+  }
 
-    await this.db.withClaims(claims, async (client) => {
-      const definitionResult = await client.query<{ field_type: CustomFieldType; options: string[] | null; is_required: boolean }>(
-        `SELECT field_type, options, is_required FROM custom_field_definitions
-         WHERE company_id = $1 AND object_key = $2 AND field_key = $3`,
-        [claims.company_id, dto.objectKey, dto.fieldKey]
-      );
-      if (definitionResult.rowCount === 0) {
-        throw new BadRequestException(`No custom field '${dto.fieldKey}' defined for ${dto.objectKey}`);
-      }
-      const definition = definitionResult.rows[0];
-      if (definition.is_required && (dto.value === null || dto.value === undefined)) {
-        throw new BadRequestException(`${dto.fieldKey} is required`);
-      }
-      validateValueAgainstType(definition.field_type, dto.value, definition.options ?? undefined);
+  /**
+   * Same write `setValue()` does, but against a `client` the CALLER
+   * already opened — the same transaction-sharing pattern
+   * `HrReferenceCatalogService.validateActiveCode()` and every
+   * `createWithinTransaction()` method in this codebase use. Needed so
+   * `HiringProcessService.complete()` can copy a hiring card's custom
+   * field values onto the newly-created employee (`objectKey: "employee"`)
+   * inside the SAME transaction that creates the employee row — writing
+   * through the public `setValue()` instead would open a second
+   * connection/transaction, so a later failure in `complete()` could
+   * leave a custom field value committed for an employee whose hire
+   * itself got rolled back.
+   */
+  async setValueWithinTransaction(
+    client: PoolClient,
+    claims: RequestClaims,
+    dto: { objectKey: string; recordId: string; fieldKey: string; value: unknown }
+  ): Promise<void> {
+    if (!claims.company_id) throw new ForbiddenException();
+    const definitionResult = await client.query<{ field_type: CustomFieldType; options: string[] | null; is_required: boolean }>(
+      `SELECT field_type, options, is_required FROM custom_field_definitions
+       WHERE company_id = $1 AND object_key = $2 AND field_key = $3 AND is_active = true`,
+      [claims.company_id, dto.objectKey, dto.fieldKey]
+    );
+    if (definitionResult.rowCount === 0) {
+      throw new BadRequestException(`No custom field '${dto.fieldKey}' defined for ${dto.objectKey}`);
+    }
+    const definition = definitionResult.rows[0];
+    if (definition.is_required && (dto.value === null || dto.value === undefined)) {
+      throw new BadRequestException(`${dto.fieldKey} is required`);
+    }
+    validateValueAgainstType(definition.field_type, dto.value, definition.options ?? undefined);
 
-      await client.query(
-        `INSERT INTO custom_field_values (company_id, object_key, record_id, field_key, value)
-         VALUES ($1, $2, $3, $4, $5::jsonb)
-         ON CONFLICT (company_id, object_key, record_id, field_key)
-         DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
-        [claims.company_id, dto.objectKey, dto.recordId, dto.fieldKey, JSON.stringify(dto.value ?? null)]
-      );
-    });
+    await client.query(
+      `INSERT INTO custom_field_values (company_id, object_key, record_id, field_key, value)
+       VALUES ($1, $2, $3, $4, $5::jsonb)
+       ON CONFLICT (company_id, object_key, record_id, field_key)
+       DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+      [claims.company_id, dto.objectKey, dto.recordId, dto.fieldKey, JSON.stringify(dto.value ?? null)]
+    );
   }
 
   /**

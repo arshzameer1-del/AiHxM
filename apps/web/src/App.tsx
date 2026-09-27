@@ -95,6 +95,15 @@ const HiringCardDesignerPage = lazy(() =>
     default: m.HiringCardDesignerPage,
   })),
 );
+// Hiring Card Field Configuration (2026-09-27) — one level deeper than the
+// card designer above: field-level enable/disable/required plus "add
+// custom field" for one card, reached from that page's own "Configure
+// fields" link.
+const HiringCardFieldConfigPage = lazy(() =>
+  import("./portal/employees/hiring/HiringCardFieldConfigPage").then((m) => ({
+    default: m.HiringCardFieldConfigPage,
+  })),
+);
 const EmployeeBulkImportPage = lazy(() =>
   import("./portal/employees/EmployeeBulkImportPage").then((m) => ({
     default: m.EmployeeBulkImportPage,
@@ -422,6 +431,13 @@ export default function App() {
                     DomainCard renders, driven entirely from that DB row,
                     not from anything in this file. */}
                   <Route path="configuration-center/hiring" element={<HiringCardDesignerPage />} />
+                  {/* Hiring Card Field Configuration (2026-09-27) — see
+                    HiringCardFieldConfigPage.tsx's own doc comment. Same
+                    hr_admin-only gate, enforced server-side by
+                    CardFieldConfigService (the exact same
+                    `employee.manage.all` permission the card designer
+                    above already requires). */}
+                  <Route path="configuration-center/hiring/:cardKey/fields" element={<HiringCardFieldConfigPage />} />
                   {/* Task #50 — Leave & Attendance. Server-side RBAC/workflow
                     routing decides who can submit/decide/cancel what;
                     LeavePage renders one screen for every role, same

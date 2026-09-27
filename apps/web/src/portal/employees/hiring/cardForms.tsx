@@ -1,4 +1,13 @@
-import type { CostCenterView, EmployeeView, HrReferenceCatalogItemView, LocationView, OrgUnitView, PositionView, ShiftView } from "@aihxm/shared-types";
+import type {
+  CostCenterView,
+  CustomFieldDefinition,
+  EmployeeView,
+  HrReferenceCatalogItemView,
+  LocationView,
+  OrgUnitView,
+  PositionView,
+  ShiftView,
+} from "@aihxm/shared-types";
 import { FieldInput, type SubEntityFieldSpec } from "../subentities/SubEntityPanel";
 
 /**
@@ -33,11 +42,47 @@ export type HiringPickerOptions = {
   employmentTypes: HrReferenceCatalogItemView[];
 };
 
+/**
+ * Hiring Card Field Configuration (2026-09-27) — the runtime shape
+ * `HiringWizardPage.tsx` builds from `api.listCardFields(cardKey)`
+ * (`CardFieldsConfigView`'s `builtIn` array, flattened to a `fieldKey`-keyed
+ * map for O(1) lookup here) and passes down as one card form's
+ * `fieldConfig` prop. Absent entirely (`undefined`) is a valid state too —
+ * every field renders enabled, at its old hardcoded `required` — so a card
+ * whose config hasn't loaded yet (or failed to) never blocks data entry.
+ */
+export type CardFieldRuntimeConfig = {
+  builtIn: Record<string, { isEnabled: boolean; isRequired: boolean }>;
+  custom: CustomFieldDefinition[];
+};
+
 export type CardFormProps = {
   data: Record<string, unknown>;
   onChange: (data: Record<string, unknown>) => void;
   options: HiringPickerOptions;
+  fieldConfig?: CardFieldRuntimeConfig;
 };
+
+function fieldEnabled(fieldConfig: CardFieldRuntimeConfig | undefined, key: string): boolean {
+  return fieldConfig?.builtIn[key]?.isEnabled !== false;
+}
+
+function fieldRequired(fieldConfig: CardFieldRuntimeConfig | undefined, key: string, fallback: boolean): boolean {
+  return fieldConfig?.builtIn[key]?.isRequired ?? fallback;
+}
+
+/** Renders `children` only when this built-in field hasn't been disabled from the card's field-configuration screen — the actual "field enable/disable" kumail asked for. */
+function FieldGate({ fieldConfig, fieldKey, children }: { fieldConfig?: CardFieldRuntimeConfig; fieldKey: string; children: React.ReactNode }) {
+  if (!fieldEnabled(fieldConfig, fieldKey)) return null;
+  return <>{children}</>;
+}
+
+/** Same enable/disable + required override, applied to a `SubEntityFieldSpec[]` used by a `RepeatableListEditor` card. */
+function applyFieldConfig(fields: SubEntityFieldSpec[], fieldConfig: CardFieldRuntimeConfig | undefined): SubEntityFieldSpec[] {
+  return fields
+    .filter((f) => fieldEnabled(fieldConfig, f.key))
+    .map((f) => ({ ...f, required: fieldRequired(fieldConfig, f.key, Boolean(f.required)) }));
+}
 
 function inputClass() {
   return "w-full rounded-lg border border-black/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent";
@@ -59,6 +104,116 @@ function set(data: Record<string, unknown>, onChange: (d: Record<string, unknown
 function str(data: Record<string, unknown>, key: string): string {
   const v = data[key];
   return v === null || v === undefined ? "" : String(v);
+}
+
+/**
+ * Hiring Card Field Configuration (2026-09-27) — kumail's own "add custom
+ * field option, custom field once added will be visible in respective
+ * tile." Every card form gets exactly one of these appended (see
+ * `withCustomFields()` below), rendering whatever custom field definitions
+ * `HiringWizardPage.tsx` fetched for THIS card (`fieldConfig.custom`).
+ * Values are kept under the reserved `data.__customFields` sub-object —
+ * `HiringProcessService.complete()` reads that exact key back out of every
+ * card's data to copy each value onto the new employee (`objectKey:
+ * "employee"`), per kumail's own "Wizard + Employee profile" scope choice.
+ */
+function CustomFieldsSection({
+  data,
+  onChange,
+  definitions,
+}: {
+  data: Record<string, unknown>;
+  onChange: (data: Record<string, unknown>) => void;
+  definitions: CustomFieldDefinition[];
+}) {
+  if (definitions.length === 0) return null;
+  const values = (data.__customFields && typeof data.__customFields === "object" ? data.__customFields : {}) as Record<string, unknown>;
+
+  function setCustom(fieldKey: string, value: unknown) {
+    onChange({ ...data, __customFields: { ...values, [fieldKey]: value } });
+  }
+
+  return (
+    <div className="border-t border-black/10 pt-3 space-y-3">
+      <p className="text-xs font-semibold text-label-tertiary uppercase tracking-wide">Custom fields</p>
+      <div className="grid grid-cols-2 gap-3">
+        {definitions.map((def) => (
+          <Labeled key={def.fieldKey} label={def.isRequired ? `${def.label} *` : def.label}>
+            <CustomFieldInput definition={def} value={values[def.fieldKey]} onChange={(v) => setCustom(def.fieldKey, v)} />
+          </Labeled>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CustomFieldInput({
+  definition,
+  value,
+  onChange,
+}: {
+  definition: CustomFieldDefinition;
+  value: unknown;
+  onChange: (value: unknown) => void;
+}) {
+  switch (definition.fieldType) {
+    case "boolean":
+      return (
+        <input
+          type="checkbox"
+          checked={Boolean(value)}
+          onChange={(e) => onChange(e.target.checked)}
+          className="h-4 w-4 rounded border-black/20"
+        />
+      );
+    case "number":
+      return (
+        <input
+          type="number"
+          value={value === null || value === undefined ? "" : String(value)}
+          onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
+          className={inputClass()}
+        />
+      );
+    case "date":
+      return (
+        <input type="date" value={value ? String(value) : ""} onChange={(e) => onChange(e.target.value || null)} className={inputClass()} />
+      );
+    case "select":
+      return (
+        <select value={value ? String(value) : ""} onChange={(e) => onChange(e.target.value || null)} className={inputClass()}>
+          <option value="">Select…</option>
+          {(definition.options ?? []).map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </select>
+      );
+    case "text":
+    default:
+      return (
+        <input value={value === null || value === undefined ? "" : String(value)} onChange={(e) => onChange(e.target.value)} className={inputClass()} />
+      );
+  }
+}
+
+/**
+ * Wraps a card's own form renderer with the shared `CustomFieldsSection`
+ * above, so every entry in `CARD_FORM_REGISTRY` gets "add custom field"
+ * support for free without touching each form's own body. `review_completion`
+ * is deliberately never wrapped (it isn't in `CARD_FORM_REGISTRY` at all —
+ * see this file's own header comment for why).
+ */
+function withCustomFields(Form: (props: CardFormProps) => JSX.Element): (props: CardFormProps) => JSX.Element {
+  return function FormWithCustomFields(props: CardFormProps) {
+    return (
+      <div className="space-y-4">
+        <Form {...props} />
+        <CustomFieldsSection data={props.data} onChange={props.onChange} definitions={props.fieldConfig?.custom ?? []} />
+      </div>
+    );
+  };
 }
 
 /** Generic repeatable-list editor: `data[arrayKey]` is an array of plain objects, each edited via the same `SubEntityFieldSpec`-driven inputs the sub-entity CRUD tabs already use. */
@@ -136,45 +291,84 @@ function RepeatableListEditor({
 const GENDERS = ["male", "female", "other"];
 const MARITAL_STATUSES = ["single", "married", "divorced", "widowed"];
 
-function PersonalIdentityForm({ data, onChange }: CardFormProps) {
+function PersonalIdentityForm({ data, onChange, fieldConfig }: CardFormProps) {
   return (
     <div className="grid grid-cols-2 gap-3">
-      <Labeled label="First name">
-        <input required value={str(data, "firstName")} onChange={(e) => set(data, onChange, "firstName", e.target.value)} className={inputClass()} />
-      </Labeled>
-      <Labeled label="Last name">
-        <input required value={str(data, "lastName")} onChange={(e) => set(data, onChange, "lastName", e.target.value)} className={inputClass()} />
-      </Labeled>
-      <Labeled label="CNIC">
-        <input value={str(data, "cnic")} onChange={(e) => set(data, onChange, "cnic", e.target.value)} className={inputClass()} />
-      </Labeled>
-      <Labeled label="Date of birth">
-        <input type="date" value={str(data, "dateOfBirth")} onChange={(e) => set(data, onChange, "dateOfBirth", e.target.value)} className={inputClass()} />
-      </Labeled>
-      <Labeled label="Gender">
-        <select value={str(data, "gender")} onChange={(e) => set(data, onChange, "gender", e.target.value)} className={`${inputClass()} capitalize`}>
-          <option value="">Select…</option>
-          {GENDERS.map((g) => (
-            <option key={g} value={g}>
-              {g}
-            </option>
-          ))}
-        </select>
-      </Labeled>
-      <Labeled label="Marital status">
-        <select
-          value={str(data, "maritalStatus")}
-          onChange={(e) => set(data, onChange, "maritalStatus", e.target.value)}
-          className={`${inputClass()} capitalize`}
-        >
-          <option value="">Select…</option>
-          {MARITAL_STATUSES.map((m) => (
-            <option key={m} value={m}>
-              {m}
-            </option>
-          ))}
-        </select>
-      </Labeled>
+      <FieldGate fieldConfig={fieldConfig} fieldKey="firstName">
+        <Labeled label="First name">
+          <input
+            required={fieldRequired(fieldConfig, "firstName", true)}
+            value={str(data, "firstName")}
+            onChange={(e) => set(data, onChange, "firstName", e.target.value)}
+            className={inputClass()}
+          />
+        </Labeled>
+      </FieldGate>
+      <FieldGate fieldConfig={fieldConfig} fieldKey="lastName">
+        <Labeled label="Last name">
+          <input
+            required={fieldRequired(fieldConfig, "lastName", true)}
+            value={str(data, "lastName")}
+            onChange={(e) => set(data, onChange, "lastName", e.target.value)}
+            className={inputClass()}
+          />
+        </Labeled>
+      </FieldGate>
+      <FieldGate fieldConfig={fieldConfig} fieldKey="cnic">
+        <Labeled label="CNIC">
+          <input
+            required={fieldRequired(fieldConfig, "cnic", false)}
+            value={str(data, "cnic")}
+            onChange={(e) => set(data, onChange, "cnic", e.target.value)}
+            className={inputClass()}
+          />
+        </Labeled>
+      </FieldGate>
+      <FieldGate fieldConfig={fieldConfig} fieldKey="dateOfBirth">
+        <Labeled label="Date of birth">
+          <input
+            type="date"
+            required={fieldRequired(fieldConfig, "dateOfBirth", false)}
+            value={str(data, "dateOfBirth")}
+            onChange={(e) => set(data, onChange, "dateOfBirth", e.target.value)}
+            className={inputClass()}
+          />
+        </Labeled>
+      </FieldGate>
+      <FieldGate fieldConfig={fieldConfig} fieldKey="gender">
+        <Labeled label="Gender">
+          <select
+            required={fieldRequired(fieldConfig, "gender", false)}
+            value={str(data, "gender")}
+            onChange={(e) => set(data, onChange, "gender", e.target.value)}
+            className={`${inputClass()} capitalize`}
+          >
+            <option value="">Select…</option>
+            {GENDERS.map((g) => (
+              <option key={g} value={g}>
+                {g}
+              </option>
+            ))}
+          </select>
+        </Labeled>
+      </FieldGate>
+      <FieldGate fieldConfig={fieldConfig} fieldKey="maritalStatus">
+        <Labeled label="Marital status">
+          <select
+            required={fieldRequired(fieldConfig, "maritalStatus", false)}
+            value={str(data, "maritalStatus")}
+            onChange={(e) => set(data, onChange, "maritalStatus", e.target.value)}
+            className={`${inputClass()} capitalize`}
+          >
+            <option value="">Select…</option>
+            {MARITAL_STATUSES.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+        </Labeled>
+      </FieldGate>
     </div>
   );
 }
@@ -226,7 +420,7 @@ const FALLBACK_EMPLOYMENT_TYPES = ["permanent", "contract", "probation", "intern
 // hold. The selected position's own cost center (when it has one) is
 // surfaced below as a read-only hint for filling in that card, not
 // duplicated here as a second, disconnected field that would go nowhere.
-function OrganizationAssignmentForm({ data, onChange, options }: CardFormProps) {
+function OrganizationAssignmentForm({ data, onChange, options, fieldConfig }: CardFormProps) {
   const orgUnitId = str(data, "orgUnitId");
   const positionId = str(data, "positionId");
   const availablePositions = options.positions.filter((p) => p.status === "vacant" && (!orgUnitId || p.orgUnitId === orgUnitId));
@@ -246,59 +440,97 @@ function OrganizationAssignmentForm({ data, onChange, options }: CardFormProps) 
 
   return (
     <div className="grid grid-cols-2 gap-3">
-      <Labeled label="Org unit">
-        <select value={orgUnitId} onChange={(e) => set(data, onChange, "orgUnitId", e.target.value)} className={inputClass()}>
-          <option value="">Select…</option>
-          {options.orgUnits.map((u) => (
-            <option key={u.id} value={u.id}>
-              {u.name}
-            </option>
-          ))}
-        </select>
-      </Labeled>
-      <Labeled label="Location">
-        <select value={str(data, "locationId")} onChange={(e) => set(data, onChange, "locationId", e.target.value)} className={inputClass()}>
-          <option value="">Select…</option>
-          {options.locations.map((l) => (
-            <option key={l.id} value={l.id}>
-              {l.name}
-            </option>
-          ))}
-        </select>
-      </Labeled>
-      <Labeled label="Employment type">
-        <select value={str(data, "employmentType")} onChange={(e) => set(data, onChange, "employmentType", e.target.value)} className={`${inputClass()} capitalize`}>
-          <option value="">Select…</option>
-          {options.employmentTypes.length > 0
-            ? options.employmentTypes.map((t) => (
-                <option key={t.code} value={t.code}>
-                  {t.label}
-                </option>
-              ))
-            : FALLBACK_EMPLOYMENT_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-        </select>
-      </Labeled>
-      <Labeled label="Date of joining">
-        <input type="date" value={str(data, "dateOfJoining")} onChange={(e) => set(data, onChange, "dateOfJoining", e.target.value)} className={inputClass()} />
-      </Labeled>
-      <Labeled label="Position">
-        <select value={positionId} onChange={(e) => handlePositionChange(e.target.value)} className={inputClass()}>
-          <option value="">No position (designation only)</option>
-          {availablePositions.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.positionTitle}
-              {p.positionCode ? ` (${p.positionCode})` : ""}
-            </option>
-          ))}
-        </select>
-      </Labeled>
-      <Labeled label="Designation">
-        <input value={str(data, "designation")} onChange={(e) => set(data, onChange, "designation", e.target.value)} className={inputClass()} />
-      </Labeled>
+      <FieldGate fieldConfig={fieldConfig} fieldKey="orgUnitId">
+        <Labeled label="Org unit">
+          <select
+            required={fieldRequired(fieldConfig, "orgUnitId", false)}
+            value={orgUnitId}
+            onChange={(e) => set(data, onChange, "orgUnitId", e.target.value)}
+            className={inputClass()}
+          >
+            <option value="">Select…</option>
+            {options.orgUnits.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name}
+              </option>
+            ))}
+          </select>
+        </Labeled>
+      </FieldGate>
+      <FieldGate fieldConfig={fieldConfig} fieldKey="locationId">
+        <Labeled label="Location">
+          <select
+            required={fieldRequired(fieldConfig, "locationId", false)}
+            value={str(data, "locationId")}
+            onChange={(e) => set(data, onChange, "locationId", e.target.value)}
+            className={inputClass()}
+          >
+            <option value="">Select…</option>
+            {options.locations.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.name}
+              </option>
+            ))}
+          </select>
+        </Labeled>
+      </FieldGate>
+      <FieldGate fieldConfig={fieldConfig} fieldKey="employmentType">
+        <Labeled label="Employment type">
+          <select
+            required={fieldRequired(fieldConfig, "employmentType", true)}
+            value={str(data, "employmentType")}
+            onChange={(e) => set(data, onChange, "employmentType", e.target.value)}
+            className={`${inputClass()} capitalize`}
+          >
+            <option value="">Select…</option>
+            {options.employmentTypes.length > 0
+              ? options.employmentTypes.map((t) => (
+                  <option key={t.code} value={t.code}>
+                    {t.label}
+                  </option>
+                ))
+              : FALLBACK_EMPLOYMENT_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+          </select>
+        </Labeled>
+      </FieldGate>
+      <FieldGate fieldConfig={fieldConfig} fieldKey="dateOfJoining">
+        <Labeled label="Date of joining">
+          <input
+            type="date"
+            required={fieldRequired(fieldConfig, "dateOfJoining", false)}
+            value={str(data, "dateOfJoining")}
+            onChange={(e) => set(data, onChange, "dateOfJoining", e.target.value)}
+            className={inputClass()}
+          />
+        </Labeled>
+      </FieldGate>
+      <FieldGate fieldConfig={fieldConfig} fieldKey="positionId">
+        <Labeled label="Position">
+          <select value={positionId} onChange={(e) => handlePositionChange(e.target.value)} className={inputClass()}>
+            <option value="">No position (designation only)</option>
+            {availablePositions.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.positionTitle}
+                {p.positionCode ? ` (${p.positionCode})` : ""}
+              </option>
+            ))}
+          </select>
+        </Labeled>
+      </FieldGate>
+      <FieldGate fieldConfig={fieldConfig} fieldKey="designation">
+        <Labeled label="Designation">
+          <input
+            required={fieldRequired(fieldConfig, "designation", false)}
+            value={str(data, "designation")}
+            onChange={(e) => set(data, onChange, "designation", e.target.value)}
+            className={inputClass()}
+          />
+        </Labeled>
+      </FieldGate>
       <p className="col-span-2 text-xs text-label-tertiary">
         {selectedPosition
           ? `Completing this hire reserves "${selectedPosition.positionTitle}" for them. ${
@@ -312,22 +544,25 @@ function OrganizationAssignmentForm({ data, onChange, options }: CardFormProps) 
   );
 }
 
-function ReportingRelationshipsForm({ data, onChange, options }: CardFormProps) {
+function ReportingRelationshipsForm({ data, onChange, options, fieldConfig }: CardFormProps) {
   return (
-    <Labeled label="Direct manager">
-      <select
-        value={str(data, "directManagerEmployeeId")}
-        onChange={(e) => set(data, onChange, "directManagerEmployeeId", e.target.value)}
-        className={inputClass()}
-      >
-        <option value="">None</option>
-        {options.colleagues.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.firstName} {c.lastName}
-          </option>
-        ))}
-      </select>
-    </Labeled>
+    <FieldGate fieldConfig={fieldConfig} fieldKey="directManagerEmployeeId">
+      <Labeled label="Direct manager">
+        <select
+          required={fieldRequired(fieldConfig, "directManagerEmployeeId", false)}
+          value={str(data, "directManagerEmployeeId")}
+          onChange={(e) => set(data, onChange, "directManagerEmployeeId", e.target.value)}
+          className={inputClass()}
+        >
+          <option value="">None</option>
+          {options.colleagues.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.firstName} {c.lastName}
+            </option>
+          ))}
+        </select>
+      </Labeled>
+    </FieldGate>
   );
 }
 
@@ -350,13 +585,13 @@ const CONTACT_TYPE_FIELDS: SubEntityFieldSpec[] = [
   { key: "isPrimary", label: "Primary", type: "checkbox" },
 ];
 
-function ContactForm({ data, onChange }: CardFormProps) {
+function ContactForm({ data, onChange, fieldConfig }: CardFormProps) {
   return (
     <RepeatableListEditor
       data={data}
       onChange={onChange}
       arrayKey="contacts"
-      fields={CONTACT_TYPE_FIELDS}
+      fields={applyFieldConfig(CONTACT_TYPE_FIELDS, fieldConfig)}
       addLabel="+ Add contact"
       emptyLabel="No contacts added yet."
       summary={(row) => String(row.value ?? "")}
@@ -381,13 +616,13 @@ const ADDRESS_FIELDS: SubEntityFieldSpec[] = [
   { key: "country", label: "Country", type: "text" },
 ];
 
-function AddressesForm({ data, onChange }: CardFormProps) {
+function AddressesForm({ data, onChange, fieldConfig }: CardFormProps) {
   return (
     <RepeatableListEditor
       data={data}
       onChange={onChange}
       arrayKey="addresses"
-      fields={ADDRESS_FIELDS}
+      fields={applyFieldConfig(ADDRESS_FIELDS, fieldConfig)}
       addLabel="+ Add address"
       emptyLabel="No addresses added yet."
       summary={(row) => String(row.line1 ?? "")}
@@ -395,67 +630,103 @@ function AddressesForm({ data, onChange }: CardFormProps) {
   );
 }
 
-function WorkingTimeForm({ data, onChange, options }: CardFormProps) {
+function WorkingTimeForm({ data, onChange, options, fieldConfig }: CardFormProps) {
   return (
     <div className="grid grid-cols-2 gap-3">
-      <Labeled label="Shift">
-        <select value={str(data, "shiftId")} onChange={(e) => set(data, onChange, "shiftId", e.target.value)} className={inputClass()}>
-          <option value="">Use default</option>
-          {options.shifts.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </select>
-      </Labeled>
-      <Labeled label="Effective from">
-        <input type="date" value={str(data, "effectiveFrom")} onChange={(e) => set(data, onChange, "effectiveFrom", e.target.value)} className={inputClass()} />
-      </Labeled>
+      <FieldGate fieldConfig={fieldConfig} fieldKey="shiftId">
+        <Labeled label="Shift">
+          <select value={str(data, "shiftId")} onChange={(e) => set(data, onChange, "shiftId", e.target.value)} className={inputClass()}>
+            <option value="">Use default</option>
+            {options.shifts.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </Labeled>
+      </FieldGate>
+      <FieldGate fieldConfig={fieldConfig} fieldKey="effectiveFrom">
+        <Labeled label="Effective from">
+          <input
+            type="date"
+            required={fieldRequired(fieldConfig, "effectiveFrom", false)}
+            value={str(data, "effectiveFrom")}
+            onChange={(e) => set(data, onChange, "effectiveFrom", e.target.value)}
+            className={inputClass()}
+          />
+        </Labeled>
+      </FieldGate>
     </div>
   );
 }
 
-function CompensationForm({ data, onChange }: CardFormProps) {
+function CompensationForm({ data, onChange, fieldConfig }: CardFormProps) {
   return (
     <div className="grid grid-cols-2 gap-3">
-      <Labeled label="Monthly salary">
-        <input
-          type="number"
-          value={str(data, "monthlySalary")}
-          onChange={(e) => set(data, onChange, "monthlySalary", e.target.value)}
-          className={inputClass()}
-        />
-      </Labeled>
-      <Labeled label="Effective from">
-        <input type="date" value={str(data, "effectiveFrom")} onChange={(e) => set(data, onChange, "effectiveFrom", e.target.value)} className={inputClass()} />
-      </Labeled>
+      <FieldGate fieldConfig={fieldConfig} fieldKey="monthlySalary">
+        <Labeled label="Monthly salary">
+          <input
+            type="number"
+            required={fieldRequired(fieldConfig, "monthlySalary", false)}
+            value={str(data, "monthlySalary")}
+            onChange={(e) => set(data, onChange, "monthlySalary", e.target.value)}
+            className={inputClass()}
+          />
+        </Labeled>
+      </FieldGate>
+      <FieldGate fieldConfig={fieldConfig} fieldKey="effectiveFrom">
+        <Labeled label="Effective from">
+          <input
+            type="date"
+            required={fieldRequired(fieldConfig, "effectiveFrom", false)}
+            value={str(data, "effectiveFrom")}
+            onChange={(e) => set(data, onChange, "effectiveFrom", e.target.value)}
+            className={inputClass()}
+          />
+        </Labeled>
+      </FieldGate>
     </div>
   );
 }
 
-function PaymentBankForm({ data, onChange }: CardFormProps) {
+function PaymentBankForm({ data, onChange, fieldConfig }: CardFormProps) {
   return (
     <div className="grid grid-cols-2 gap-3">
-      <Labeled label="Payment method">
-        <select value={str(data, "paymentMethod")} onChange={(e) => set(data, onChange, "paymentMethod", e.target.value)} className={inputClass()}>
-          <option value="">Select…</option>
-          <option value="bank_transfer">Bank transfer</option>
-          <option value="cash">Cash</option>
-          <option value="cheque">Cheque</option>
-        </select>
-      </Labeled>
-      <Labeled label="Bank name">
-        <input value={str(data, "bankName")} onChange={(e) => set(data, onChange, "bankName", e.target.value)} className={inputClass()} />
-      </Labeled>
-      <Labeled label="Account title">
-        <input value={str(data, "accountTitle")} onChange={(e) => set(data, onChange, "accountTitle", e.target.value)} className={inputClass()} />
-      </Labeled>
-      <Labeled label="Account number">
-        <input value={str(data, "accountNumber")} onChange={(e) => set(data, onChange, "accountNumber", e.target.value)} className={inputClass()} />
-      </Labeled>
-      <Labeled label="IBAN">
-        <input value={str(data, "iban")} onChange={(e) => set(data, onChange, "iban", e.target.value)} className={inputClass()} />
-      </Labeled>
+      <FieldGate fieldConfig={fieldConfig} fieldKey="paymentMethod">
+        <Labeled label="Payment method">
+          <select
+            required={fieldRequired(fieldConfig, "paymentMethod", false)}
+            value={str(data, "paymentMethod")}
+            onChange={(e) => set(data, onChange, "paymentMethod", e.target.value)}
+            className={inputClass()}
+          >
+            <option value="">Select…</option>
+            <option value="bank_transfer">Bank transfer</option>
+            <option value="cash">Cash</option>
+            <option value="cheque">Cheque</option>
+          </select>
+        </Labeled>
+      </FieldGate>
+      <FieldGate fieldConfig={fieldConfig} fieldKey="bankName">
+        <Labeled label="Bank name">
+          <input value={str(data, "bankName")} onChange={(e) => set(data, onChange, "bankName", e.target.value)} className={inputClass()} />
+        </Labeled>
+      </FieldGate>
+      <FieldGate fieldConfig={fieldConfig} fieldKey="accountTitle">
+        <Labeled label="Account title">
+          <input value={str(data, "accountTitle")} onChange={(e) => set(data, onChange, "accountTitle", e.target.value)} className={inputClass()} />
+        </Labeled>
+      </FieldGate>
+      <FieldGate fieldConfig={fieldConfig} fieldKey="accountNumber">
+        <Labeled label="Account number">
+          <input value={str(data, "accountNumber")} onChange={(e) => set(data, onChange, "accountNumber", e.target.value)} className={inputClass()} />
+        </Labeled>
+      </FieldGate>
+      <FieldGate fieldConfig={fieldConfig} fieldKey="iban">
+        <Labeled label="IBAN">
+          <input value={str(data, "iban")} onChange={(e) => set(data, onChange, "iban", e.target.value)} className={inputClass()} />
+        </Labeled>
+      </FieldGate>
     </div>
   );
 }
@@ -478,13 +749,13 @@ const IMPORTANT_DATE_FIELDS: SubEntityFieldSpec[] = [
   { key: "label", label: "Label", type: "text" },
 ];
 
-function ImportantDatesForm({ data, onChange }: CardFormProps) {
+function ImportantDatesForm({ data, onChange, fieldConfig }: CardFormProps) {
   return (
     <RepeatableListEditor
       data={data}
       onChange={onChange}
       arrayKey="dates"
-      fields={IMPORTANT_DATE_FIELDS}
+      fields={applyFieldConfig(IMPORTANT_DATE_FIELDS, fieldConfig)}
       addLabel="+ Add date"
       emptyLabel="No dates added yet."
       summary={(row) => String(row.dateType ?? "")}
@@ -492,7 +763,7 @@ function ImportantDatesForm({ data, onChange }: CardFormProps) {
   );
 }
 
-function CostAllocationForm({ data, onChange, options }: CardFormProps) {
+function CostAllocationForm({ data, onChange, options, fieldConfig }: CardFormProps) {
   const fields: SubEntityFieldSpec[] = [
     {
       key: "costCenterId",
@@ -509,7 +780,7 @@ function CostAllocationForm({ data, onChange, options }: CardFormProps) {
       data={data}
       onChange={onChange}
       arrayKey="allocations"
-      fields={fields}
+      fields={applyFieldConfig(fields, fieldConfig)}
       addLabel="+ Add split"
       emptyLabel="No cost allocation splits added yet."
       summary={(row) => `${options.costCenters.find((c) => c.id === row.costCenterId)?.name ?? ""} ${row.allocationPercentage ? `${row.allocationPercentage}%` : ""}`}
@@ -537,13 +808,13 @@ const FAMILY_FIELDS: SubEntityFieldSpec[] = [
   { key: "isBeneficiary", label: "Beneficiary", type: "checkbox" },
 ];
 
-function FamilyDependentsForm({ data, onChange }: CardFormProps) {
+function FamilyDependentsForm({ data, onChange, fieldConfig }: CardFormProps) {
   return (
     <RepeatableListEditor
       data={data}
       onChange={onChange}
       arrayKey="members"
-      fields={FAMILY_FIELDS}
+      fields={applyFieldConfig(FAMILY_FIELDS, fieldConfig)}
       addLabel="+ Add family member"
       emptyLabel="No family members added yet."
       summary={(row) => String(row.fullName ?? "")}
@@ -557,13 +828,13 @@ const EDUCATION_FIELDS: SubEntityFieldSpec[] = [
   { key: "fieldOfStudy", label: "Field of study", type: "text" },
 ];
 
-function EducationForm({ data, onChange }: CardFormProps) {
+function EducationForm({ data, onChange, fieldConfig }: CardFormProps) {
   return (
     <RepeatableListEditor
       data={data}
       onChange={onChange}
       arrayKey="entries"
-      fields={EDUCATION_FIELDS}
+      fields={applyFieldConfig(EDUCATION_FIELDS, fieldConfig)}
       addLabel="+ Add education"
       emptyLabel="No education added yet."
       summary={(row) => String(row.degreeTitle ?? "")}
@@ -587,13 +858,13 @@ const QUALIFICATION_FIELDS: SubEntityFieldSpec[] = [
   { key: "issuingAuthority", label: "Issuing authority", type: "text" },
 ];
 
-function QualificationsSkillsForm({ data, onChange }: CardFormProps) {
+function QualificationsSkillsForm({ data, onChange, fieldConfig }: CardFormProps) {
   return (
     <RepeatableListEditor
       data={data}
       onChange={onChange}
       arrayKey="items"
-      fields={QUALIFICATION_FIELDS}
+      fields={applyFieldConfig(QUALIFICATION_FIELDS, fieldConfig)}
       addLabel="+ Add qualification"
       emptyLabel="No qualifications added yet."
       summary={(row) => String(row.title ?? "")}
@@ -606,13 +877,13 @@ const ASSET_FIELDS: SubEntityFieldSpec[] = [
   { key: "assetTag", label: "Asset tag", type: "text" },
 ];
 
-function AssetsForm({ data, onChange }: CardFormProps) {
+function AssetsForm({ data, onChange, fieldConfig }: CardFormProps) {
   return (
     <RepeatableListEditor
       data={data}
       onChange={onChange}
       arrayKey="items"
-      fields={ASSET_FIELDS}
+      fields={applyFieldConfig(ASSET_FIELDS, fieldConfig)}
       addLabel="+ Assign asset"
       emptyLabel="No assets added yet."
       summary={(row) => String(row.assetType ?? "")}
@@ -620,18 +891,21 @@ function AssetsForm({ data, onChange }: CardFormProps) {
   );
 }
 
-function GenericNotesForm({ data, onChange, note }: CardFormProps & { note: string }) {
+function GenericNotesForm({ data, onChange, note, fieldConfig }: CardFormProps & { note: string }) {
   return (
-    <div className="space-y-2">
-      <p className="text-xs text-label-tertiary">{note}</p>
-      <textarea
-        value={str(data, "notes")}
-        onChange={(e) => set(data, onChange, "notes", e.target.value)}
-        rows={3}
-        className={inputClass()}
-        placeholder="Notes (optional)"
-      />
-    </div>
+    <FieldGate fieldConfig={fieldConfig} fieldKey="notes">
+      <div className="space-y-2">
+        <p className="text-xs text-label-tertiary">{note}</p>
+        <textarea
+          required={fieldRequired(fieldConfig, "notes", false)}
+          value={str(data, "notes")}
+          onChange={(e) => set(data, onChange, "notes", e.target.value)}
+          rows={3}
+          className={inputClass()}
+          placeholder="Notes (optional)"
+        />
+      </div>
+    </FieldGate>
   );
 }
 
@@ -639,22 +913,22 @@ const NOT_YET_WIRED_NOTE =
   "This information isn't projected into a dedicated screen yet — it's saved with this hire and can be entered properly once that module lands.";
 
 export const CARD_FORM_REGISTRY: Record<string, (props: CardFormProps) => JSX.Element> = {
-  personal_identity: PersonalIdentityForm,
-  organization_assignment: OrganizationAssignmentForm,
-  reporting_relationships: ReportingRelationshipsForm,
-  contact: ContactForm,
-  addresses: AddressesForm,
-  working_time: WorkingTimeForm,
-  compensation: CompensationForm,
-  payment_bank: PaymentBankForm,
-  important_dates: ImportantDatesForm,
-  cost_allocation: CostAllocationForm,
-  family_dependents: FamilyDependentsForm,
-  education: EducationForm,
-  qualifications_skills: QualificationsSkillsForm,
-  assets: AssetsForm,
-  documents: (props) => <GenericNotesForm {...props} note={NOT_YET_WIRED_NOTE} />,
-  time_leave_setup: (props) => <GenericNotesForm {...props} note={NOT_YET_WIRED_NOTE} />,
-  benefits: (props) => <GenericNotesForm {...props} note={NOT_YET_WIRED_NOTE} />,
-  emergency_safety: (props) => <GenericNotesForm {...props} note={NOT_YET_WIRED_NOTE} />,
+  personal_identity: withCustomFields(PersonalIdentityForm),
+  organization_assignment: withCustomFields(OrganizationAssignmentForm),
+  reporting_relationships: withCustomFields(ReportingRelationshipsForm),
+  contact: withCustomFields(ContactForm),
+  addresses: withCustomFields(AddressesForm),
+  working_time: withCustomFields(WorkingTimeForm),
+  compensation: withCustomFields(CompensationForm),
+  payment_bank: withCustomFields(PaymentBankForm),
+  important_dates: withCustomFields(ImportantDatesForm),
+  cost_allocation: withCustomFields(CostAllocationForm),
+  family_dependents: withCustomFields(FamilyDependentsForm),
+  education: withCustomFields(EducationForm),
+  qualifications_skills: withCustomFields(QualificationsSkillsForm),
+  assets: withCustomFields(AssetsForm),
+  documents: withCustomFields((props) => <GenericNotesForm {...props} note={NOT_YET_WIRED_NOTE} />),
+  time_leave_setup: withCustomFields((props) => <GenericNotesForm {...props} note={NOT_YET_WIRED_NOTE} />),
+  benefits: withCustomFields((props) => <GenericNotesForm {...props} note={NOT_YET_WIRED_NOTE} />),
+  emergency_safety: withCustomFields((props) => <GenericNotesForm {...props} note={NOT_YET_WIRED_NOTE} />),
 };

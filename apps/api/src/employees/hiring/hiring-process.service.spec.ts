@@ -13,7 +13,9 @@ import { PayrollService } from "../../payroll/payroll.service";
 import { ImportExportService } from "../../import-export/import-export.service";
 import { EmployeesService } from "../employees.service";
 import { EmployeeCostAllocationsService } from "../employee-cost-allocations.service";
+import { CustomFieldsService } from "../../custom-fields/custom-fields.service";
 import { HiringProcessService } from "./hiring-process.service";
+import { CardFieldConfigService } from "./card-field-config.service";
 
 const FIXTURE_CLAIMS: RequestClaims = { is_platform_admin: true, company_id: null, sub: "hiring-spec-fixtures" };
 
@@ -537,6 +539,107 @@ describe("HiringProcessService", () => {
       expect(assetRows).toHaveLength(1);
       expect(assetRows[0].asset_tag).toBe("LT-1001");
       expect(assetRows[0].status).toBe("assigned");
+    });
+  });
+
+  describe("Hiring Card Field Configuration — a custom field added to a hiring card is copied onto the employee at completion", () => {
+    let hiringWithCustomFields: HiringProcessService;
+    let cardFields: CardFieldConfigService;
+    let customFields: CustomFieldsService;
+
+    beforeAll(() => {
+      const rbac = new RbacService(db);
+      const entitlements = new EntitlementsService(db);
+      const audit = new AuditService();
+      const employees = new EmployeesService(db, rbac, entitlements, audit, new LocalFileStorageService());
+      customFields = new CustomFieldsService(db, rbac);
+      cardFields = new CardFieldConfigService(db, rbac, entitlements, audit, customFields);
+      // Same instance shape as the outer `hiring`, but with a real
+      // CustomFieldsService wired in at the very end — the outer `hiring`
+      // deliberately leaves it undefined so every OTHER test in this file
+      // stays unaffected by this feature.
+      hiringWithCustomFields = new HiringProcessService(
+        db,
+        rbac,
+        entitlements,
+        audit,
+        employees,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        customFields
+      );
+    });
+
+    it("mirrors a custom field added to the Personal Identity card onto the employee's own profile (objectKey 'employee')", async () => {
+      await cardFields.addCustomField(hrAdminClaims, "personal_identity", {
+        fieldKey: "favoriteColor",
+        label: "Favorite color",
+        fieldType: "text",
+      });
+
+      let process = await hiringWithCustomFields.start(hrAdminClaims);
+      await hiringWithCustomFields.saveCard(hrAdminClaims, process.id, "personal_identity", {
+        data: { firstName: "Bilal", lastName: "Rana", __customFields: { favoriteColor: "Green" } },
+      });
+      await hiringWithCustomFields.saveCard(hrAdminClaims, process.id, "employment", {
+        data: { employmentType: "permanent", dateOfJoining: "2026-06-01" },
+      });
+      await hiringWithCustomFields.saveCard(hrAdminClaims, process.id, "organization_assignment", {
+        data: { note: "no org unit needed for this test" },
+      });
+      await hiringWithCustomFields.saveCard(hrAdminClaims, process.id, "review_completion", { data: { reviewed: true } });
+
+      process = await hiringWithCustomFields.get(hrAdminClaims, process.id);
+      for (let i = 0; i < process.cards.length; i++) {
+        process = await hiringWithCustomFields.next(hrAdminClaims, process.id, process.revision);
+      }
+      expect(process.status).toBe("ready_for_completion");
+
+      const completed = await hiringWithCustomFields.complete(hrAdminClaims, process.id);
+      expect(completed.status).toBe("hired");
+      const employeeId = completed.employeeId as string;
+
+      const employeeValues = await customFields.getValues(hrAdminClaims, "employee", employeeId);
+      expect(employeeValues.favoriteColor).toBe("Green");
+
+      // The card-scoped definition (what the live Hiring Wizard reads)
+      // and its `employee`-scope mirror (what the Employee Detail page
+      // reads afterward) both exist — kumail's own "Wizard + Employee
+      // profile" scope choice.
+      const cardScoped = await cardFields.listCardFields(hrAdminClaims, "personal_identity");
+      expect(cardScoped.custom.map((f) => f.fieldKey)).toContain("favoriteColor");
+      const employeeScoped = await customFields.listDefinitions(hrAdminClaims, "employee");
+      expect(employeeScoped.map((f) => f.fieldKey)).toContain("favoriteColor");
+    });
+
+    it("skips a card with no __customFields entry without error", async () => {
+      let process = await hiringWithCustomFields.start(hrAdminClaims);
+      await hiringWithCustomFields.saveCard(hrAdminClaims, process.id, "personal_identity", { data: { firstName: "No", lastName: "Custom" } });
+      await hiringWithCustomFields.saveCard(hrAdminClaims, process.id, "employment", {
+        data: { employmentType: "permanent", dateOfJoining: "2026-06-02" },
+      });
+      await hiringWithCustomFields.saveCard(hrAdminClaims, process.id, "organization_assignment", {
+        data: { note: "no org unit needed for this test" },
+      });
+      await hiringWithCustomFields.saveCard(hrAdminClaims, process.id, "review_completion", { data: { reviewed: true } });
+
+      process = await hiringWithCustomFields.get(hrAdminClaims, process.id);
+      for (let i = 0; i < process.cards.length; i++) {
+        process = await hiringWithCustomFields.next(hrAdminClaims, process.id, process.revision);
+      }
+
+      const completed = await hiringWithCustomFields.complete(hrAdminClaims, process.id);
+      expect(completed.status).toBe("hired");
     });
   });
 });

@@ -13,6 +13,7 @@ import { useAuth } from "../../auth/AuthContext";
 import { EmployeeFields } from "./EmployeeFields";
 import { OnboardingOffboardingSection } from "../onboarding-offboarding/OnboardingOffboardingSection";
 import { LifecycleActionsPanel } from "./LifecycleActionsPanel";
+import { EmployeeCustomFieldsPanel } from "./EmployeeCustomFieldsPanel";
 import { SubEntityPanel } from "./subentities/SubEntityPanel";
 import {
   addressesConfig,
@@ -143,6 +144,13 @@ export function EmployeeDetailPage() {
             canManage={canManage}
             onEmployeeTerminated={load}
           />
+
+          {/* Hiring Card Field Configuration (2026-09-27) — custom fields
+              added on a hiring card are mirrored onto `objectKey:
+              "employee"` (kumail's own "Wizard + Employee profile" scope
+              choice); renders nothing at all for a tenant that has never
+              defined one. */}
+          <EmployeeCustomFieldsPanel employeeId={employee.id} canManage={canManage} />
 
           <section className="bg-card rounded-card p-5 shadow-sm">
             <h2 className="font-semibold text-sm uppercase tracking-wide text-label-tertiary mb-3">

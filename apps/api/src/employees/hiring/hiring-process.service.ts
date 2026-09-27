@@ -18,7 +18,8 @@ import { EmployeeQualificationsService } from "../employee-qualifications.servic
 import { EmployeeAssetsService } from "../employee-assets.service";
 import { ShiftsService } from "../../shifts/shifts.service";
 import { PayrollService } from "../../payroll/payroll.service";
-import { CARD_CATALOG, EMPLOYEE_MAPPED_CARD_KEYS } from "./card-catalog";
+import { CustomFieldsService } from "../../custom-fields/custom-fields.service";
+import { CARD_CATALOG } from "./card-catalog";
 import { validateOrganizationAssignmentCard } from "./organization-assignment-validator";
 import type {
   EmployeeAddressType,
@@ -117,7 +118,17 @@ export class HiringProcessService {
     private readonly education: EmployeeEducationService = new EmployeeEducationService(db, rbac, entitlements, audit),
     private readonly qualifications: EmployeeQualificationsService = new EmployeeQualificationsService(db, rbac, entitlements, audit),
     private readonly assets: EmployeeAssetsService = new EmployeeAssetsService(db, rbac, entitlements, audit),
-    private readonly webhooks?: WebhookDispatchService
+    private readonly webhooks?: WebhookDispatchService,
+    // Hiring Card Field Configuration (2026-09-27) — a custom field added
+    // to any hiring card is captured under `data.__customFields` on that
+    // card's own `hire_process_card_data` row (see `CardFieldConfigService`
+    // and `hiringCardObjectKey()`'s own doc comments) and copied onto the
+    // new employee (`objectKey: "employee"`) at `complete()` time. Kept
+    // genuinely optional, appended last, for the same reason `webhooks`
+    // above is — existing spec files that hand-construct this service
+    // positionally without it keep working; those flows just don't get
+    // custom-field values copied onto the employee.
+    private readonly customFields?: CustomFieldsService
   ) {}
 
   private async requireAccess(claims: RequestClaims): Promise<void> {
@@ -514,26 +525,12 @@ export class HiringProcessService {
         throw new BadRequestException(`Cannot complete a hiring process in status "${processRow.status}"`);
       }
 
-      const cardData = await client.query(
-        "SELECT card_key, data FROM hire_process_card_data WHERE hire_process_id = $1 AND card_key = ANY($2::text[])",
-        [
-          hireProcessId,
-          [
-            ...EMPLOYEE_MAPPED_CARD_KEYS,
-            "contact",
-            "addresses",
-            "working_time",
-            "important_dates",
-            "compensation",
-            "payment_bank",
-            "cost_allocation",
-            "family_dependents",
-            "education",
-            "qualifications_skills",
-            "assets",
-          ],
-        ]
-      );
+      // Fetches every card's data, not a fixed whitelist — needed so any
+      // card's `data.__customFields` (Hiring Card Field Configuration,
+      // 2026-09-27 — see below) gets copied onto the employee even for a
+      // card (e.g. `documents`, `benefits`) that has no dedicated
+      // projection of its own below.
+      const cardData = await client.query("SELECT card_key, data FROM hire_process_card_data WHERE hire_process_id = $1", [hireProcessId]);
       const dataByCard = new Map(cardData.rows.map((r) => [r.card_key as string, r.data as Record<string, unknown>]));
       const personal = dataByCard.get("personal_identity") ?? {};
       const employment = dataByCard.get("employment") ?? {};
@@ -727,6 +724,32 @@ export class HiringProcessService {
           description: entry.description as string | undefined,
           assignedDate: entry.assignedDate as string | undefined,
         });
+      }
+
+      // Hiring Card Field Configuration (2026-09-27) — kumail's own
+      // "Wizard + Employee profile" scope choice: any custom field value
+      // captured on ANY card during hiring (reserved key
+      // `data.__customFields`, written by the wizard's generic
+      // `CustomFieldsSection`) is copied onto the new employee under
+      // `objectKey: "employee"` here, inside this SAME transaction — see
+      // `CustomFieldsService.setValueWithinTransaction()`'s own doc
+      // comment for why that matters. Only runs when a `CustomFieldsService`
+      // was actually wired (see this service's own constructor comment);
+      // skipped entirely otherwise, the same optional-dependency posture
+      // `shifts`/`payroll` above already use.
+      if (this.customFields) {
+        for (const [, data] of dataByCard) {
+          const customValues = data.__customFields;
+          if (!customValues || typeof customValues !== "object") continue;
+          for (const [fieldKey, value] of Object.entries(customValues as Record<string, unknown>)) {
+            await this.customFields.setValueWithinTransaction(client, claims, {
+              objectKey: "employee",
+              recordId: employee.id,
+              fieldKey,
+              value,
+            });
+          }
+        }
       }
 
       const updated = await client.query(

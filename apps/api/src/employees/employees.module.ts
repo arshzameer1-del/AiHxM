@@ -4,6 +4,7 @@ import { EmployeesService } from "./employees.service";
 import { PersonsService } from "./persons.service";
 import { HiringController, HiringConfigurationController } from "./hiring/hiring.controller";
 import { HiringProcessService } from "./hiring/hiring-process.service";
+import { CardFieldConfigService } from "./hiring/card-field-config.service";
 import { EmployeeContactsController } from "./employee-contacts.controller";
 import { EmployeeContactsService } from "./employee-contacts.service";
 import { EmployeeAddressesController } from "./employee-addresses.controller";
@@ -35,6 +36,7 @@ import { ShiftsModule } from "../shifts/shifts.module";
 import { PayrollModule } from "../payroll/payroll.module";
 import { ImportExportModule } from "../import-export/import-export.module";
 import { HrAdministrationModule } from "../hr-administration/hr-administration.module";
+import { CustomFieldsModule } from "../custom-fields/custom-fields.module";
 
 @Module({
   // Phase 3 item #4 — WebhooksModule is deliberately slim (exports only
@@ -58,6 +60,11 @@ import { HrAdministrationModule } from "../hr-administration/hr-administration.m
   // EmployeesModule's own (see its own doc comment), so importing it here
   // for EmployeesService/EmployeeLifecycleService's `employment_type`/
   // `lifecycle_reason:*` validation is not circular either.
+  // Hiring Card Field Configuration (2026-09-27) — CustomFieldsModule only
+  // imports RbacModule (see its own module file), so importing it here for
+  // CardFieldConfigService's "add custom field" action AND for
+  // HiringProcessService's optional `customFields` constructor param is
+  // not circular either.
   imports: [
     RbacModule,
     EntitlementsModule,
@@ -68,6 +75,7 @@ import { HrAdministrationModule } from "../hr-administration/hr-administration.m
     PayrollModule,
     ImportExportModule,
     HrAdministrationModule,
+    CustomFieldsModule,
   ],
   // Core Employee Enterprise Phase 2/3 — HiringController (the hire
   // process engine) and HiringConfigurationController (Phase 3's scoped
@@ -103,6 +111,7 @@ import { HrAdministrationModule } from "../hr-administration/hr-administration.m
     EmployeesService,
     PersonsService,
     HiringProcessService,
+    CardFieldConfigService,
     EmployeeContactsService,
     EmployeeAddressesService,
     EmployeeImportantDatesService,

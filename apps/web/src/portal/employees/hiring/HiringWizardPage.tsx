@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import type {
+  CardFieldsConfigView,
   CostCenterView,
   EmployeeView,
   HireProcessCardView,
@@ -12,7 +13,23 @@ import type {
   ShiftView,
 } from "@aihxm/shared-types";
 import { api, ApiError } from "../../../api/client";
-import { CARD_FORM_REGISTRY, type HiringPickerOptions } from "./cardForms";
+import { CARD_FORM_REGISTRY, type CardFieldRuntimeConfig, type HiringPickerOptions } from "./cardForms";
+
+/** Hiring Card Field Configuration (2026-09-27) — flattens one or more
+ * `CardFieldsConfigView`s (the merged Organization Assignment tile reads
+ * TWO underlying cards' own field configs) into the `Record`-keyed shape
+ * `cardForms.tsx`'s `fieldConfig` prop expects. */
+function toRuntimeConfig(views: CardFieldsConfigView[]): CardFieldRuntimeConfig {
+  const builtIn: CardFieldRuntimeConfig["builtIn"] = {};
+  const custom: CardFieldRuntimeConfig["custom"] = [];
+  for (const view of views) {
+    for (const f of view.builtIn) {
+      builtIn[f.fieldKey] = { isEnabled: f.isEnabled, isRequired: f.isRequired };
+    }
+    custom.push(...view.custom);
+  }
+  return { builtIn, custom };
+}
 
 /**
  * Core Employee Enterprise Phase 2/3's Hiring Wizard container
@@ -127,6 +144,7 @@ export function HiringWizardPage() {
   const [activeCardKey, setActiveCardKey] = useState<string | null>(null);
   const [cardData, setCardData] = useState<Record<string, unknown>>({});
   const [cardRevisions, setCardRevisions] = useState<Record<string, number | undefined>>({});
+  const [fieldConfig, setFieldConfig] = useState<CardFieldRuntimeConfig | undefined>(undefined);
   const [cardLoading, setCardLoading] = useState(false);
   const [cardError, setCardError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -201,23 +219,34 @@ export function HiringWizardPage() {
       if (!id) return;
       setCardLoading(true);
       setCardError(null);
+      setFieldConfig(undefined);
       if (cardKey === MERGE_TARGET_CARD_KEY) {
         Promise.all([
           api.getHireProcessCardData(id, MERGE_TARGET_CARD_KEY),
           hasEmploymentCard ? api.getHireProcessCardData(id, HIDDEN_CARD_KEY) : Promise.resolve(null),
+          // Hiring Card Field Configuration (2026-09-27) — this merged tile
+          // presents TWO underlying cards' own fields together, so its
+          // field config is the union of both (see `toRuntimeConfig`'s own
+          // comment). `.catch(() => null)` on each: a field-config fetch
+          // failure must never block the wizard itself — every field just
+          // renders enabled, at its old hardcoded `required`.
+          api.listCardFields(MERGE_TARGET_CARD_KEY).catch(() => null),
+          hasEmploymentCard ? api.listCardFields(HIDDEN_CARD_KEY).catch(() => null) : Promise.resolve(null),
         ])
-          .then(([orgData, empData]) => {
+          .then(([orgData, empData, orgFields, empFields]) => {
             setCardData({ ...(empData?.data ?? {}), ...(orgData?.data ?? {}) });
             setCardRevisions((prev) => ({ ...prev, [MERGE_TARGET_CARD_KEY]: orgData?.revision, [HIDDEN_CARD_KEY]: empData?.revision }));
+            const views = [orgFields, empFields].filter((f): f is CardFieldsConfigView => f !== null);
+            if (views.length > 0) setFieldConfig(toRuntimeConfig(views));
           })
           .catch(() => setCardError("Could not load this card's saved data."))
           .finally(() => setCardLoading(false));
       } else {
-        api
-          .getHireProcessCardData(id, cardKey)
-          .then((data) => {
+        Promise.all([api.getHireProcessCardData(id, cardKey), api.listCardFields(cardKey).catch(() => null)])
+          .then(([data, fields]) => {
             setCardData(data?.data ?? {});
             setCardRevisions((prev) => ({ ...prev, [cardKey]: data?.revision }));
+            if (fields) setFieldConfig(toRuntimeConfig([fields]));
           })
           .catch(() => setCardError("Could not load this card's saved data."))
           .finally(() => setCardLoading(false));
@@ -265,8 +294,14 @@ export function HiringWizardPage() {
             ...(cardRevisions[HIDDEN_CARD_KEY] === undefined ? {} : { expectedRevision: cardRevisions[HIDDEN_CARD_KEY] }),
           });
         }
+        // `__customFields` rides along on this (the merge target's) own
+        // save rather than Employment's — it holds BOTH underlying cards'
+        // custom field values together (see `toRuntimeConfig`'s own
+        // comment), and `HiringProcessService.complete()` only needs to
+        // find it under ONE of the two card rows to copy every value it
+        // holds onto the new employee.
         await api.saveHireProcessCard(id, MERGE_TARGET_CARD_KEY, {
-          data: pick(cardData, ORG_ASSIGNMENT_FIELD_KEYS),
+          data: { ...pick(cardData, ORG_ASSIGNMENT_FIELD_KEYS), __customFields: cardData.__customFields },
           ...(cardRevisions[MERGE_TARGET_CARD_KEY] === undefined ? {} : { expectedRevision: cardRevisions[MERGE_TARGET_CARD_KEY] }),
         });
       } else {
@@ -477,7 +512,7 @@ export function HiringWizardPage() {
               (() => {
                 const Form = CARD_FORM_REGISTRY[activeCard.cardKey];
                 if (!Form) return <div className="text-sm text-label-tertiary">No editor is available for this card yet.</div>;
-                return <Form data={cardData} onChange={setCardData} options={options} />;
+                return <Form data={cardData} onChange={setCardData} options={options} fieldConfig={fieldConfig} />;
               })()
             )}
 

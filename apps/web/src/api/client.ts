@@ -272,6 +272,19 @@ import type {
   UpdateHrReferenceCatalogItemRequest,
 } from "@aihxm/shared-types";
 
+// Hiring Card Field Configuration (2026-09-27) — kumail's own request, one
+// level deeper than the card-level toggles above `listHiringCardConfig`
+// already covers: field-level enable/disable/required for a single card's
+// built-in fields, plus "add custom field". Own import block for the same
+// reason the HR Administration one above is.
+import type {
+  CardFieldsConfigView,
+  CardFieldDefinitionView,
+  UpdateCardFieldConfigRequest,
+  AddCardCustomFieldRequest,
+  CustomFieldDefinition,
+} from "@aihxm/shared-types";
+
 const TOKEN_KEY = "aihxm.platformAdminToken";
 
 export function getToken(): string | null {
@@ -1624,6 +1637,48 @@ export const api = {
 
   updateHiringCardConfig: (cards: ({ cardKey: string } & UpdateCardDefinitionRequest)[]) =>
     request<CardDefinitionView[]>("/configuration/core-employee/hiring", { method: "PUT", body: JSON.stringify({ cards }) }),
+
+  // Hiring Card Field Configuration (2026-09-27) — kumail's own request:
+  // "from configuration like we have tile configuration there should be
+  // configuration available for their fields under their respective tile
+  // — field enable/disable, add custom field option — custom field once
+  // added will be visible in respective tile." One level deeper than
+  // `listHiringCardConfig`/`updateHiringCardConfig` above (which only
+  // toggle whole CARDS on/off); these toggle individual FIELDS within one
+  // card, and let an admin add a brand-new field to it.
+  listCardFields: (cardKey: string) => request<CardFieldsConfigView>(`/configuration/core-employee/hiring/${encodeURIComponent(cardKey)}/fields`),
+
+  updateCardFieldConfig: (cardKey: string, fieldKey: string, patch: UpdateCardFieldConfigRequest) =>
+    request<CardFieldDefinitionView>(
+      `/configuration/core-employee/hiring/${encodeURIComponent(cardKey)}/fields/${encodeURIComponent(fieldKey)}`,
+      { method: "PUT", body: JSON.stringify(patch) }
+    ),
+
+  addCardCustomField: (cardKey: string, dto: AddCardCustomFieldRequest) =>
+    request<CustomFieldDefinition>(`/configuration/core-employee/hiring/${encodeURIComponent(cardKey)}/fields/custom`, {
+      method: "POST",
+      body: JSON.stringify(dto),
+    }),
+
+  deactivateCardCustomField: (cardKey: string, fieldKey: string) =>
+    request<void>(`/configuration/core-employee/hiring/${encodeURIComponent(cardKey)}/fields/custom/${encodeURIComponent(fieldKey)}`, {
+      method: "DELETE",
+    }),
+
+  // Generic custom fields (WRICEF engine, reused rather than forked — see
+  // `CardFieldConfigService`'s own doc comment) — used here to read the
+  // `objectKey: "employee"` mirror on the Employee Detail page, per
+  // kumail's own "Wizard + Employee profile" scope choice.
+  listCustomFieldDefinitions: (objectKey: string, includeInactive = false) =>
+    request<CustomFieldDefinition[]>(
+      `/custom-fields/definitions?objectKey=${encodeURIComponent(objectKey)}${includeInactive ? "&includeInactive=true" : ""}`
+    ),
+
+  getCustomFieldValues: (objectKey: string, recordId: string) =>
+    request<Record<string, unknown>>(`/custom-fields/values?objectKey=${encodeURIComponent(objectKey)}&recordId=${encodeURIComponent(recordId)}`),
+
+  setCustomFieldValue: (dto: { objectKey: string; recordId: string; fieldKey: string; value: unknown }) =>
+    request<void>("/custom-fields/values", { method: "POST", body: JSON.stringify(dto) }),
 
   // --- Core Employee Enterprise Phase 12: Bulk Hiring & Workforce Analytics ---
   bulkImportEmployees: (csv: string) =>
