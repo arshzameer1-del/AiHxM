@@ -1,0 +1,17 @@
+# Keeps the Cloud Run build fast and the image small — this repo's build
+# context is the monorepo root (see apps/api/Dockerfile's own comment for
+# why), so without this file Docker would upload every node_modules,
+# build artifact, and the whole apps/web frontend on every build.
+node_modules
+**/node_modules
+**/dist
+**/.turbo
+.git
+.github
+apps/web
+storage-data
+*.md
+!apps/api/**/*.md
+.env
+.env.*
+!.env.production.example
