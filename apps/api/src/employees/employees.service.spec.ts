@@ -167,6 +167,41 @@ describe("EmployeesService", () => {
       expect(result.errors).toHaveLength(1);
       expect(result.errors[0]).toMatchObject({ row: 2 });
     });
+
+    /**
+     * kumail's own live incident (2026-09-27): a bulk-import file with 6
+     * unedited copies of the template's example row created 6 real
+     * employees all named "Ayesha Khan" — see `bulkImportEmployees()`'s
+     * own doc comment for the full story. This is the regression test for
+     * the fix: the whole batch is rejected BEFORE anything is created,
+     * and none of the duplicated rows (nor any other row in the same
+     * file) makes it into the database.
+     */
+    it("rejects the whole batch when two or more rows are identical, before creating anything", async () => {
+      const csv = [
+        "firstName,lastName,department,designation",
+        "Ayesha,Khan,Engineering,Software Engineer",
+        "Ayesha,Khan,Engineering,Software Engineer",
+        "Bilal,Rana,Finance,Accountant",
+      ].join("\n");
+
+      await expect(employees.bulkImportEmployees(hrAdminClaims, csv)).rejects.toThrow(BadRequestException);
+
+      const list = await employees.list(hrAdminClaims);
+      expect(list.some((e) => e.firstName === "Ayesha" && e.lastName === "Khan")).toBe(false);
+      expect(list.some((e) => e.firstName === "Bilal" && e.lastName === "Rana")).toBe(false);
+    });
+
+    it("does not flag two different rows that merely share a name", async () => {
+      const csv = [
+        "firstName,lastName,department,designation,email",
+        "Ali,Ahmed,Engineering,Software Engineer,ali.ahmed.1@example.com",
+        "Ali,Ahmed,Finance,Accountant,ali.ahmed.2@example.com",
+      ].join("\n");
+
+      const result = await employees.bulkImportEmployees(hrAdminClaims, csv);
+      expect(result.imported).toBe(2);
+    });
   });
 
   /**

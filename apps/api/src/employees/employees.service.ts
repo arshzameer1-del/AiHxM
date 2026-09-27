@@ -413,11 +413,88 @@ export class EmployeesService {
       })
     );
 
+    // kumail's own live incident (2026-09-27): a bulk-import file with 6
+    // rows that were exact, unedited copies of the downloadable template's
+    // own example row ("Ayesha Khan" / Engineering / Software Engineer)
+    // created 6 real, distinct employees — each got its own real,
+    // sequential employee number (`assignEmployeeNumber` has no idea the
+    // surrounding row data is duplicated), and `PersonsService
+    // .findOrCreateForHire()`'s own duplicate check only ever looks at
+    // CNIC (see that method's own doc comment), which was blank on every
+    // one of those rows. Neither existing safeguard was ever meant to
+    // catch "the same row appears twice in one file" — this one is.
+    //
+    // Checked BEFORE any employee is created (not a per-row skip like
+    // `parseAndValidate`'s structural errors above) — matching this
+    // method's own established "a bad row fails the WHOLE batch, an admin
+    // fixes the file and re-runs" posture (see this method's own class
+    // doc comment) rather than silently creating some of a duplicated
+    // batch and skipping the rest.
+    //
+    // Deliberately keyed on every real identity/assignment field EXCEPT
+    // `employeeNumber` (often blank — that's fine, two blanks aren't
+    // evidence of anything) — two rows matching on every one of these
+    // fields at once (name AND email AND phone AND CNIC AND department
+    // AND designation AND ...) is for all practical purposes always a
+    // copy-paste mistake, never two real, distinct hires; genuinely
+    // distinct people sharing a name still differ in at least one of the
+    // rest.
+    const duplicateGroups = this.findDuplicateImportRows(parsedRows);
+    if (duplicateGroups.length > 0) {
+      const preview = duplicateGroups
+        .slice(0, 5)
+        .map((g) => `${g.count}× "${g.firstName} ${g.lastName}"${g.designation ? ` (${g.designation})` : ""}`)
+        .join("; ");
+      throw new BadRequestException(
+        `This file has ${duplicateGroups.length} set(s) of identical rows: ${preview}${
+          duplicateGroups.length > 5 ? ", …" : ""
+        }. Nothing was imported — remove the duplicate rows (or give each employee their own name/email/CNIC) and re-upload.`
+      );
+    }
+
     const imported: EmployeeView[] = [];
     for (const row of parsedRows) {
       imported.push(await this.create(claims, row));
     }
     return { imported: imported.length, rows: imported, errors };
+  }
+
+  /** See `bulkImportEmployees()`'s own doc comment for why this check exists and what it deliberately does and doesn't match on. */
+  private findDuplicateImportRows(
+    rows: CreateEmployeeRequest[]
+  ): { firstName: string; lastName: string; designation?: string; count: number }[] {
+    const norm = (v: string | undefined) => (v ?? "").trim().toLowerCase();
+    const signature = (r: CreateEmployeeRequest) =>
+      [
+        norm(r.firstName),
+        norm(r.lastName),
+        norm(r.email),
+        norm(r.phone),
+        norm(r.cnic),
+        norm(r.dateOfBirth),
+        norm(r.department),
+        norm(r.orgUnitId),
+        norm(r.designation),
+        norm(r.location),
+        norm(r.locationId),
+        norm(r.employmentType),
+        norm(r.managerId),
+        norm(r.dateOfJoining),
+        norm(r.salaryBand),
+        norm(r.bankAccountNumber),
+      ].join("\u0001");
+
+    const groups = new Map<string, CreateEmployeeRequest[]>();
+    for (const row of rows) {
+      const key = signature(row);
+      const existing = groups.get(key);
+      if (existing) existing.push(row);
+      else groups.set(key, [row]);
+    }
+
+    return [...groups.values()]
+      .filter((group) => group.length > 1)
+      .map((group) => ({ firstName: group[0].firstName, lastName: group[0].lastName, designation: group[0].designation, count: group.length }));
   }
 
   async list(claims: RequestClaims): Promise<EmployeeView[]> {

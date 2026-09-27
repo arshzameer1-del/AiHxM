@@ -21,21 +21,32 @@ const TEMPLATE_HEADERS = [
   "salaryBand",
 ];
 
+// kumail's own live incident (2026-09-27): a real bulk-import file had 6
+// unedited copies of this row, and all 6 became real employees named
+// "Ayesha Khan" (see `EmployeesService.bulkImportEmployees()`'s own doc
+// comment for the backend half of this fix — a same-file duplicate check
+// that now blocks exactly that). This half of the fix is the OTHER
+// contributing cause: the template's own example row looked like a
+// plausible real employee, which is exactly what made it easy to
+// copy-paste and forget to edit. Deliberately unrealistic in every field
+// now — nobody could mistake this for a real hire if a copy is left in by
+// accident, and the new backend duplicate check catches it anyway if it's
+// pasted more than once.
 const TEMPLATE_EXAMPLE = [
-  "Ayesha",
-  "Khan",
+  "EXAMPLE",
+  "DELETE THIS ROW",
   "",
-  "ayesha.khan@example.com",
-  "0300-1234567",
+  "example.delete-this-row@example.com",
+  "0300-0000000",
   "",
-  "1995-04-12",
+  "1990-01-01",
   "female",
   "single",
-  "Engineering",
-  "Software Engineer",
-  "Karachi",
+  "Example Department",
+  "Example Designation",
+  "Example City",
   "permanent",
-  "2026-10-01",
+  "2026-01-01",
   "",
 ];
 
@@ -118,6 +129,10 @@ export function EmployeeBulkImportPage() {
             Download CSV template
           </button>
         </div>
+        <p className="text-xs text-label-tertiary -mt-2">
+          The downloaded file includes one "EXAMPLE — DELETE THIS ROW" line showing the expected format — delete it
+          before adding your own employees.
+        </p>
 
         <h2 className="font-semibold text-sm uppercase tracking-wide text-label-tertiary">2. Choose your file</h2>
         <input
@@ -133,9 +148,12 @@ export function EmployeeBulkImportPage() {
         )}
 
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-900">
-          If one row fails partway through (for example a duplicate CNIC), the import stops there — rows already created
-          before that point are NOT undone. Fix the file and re-run only if you're unsure which rows made it in; check the
-          Employees list to see what's already there.
+          If two or more rows in this file are identical (same name, email, CNIC, department, designation, etc. — a
+          common copy-paste mistake), the import is stopped before anything is created and you'll see exactly which
+          rows matched. If one row fails for another reason partway through (for example a duplicate CNIC against an
+          existing employee), the import stops there — rows already created before that point are NOT undone. Fix the
+          file and re-run only if you're unsure which rows made it in; check the Employees list to see what's already
+          there.
         </div>
 
         {error && <div className="text-danger text-sm">{error}</div>}
