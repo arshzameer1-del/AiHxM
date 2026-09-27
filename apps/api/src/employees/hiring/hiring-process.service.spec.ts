@@ -431,7 +431,21 @@ describe("HiringProcessService", () => {
       const employeeId = completed.employeeId as string;
 
       const { compensationRows, paymentRows, allocationRows } = await db.withClaims(FIXTURE_CLAIMS, async (client) => {
-        const compensation = await client.query("SELECT * FROM employee_compensation WHERE employee_id = $1", [employeeId]);
+        // Payroll Phase P1 (2026-09-27) retired `employee_compensation` as a
+        // live write target — the Hiring Wizard's "compensation" card still
+        // calls PayrollService.setCompensation() with the same
+        // {monthlySalary, effectiveFrom} shape, but that now targets ONLY
+        // the "basic_salary" row in the component-based
+        // `employee_compensation_components` table (see
+        // claude/payroll-enterprise-gap-analysis-and-roadmap.md). The old
+        // table is kept as a frozen historical record, not written to by
+        // new hires, so this test reads the new table instead.
+        const compensation = await client.query(
+          `SELECT ecc.amount FROM employee_compensation_components ecc
+           JOIN compensation_components cc ON cc.id = ecc.component_id
+           WHERE ecc.employee_id = $1 AND cc.key = 'basic_salary' AND ecc.effective_to IS NULL`,
+          [employeeId]
+        );
         const payments = await client.query("SELECT * FROM employee_payment_accounts WHERE employee_id = $1", [employeeId]);
         const allocations = await client.query(
           "SELECT * FROM employee_cost_allocations WHERE employee_id = $1 ORDER BY allocation_percentage DESC",
@@ -441,7 +455,7 @@ describe("HiringProcessService", () => {
       });
 
       expect(compensationRows).toHaveLength(1);
-      expect(Number(compensationRows[0].monthly_salary)).toBe(150000);
+      expect(Number(compensationRows[0].amount)).toBe(150000);
       expect(paymentRows).toHaveLength(1);
       expect(paymentRows[0].bank_name).toBe("HBL");
       expect(paymentRows[0].is_primary).toBe(true);

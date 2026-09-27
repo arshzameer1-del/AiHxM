@@ -370,6 +370,7 @@ function SettingsAndSlabsSection() {
       {savedNotice && <p className="text-xs text-success">{savedNotice}</p>}
       <div>
         <h3 className="text-sm font-semibold mb-2">EOBI &amp; social security</h3>
+        {settings && <p className="text-xs text-label-tertiary mb-2">In effect since {formatDate(settings.effectiveFrom)}</p>}
         {!settings ? (
           <div className="text-sm text-label-tertiary">Loading…</div>
         ) : (

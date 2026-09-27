@@ -21,11 +21,14 @@ import type {
   CompanyDashboardRow,
   CompanyDetail,
   CompanyListFilters,
+  CompensationComponentView,
   CompensationView,
   CreateApplicationRequest,
   CreateCandidateRequest,
   CreateCompanyRequest,
+  CreateCompensationComponentRequest,
   CreateEmployeeGroupRequest,
+  EmployeeCompensationView,
   CreateEmployeeLoginRequest,
   CreateEmployeeLoginResponse,
   DeletionImpactPreview,
@@ -146,6 +149,7 @@ import type {
   Role,
   SessionResult,
   SetCompensationRequest,
+  SetEmployeeCompensationComponentsRequest,
   SetTaxSlabsRequest,
   SetWeeklyPatternRequest,
   ShiftAssignmentView,
@@ -194,6 +198,7 @@ import type {
   UpdateHolidayRequest,
   UpdateLeavePolicyRequest,
   UpdateOffboardingItemTemplateRequest,
+  UpdateCompensationComponentRequest,
   UpdateOnboardingItemTemplateRequest,
   UpdatePayrollSettingsRequest,
   UpdateShiftRequest,
@@ -2084,16 +2089,37 @@ export const api = {
   // only ever sees their own payslip, and only once its run is finalized —
   // enforced entirely server-side (PayrollService.listPayslips/getPayslip),
   // same "server already scopes it" posture as every other module here.
+  // Payroll Enterprise Gap Analysis & Roadmap, Phase P1 — compensation is
+  // now a real component model (Basic Salary + named allowances), not one
+  // flat monthlySalary figure. `setCompensation` stays for back-compat
+  // (the Hiring Wizard's Compensation card still calls it — sets ONLY
+  // Basic Salary); everything else uses the component-based calls below.
+  listCompensationComponents: () => request<CompensationComponentView[]>("/payroll/compensation-components"),
+
+  createCompensationComponent: (input: CreateCompensationComponentRequest) =>
+    request<CompensationComponentView>("/payroll/compensation-components", { method: "POST", body: JSON.stringify(input) }),
+
+  updateCompensationComponent: (id: string, patch: UpdateCompensationComponentRequest) =>
+    request<CompensationComponentView>(`/payroll/compensation-components/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
   setCompensation: (input: SetCompensationRequest) =>
     request<CompensationView>("/payroll/compensation", { method: "POST", body: JSON.stringify(input) }),
 
+  setCompensationComponents: (input: SetEmployeeCompensationComponentsRequest) =>
+    request<EmployeeCompensationView>("/payroll/compensation/components", { method: "POST", body: JSON.stringify(input) }),
+
+  getCurrentCompensation: (employeeId: string) =>
+    request<EmployeeCompensationView>(`/payroll/compensation/${employeeId}`),
+
   getCompensationHistory: (employeeId: string) =>
-    request<CompensationView[]>(`/payroll/compensation/${employeeId}`),
+    request<CompensationView[]>(`/payroll/compensation/${employeeId}/history`),
 
   getPayrollSettings: () => request<PayrollSettingsView>("/payroll/settings"),
 
   updatePayrollSettings: (patch: UpdatePayrollSettingsRequest) =>
     request<PayrollSettingsView>("/payroll/settings", { method: "PATCH", body: JSON.stringify(patch) }),
+
+  getPayrollSettingsHistory: () => request<PayrollSettingsView[]>("/payroll/settings/history"),
 
   listTaxSlabs: () => request<TaxSlabView[]>("/payroll/tax-slabs"),
 

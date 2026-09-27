@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import type {
+  CompensationComponentView,
   CompensationView,
   EmployeeView,
   PayrollSettingsView,
@@ -19,50 +20,73 @@ function errorMessage(err: unknown, fallback: string): string {
 
 /**
  * `payroll.manage.all` (hr_admin) territory only — PayrollPage never
- * renders this for anyone else. Sets one employee's rate as of a given
- * date (`SetCompensationRequest`); the service keeps every prior rate
- * around with `effectiveTo` closed off, so this is additive, not an
- * edit-in-place.
+ * renders this for anyone else.
+ *
+ * Payroll Enterprise Gap Analysis & Roadmap, Phase P1 — compensation is a
+ * real component model now (Basic Salary + named allowances), not one
+ * flat monthly figure: one numeric input per active catalog component,
+ * submitted together as of one effective date
+ * (`SetEmployeeCompensationComponentsRequest`). Each component keeps its
+ * own effective-dated history — `setCompensationComponents()` supersedes,
+ * never overwrites.
  */
 export function CompensationForm({ onSaved }: { onSaved: () => void }) {
   const [employees, setEmployees] = useState<EmployeeView[]>([]);
+  const [components, setComponents] = useState<CompensationComponentView[]>([]);
   const [employeeId, setEmployeeId] = useState("");
-  const [monthlySalary, setMonthlySalary] = useState("");
+  const [amounts, setAmounts] = useState<Record<string, string>>({});
   const [effectiveFrom, setEffectiveFrom] = useState("");
   const [history, setHistory] = useState<CompensationView[] | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [showAddComponent, setShowAddComponent] = useState(false);
 
   useEffect(() => {
     api.listEmployees().then(setEmployees).catch(() => {
       // A failed employee-list fetch shouldn't block the rest of the form.
+    });
+    api.listCompensationComponents().then(setComponents).catch(() => {
+      // Falls back to an empty catalog — the "Add component" form still works.
     });
   }, []);
 
   useEffect(() => {
     if (!employeeId) {
       setHistory(null);
+      setAmounts({});
       return;
     }
     api
-      .getCompensationHistory(employeeId)
-      .then(setHistory)
-      .catch(() => setHistory(null));
-  }, [employeeId]);
+      .getCurrentCompensation(employeeId)
+      .then((current) => {
+        const next: Record<string, string> = {};
+        for (const c of current.components) next[c.componentId] = String(c.amount);
+        setAmounts(next);
+      })
+      .catch(() => setAmounts({}));
+    if (showHistory) {
+      api.getCompensationHistory(employeeId).then(setHistory).catch(() => setHistory(null));
+    }
+  }, [employeeId, showHistory]);
+
+  const activeComponents = components.filter((c) => c.isActive);
+  const total = activeComponents.reduce((sum, c) => sum + (Number(amounts[c.id]) || 0), 0);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
     try {
-      await api.setCompensation({
+      await api.setCompensationComponents({
         employeeId,
-        monthlySalary: Number(monthlySalary),
         effectiveFrom,
+        components: activeComponents.map((c) => ({ componentId: c.id, amount: Number(amounts[c.id]) || 0 })),
       });
-      const refreshed = await api.getCompensationHistory(employeeId);
-      setHistory(refreshed);
-      setMonthlySalary("");
+      if (showHistory) {
+        const refreshed = await api.getCompensationHistory(employeeId);
+        setHistory(refreshed);
+      }
       setEffectiveFrom("");
       onSaved();
     } catch (err) {
@@ -87,60 +111,160 @@ export function CompensationForm({ onSaved }: { onSaved: () => void }) {
           </select>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className={labelClass}>Monthly salary (PKR)</label>
-            <input
-              type="number"
-              min="0"
-              step="1"
-              required
-              value={monthlySalary}
-              onChange={(e) => setMonthlySalary(e.target.value)}
-              className={inputClass}
-            />
+        {employeeId && (
+          <div className="space-y-2">
+            {activeComponents.map((c) => (
+              <div key={c.id} className="grid grid-cols-[1fr_auto] gap-3 items-center">
+                <label className="text-sm">
+                  {c.name}
+                  {!c.isTaxable && <span className="text-label-tertiary text-xs ml-1">(non-taxable)</span>}
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={amounts[c.id] ?? ""}
+                  onChange={(e) => setAmounts((prev) => ({ ...prev, [c.id]: e.target.value }))}
+                  className={`${inputClass} w-40 text-right`}
+                  placeholder="0"
+                />
+              </div>
+            ))}
+            <div className="grid grid-cols-[1fr_auto] gap-3 items-center pt-2 border-t border-black/10">
+              <span className="text-sm font-semibold">Total monthly</span>
+              <span className="font-mono font-semibold w-40 text-right">{pkr.format(total)}</span>
+            </div>
           </div>
-          <div>
-            <label className={labelClass}>Effective from</label>
-            <input
-              type="date"
-              required
-              value={effectiveFrom}
-              onChange={(e) => setEffectiveFrom(e.target.value)}
-              className={inputClass}
-            />
-          </div>
+        )}
+
+        <div>
+          <label className={labelClass}>Effective from</label>
+          <input
+            type="date"
+            required
+            value={effectiveFrom}
+            onChange={(e) => setEffectiveFrom(e.target.value)}
+            className={inputClass}
+          />
         </div>
 
         {error && <div className="text-danger text-sm">{error}</div>}
 
-        <button
-          type="submit"
-          disabled={submitting || !employeeId}
-          className="bg-accent text-white rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-50"
-        >
-          {submitting ? "Saving…" : "Set compensation"}
-        </button>
+        <div className="flex items-center gap-4">
+          <button
+            type="submit"
+            disabled={submitting || !employeeId}
+            className="bg-accent text-white rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-50"
+          >
+            {submitting ? "Saving…" : "Save compensation"}
+          </button>
+          {employeeId && (
+            <button
+              type="button"
+              onClick={() => setShowHistory((s) => !s)}
+              className="text-xs font-semibold text-accent hover:underline"
+            >
+              {showHistory ? "Hide history" : "History"}
+            </button>
+          )}
+        </div>
       </form>
 
-      {history && (
+      {showHistory && (
         <div className="space-y-2">
-          <div className="text-xs font-semibold uppercase tracking-wide text-label-tertiary">Rate history</div>
-          {history.length === 0 ? (
+          <div className="text-xs font-semibold uppercase tracking-wide text-label-tertiary">Compensation history</div>
+          {!history ? (
+            <div className="text-sm text-label-tertiary">Loading…</div>
+          ) : history.length === 0 ? (
             <div className="text-sm text-label-tertiary">No compensation set for this employee yet.</div>
           ) : (
             history.map((c) => (
               <div key={c.id} className="flex justify-between text-sm bg-card rounded-lg px-3 py-2 shadow-sm">
                 <span>
-                  {c.effectiveFrom} {c.effectiveTo ? `– ${c.effectiveTo}` : "– current"}
+                  {c.componentName} — {c.effectiveFrom} {c.effectiveTo ? `– ${c.effectiveTo}` : "– current"}
                 </span>
-                <span className="font-mono font-semibold">{pkr.format(c.monthlySalary)}/mo</span>
+                <span className="font-mono font-semibold">{pkr.format(c.amount)}/mo</span>
               </div>
             ))
           )}
         </div>
       )}
+
+      <div>
+        {!showAddComponent ? (
+          <button
+            type="button"
+            onClick={() => setShowAddComponent(true)}
+            className="text-xs font-semibold text-accent hover:underline"
+          >
+            + Add a custom compensation component
+          </button>
+        ) : (
+          <AddComponentForm
+            onAdded={(c) => {
+              setComponents((prev) => [...prev, c]);
+              setShowAddComponent(false);
+            }}
+            onCancel={() => setShowAddComponent(false)}
+          />
+        )}
+      </div>
     </div>
+  );
+}
+
+/** A tenant's compensation-component catalog is theirs to extend — Phase
+ * P1 deliberately doesn't hard-code the 6 starter components as the only
+ * ones a company can ever pay. New components default to taxable=true
+ * (see `CompensationComponentView`'s own doc comment for why). */
+function AddComponentForm({ onAdded, onCancel }: { onAdded: (c: CompensationComponentView) => void; onCancel: () => void }) {
+  const [name, setName] = useState("");
+  const [isTaxable, setIsTaxable] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSubmitting(true);
+    try {
+      const created = await api.createCompensationComponent({ name, isTaxable });
+      onAdded(created);
+    } catch (err) {
+      setError(errorMessage(err, "Could not add this component."));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="flex items-end gap-3 bg-black/5 rounded-lg p-3 mt-2">
+      <div className="flex-1">
+        <label className={labelClass}>Component name</label>
+        <input
+          required
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="e.g. Fuel Allowance"
+          className={inputClass}
+        />
+      </div>
+      <label className="flex items-center gap-2 text-sm pb-2">
+        <input type="checkbox" checked={isTaxable} onChange={(e) => setIsTaxable(e.target.checked)} />
+        Taxable
+      </label>
+      <button
+        type="submit"
+        disabled={submitting || !name.trim()}
+        className="bg-accent text-white rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-50"
+      >
+        {submitting ? "Adding…" : "Add"}
+      </button>
+      <button type="button" onClick={onCancel} className="text-sm font-medium text-label-secondary pb-2">
+        Cancel
+      </button>
+      {error && <div className="text-danger text-sm">{error}</div>}
+    </form>
   );
 }
 

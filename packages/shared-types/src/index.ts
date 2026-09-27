@@ -3236,33 +3236,117 @@ export type AssignSystemAdminRoleRequest = {
 // EOBI/PESSI/SESSI confirmation.
 // -----------------------------------------------------------------------
 
+// --- Payroll Enterprise Gap Analysis & Roadmap, Phase P1 (2026-09-27) ---
+// (claude/payroll-enterprise-gap-analysis-and-roadmap.md) — the single
+// flat `monthlySalary` figure is replaced by a real component model
+// (Basic Salary + named allowances, each independently effective-dated),
+// and `PayrollSettingsView` gains the same effective-dating tax_slabs
+// already had, so a run can resolve the EOBI/social-security rates that
+// were actually in force during ITS OWN period.
+
+/** One entry in a tenant's compensation-component catalog (Basic Salary,
+ * House Rent Allowance, etc.). Pure identity/config — not itself
+ * effective-dated; only the per-employee AMOUNT assigned against a
+ * component (`CompensationView` below) carries a history. Lazily seeded
+ * with a standard 6-component starter set the first time a tenant has
+ * none, the same pattern used for tax slabs/payroll settings. */
+export type CompensationComponentView = {
+  id: string;
+  companyId: string;
+  key: string;
+  name: string;
+  /** Deliberately defaults to true for every component, including the
+   * seeded starter set — this codebase never presumes an allowance is
+   * tax-exempt without a real accountant confirming the exemption
+   * applies (see `claude/statutory-payroll-rates-pakistan.md`). */
+  isTaxable: boolean;
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: string;
+};
+
+export type CreateCompensationComponentRequest = {
+  name: string;
+  /** Slugified from name when omitted. */
+  key?: string;
+  isTaxable?: boolean;
+};
+
+export type UpdateCompensationComponentRequest = {
+  name?: string;
+  isTaxable?: boolean;
+  isActive?: boolean;
+  sortOrder?: number;
+};
+
+/** One effective-dated amount an employee is paid against ONE
+ * compensation component. Component identity is denormalized alongside
+ * the amount so a caller never needs a second round trip to label a
+ * history row. `GET /payroll/compensation/:employeeId/history` returns
+ * these flattened across every component an employee has ever had. */
 export type CompensationView = {
   id: string;
   companyId: string;
   employeeId: string;
-  monthlySalary: number;
+  componentId: string;
+  componentKey: string;
+  componentName: string;
+  isTaxable: boolean;
+  amount: number;
   effectiveFrom: string;
-  /** null = this is the employee's current rate. */
+  /** null = this is the current amount for this component. */
   effectiveTo: string | null;
   createdByUserAccountId: string;
   createdAt: string;
 };
 
+/** Back-compat, single-component convenience that sets/updates ONLY the
+ * "Basic Salary" component (creating the standard catalog for the
+ * tenant first if it doesn't exist yet). This is what the Hiring
+ * Wizard's Compensation card still calls — a new hire's one number
+ * becomes their starting Basic Salary; allowances are added afterward
+ * via the Payroll admin screen. Anyone paying more than one component
+ * uses `SetEmployeeCompensationComponentsRequest` below instead. */
 export type SetCompensationRequest = {
   employeeId: string;
   monthlySalary: number;
   effectiveFrom: string;
 };
 
+/** Sets one or more components' amounts for an employee as of the same
+ * date in one call — a component left out of `components` is untouched
+ * (its existing effective row keeps running), so bumping just Basic
+ * Salary doesn't require resubmitting every allowance. */
+export type SetEmployeeCompensationComponentsRequest = {
+  employeeId: string;
+  effectiveFrom: string;
+  components: Array<{ componentId: string; amount: number }>;
+};
+
+/** The employee's current (as-of-today) compensation: one entry per
+ * component they have an open effective-dated row for. */
+export type EmployeeCompensationView = {
+  employeeId: string;
+  asOfDate: string;
+  components: CompensationView[];
+  totalMonthly: number;
+};
+
 export type SocialSecurityScheme = "none" | "pessi" | "sessi";
 
 /**
- * One row per tenant. Every rate/base here is tenant-editable DATA, not a
- * hardcoded constant — Decision #14's response to real, documented
- * uncertainty in the current EOBI wage base and PESSI/SESSI wage
- * ceilings (see `claude/statutory-payroll-rates-pakistan.md`). Lazily
- * seeded with researched-but-unconfirmed defaults the first time a
- * tenant has none, the same pattern Phase 9 used for leave balances.
+ * One EFFECTIVE-DATED generation per tenant (Phase P1 — previously a
+ * single mutable row, matching what `tax_slabs` already did before
+ * 0033_effective_dating_leave_tax.sql). Every rate/base here is
+ * tenant-editable DATA, not a hardcoded constant — Decision #14's
+ * response to real, documented uncertainty in the current EOBI wage
+ * base and PESSI/SESSI wage ceilings (see
+ * `claude/statutory-payroll-rates-pakistan.md`). Lazily seeded with
+ * researched-but-unconfirmed defaults the first time a tenant has none,
+ * the same pattern Phase 9 used for leave balances. `updateSettings()`
+ * SUPERSEDES the current generation rather than mutating it in place, so
+ * a payroll run can resolve the rates that were actually in force during
+ * its own period instead of always reading "today's" settings.
  */
 export type PayrollSettingsView = {
   companyId: string;
@@ -3272,6 +3356,8 @@ export type PayrollSettingsView = {
   socialSecurityScheme: SocialSecurityScheme;
   socialSecurityEmployerRatePercent: number;
   socialSecurityWageCeiling: number | null;
+  effectiveFrom: string;
+  effectiveTo: string | null;
   updatedAt: string;
 };
 
@@ -3360,6 +3446,18 @@ export type PayslipView = {
   paidDays: number;
   unpaidLeaveDays: number;
   grossPay: number;
+  /** The employee's ACTUAL taxable earnings for this one period (sum of
+   * every taxable component's prorated amount, net of the taxable share
+   * of any unpaid-leave deduction) — Phase P1's addition, used to
+   * accumulate a real year-to-date total across a tax year's finalized
+   * runs. Not annualized. */
+  taxableGrossThisPeriod: number;
+  /** The ESTIMATED full tax-year taxable income this period's income tax
+   * was actually calculated against (year-to-date actual + this period +
+   * a projection of the remaining tax-year days at this period's rate) —
+   * the cumulative average-rate withholding method, not a naive
+   * `thisPeriodGross * 12`. See `PayrollService.calculateOnePayslip()`'s
+   * own doc comment for the full method and its documented limits. */
   taxableAnnualIncome: number;
   incomeTaxMonthly: number;
   eobiEmployeeContribution: number;

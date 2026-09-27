@@ -12,22 +12,77 @@ import { PayrollService } from "./payroll.service";
 
 const FIXTURE_CLAIMS: RequestClaims = { is_platform_admin: true, company_id: null, sub: "payroll-spec-fixtures" };
 
+// --- Independent re-expression of the documented income-tax method -------
+// (PayrollService.calculateOnePayslip()'s own doc comment has the
+// authoritative version). Kept here, separately typed out from that doc
+// comment rather than imported, so these tests exercise the SERVICE's
+// actual behavior against an independently-stated expectation, not the
+// service checking its own private helpers.
+const DEFAULT_SLABS_FOR_TESTS = [
+  { min: 0, max: 600_000, base: 0, rate: 0 },
+  { min: 600_000, max: 1_200_000, base: 0, rate: 1 },
+  { min: 1_200_000, max: 2_200_000, base: 6_000, rate: 11 },
+  { min: 2_200_000, max: 3_200_000, base: 116_000, rate: 20 },
+  { min: 3_200_000, max: 4_100_000, base: 316_000, rate: 25 },
+  { min: 4_100_000, max: 5_600_000, base: 541_000, rate: 29 },
+  { min: 5_600_000, max: 7_000_000, base: 976_000, rate: 32 },
+  { min: 7_000_000, max: null as number | null, base: 1_424_000, rate: 35 },
+];
+
+function taxYearLabelFor(isoDate: string): number {
+  const [y, m] = isoDate.split("-").map(Number);
+  return m >= 7 ? y + 1 : y;
+}
+function taxYearBoundsFor(label: number): { start: string; end: string } {
+  return { start: `${label - 1}-07-01`, end: `${label}-06-30` };
+}
+function daysBetweenInclusive(a: string, b: string): number {
+  return Math.round((Date.parse(b) - Date.parse(a)) / (24 * 60 * 60 * 1000)) + 1;
+}
+function taxFromSlabsForTests(annualIncome: number, slabs = DEFAULT_SLABS_FOR_TESTS): number {
+  const bracket = slabs.find((s) => annualIncome >= s.min && (s.max === null || annualIncome <= s.max)) ?? slabs[slabs.length - 1];
+  return Math.max(0, bracket.base + (bracket.rate / 100) * (annualIncome - bracket.min));
+}
+/** Computes the expected `incomeTaxMonthly` for a period under the
+ * cumulative average-rate method, given the employee's prior-YTD taxable
+ * income/tax withheld from earlier FINALIZED runs in the same tax year
+ * (0/0 when this is their first run of the tax year). */
+function expectedIncomeTax(opts: {
+  periodEnd: string;
+  daysInPeriod: number;
+  taxableGrossThisPeriod: number;
+  priorYtdTaxable?: number;
+  priorYtdWithheld?: number;
+  slabs?: typeof DEFAULT_SLABS_FOR_TESTS;
+}): number {
+  const priorYtdTaxable = opts.priorYtdTaxable ?? 0;
+  const priorYtdWithheld = opts.priorYtdWithheld ?? 0;
+  const taxYear = taxYearLabelFor(opts.periodEnd);
+  const { start, end } = taxYearBoundsFor(taxYear);
+  const totalDays = daysBetweenInclusive(start, end);
+  const elapsed = Math.min(totalDays, daysBetweenInclusive(start, opts.periodEnd));
+  const remaining = Math.max(0, totalDays - elapsed);
+  const dailyRate = opts.daysInPeriod > 0 ? opts.taxableGrossThisPeriod / opts.daysInPeriod : 0;
+  const projected = dailyRate * remaining;
+  const estimatedAnnual = priorYtdTaxable + opts.taxableGrossThisPeriod + projected;
+  const totalAnnualTax = taxFromSlabsForTests(estimatedAnnual, opts.slabs);
+  const fraction = totalDays > 0 ? elapsed / totalDays : 1;
+  const dueToDate = totalAnnualTax * fraction;
+  return Math.max(0, dueToDate - priorYtdWithheld);
+}
+
 /**
  * Phase 12's own exit criterion (plan doc Section 10): real Postgres, no
- * mocks, exercising the REAL `PayrollService` API — compensation
- * versioning, lazily-seeded settings/tax slabs, the calculation engine
- * (`calculateRun` -> `calculateOnePayslip`), the draft -> calculated ->
- * finalized run lifecycle, self- vs manage-scoped payslip visibility, and
- * the bank disbursement export — gated the same way every other module in
- * this codebase is: `tenant_module_entitlement` (404 when disabled) and
- * RBAC (`payroll.manage.all` for HR, `payroll_review.view.self` for an
- * employee's own finalized payslip).
- *
- * This file replaces an earlier version that tested a fictional flat
- * function API (`calculateGrossSalary`, `calculateIncomeTax`, ...) that
- * never existed on `PayrollService`. The real service is a stateful,
- * claims-gated workflow service — see `payroll.service.ts` and
- * `payroll.e2e.spec.ts` (the HTTP-level counterpart to this file).
+ * mocks, exercising the REAL `PayrollService` API. Payroll Enterprise Gap
+ * Analysis & Roadmap Phase P1 (2026-09-27) rewrote compensation into a
+ * component model and income tax into a year-to-date cumulative method —
+ * this file was rewritten alongside that change. Tests that need an exact
+ * PKR figure use a FRESH, isolated employee (so there is no prior-YTD
+ * history to account for) and the `expectedIncomeTax()` helper above;
+ * tests about lifecycle/visibility/permissions assert relationships
+ * (e.g. `netPay === grossPay - tax - EOBI`) rather than hardcoded amounts,
+ * so they stay correct regardless of how much YTD history a shared fixture
+ * employee has accumulated from earlier tests in the same tax year.
  */
 describe("PayrollService", () => {
   let pool: Pool;
@@ -77,12 +132,15 @@ describe("PayrollService", () => {
     });
   }
 
-  async function createEmployee(opts: {
-    userAccountId?: string | null;
-    dateOfJoining?: string;
-    terminationDate?: string | null;
-    bankAccountNumber?: string | null;
-  }): Promise<{ id: string; employeeNumber: string }> {
+  async function createEmployeeIn(
+    targetCompanyId: string,
+    opts: {
+      userAccountId?: string | null;
+      dateOfJoining?: string;
+      terminationDate?: string | null;
+      bankAccountNumber?: string | null;
+    }
+  ): Promise<{ id: string; employeeNumber: string }> {
     employeeCounter += 1;
     const employeeNumber = `PR-${employeeCounter}`;
     return db.withClaims(FIXTURE_CLAIMS, async (client) => {
@@ -90,7 +148,7 @@ describe("PayrollService", () => {
         `INSERT INTO employees (company_id, user_account_id, employee_number, first_name, last_name, date_of_joining, termination_date, bank_account_number)
          VALUES ($1, $2, $3, 'Test', 'Employee', $4, $5, $6) RETURNING id, employee_number`,
         [
-          companyId,
+          targetCompanyId,
           opts.userAccountId ?? null,
           employeeNumber,
           opts.dateOfJoining ?? "2020-01-01",
@@ -100,6 +158,15 @@ describe("PayrollService", () => {
       );
       return { id: result.rows[0].id as string, employeeNumber: result.rows[0].employee_number as string };
     });
+  }
+
+  async function createEmployee(opts: {
+    userAccountId?: string | null;
+    dateOfJoining?: string;
+    terminationDate?: string | null;
+    bankAccountNumber?: string | null;
+  }): Promise<{ id: string; employeeNumber: string }> {
+    return createEmployeeIn(companyId, opts);
   }
 
   async function insertUnpaidLeave(employeeId: string, startDate: string, endDate: string): Promise<void> {
@@ -158,7 +225,8 @@ describe("PayrollService", () => {
     staffEmployeeNumber = staffEmployee.employeeNumber;
     // Open-ended compensation, deliberately never superseded again in this
     // file, so every later payroll run in this spec calculates the exact
-    // same PKR 150,000/mo for this employee regardless of period length.
+    // same PKR 150,000/mo Basic Salary for this employee regardless of
+    // period length. Uses the back-compat single-component endpoint.
     await payroll.setCompensation(hrAdminClaims, { employeeId: staffEmployeeId, monthlySalary: 150000, effectiveFrom: "2020-01-01" });
 
     const compEmployee = await createEmployee({});
@@ -191,10 +259,10 @@ describe("PayrollService", () => {
     await pool.end();
   });
 
-  // --- Compensation ---------------------------------------------------
+  // --- Compensation (back-compat single component) ----------------------
 
-  describe("setCompensation() / getCompensationHistory()", () => {
-    it("sets an open-ended compensation row, then a later raise supersedes (not overwrites) it", async () => {
+  describe("setCompensation() / getCompensationHistory() — back-compat Basic Salary convenience", () => {
+    it("sets an open-ended Basic Salary row, then a later raise supersedes (not overwrites) it", async () => {
       const raiseEmployee = await createEmployee({});
 
       const original = await payroll.setCompensation(hrAdminClaims, {
@@ -202,7 +270,8 @@ describe("PayrollService", () => {
         monthlySalary: 100000,
         effectiveFrom: "2020-01-01",
       });
-      expect(original.monthlySalary).toBe(100000);
+      expect(original.componentKey).toBe("basic_salary");
+      expect(original.amount).toBe(100000);
       expect(original.effectiveTo).toBeNull();
 
       const historyAfterFirst = await payroll.getCompensationHistory(hrAdminClaims, raiseEmployee.id);
@@ -221,30 +290,18 @@ describe("PayrollService", () => {
       // Superseded (day before the new row's effectiveFrom), never deleted.
       expect(supersededOriginal.effectiveTo).toBe("2025-05-31");
       const current = history.find((c) => c.id === raised.id)!;
-      expect(current.monthlySalary).toBe(120000);
+      expect(current.amount).toBe(120000);
       expect(current.effectiveTo).toBeNull();
     });
 
-    it("collapses a same-day second edit into the still-open row rather than opening a second one (fixed via the shared EffectiveDatingEngine retrofit)", async () => {
+    it("collapses a same-day second edit into the still-open row rather than opening a second one", async () => {
       const employee = await createEmployee({});
+      const today = new Date().toISOString().slice(0, 10);
 
-      const first = await payroll.setCompensation(hrAdminClaims, {
-        employeeId: employee.id,
-        monthlySalary: 90000,
-        effectiveFrom: new Date().toISOString().slice(0, 10),
-      });
-
-      // Before the shared-engine retrofit, this second same-day call had
-      // no collapse guard at all and would attempt to close the row
-      // opened above at (today - 1 day) < its own effective_from — an
-      // invalid range. This is the regression test for that fix.
-      const second = await payroll.setCompensation(hrAdminClaims, {
-        employeeId: employee.id,
-        monthlySalary: 95000,
-        effectiveFrom: new Date().toISOString().slice(0, 10),
-      });
+      const first = await payroll.setCompensation(hrAdminClaims, { employeeId: employee.id, monthlySalary: 90000, effectiveFrom: today });
+      const second = await payroll.setCompensation(hrAdminClaims, { employeeId: employee.id, monthlySalary: 95000, effectiveFrom: today });
       expect(second.id).toBe(first.id);
-      expect(second.monthlySalary).toBe(95000);
+      expect(second.amount).toBe(95000);
 
       const history = await payroll.getCompensationHistory(hrAdminClaims, employee.id);
       expect(history).toHaveLength(1);
@@ -284,9 +341,110 @@ describe("PayrollService", () => {
     });
   });
 
+  // --- Compensation components (Phase P1) --------------------------------
+
+  describe("compensation components — catalog & multi-component amounts", () => {
+    it("lazily seeds the standard 6-component catalog, all taxable, in a stable sort order", async () => {
+      const components = await payroll.listCompensationComponents(hrAdminClaims);
+      expect(components.length).toBeGreaterThanOrEqual(6);
+      const keys = components.map((c) => c.key);
+      expect(keys).toEqual(
+        expect.arrayContaining(["basic_salary", "house_rent_allowance", "medical_allowance", "conveyance_allowance", "utilities_allowance", "other_allowance"])
+      );
+      expect(components.every((c) => c.isTaxable)).toBe(true);
+      expect(components.every((c) => c.isActive)).toBe(true);
+      const basic = components.find((c) => c.key === "basic_salary")!;
+      expect(basic.sortOrder).toBe(0);
+    });
+
+    it("creates a custom component, defaulting to taxable, and rejects a duplicate key", async () => {
+      const created = await payroll.createCompensationComponent(hrAdminClaims, { name: "Fuel Allowance" });
+      expect(created.key).toBe("fuel_allowance");
+      expect(created.isTaxable).toBe(true);
+      expect(created.isActive).toBe(true);
+
+      await expect(payroll.createCompensationComponent(hrAdminClaims, { name: "Fuel Allowance" })).rejects.toThrow(BadRequestException);
+    });
+
+    it("can create a non-taxable custom component explicitly", async () => {
+      const created = await payroll.createCompensationComponent(hrAdminClaims, { name: "Loan Reimbursement", isTaxable: false });
+      expect(created.isTaxable).toBe(false);
+    });
+
+    it("updateCompensationComponent can rename, retax, and deactivate a component", async () => {
+      const created = await payroll.createCompensationComponent(hrAdminClaims, { name: "Temp Component" });
+      const updated = await payroll.updateCompensationComponent(hrAdminClaims, created.id, {
+        name: "Renamed Component",
+        isTaxable: false,
+        isActive: false,
+      });
+      expect(updated.name).toBe("Renamed Component");
+      expect(updated.isTaxable).toBe(false);
+      expect(updated.isActive).toBe(false);
+    });
+
+    it("setCompensationComponents sets multiple components at once; an omitted component is left untouched", async () => {
+      const employee = await createEmployee({});
+      const catalog = await payroll.listCompensationComponents(hrAdminClaims);
+      const basic = catalog.find((c) => c.key === "basic_salary")!;
+      const hra = catalog.find((c) => c.key === "house_rent_allowance")!;
+
+      const first = await payroll.setCompensationComponents(hrAdminClaims, {
+        employeeId: employee.id,
+        effectiveFrom: "2026-01-01",
+        components: [
+          { componentId: basic.id, amount: 80000 },
+          { componentId: hra.id, amount: 20000 },
+        ],
+      });
+      expect(first.totalMonthly).toBe(100000);
+      expect(first.components).toHaveLength(2);
+
+      // Bump ONLY Basic Salary — HRA's existing effective-dated row must
+      // survive untouched (still 20000, still the same row).
+      const hraRowBefore = first.components.find((c) => c.componentId === hra.id)!;
+      const second = await payroll.setCompensationComponents(hrAdminClaims, {
+        employeeId: employee.id,
+        effectiveFrom: "2026-06-01",
+        components: [{ componentId: basic.id, amount: 90000 }],
+      });
+      expect(second.totalMonthly).toBe(110000);
+      const hraRowAfter = second.components.find((c) => c.componentId === hra.id)!;
+      expect(hraRowAfter.id).toBe(hraRowBefore.id);
+      expect(hraRowAfter.amount).toBe(20000);
+
+      const current = await payroll.getCurrentCompensation(hrAdminClaims, employee.id);
+      expect(current.totalMonthly).toBe(110000);
+    });
+
+    it("rejects an unknown or inactive component, and a negative amount", async () => {
+      const employee = await createEmployee({});
+      await expect(
+        payroll.setCompensationComponents(hrAdminClaims, { employeeId: employee.id, effectiveFrom: "2026-01-01", components: [{ componentId: randomUUID(), amount: 1000 }] })
+      ).rejects.toThrow(BadRequestException);
+
+      const inactive = await payroll.createCompensationComponent(hrAdminClaims, { name: "Will Deactivate" });
+      await payroll.updateCompensationComponent(hrAdminClaims, inactive.id, { isActive: false });
+      await expect(
+        payroll.setCompensationComponents(hrAdminClaims, { employeeId: employee.id, effectiveFrom: "2026-01-01", components: [{ componentId: inactive.id, amount: 1000 }] })
+      ).rejects.toThrow(BadRequestException);
+
+      const catalog = await payroll.listCompensationComponents(hrAdminClaims);
+      const basic = catalog.find((c) => c.key === "basic_salary")!;
+      await expect(
+        payroll.setCompensationComponents(hrAdminClaims, { employeeId: employee.id, effectiveFrom: "2026-01-01", components: [{ componentId: basic.id, amount: -5 }] })
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("denies a caller without payroll.manage.all", async () => {
+      await expect(payroll.listCompensationComponents(outsiderClaims)).rejects.toThrow(ForbiddenException);
+      await expect(payroll.createCompensationComponent(outsiderClaims, { name: "X" })).rejects.toThrow(ForbiddenException);
+    });
+  });
+
   // --- Settings & tax slabs (secondary tenant) -------------------------
 
-  describe("getSettings() / updateSettings()", () => {
+  describe("getSettings() / updateSettings() — now effective-dated", () => {
     it("lazily seeds the documented default EOBI/social-security rates on first access", async () => {
       const settings = await payroll.getSettings(secondaryHrClaims);
       expect(settings.eobiEmployeeRatePercent).toBe(1);
@@ -295,9 +453,11 @@ describe("PayrollService", () => {
       expect(settings.socialSecurityScheme).toBe("none");
       expect(settings.socialSecurityEmployerRatePercent).toBe(0);
       expect(settings.socialSecurityWageCeiling).toBeNull();
+      expect(settings.effectiveTo).toBeNull();
     });
 
-    it("updateSettings patches only the given fields, leaving the rest untouched", async () => {
+    it("updateSettings SUPERSEDES (not mutates) the current generation, patching only the given fields", async () => {
+      const before = await payroll.getSettings(secondaryHrClaims);
       const updated = await payroll.updateSettings(secondaryHrClaims, {
         socialSecurityScheme: "pessi",
         socialSecurityEmployerRatePercent: 6,
@@ -306,10 +466,18 @@ describe("PayrollService", () => {
       expect(updated.socialSecurityScheme).toBe("pessi");
       expect(updated.socialSecurityEmployerRatePercent).toBe(6);
       expect(updated.socialSecurityWageCeiling).toBe(50000);
-      // Untouched fields keep their previous (default) values.
+      // Untouched fields keep their previous values.
       expect(updated.eobiEmployeeRatePercent).toBe(1);
       expect(updated.eobiEmployerRatePercent).toBe(5);
       expect(updated.eobiWageBase).toBe(40700);
+
+      const history = await payroll.getSettingsHistory(secondaryHrClaims);
+      expect(history.length).toBeGreaterThanOrEqual(1);
+      // If this ran on a later calendar day than the seed, the original
+      // generation is closed; either way, the current read matches `updated`.
+      const current = history.find((h) => h.effectiveTo === null)!;
+      expect(current.socialSecurityScheme).toBe("pessi");
+      void before;
     });
 
     it("denies a caller without payroll.manage.all", async () => {
@@ -503,6 +671,93 @@ describe("PayrollService", () => {
     });
   });
 
+  // --- Phase P1: a run pins to the generation in force during ITS period ---
+
+  describe("period-pinned settings & tax slabs (Phase P1)", () => {
+    let pinCompanyId: string;
+    let pinHrClaims: RequestClaims;
+
+    beforeAll(async () => {
+      const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      pinCompanyId = await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const company = await client.query("INSERT INTO companies (name, slug) VALUES ($1, $2) RETURNING id", [
+          `Payroll Pin Co ${stamp}`,
+          `payroll-pin-${stamp}`,
+        ]);
+        const id = company.rows[0].id as string;
+        await client.query(
+          "INSERT INTO tenant_module_entitlement (company_id, module_key, enabled) VALUES ($1, 'payroll', true)",
+          [id]
+        );
+        return id;
+      });
+      const hrUserId = await makeUser(`payroll-pin-hr-${stamp}@example.com`);
+      await assignRole(hrUserId, "hr_admin", pinCompanyId);
+      pinHrClaims = { is_platform_admin: false, company_id: pinCompanyId, sub: hrUserId };
+    });
+
+    afterAll(async () => {
+      await db.withClaims(FIXTURE_CLAIMS, (client) => client.query("DELETE FROM companies WHERE id = $1", [pinCompanyId]));
+    });
+
+    it("a run for a PAST period uses the tax slabs that were in force THEN, not whatever is current today", async () => {
+      // Generation A: flat 0% (seeded via setTaxSlabs), backdated to look
+      // like it was already active a while ago.
+      await payroll.setTaxSlabs(pinHrClaims, { slabs: [{ minAnnualIncome: 0, maxAnnualIncome: null, baseTax: 0, ratePercent: 0 }] });
+      await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query("UPDATE tax_slabs SET effective_from = CURRENT_DATE - INTERVAL '30 days' WHERE company_id = $1 AND effective_to IS NULL", [pinCompanyId])
+      );
+      // Generation B: flat 50%, superseding today — this is now "current".
+      await payroll.setTaxSlabs(pinHrClaims, { slabs: [{ minAnnualIncome: 0, maxAnnualIncome: null, baseTax: 0, ratePercent: 50 }] });
+
+      const employee = await createEmployeeIn(pinCompanyId, { dateOfJoining: "2020-01-01" });
+      await payroll.setCompensation(pinHrClaims, { employeeId: employee.id, monthlySalary: 100000, effectiveFrom: "2020-01-01" });
+
+      // A one-day run 20 days ago falls inside generation A's window
+      // (started 30 days ago), not generation B's (starts today).
+      const pastDate = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const run = await payroll.createRun(pinHrClaims, { periodStart: pastDate, periodEnd: pastDate });
+      await payroll.calculateRun(pinHrClaims, run.id);
+      const payslips = await payroll.listPayslips(pinHrClaims, { payrollRunId: run.id });
+      const slip = payslips.find((p) => p.employeeId === employee.id)!;
+
+      // Generation A (0%) applied, not generation B (50%) which is
+      // "current" today but was NOT in force during this run's period.
+      expect(slip.incomeTaxMonthly).toBe(0);
+    });
+
+    it("a run for a PAST period uses the EOBI/social-security settings that were in force THEN, not whatever is current today", async () => {
+      // Current (today's) settings: a distinctive, high EOBI employee rate.
+      await payroll.updateSettings(pinHrClaims, { eobiEmployeeRatePercent: 40 });
+      // Backdate that generation so it reads as "already active a while
+      // ago", then supersede it with an even-more-current generation of a
+      // DIFFERENT rate, so "today's settings" and "settings 20 days ago"
+      // are provably different values.
+      await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query("UPDATE payroll_settings SET effective_from = CURRENT_DATE - INTERVAL '30 days' WHERE company_id = $1 AND effective_to IS NULL", [pinCompanyId])
+      );
+      await payroll.updateSettings(pinHrClaims, { eobiEmployeeRatePercent: 2 });
+
+      const employee = await createEmployeeIn(pinCompanyId, { dateOfJoining: "2020-01-01" });
+      await payroll.setCompensation(pinHrClaims, { employeeId: employee.id, monthlySalary: 50000, effectiveFrom: "2020-01-01" });
+
+      // A different past period than the tax-slabs test above (same
+      // company, same describe block) uses, so the two runs don't collide
+      // on the exact-period-duplicate check.
+      const pastDate = new Date(Date.now() - 21 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const run = await payroll.createRun(pinHrClaims, { periodStart: pastDate, periodEnd: pastDate });
+      await payroll.calculateRun(pinHrClaims, run.id);
+      const payslips = await payroll.listPayslips(pinHrClaims, { payrollRunId: run.id });
+      const slip = payslips.find((p) => p.employeeId === employee.id)!;
+      const settingsAtThatTime = await payroll.getSettingsHistory(pinHrClaims);
+      const wageBase = settingsAtThatTime[0].eobiWageBase;
+
+      // 40% of the wage base (generation active 20 days ago), not 2%
+      // (today's "current" generation).
+      expect(slip.eobiEmployeeContribution).toBeCloseTo(wageBase * 0.4, 2);
+    });
+  });
+
   // --- Payroll runs: create/list/get -----------------------------------
 
   describe("createRun() / listRuns() / getRun()", () => {
@@ -561,30 +816,66 @@ describe("PayrollService", () => {
   // --- calculateRun(): the actual statutory math ------------------------
 
   describe("calculateRun()", () => {
-    it("computes gross pay, FBR income tax, and EOBI deductions for a full-period employee", async () => {
-      // 150,000/mo for the whole period -> gross pay equals the monthly
-      // salary exactly regardless of days-in-period (full proration).
-      // Annualized: 1,800,000 -> FBR bracket 1,200,000-2,200,000
-      // (base 6,000 + 11% of the excess over 1,200,000).
-      const run = await payroll.createRun(hrAdminClaims, { periodStart: "2027-01-01", periodEnd: "2027-01-31" });
+    it("computes gross pay, FBR income tax (YTD method, first run of the tax year), and EOBI for a full-period employee", async () => {
+      // A FRESH, isolated employee — this is their first-ever payroll run,
+      // so priorYtd is 0/0 and expectedIncomeTax() below is directly
+      // comparable without needing any other test's history.
+      const mathEmployee = await createEmployee({ dateOfJoining: "2020-01-01" });
+      await payroll.setCompensation(hrAdminClaims, { employeeId: mathEmployee.id, monthlySalary: 150000, effectiveFrom: "2020-01-01" });
+
+      const periodStart = "2027-01-01";
+      const periodEnd = "2027-01-31";
+      const run = await payroll.createRun(hrAdminClaims, { periodStart, periodEnd });
       const calculated = await payroll.calculateRun(hrAdminClaims, run.id);
       expect(calculated.run.status).toBe("calculated");
       expect(calculated.payslipCount).toBeGreaterThanOrEqual(1);
 
       const payslips = await payroll.listPayslips(hrAdminClaims, { payrollRunId: run.id });
-      const slip = payslips.find((p) => p.employeeId === staffEmployeeId)!;
+      const slip = payslips.find((p) => p.employeeId === mathEmployee.id)!;
       expect(slip).toBeDefined();
       expect(slip.grossPay).toBe(150000);
-      expect(slip.taxableAnnualIncome).toBe(1_800_000);
-      // base 6,000 + 11% * (1,800,000 - 1,200,000) = 72,000/yr -> 6,000/mo
-      expect(slip.incomeTaxMonthly).toBe(6000);
+      expect(slip.taxableGrossThisPeriod).toBe(150000);
+
+      const expectedTax = expectedIncomeTax({ periodEnd, daysInPeriod: 31, taxableGrossThisPeriod: 150000 });
+      expect(slip.incomeTaxMonthly).toBeCloseTo(expectedTax, 2);
       // EOBI: 1% / 5% of the 40,700 wage base, no unpaid leave -> full ratio
       expect(slip.eobiEmployeeContribution).toBe(407);
       expect(slip.eobiEmployerContribution).toBe(2035);
       // Default scheme is 'none' -> no employer social security contribution
       expect(slip.socialSecurityEmployerContribution).toBe(0);
-      expect(slip.netPay).toBe(150000 - 6000 - 407);
+      expect(slip.netPay).toBeCloseTo(150000 - expectedTax - 407, 2);
       expect(slip.calculationBreakdown.length).toBeGreaterThan(0);
+    });
+
+    it("sums MULTIPLE compensation components into gross pay, and excludes a non-taxable component from taxable income", async () => {
+      const employee = await createEmployee({ dateOfJoining: "2020-01-01" });
+      const catalog = await payroll.listCompensationComponents(hrAdminClaims);
+      const basic = catalog.find((c) => c.key === "basic_salary")!;
+      const nonTaxable = await payroll.createCompensationComponent(hrAdminClaims, { name: "Tax-Free Perk", isTaxable: false });
+
+      await payroll.setCompensationComponents(hrAdminClaims, {
+        employeeId: employee.id,
+        effectiveFrom: "2020-01-01",
+        components: [
+          { componentId: basic.id, amount: 100000 },
+          { componentId: nonTaxable.id, amount: 20000 },
+        ],
+      });
+
+      const periodStart = "2026-08-01";
+      const periodEnd = "2026-08-31";
+      const run = await payroll.createRun(hrAdminClaims, { periodStart, periodEnd });
+      await payroll.calculateRun(hrAdminClaims, run.id);
+      const payslips = await payroll.listPayslips(hrAdminClaims, { payrollRunId: run.id });
+      const slip = payslips.find((p) => p.employeeId === employee.id)!;
+
+      expect(slip.grossPay).toBe(120000); // both components
+      expect(slip.taxableGrossThisPeriod).toBe(100000); // only Basic Salary
+      expect(slip.calculationBreakdown.some((s) => String(s.label).includes("Basic Salary"))).toBe(true);
+      expect(slip.calculationBreakdown.some((s) => String(s.label).includes("Tax-Free Perk") && String(s.label).includes("non-taxable"))).toBe(true);
+
+      const expectedTax = expectedIncomeTax({ periodEnd, daysInPeriod: 31, taxableGrossThisPeriod: 100000 });
+      expect(slip.incomeTaxMonthly).toBeCloseTo(expectedTax, 2);
     });
 
     it("prorates a mid-period compensation change across both segments", async () => {
@@ -609,9 +900,11 @@ describe("PayrollService", () => {
       // 14 days @ 100,000/mo + 14 days @ 120,000/mo, over a 28-day period:
       // (100000*14/28) + (120000*14/28) = 50000 + 60000 = 110000
       expect(slip.grossPay).toBe(110000);
-      expect(slip.taxableAnnualIncome).toBe(110000 * 12);
+      expect(slip.taxableGrossThisPeriod).toBe(110000);
       expect(slip.unpaidLeaveDays).toBe(0);
-      expect(slip.calculationBreakdown.some((s) => String(s.label).includes("Compensation segment"))).toBe(true);
+      expect(slip.calculationBreakdown.some((s) => String(s.label).includes("Basic Salary"))).toBe(true);
+      // Internal consistency, independent of the exact tax bracket math.
+      expect(slip.netPay).toBeCloseTo(slip.grossPay - slip.incomeTaxMonthly - slip.eobiEmployeeContribution, 2);
     });
 
     it("deducts approved unpaid leave from gross pay, prorating EOBI by the paid-days ratio", async () => {
@@ -632,11 +925,10 @@ describe("PayrollService", () => {
       expect(slip.paidDays).toBe(26);
       // 93000 - (93000 * 5 / 31) = 93000 - 15000 = 78000
       expect(slip.grossPay).toBe(78000);
-      // Annualized 936,000 -> bracket 600,000-1,200,000 @ 1%, base 0
-      expect(slip.incomeTaxMonthly).toBe(280);
+      expect(slip.taxableGrossThisPeriod).toBe(78000);
       // EOBI prorated by paid-days ratio (26/31): 407 * 26/31 ≈ 341.35
       expect(slip.eobiEmployeeContribution).toBeCloseTo(341.35, 2);
-      expect(slip.netPay).toBeCloseTo(78000 - 280 - 341.35, 2);
+      expect(slip.netPay).toBeCloseTo(slip.grossPay - slip.incomeTaxMonthly - slip.eobiEmployeeContribution, 2);
     });
 
     it("collects a per-employee error (rather than aborting the run) when no compensation record covers the period", async () => {
@@ -672,16 +964,80 @@ describe("PayrollService", () => {
     });
   });
 
+  // --- Phase P1: year-to-date cumulative tax accumulation -----------------
+
+  describe("year-to-date income tax accumulation (Phase P1)", () => {
+    it("a second FINALIZED run in the same tax year reduces this period's tax by what was already withheld", async () => {
+      const employee = await createEmployee({ dateOfJoining: "2020-01-01" });
+      await payroll.setCompensation(hrAdminClaims, { employeeId: employee.id, monthlySalary: 400000, effectiveFrom: "2020-01-01" });
+
+      // First run of tax year 2029 (Jul 2028): priorYtd is 0/0.
+      const run1 = await payroll.createRun(hrAdminClaims, { periodStart: "2028-07-01", periodEnd: "2028-07-31" });
+      await payroll.calculateRun(hrAdminClaims, run1.id);
+      await payroll.finalizeRun(hrAdminClaims, run1.id);
+      const slip1 = (await payroll.listPayslips(hrAdminClaims, { payrollRunId: run1.id })).find((p) => p.employeeId === employee.id)!;
+      const expectedTax1 = expectedIncomeTax({ periodEnd: "2028-07-31", daysInPeriod: 31, taxableGrossThisPeriod: 400000 });
+      expect(slip1.incomeTaxMonthly).toBeCloseTo(expectedTax1, 2);
+
+      // Second run, same tax year: priorYtd now reflects run1's ACTUAL
+      // finalized taxable income/tax withheld.
+      const run2 = await payroll.createRun(hrAdminClaims, { periodStart: "2028-08-01", periodEnd: "2028-08-31" });
+      await payroll.calculateRun(hrAdminClaims, run2.id);
+      const slip2 = (await payroll.listPayslips(hrAdminClaims, { payrollRunId: run2.id })).find((p) => p.employeeId === employee.id)!;
+      const expectedTax2 = expectedIncomeTax({
+        periodEnd: "2028-08-31",
+        daysInPeriod: 31,
+        taxableGrossThisPeriod: 400000,
+        priorYtdTaxable: slip1.taxableGrossThisPeriod,
+        priorYtdWithheld: slip1.incomeTaxMonthly,
+      });
+      expect(slip2.incomeTaxMonthly).toBeCloseTo(expectedTax2, 2);
+    });
+
+    it("a run in a DIFFERENT tax year does not inherit the prior tax year's YTD", async () => {
+      const employee = await createEmployee({ dateOfJoining: "2020-01-01" });
+      await payroll.setCompensation(hrAdminClaims, { employeeId: employee.id, monthlySalary: 500000, effectiveFrom: "2020-01-01" });
+
+      // Last month of tax year 2028.
+      const run1 = await payroll.createRun(hrAdminClaims, { periodStart: "2028-06-01", periodEnd: "2028-06-30" });
+      await payroll.calculateRun(hrAdminClaims, run1.id);
+      await payroll.finalizeRun(hrAdminClaims, run1.id);
+
+      // A later month of the NEXT tax year (2029) — must NOT see run1's YTD.
+      const run2 = await payroll.createRun(hrAdminClaims, { periodStart: "2028-09-01", periodEnd: "2028-09-30" });
+      await payroll.calculateRun(hrAdminClaims, run2.id);
+      const slip2 = (await payroll.listPayslips(hrAdminClaims, { payrollRunId: run2.id })).find((p) => p.employeeId === employee.id)!;
+      const expectedTax2 = expectedIncomeTax({ periodEnd: "2028-09-30", daysInPeriod: 30, taxableGrossThisPeriod: 500000 });
+      expect(slip2.incomeTaxMonthly).toBeCloseTo(expectedTax2, 2);
+    });
+
+    it("recalculating a not-yet-finalized run never double-counts its own prior calculation", async () => {
+      const employee = await createEmployee({ dateOfJoining: "2020-01-01" });
+      await payroll.setCompensation(hrAdminClaims, { employeeId: employee.id, monthlySalary: 250000, effectiveFrom: "2020-01-01" });
+
+      const run = await payroll.createRun(hrAdminClaims, { periodStart: "2027-10-01", periodEnd: "2027-10-31" });
+      await payroll.calculateRun(hrAdminClaims, run.id);
+      const first = (await payroll.listPayslips(hrAdminClaims, { payrollRunId: run.id })).find((p) => p.employeeId === employee.id)!;
+
+      // Recalculate the SAME (still-unfinalized) run several times — since
+      // only FINALIZED runs count toward YTD, this must be idempotent.
+      await payroll.calculateRun(hrAdminClaims, run.id);
+      await payroll.calculateRun(hrAdminClaims, run.id);
+      const again = (await payroll.listPayslips(hrAdminClaims, { payrollRunId: run.id })).find((p) => p.employeeId === employee.id)!;
+      expect(again.incomeTaxMonthly).toBeCloseTo(first.incomeTaxMonthly, 2);
+    });
+  });
+
   // --- finalizeRun() ------------------------------------------------------
 
   describe("finalizeRun()", () => {
     it("refuses to finalize a run that has not been calculated yet", async () => {
-      const run = await payroll.createRun(hrAdminClaims, { periodStart: "2027-06-01", periodEnd: "2027-06-01" });
+      const run = await payroll.createRun(hrAdminClaims, { periodStart: "2027-11-01", periodEnd: "2027-11-01" });
       await expect(payroll.finalizeRun(hrAdminClaims, run.id)).rejects.toThrow(BadRequestException);
     });
 
     it("finalizes a calculated run, and refuses to finalize it twice", async () => {
-      const run = await payroll.createRun(hrAdminClaims, { periodStart: "2027-06-02", periodEnd: "2027-06-02" });
+      const run = await payroll.createRun(hrAdminClaims, { periodStart: "2027-11-02", periodEnd: "2027-11-02" });
       await payroll.calculateRun(hrAdminClaims, run.id);
       const finalized = await payroll.finalizeRun(hrAdminClaims, run.id);
       expect(finalized.status).toBe("finalized");
@@ -691,7 +1047,7 @@ describe("PayrollService", () => {
     });
 
     it("denies a caller without payroll.manage.all", async () => {
-      const run = await payroll.createRun(hrAdminClaims, { periodStart: "2027-06-03", periodEnd: "2027-06-03" });
+      const run = await payroll.createRun(hrAdminClaims, { periodStart: "2027-11-03", periodEnd: "2027-11-03" });
       await payroll.calculateRun(hrAdminClaims, run.id);
       await expect(payroll.finalizeRun(outsiderClaims, run.id)).rejects.toThrow(ForbiddenException);
     });
@@ -706,20 +1062,16 @@ describe("PayrollService", () => {
 
     beforeAll(async () => {
       // compEmployeeId was only ever used above to exercise setCompensation's
-      // permission/entitlement failure paths (every call that would have
-      // actually set a compensation row threw) — it has no compensation
-      // record of its own, so give it one here, otherwise calculateRun()
-      // collects a "No compensation record" error for it instead of
-      // producing a payslip (see the "collects a per-employee error"
-      // test above), and this describe block's own payslip lookup for it
-      // would never find one.
+      // permission/entitlement failure paths — give it a compensation
+      // record here, otherwise calculateRun() collects a "No compensation
+      // record" error for it instead of producing a payslip.
       await payroll.setCompensation(hrAdminClaims, {
         employeeId: compEmployeeId,
         monthlySalary: 80000,
         effectiveFrom: "2020-01-01",
       });
 
-      const run = await payroll.createRun(hrAdminClaims, { periodStart: "2027-07-05", periodEnd: "2027-07-05" });
+      const run = await payroll.createRun(hrAdminClaims, { periodStart: "2027-12-05", periodEnd: "2027-12-05" });
       visRunId = run.id;
       await payroll.calculateRun(hrAdminClaims, run.id);
       const payslips = await payroll.listPayslips(hrAdminClaims, { payrollRunId: visRunId });
@@ -750,7 +1102,12 @@ describe("PayrollService", () => {
       expect(list[0].employeeId).toBe(staffEmployeeId);
 
       const own = await payroll.getPayslip(staffClaims, staffPayslipId);
-      expect(own.netPay).toBe(150000 - 6000 - 407);
+      // Relational check (not a hardcoded PKR figure): this employee has
+      // accumulated real YTD history from earlier describe blocks in this
+      // same tax year by this point in the file, so the specific tax
+      // figure isn't independently meaningful here — internal consistency
+      // of the gross-to-net formula is what this test is actually for.
+      expect(own.netPay).toBeCloseTo(own.grossPay - own.incomeTaxMonthly - own.eobiEmployeeContribution, 2);
 
       await expect(payroll.getPayslip(staffClaims, otherPayslipId)).rejects.toThrow(NotFoundException);
     });
@@ -783,7 +1140,7 @@ describe("PayrollService", () => {
 
   describe("generateDisbursementFile()", () => {
     it("refuses to disburse a run that is not finalized yet", async () => {
-      const run = await payroll.createRun(hrAdminClaims, { periodStart: "2027-08-01", periodEnd: "2027-08-01" });
+      const run = await payroll.createRun(hrAdminClaims, { periodStart: "2028-01-01", periodEnd: "2028-01-01" });
       await expect(payroll.generateDisbursementFile(hrAdminClaims, run.id)).rejects.toThrow(BadRequestException);
 
       await payroll.calculateRun(hrAdminClaims, run.id);
@@ -791,19 +1148,20 @@ describe("PayrollService", () => {
     });
 
     it("produces a CSV keyed by employee_number (never the internal UUID) for a finalized run", async () => {
-      const run = await payroll.createRun(hrAdminClaims, { periodStart: "2027-08-02", periodEnd: "2027-08-02" });
+      const run = await payroll.createRun(hrAdminClaims, { periodStart: "2028-01-02", periodEnd: "2028-01-02" });
       await payroll.calculateRun(hrAdminClaims, run.id);
       await payroll.finalizeRun(hrAdminClaims, run.id);
+      const payslip = (await payroll.listPayslips(hrAdminClaims, { payrollRunId: run.id })).find((p) => p.employeeId === staffEmployeeId)!;
 
       const csv = await payroll.generateDisbursementFile(hrAdminClaims, run.id);
       const lines = csv.split("\n");
       expect(lines[0]).toBe("employeeNumber,bankAccountNumber,netPay");
       expect(csv).not.toContain(staffEmployeeId); // the internal UUID never appears
-      expect(csv).toContain(`${staffEmployeeNumber},PK00-STAFF,143593.00`);
+      expect(csv).toContain(`${staffEmployeeNumber},PK00-STAFF,${payslip.netPay.toFixed(2)}`);
     });
 
     it("denies a caller without payroll.manage.all", async () => {
-      const run = await payroll.createRun(hrAdminClaims, { periodStart: "2027-08-03", periodEnd: "2027-08-03" });
+      const run = await payroll.createRun(hrAdminClaims, { periodStart: "2028-01-03", periodEnd: "2028-01-03" });
       await payroll.calculateRun(hrAdminClaims, run.id);
       await payroll.finalizeRun(hrAdminClaims, run.id);
       await expect(payroll.generateDisbursementFile(outsiderClaims, run.id)).rejects.toThrow(ForbiddenException);

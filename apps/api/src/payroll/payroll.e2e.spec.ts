@@ -134,14 +134,32 @@ describe("Payroll HTTP surface (e2e)", () => {
   });
 
   describe("POST /payroll/compensation and GET /payroll/compensation/:employeeId", () => {
-    it("was already set for the fixture employee in beforeAll and shows up in history", async () => {
+    it("was already set for the fixture employee in beforeAll and shows up as their current compensation", async () => {
+      // Phase P1: GET /payroll/compensation/:employeeId now returns the
+      // employee's CURRENT component-based snapshot (not a history array)
+      // — history moved to its own GET .../history route below.
       const res = await request(app.getHttpServer())
         .get(`/payroll/compensation/${staffEmployeeId}`)
         .set("Authorization", `Bearer ${hrAdminToken}`);
 
       expect(res.status).toBe(200);
+      expect(res.body.employeeId).toBe(staffEmployeeId);
+      expect(res.body.totalMonthly).toBe(150000);
+      expect(Array.isArray(res.body.components)).toBe(true);
+      const basic = res.body.components.find((c: { componentKey: string }) => c.componentKey === "basic_salary");
+      expect(basic).toBeDefined();
+      expect(basic.amount).toBe(150000);
+    });
+
+    it("GET /payroll/compensation/:employeeId/history returns the full versioned history", async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/payroll/compensation/${staffEmployeeId}/history`)
+        .set("Authorization", `Bearer ${hrAdminToken}`);
+
+      expect(res.status).toBe(200);
       expect(Array.isArray(res.body)).toBe(true);
-      expect(res.body[0].monthlySalary).toBe(150000);
+      expect(res.body[0].componentKey).toBe("basic_salary");
+      expect(res.body[0].amount).toBe(150000);
     });
 
     it("rejects without authorization", async () => {

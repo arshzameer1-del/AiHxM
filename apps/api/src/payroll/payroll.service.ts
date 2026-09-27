@@ -9,23 +9,46 @@ import { ImportExportService } from "../import-export/import-export.service";
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
 import type {
   CalculatePayrollRunResponse,
+  CompensationComponentView,
   CompensationView,
+  CreateCompensationComponentRequest,
   CreatePayrollRunRequest,
+  EmployeeCompensationView,
   PayrollCalculationError,
   PayrollCalculationStep,
   PayrollRunView,
   PayrollSettingsView,
   PayslipView,
   SetCompensationRequest,
+  SetEmployeeCompensationComponentsRequest,
   SetTaxSlabsRequest,
   TaxSlabSetView,
   TaxSlabView,
+  UpdateCompensationComponentRequest,
   UpdatePayrollSettingsRequest,
 } from "@aihxm/shared-types";
 
 const MODULE_KEY = "payroll" as const;
 const HR_MANAGE_PERMISSION = "payroll.manage.all";
 const SELF_VIEW_PERMISSION = "payroll_review.view.self";
+const BASIC_SALARY_KEY = "basic_salary";
+
+// The standard starter compensation-component catalog, lazily seeded per
+// company the first time PayrollService needs one and finds none — the
+// same lazy-seed pattern already used for tax slabs/payroll settings.
+// Every component defaults to taxable=true: Payroll Enterprise Gap
+// Analysis Phase P1 deliberately does NOT presume any allowance is
+// tax-exempt without a real accountant confirming a specific exemption
+// applies (see claude/statutory-payroll-rates-pakistan.md). A tenant's
+// HR/Finance admin can flip is_taxable per component, or add their own.
+const DEFAULT_COMPONENTS: Array<{ key: string; name: string; sortOrder: number }> = [
+  { key: BASIC_SALARY_KEY, name: "Basic Salary", sortOrder: 0 },
+  { key: "house_rent_allowance", name: "House Rent Allowance", sortOrder: 1 },
+  { key: "medical_allowance", name: "Medical Allowance", sortOrder: 2 },
+  { key: "conveyance_allowance", name: "Conveyance Allowance", sortOrder: 3 },
+  { key: "utilities_allowance", name: "Utilities Allowance", sortOrder: 4 },
+  { key: "other_allowance", name: "Other Allowance", sortOrder: 5 },
+];
 
 // The default FBR salaried-individual tax slabs (Tax Year 2027 / FY2026-27),
 // lazily seeded per-company the first time PayrollService needs a
@@ -72,14 +95,35 @@ function toIsoDateOrNull(value: unknown): string | null {
   return toIsoDate(value);
 }
 
+function slugify(name: string): string {
+  const slug = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return slug || "component";
+}
+
 // Calendar days, inclusive of both ends. Deliberately not business-day
 // aware — the same simplification `LeaveRequestsService`'s own
 // `inclusiveDayCount` documents, reused here (copied rather than
 // imported since it isn't exported) so payroll's day math matches leave's
 // exactly: a day either module counts is the same day the other counts.
 function inclusiveDayCount(startDate: string, endDate: string): number {
-  const start = Date.UTC(...(startDate.split("-").map(Number) as [number, number, number]));
-  const end = Date.UTC(...(endDate.split("-").map(Number) as [number, number, number]));
+  // NOTE: `Date.UTC(year, monthIndex, day)` takes a 0-indexed month — the
+  // ISO date strings we parse here use 1-indexed calendar months, so each
+  // component must be adjusted before being handed to `Date.UTC`. Passing
+  // the raw calendar month (as this function's counterpart in
+  // `LeaveRequestsService` still does) silently shifts every date forward
+  // by "one month's worth" of index; that shift cancels out for a
+  // same-calendar-month span (both ends shift identically) but corrupts
+  // any span crossing a month boundary — which is exactly what the
+  // Phase P1 tax-year day-count arithmetic below does (a 365/366-day span
+  // from 1 July to 30 June). Fixed here for payroll's own copy.
+  const [startYear, startMonth, startDay] = startDate.split("-").map(Number);
+  const [endYear, endMonth, endDay] = endDate.split("-").map(Number);
+  const start = Date.UTC(startYear, startMonth - 1, startDay);
+  const end = Date.UTC(endYear, endMonth - 1, endDay);
   return Math.round((end - start) / (24 * 60 * 60 * 1000)) + 1;
 }
 
@@ -91,13 +135,57 @@ function dateMin(a: string, b: string): string {
   return a < b ? a : b;
 }
 
+// Pakistan's tax year for salaried individuals runs 1 July - 30 June,
+// labeled by the calendar year it ENDS in (the same convention
+// `DEFAULT_TAX_SLABS`' own comment uses: "Tax Year 2027" = 1 Jul 2026 -
+// 30 Jun 2027). Used only to bound the year-to-date accumulation window
+// below — NOT a claim about exactly how FBR's own withholding rules
+// work in every particular; see this file's header doc comment.
+function taxYearLabelFor(isoDate: string): number {
+  const [y, m] = isoDate.split("-").map(Number);
+  return m >= 7 ? y + 1 : y;
+}
+
+function taxYearBounds(label: number): { start: string; end: string } {
+  const startYear = label - 1;
+  return { start: `${startYear}-07-01`, end: `${label}-06-30` };
+}
+
+function taxFromSlabs(annualIncome: number, slabs: TaxSlabView[]): number {
+  const bracket =
+    slabs.find((s) => annualIncome >= s.minAnnualIncome && (s.maxAnnualIncome === null || annualIncome <= s.maxAnnualIncome)) ??
+    slabs[slabs.length - 1];
+  return Math.max(0, bracket.baseTax + (bracket.ratePercent / 100) * (annualIncome - bracket.minAnnualIncome));
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function rowToCompensation(row: any): CompensationView {
+function rowToComponent(row: any): CompensationComponentView {
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    key: row.key,
+    name: row.name,
+    isTaxable: row.is_taxable,
+    isActive: row.is_active,
+    sortOrder: row.sort_order,
+    createdAt: toIso(row.created_at) as string,
+  };
+}
+
+/** Maps one `employee_compensation_components` row JOINed to its
+ * `compensation_components` catalog row (columns aliased `component_*`
+ * by every query below) into the flattened `CompensationView` shape. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function rowToCompensationRow(row: any): CompensationView {
   return {
     id: row.id,
     companyId: row.company_id,
     employeeId: row.employee_id,
-    monthlySalary: Number(row.monthly_salary),
+    componentId: row.component_id,
+    componentKey: row.component_key,
+    componentName: row.component_name,
+    isTaxable: row.component_is_taxable,
+    amount: Number(row.amount),
     effectiveFrom: toIsoDate(row.effective_from),
     effectiveTo: toIsoDateOrNull(row.effective_to),
     createdByUserAccountId: row.created_by_user_account_id,
@@ -115,6 +203,8 @@ function rowToSettings(row: any): PayrollSettingsView {
     socialSecurityScheme: row.social_security_scheme,
     socialSecurityEmployerRatePercent: Number(row.social_security_employer_rate_percent),
     socialSecurityWageCeiling: row.social_security_wage_ceiling === null ? null : Number(row.social_security_wage_ceiling),
+    effectiveFrom: toIsoDate(row.effective_from),
+    effectiveTo: toIsoDateOrNull(row.effective_to),
     updatedAt: toIso(row.updated_at) as string,
   };
 }
@@ -161,6 +251,7 @@ function rowToPayslip(row: any): PayslipView {
     paidDays: Number(row.paid_days),
     unpaidLeaveDays: Number(row.unpaid_leave_days),
     grossPay: Number(row.gross_pay),
+    taxableGrossThisPeriod: Number(row.taxable_gross_this_period),
     taxableAnnualIncome: Number(row.taxable_annual_income),
     incomeTaxMonthly: Number(row.income_tax_monthly),
     eobiEmployeeContribution: Number(row.eobi_employee_contribution),
@@ -184,6 +275,23 @@ function rowToPayslip(row: any): PayslipView {
  * Nothing in this service should ever be pointed at a real employee's
  * real money without a real accountant reviewing a real calculated run's
  * `calculation_breakdown` first.
+ *
+ * Payroll Enterprise Gap Analysis & Roadmap, Phase P1 (2026-09-27,
+ * claude/payroll-enterprise-gap-analysis-and-roadmap.md) rebuilt this
+ * file's compensation and tax-calculation core:
+ *
+ *  - Compensation is now a real component model (Basic Salary + named
+ *    allowances), not one flat `monthly_salary` figure — see
+ *    `compensation_components`/`employee_compensation_components`
+ *    (migration 0092) and `setCompensationComponents()` below.
+ *  - `payroll_settings` (EOBI/social-security) is now effective-dated
+ *    like `tax_slabs` already was, and a run resolves BOTH as of its own
+ *    `periodEnd` (`loadSettingsAsOf()`/`loadTaxSlabsAsOf()`) instead of
+ *    always reading "whatever is current right now".
+ *  - Income tax uses a real year-to-date cumulative average-rate method
+ *    (`calculateOnePayslip()`'s own doc comment has the full formula and
+ *    its documented limits) instead of annualizing one period's gross
+ *    forever.
  */
 @Injectable()
 export class PayrollService {
@@ -196,20 +304,81 @@ export class PayrollService {
     private readonly effectiveDating: EffectiveDatingEngine
   ) {}
 
-  // --- Compensation ------------------------------------------------------
+  // --- Compensation components (catalog) -----------------------------------
+
+  async listCompensationComponents(claims: RequestClaims): Promise<CompensationComponentView[]> {
+    await this.requireHrManage(claims);
+    return this.db.withClaims(claims, (client) => this.loadOrSeedComponents(client, claims));
+  }
+
+  async createCompensationComponent(claims: RequestClaims, input: CreateCompensationComponentRequest): Promise<CompensationComponentView> {
+    await this.requireHrManage(claims);
+    const name = input.name.trim();
+    if (!name) throw new BadRequestException("A component name is required");
+    const key = (input.key?.trim() || slugify(name)).toLowerCase();
+    return this.db.withClaims(claims, async (client) => {
+      await this.loadOrSeedComponents(client, claims);
+      const existing = await client.query("SELECT 1 FROM compensation_components WHERE company_id = $1 AND key = $2", [
+        claims.company_id,
+        key,
+      ]);
+      if ((existing.rowCount ?? 0) > 0) {
+        throw new BadRequestException(`A compensation component with key "${key}" already exists`);
+      }
+      const maxSort = await client.query("SELECT COALESCE(MAX(sort_order), -1) AS max FROM compensation_components WHERE company_id = $1", [
+        claims.company_id,
+      ]);
+      const result = await client.query(
+        `INSERT INTO compensation_components (company_id, key, name, is_taxable, sort_order)
+         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [claims.company_id, key, name, input.isTaxable ?? true, Number(maxSort.rows[0].max) + 1]
+      );
+      await this.audit.record(client, claims, {
+        companyId: claims.company_id ?? null,
+        action: "compensation_component.create",
+        target: result.rows[0].id,
+        metadata: { key, name },
+      });
+      return rowToComponent(result.rows[0]);
+    });
+  }
+
+  async updateCompensationComponent(
+    claims: RequestClaims,
+    id: string,
+    patch: UpdateCompensationComponentRequest
+  ): Promise<CompensationComponentView> {
+    await this.requireHrManage(claims);
+    return this.db.withClaims(claims, async (client) => {
+      const existing = await client.query("SELECT * FROM compensation_components WHERE id = $1", [id]);
+      if (existing.rowCount === 0) throw new NotFoundException("Compensation component not found");
+      const current = existing.rows[0];
+      const result = await client.query(
+        `UPDATE compensation_components
+         SET name = $2, is_taxable = $3, is_active = $4, sort_order = $5
+         WHERE id = $1 RETURNING *`,
+        [
+          id,
+          patch.name?.trim() || current.name,
+          patch.isTaxable ?? current.is_taxable,
+          patch.isActive ?? current.is_active,
+          patch.sortOrder ?? current.sort_order,
+        ]
+      );
+      await this.audit.record(client, claims, { companyId: claims.company_id ?? null, action: "compensation_component.update", target: id });
+      return rowToComponent(result.rows[0]);
+    });
+  }
+
+  // --- Compensation (per-employee amounts) ---------------------------------
 
   /**
-   * Supersedes (not overwrites) the employee's current open-ended
-   * compensation row via the shared EffectiveDatingEngine. This is a
-   * retrofit, not just a refactor: the original hand-written version had
-   * no same-day-collapse guard, so setting compensation twice in one day
-   * would have attempted to close a row at (effectiveFrom - 1 day),
-   * producing an invalid effective_to < effective_from range — a latent
-   * bug nothing had triggered yet. The engine's supersession rule fixes
-   * this the same way it already does for Leave Policies and Tax Slabs.
-   * A mid-period salary change is this phase's own named edge case —
-   * `calculateRun()` reads whichever segments overlap a given run's
-   * period, old and new alike.
+   * Back-compat, single-component convenience — the Hiring Wizard's
+   * Compensation card still calls this shape (`{employeeId, monthlySalary,
+   * effectiveFrom}`); it now sets ONLY the "Basic Salary" component
+   * (seeding the standard catalog for the tenant first if needed) rather
+   * than writing to the retired `employee_compensation` table. Anyone
+   * paying more than Basic Salary uses `setCompensationComponents()`.
    */
   async setCompensation(claims: RequestClaims, input: SetCompensationRequest): Promise<CompensationView> {
     await this.requireHrManage(claims);
@@ -219,44 +388,141 @@ export class PayrollService {
   /**
    * Core Employee Enterprise Phase 8 — split out of `setCompensation()`
    * above for exactly the reason `EmployeesService.createWithinTransaction()`
-   * exists (see that method's own doc comment): HiringProcessService's
-   * `compensation` card calls this directly, inside the SAME transaction
-   * that creates the new employee, rather than opening a second,
-   * independent transaction on a different pooled connection.
-   * `setCompensation()` itself is unchanged for every existing caller —
-   * this is a pure control-flow extraction, no behavior change.
+   * exists: HiringProcessService's `compensation` card calls this
+   * directly, inside the SAME transaction that creates the new employee.
    */
   async setCompensationWithinTransaction(client: PoolClient, claims: RequestClaims, input: SetCompensationRequest): Promise<CompensationView> {
     const employee = await this.loadEmployee(client, input.employeeId);
     if (!employee) throw new NotFoundException("Employee not found");
 
-    const { row } = await this.effectiveDating.applyVersionedRow(client, {
-      table: "employee_compensation",
-      scope: { employee_id: input.employeeId },
-      extraInsertColumns: { company_id: claims.company_id, created_by_user_account_id: claims.sub },
-      data: { monthly_salary: input.monthlySalary },
+    const components = await this.loadOrSeedComponents(client, claims);
+    const basic = components.find((c) => c.key === BASIC_SALARY_KEY);
+    if (!basic) throw new Error("Basic Salary component missing from catalog — this should never happen");
+
+    const row = await this.applyOneComponent(client, claims, {
+      employeeId: input.employeeId,
+      componentId: basic.id,
+      amount: input.monthlySalary,
       effectiveFrom: input.effectiveFrom,
     });
     await this.audit.record(client, claims, {
       companyId: claims.company_id ?? null,
       action: "compensation.set",
       target: input.employeeId,
-      metadata: { monthlySalary: input.monthlySalary, effectiveFrom: input.effectiveFrom },
+      metadata: { componentKey: BASIC_SALARY_KEY, amount: input.monthlySalary, effectiveFrom: input.effectiveFrom },
     });
-    return rowToCompensation(row);
+    return { ...row, componentKey: basic.key, componentName: basic.name, isTaxable: basic.isTaxable };
   }
 
+  /**
+   * Sets one or more components' amounts for an employee as of the same
+   * date in one call. A component left out of `input.components` is
+   * untouched — bumping just Basic Salary doesn't require resubmitting
+   * every allowance (each component is independently effective-dated).
+   */
+  async setCompensationComponents(claims: RequestClaims, input: SetEmployeeCompensationComponentsRequest): Promise<EmployeeCompensationView> {
+    await this.requireHrManage(claims);
+    if (input.components.length === 0) throw new BadRequestException("At least one component amount is required");
+    return this.db.withClaims(claims, async (client) => {
+      const employee = await this.loadEmployee(client, input.employeeId);
+      if (!employee) throw new NotFoundException("Employee not found");
+
+      const catalog = await this.loadOrSeedComponents(client, claims);
+      const byId = new Map(catalog.map((c) => [c.id, c]));
+      for (const entry of input.components) {
+        const component = byId.get(entry.componentId);
+        if (!component) throw new BadRequestException(`Unknown compensation component: ${entry.componentId}`);
+        if (!component.isActive) throw new BadRequestException(`Compensation component "${component.name}" is not active`);
+        if (entry.amount < 0) throw new BadRequestException("A component amount cannot be negative");
+      }
+
+      for (const entry of input.components) {
+        await this.applyOneComponent(client, claims, {
+          employeeId: input.employeeId,
+          componentId: entry.componentId,
+          amount: entry.amount,
+          effectiveFrom: input.effectiveFrom,
+        });
+      }
+      await this.audit.record(client, claims, {
+        companyId: claims.company_id ?? null,
+        action: "compensation.set_components",
+        target: input.employeeId,
+        metadata: { effectiveFrom: input.effectiveFrom, componentIds: input.components.map((c) => c.componentId) },
+      });
+      return this.loadCurrentCompensation(client, claims, input.employeeId);
+    });
+  }
+
+  private async applyOneComponent(
+    client: PoolClient,
+    claims: RequestClaims,
+    input: { employeeId: string; componentId: string; amount: number; effectiveFrom: string }
+  ): Promise<CompensationView> {
+    const { row } = await this.effectiveDating.applyVersionedRow(client, {
+      table: "employee_compensation_components",
+      scope: { employee_id: input.employeeId, component_id: input.componentId },
+      extraInsertColumns: { company_id: claims.company_id, created_by_user_account_id: claims.sub },
+      data: { amount: input.amount },
+      effectiveFrom: input.effectiveFrom,
+    });
+    const withComponent = await client.query(
+      `SELECT ecc.*, cc.key AS component_key, cc.name AS component_name, cc.is_taxable AS component_is_taxable
+       FROM employee_compensation_components ecc
+       JOIN compensation_components cc ON cc.id = ecc.component_id
+       WHERE ecc.id = $1`,
+      [(row as { id: string }).id]
+    );
+    return rowToCompensationRow(withComponent.rows[0]);
+  }
+
+  /** The employee's current (as-of-today) compensation across every
+   * active component they have an open row for. */
+  async getCurrentCompensation(claims: RequestClaims, employeeId: string): Promise<EmployeeCompensationView> {
+    await this.requireHrManage(claims);
+    return this.db.withClaims(claims, async (client) => {
+      const employee = await this.loadEmployee(client, employeeId);
+      if (!employee) throw new NotFoundException("Employee not found");
+      return this.loadCurrentCompensation(client, claims, employeeId);
+    });
+  }
+
+  private async loadCurrentCompensation(client: PoolClient, claims: RequestClaims, employeeId: string): Promise<EmployeeCompensationView> {
+    await this.loadOrSeedComponents(client, claims);
+    const result = await client.query(
+      `SELECT ecc.*, cc.key AS component_key, cc.name AS component_name, cc.is_taxable AS component_is_taxable, cc.sort_order
+       FROM employee_compensation_components ecc
+       JOIN compensation_components cc ON cc.id = ecc.component_id
+       WHERE ecc.employee_id = $1 AND ecc.effective_to IS NULL AND cc.is_active = true
+       ORDER BY cc.sort_order ASC`,
+      [employeeId]
+    );
+    const components = result.rows.map(rowToCompensationRow);
+    return {
+      employeeId,
+      asOfDate: toIsoDate(new Date()),
+      components,
+      totalMonthly: Number(components.reduce((sum, c) => sum + c.amount, 0).toFixed(2)),
+    };
+  }
+
+  /** Full effective-dated history across EVERY component (active or
+   * retired) an employee has ever had, newest first — mirrors
+   * `TaxSlabsForm`'s own history endpoint shape. */
   async getCompensationHistory(claims: RequestClaims, employeeId: string): Promise<CompensationView[]> {
     await this.requireHrManage(claims);
     return this.db.withClaims(claims, async (client) => {
       const employee = await this.loadEmployee(client, employeeId);
       if (!employee) throw new NotFoundException("Employee not found");
-      const rows = await this.effectiveDating.getHistory(client, {
-        table: "employee_compensation",
-        scope: { employee_id: employeeId },
-        orderBy: "effective_from DESC",
-      });
-      return rows.map(rowToCompensation);
+      const result = await client.query(
+        `SELECT ecc.*, cc.key AS component_key, cc.name AS component_name, cc.is_taxable AS component_is_taxable
+         FROM employee_compensation_components ecc
+         JOIN compensation_components cc ON cc.id = ecc.component_id
+         WHERE ecc.employee_id = $1
+         ORDER BY ecc.effective_from DESC, cc.sort_order ASC`,
+        [employeeId]
+      );
+      return result.rows.map(rowToCompensationRow);
     });
   }
 
@@ -264,38 +530,56 @@ export class PayrollService {
 
   /** Lazily seeds `payroll_settings` from the table's own column
    * defaults the first time a tenant has no row — the same lazy-seed
-   * pattern Phase 9 used for `leave_balances`. */
+   * pattern Phase 9 used for `leave_balances`. Reads the CURRENT
+   * generation via the shared EffectiveDatingEngine now that this table
+   * is effective-dated (Phase P1). */
   async getSettings(claims: RequestClaims): Promise<PayrollSettingsView> {
     await this.requireHrManage(claims);
     return this.db.withClaims(claims, (client) => this.loadOrSeedSettings(client, claims));
   }
 
+  /**
+   * SUPERSEDES the current settings generation (rather than mutating it
+   * in place) via the shared EffectiveDatingEngine, so a payroll run for
+   * a past period can resolve the EOBI/social-security rates that were
+   * actually in force during THAT period (`loadSettingsAsOf()`) instead
+   * of whatever is current today.
+   */
   async updateSettings(claims: RequestClaims, patch: UpdatePayrollSettingsRequest): Promise<PayrollSettingsView> {
     await this.requireHrManage(claims);
     return this.db.withClaims(claims, async (client) => {
       const current = await this.loadOrSeedSettings(client, claims);
-      const result = await client.query(
-        `UPDATE payroll_settings
-         SET eobi_employee_rate_percent = $2,
-             eobi_employer_rate_percent = $3,
-             eobi_wage_base = $4,
-             social_security_scheme = $5,
-             social_security_employer_rate_percent = $6,
-             social_security_wage_ceiling = $7,
-             updated_at = now()
-         WHERE company_id = $1 RETURNING *`,
-        [
-          claims.company_id,
-          patch.eobiEmployeeRatePercent ?? current.eobiEmployeeRatePercent,
-          patch.eobiEmployerRatePercent ?? current.eobiEmployerRatePercent,
-          patch.eobiWageBase ?? current.eobiWageBase,
-          patch.socialSecurityScheme ?? current.socialSecurityScheme,
-          patch.socialSecurityEmployerRatePercent ?? current.socialSecurityEmployerRatePercent,
-          patch.socialSecurityWageCeiling === undefined ? current.socialSecurityWageCeiling : patch.socialSecurityWageCeiling,
-        ]
-      );
+      const { row } = await this.effectiveDating.applyVersionedRow(client, {
+        table: "payroll_settings",
+        scope: { company_id: claims.company_id! },
+        data: {
+          eobi_employee_rate_percent: patch.eobiEmployeeRatePercent ?? current.eobiEmployeeRatePercent,
+          eobi_employer_rate_percent: patch.eobiEmployerRatePercent ?? current.eobiEmployerRatePercent,
+          eobi_wage_base: patch.eobiWageBase ?? current.eobiWageBase,
+          social_security_scheme: patch.socialSecurityScheme ?? current.socialSecurityScheme,
+          social_security_employer_rate_percent: patch.socialSecurityEmployerRatePercent ?? current.socialSecurityEmployerRatePercent,
+          social_security_wage_ceiling:
+            patch.socialSecurityWageCeiling === undefined ? current.socialSecurityWageCeiling : patch.socialSecurityWageCeiling,
+          updated_at: new Date(),
+        },
+      });
       await this.audit.record(client, claims, { companyId: claims.company_id ?? null, action: "payroll_settings.update" });
-      return rowToSettings(result.rows[0]);
+      return rowToSettings(row);
+    });
+  }
+
+  /** Every effective-dated generation of this tenant's EOBI/social-security
+   * settings, oldest first — mirrors `getTaxSlabHistory()`'s shape. */
+  async getSettingsHistory(claims: RequestClaims): Promise<PayrollSettingsView[]> {
+    await this.requireHrManage(claims);
+    return this.db.withClaims(claims, async (client) => {
+      await this.loadOrSeedSettings(client, claims);
+      const rows = await this.effectiveDating.getHistory(client, {
+        table: "payroll_settings",
+        scope: { company_id: claims.company_id! },
+        orderBy: "effective_from ASC",
+      });
+      return rows.map(rowToSettings);
     });
   }
 
@@ -437,6 +721,12 @@ export class PayrollService {
    * partial failure" discipline `ImportExportService.parseAndValidate()`
    * established for Conversions. An employee with an error gets no
    * payslip row for this run; HR sees exactly why in the response.
+   *
+   * Phase P1: settings/tax slabs are resolved AS OF this run's own
+   * `periodEnd` (`loadSettingsAsOf()`/`loadTaxSlabsAsOf()`), not
+   * "whatever is current today" — a run recalculated after a later rate
+   * change still uses the rates that were actually in force during its
+   * own period.
    */
   async calculateRun(claims: RequestClaims, id: string): Promise<CalculatePayrollRunResponse> {
     await this.requireHrManage(claims);
@@ -446,12 +736,13 @@ export class PayrollService {
         throw new BadRequestException("Cannot recalculate a finalized payroll run");
       }
 
-      const settings = await this.loadOrSeedSettings(client, claims);
-      const taxSlabs = await this.loadOrSeedTaxSlabs(client, claims);
-
       const periodStart = toIsoDate(run.period_start);
       const periodEnd = toIsoDate(run.period_end);
       const daysInPeriod = inclusiveDayCount(periodStart, periodEnd);
+
+      await this.loadOrSeedComponents(client, claims);
+      const settings = await this.loadSettingsAsOf(client, claims, periodEnd);
+      const taxSlabs = await this.loadTaxSlabsAsOf(client, claims, periodEnd);
 
       const employeesResult = await client.query<EmployeeRow>(
         `SELECT id, company_id, user_account_id, employee_number, bank_account_number, date_of_joining, termination_date
@@ -478,10 +769,10 @@ export class PayrollService {
         await client.query(
           `INSERT INTO payslips (
              company_id, payroll_run_id, employee_id, employee_number, bank_account_number,
-             days_in_period, paid_days, unpaid_leave_days, gross_pay, taxable_annual_income,
-             income_tax_monthly, eobi_employee_contribution, eobi_employer_contribution,
+             days_in_period, paid_days, unpaid_leave_days, gross_pay, taxable_gross_this_period,
+             taxable_annual_income, income_tax_monthly, eobi_employee_contribution, eobi_employer_contribution,
              social_security_employer_contribution, net_pay, calculation_breakdown
-           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb)`,
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb)`,
           [
             claims.company_id,
             id,
@@ -492,6 +783,7 @@ export class PayrollService {
             row.paidDays,
             row.unpaidLeaveDays,
             row.grossPay,
+            row.taxableGrossThisPeriod,
             row.taxableAnnualIncome,
             row.incomeTaxMonthly,
             row.eobiEmployeeContribution,
@@ -620,6 +912,38 @@ export class PayrollService {
 
   // --- Internals -------------------------------------------------------
 
+  /**
+   * Gross-to-net for one employee, one run. Phase P1 rewrite — two things
+   * changed from the original single-`monthly_salary` version:
+   *
+   *  1. Gross pay is now the sum of every compensation component's own
+   *     prorated segment (Basic Salary + whichever allowances the
+   *     employee has), not one number — each component gets its own
+   *     breakdown line, and only TAXABLE components feed the tax
+   *     calculation below.
+   *
+   *  2. Income tax uses a cumulative "average rate" year-to-date method
+   *     instead of annualizing this one period's gross forever:
+   *       - `priorYtd` = actual taxable income/tax already recorded on
+   *         this employee's FINALIZED payslips earlier in the same tax
+   *         year (1 Jul - 30 Jun) — never a draft/calculated run, so
+   *         recalculating a not-yet-finalized run can never double-count.
+   *       - This period's taxable income is projected forward at its own
+   *         daily rate across the tax year's remaining days to estimate
+   *         a full-year taxable figure.
+   *       - Tax on that estimate, times the fraction of the tax year
+   *         elapsed so far, gives the total tax that SHOULD have been
+   *         withheld to date; subtracting what was already withheld
+   *         gives this period's tax.
+   *     This is the standard "average rate"/cumulative withholding
+   *     approach used by many South Asian payroll systems to approximate
+   *     FBR salary-tax withholding — it is a documented simplification
+   *     (assumes one employer, doesn't model mid-year rate-schedule
+   *     changes mid-tax-year), not a certified reproduction of FBR's own
+   *     Income Tax Rules formula. Per this file's own header comment: an
+   *     accountant should review a real calculated run's breakdown
+   *     before this is trusted with real money.
+   */
   private async calculateOnePayslip(
     client: PoolClient,
     employee: EmployeeRow,
@@ -642,32 +966,38 @@ export class PayrollService {
     const employmentWindowDays = inclusiveDayCount(windowStart, windowEnd);
     breakdown.push({ label: "Employment window within period", value: `${windowStart} to ${windowEnd} (${employmentWindowDays} days)` });
 
-    const compensationResult = await client.query(
-      `SELECT * FROM employee_compensation
-       WHERE employee_id = $1 AND effective_from <= $3 AND (effective_to IS NULL OR effective_to >= $2)
-       ORDER BY effective_from ASC`,
+    const componentSegments = await client.query(
+      `SELECT ecc.*, cc.key AS component_key, cc.name AS component_name, cc.is_taxable AS component_is_taxable
+       FROM employee_compensation_components ecc
+       JOIN compensation_components cc ON cc.id = ecc.component_id
+       WHERE ecc.employee_id = $1 AND cc.is_active = true
+         AND ecc.effective_from <= $3 AND (ecc.effective_to IS NULL OR ecc.effective_to >= $2)
+       ORDER BY cc.sort_order ASC, ecc.effective_from ASC`,
       [employee.id, windowStart, windowEnd]
     );
-    if (compensationResult.rowCount === 0) {
+    if (componentSegments.rowCount === 0) {
       throw new Error("No compensation record covers this employee for this period");
     }
 
     let grossFromSegments = 0;
-    let latestMonthlySalary = 0;
-    for (const seg of compensationResult.rows) {
+    let taxableGrossFromSegments = 0;
+    const latestAmountByComponent = new Map<string, number>();
+    for (const seg of componentSegments.rows) {
       const segStart = dateMax(windowStart, toIsoDate(seg.effective_from));
       const segEnd = dateMin(windowEnd, seg.effective_to ? toIsoDate(seg.effective_to) : windowEnd);
       if (segEnd < segStart) continue;
       const segDays = inclusiveDayCount(segStart, segEnd);
-      const monthlySalary = Number(seg.monthly_salary);
-      const proratedAmount = (monthlySalary * segDays) / daysInPeriod;
+      const amount = Number(seg.amount);
+      const proratedAmount = (amount * segDays) / daysInPeriod;
       grossFromSegments += proratedAmount;
-      latestMonthlySalary = monthlySalary;
+      if (seg.component_is_taxable) taxableGrossFromSegments += proratedAmount;
+      latestAmountByComponent.set(seg.component_id, amount);
       breakdown.push({
-        label: `Compensation segment ${segStart} to ${segEnd} (${segDays} days) @ ${monthlySalary}/mo`,
+        label: `${seg.component_name} — ${segStart} to ${segEnd} (${segDays} days) @ ${amount}/mo${seg.component_is_taxable ? "" : " (non-taxable)"}`,
         value: Number(proratedAmount.toFixed(2)),
       });
     }
+    const latestTotalMonthlyRate = [...latestAmountByComponent.values()].reduce((a, b) => a + b, 0);
 
     const unpaidLeaveResult = await client.query(
       `SELECT start_date, end_date FROM leave_requests
@@ -684,34 +1014,74 @@ export class PayrollService {
     }
     breakdown.push({ label: "Unpaid leave days (approved, overlapping period)", value: unpaidLeaveDays });
 
-    // Simplification, documented in Decision #14: the unpaid-leave
-    // deduction is computed uniformly against the period's LATEST salary
-    // rate, not a per-day rate that tracks which compensation segment
-    // each unpaid day actually fell in.
-    const unpaidDeduction = unpaidLeaveDays > 0 ? (latestMonthlySalary * unpaidLeaveDays) / daysInPeriod : 0;
+    // Simplification, documented since Decision #14: the unpaid-leave
+    // deduction is computed uniformly against the period's LATEST total
+    // monthly rate (across every component), not a per-day rate that
+    // tracks which compensation segment each unpaid day actually fell
+    // in. The deduction is then split between taxable/non-taxable pay
+    // proportionally to this period's own taxable share — there's no
+    // way to know which specific component an unpaid day "came out of",
+    // so a proportional split is the least-arbitrary allocation.
+    const unpaidDeduction = unpaidLeaveDays > 0 ? (latestTotalMonthlyRate * unpaidLeaveDays) / daysInPeriod : 0;
     if (unpaidLeaveDays > 0) {
-      breakdown.push({ label: `Unpaid-leave deduction @ ${latestMonthlySalary}/mo rate`, value: -Number(unpaidDeduction.toFixed(2)) });
+      breakdown.push({ label: `Unpaid-leave deduction @ ${latestTotalMonthlyRate}/mo total rate`, value: -Number(unpaidDeduction.toFixed(2)) });
     }
+    const taxableShare = grossFromSegments > 0 ? taxableGrossFromSegments / grossFromSegments : 0;
+    const taxableUnpaidDeduction = unpaidDeduction * taxableShare;
 
     const paidDays = Math.max(0, employmentWindowDays - unpaidLeaveDays);
     const grossPay = Math.max(0, grossFromSegments - unpaidDeduction);
+    const taxableGrossThisPeriod = Math.max(0, taxableGrossFromSegments - taxableUnpaidDeduction);
     breakdown.push({ label: "Gross pay", value: Number(grossPay.toFixed(2)) });
+    breakdown.push({ label: "Of which taxable this period", value: Number(taxableGrossThisPeriod.toFixed(2)) });
 
-    // Simplification, documented in Decision #14: this period's monthly
-    // gross is annualized (x12) to look up a tax bracket, rather than
-    // projecting a full tax year across multiple runs.
-    const taxableAnnualIncome = grossPay * 12;
-    breakdown.push({ label: "Taxable annual income (this period's gross x 12)", value: Number(taxableAnnualIncome.toFixed(2)) });
-
-    const bracket =
-      taxSlabs.find((s) => taxableAnnualIncome >= s.minAnnualIncome && (s.maxAnnualIncome === null || taxableAnnualIncome <= s.maxAnnualIncome)) ??
-      taxSlabs[taxSlabs.length - 1];
-    const annualTax = bracket.baseTax + (bracket.ratePercent / 100) * (taxableAnnualIncome - bracket.minAnnualIncome);
-    const incomeTaxMonthly = Math.max(0, annualTax / 12);
+    // --- Year-to-date cumulative tax withholding (Phase P1) -------------
+    const taxYear = taxYearLabelFor(periodEnd);
+    const { start: taxYearStart, end: taxYearEnd } = taxYearBounds(taxYear);
+    const ytdResult = await client.query(
+      `SELECT COALESCE(SUM(p.taxable_gross_this_period), 0) AS taxable, COALESCE(SUM(p.income_tax_monthly), 0) AS tax
+       FROM payslips p
+       JOIN payroll_runs pr ON pr.id = p.payroll_run_id
+       WHERE p.employee_id = $1 AND pr.status = 'finalized' AND pr.period_end >= $2 AND pr.period_end < $3`,
+      [employee.id, taxYearStart, periodStart]
+    );
+    const priorYtdTaxable = Number(ytdResult.rows[0].taxable);
+    const priorYtdTaxWithheld = Number(ytdResult.rows[0].tax);
     breakdown.push({
-      label: `Tax bracket ${bracket.minAnnualIncome}-${bracket.maxAnnualIncome ?? "∞"} @ ${bracket.ratePercent}% (base ${bracket.baseTax})`,
-      value: Number(incomeTaxMonthly.toFixed(2)),
+      label: `Tax year ${taxYear} (${taxYearStart} to ${taxYearEnd}) — YTD taxable income before this period (finalized runs only)`,
+      value: Number(priorYtdTaxable.toFixed(2)),
     });
+
+    const totalDaysInTaxYear = inclusiveDayCount(taxYearStart, taxYearEnd);
+    const daysElapsedInclusive = Math.min(totalDaysInTaxYear, inclusiveDayCount(taxYearStart, periodEnd));
+    const daysRemaining = Math.max(0, totalDaysInTaxYear - daysElapsedInclusive);
+    const dailyTaxableRate = daysInPeriod > 0 ? taxableGrossThisPeriod / daysInPeriod : 0;
+    const projectedRemainingIncome = dailyTaxableRate * daysRemaining;
+    const estimatedAnnualTaxableIncome = priorYtdTaxable + taxableGrossThisPeriod + projectedRemainingIncome;
+    breakdown.push({
+      label: "Estimated full tax-year taxable income (YTD + this period + projected remainder)",
+      value: Number(estimatedAnnualTaxableIncome.toFixed(2)),
+    });
+
+    const totalAnnualTaxEstimate = taxFromSlabs(estimatedAnnualTaxableIncome, taxSlabs);
+    const fractionElapsed = totalDaysInTaxYear > 0 ? daysElapsedInclusive / totalDaysInTaxYear : 1;
+    const totalTaxDueToDate = totalAnnualTaxEstimate * fractionElapsed;
+    const bracket =
+      taxSlabs.find(
+        (s) => estimatedAnnualTaxableIncome >= s.minAnnualIncome && (s.maxAnnualIncome === null || estimatedAnnualTaxableIncome <= s.maxAnnualIncome)
+      ) ?? taxSlabs[taxSlabs.length - 1];
+    breakdown.push({
+      label: `Tax bracket ${bracket.minAnnualIncome}-${bracket.maxAnnualIncome ?? "∞"} @ ${bracket.ratePercent}% (base ${bracket.baseTax}) — estimated full-year tax`,
+      value: Number(totalAnnualTaxEstimate.toFixed(2)),
+    });
+    breakdown.push({
+      label: `Tax due to date (${daysElapsedInclusive}/${totalDaysInTaxYear} days elapsed this tax year)`,
+      value: Number(totalTaxDueToDate.toFixed(2)),
+    });
+    breakdown.push({ label: "Already withheld this tax year (finalized runs only)", value: Number(priorYtdTaxWithheld.toFixed(2)) });
+
+    const incomeTaxMonthly = Math.max(0, totalTaxDueToDate - priorYtdTaxWithheld);
+    breakdown.push({ label: "Income tax this period", value: Number(incomeTaxMonthly.toFixed(2)) });
 
     const paidDaysRatio = employmentWindowDays > 0 ? paidDays / employmentWindowDays : 0;
     const eobiEmployeeContribution = settings.eobiWageBase * (settings.eobiEmployeeRatePercent / 100) * paidDaysRatio;
@@ -739,7 +1109,8 @@ export class PayrollService {
       paidDays: Number(paidDays.toFixed(2)),
       unpaidLeaveDays: Number(unpaidLeaveDays.toFixed(2)),
       grossPay: Number(grossPay.toFixed(2)),
-      taxableAnnualIncome: Number(taxableAnnualIncome.toFixed(2)),
+      taxableGrossThisPeriod: Number(taxableGrossThisPeriod.toFixed(2)),
+      taxableAnnualIncome: Number(estimatedAnnualTaxableIncome.toFixed(2)),
       incomeTaxMonthly: Number(incomeTaxMonthly.toFixed(2)),
       eobiEmployeeContribution: Number(eobiEmployeeContribution.toFixed(2)),
       eobiEmployerContribution: Number(eobiEmployerContribution.toFixed(2)),
@@ -749,23 +1120,62 @@ export class PayrollService {
     };
   }
 
+  private async loadOrSeedComponents(client: PoolClient, claims: RequestClaims): Promise<CompensationComponentView[]> {
+    const existing = await client.query("SELECT * FROM compensation_components WHERE company_id = $1 ORDER BY sort_order ASC", [
+      claims.company_id,
+    ]);
+    if ((existing.rowCount ?? 0) > 0) return existing.rows.map(rowToComponent);
+    const inserted: unknown[] = [];
+    for (const component of DEFAULT_COMPONENTS) {
+      const result = await client.query(
+        `INSERT INTO compensation_components (company_id, key, name, is_taxable, sort_order)
+         VALUES ($1, $2, $3, true, $4)
+         ON CONFLICT (company_id, key) DO NOTHING RETURNING *`,
+        [claims.company_id, component.key, component.name, component.sortOrder]
+      );
+      if ((result.rowCount ?? 0) > 0) inserted.push(result.rows[0]);
+    }
+    if (inserted.length > 0) return inserted.map(rowToComponent) as CompensationComponentView[];
+    const retry = await client.query("SELECT * FROM compensation_components WHERE company_id = $1 ORDER BY sort_order ASC", [
+      claims.company_id,
+    ]);
+    return retry.rows.map(rowToComponent);
+  }
+
   private async loadOrSeedSettings(client: PoolClient, claims: RequestClaims): Promise<PayrollSettingsView> {
-    const existing = await client.query("SELECT * FROM payroll_settings WHERE company_id = $1", [claims.company_id]);
-    if ((existing.rowCount ?? 0) > 0) return rowToSettings(existing.rows[0]);
+    const existing = await this.effectiveDating.getCurrentRow(client, { table: "payroll_settings", scope: { company_id: claims.company_id! } });
+    if (existing) return rowToSettings(existing);
     const inserted = await client.query(
-      "INSERT INTO payroll_settings (company_id) VALUES ($1) ON CONFLICT (company_id) DO NOTHING RETURNING *",
+      `INSERT INTO payroll_settings (company_id, effective_from) VALUES ($1, CURRENT_DATE)
+       ON CONFLICT (company_id) WHERE effective_to IS NULL DO NOTHING RETURNING *`,
       [claims.company_id]
     );
     if ((inserted.rowCount ?? 0) > 0) return rowToSettings(inserted.rows[0]);
-    const retry = await client.query("SELECT * FROM payroll_settings WHERE company_id = $1", [claims.company_id]);
-    return rowToSettings(retry.rows[0]);
+    const retry = await this.effectiveDating.getCurrentRow(client, { table: "payroll_settings", scope: { company_id: claims.company_id! } });
+    return rowToSettings(retry);
+  }
+
+  /** Resolves the EOBI/social-security settings generation that was
+   * actually in force on `asOfDate` — used by `calculateRun()` so a
+   * run's own period, not "today", decides which rates apply. Falls back
+   * to lazily seeding + using the current generation if a tenant somehow
+   * has no generation covering that date at all (e.g. a run dated before
+   * the tenant's very first settings row — the same edge case tax slabs
+   * already had to handle). */
+  private async loadSettingsAsOf(client: PoolClient, claims: RequestClaims, asOfDate: string): Promise<PayrollSettingsView> {
+    await this.loadOrSeedSettings(client, claims);
+    const result = await client.query(
+      `SELECT * FROM payroll_settings WHERE company_id = $1 AND effective_from <= $2 AND (effective_to IS NULL OR effective_to >= $2)
+       ORDER BY effective_from DESC LIMIT 1`,
+      [claims.company_id, asOfDate]
+    );
+    if ((result.rowCount ?? 0) > 0) return rowToSettings(result.rows[0]);
+    return this.loadOrSeedSettings(client, claims);
   }
 
   private async loadOrSeedTaxSlabs(client: PoolClient, claims: RequestClaims): Promise<TaxSlabView[]> {
     // Reads the CURRENT set only (effective_to IS NULL) — same "live
-    // decision paths keep reading current" discipline as leave policies;
-    // resolving a run's OWN period against historical slabs is a named,
-    // separate follow-on (migration 0033's header comment).
+    // decision paths keep reading current" discipline as leave policies.
     // "Current" read goes through the shared engine like every other
     // caller; the one-time bootstrap INSERT below is a seeding concern
     // specific to this method (not a supersession), so it stays bespoke.
@@ -792,6 +1202,23 @@ export class PayrollService {
       orderBy: "min_annual_income ASC",
     });
     return retry.map(rowToTaxSlab);
+  }
+
+  /** Resolves the tax slab GENERATION that was actually in force on
+   * `asOfDate` — Phase P1's fix for the gap migration 0033's own header
+   * comment named up front ("resolving a run's OWN period against
+   * historical slabs is a real, separately named follow-on"). Falls back
+   * to lazily seeding + using the current generation for a date before
+   * the tenant's first-ever slab set. */
+  private async loadTaxSlabsAsOf(client: PoolClient, claims: RequestClaims, asOfDate: string): Promise<TaxSlabView[]> {
+    await this.loadOrSeedTaxSlabs(client, claims);
+    const result = await client.query(
+      `SELECT * FROM tax_slabs WHERE company_id = $1 AND effective_from <= $2 AND (effective_to IS NULL OR effective_to >= $2)
+       ORDER BY min_annual_income ASC`,
+      [claims.company_id, asOfDate]
+    );
+    if (result.rowCount && result.rowCount > 0) return result.rows.map(rowToTaxSlab);
+    return this.loadOrSeedTaxSlabs(client, claims);
   }
 
   private async loadEmployee(client: PoolClient, employeeId: string): Promise<{ id: string } | null> {
