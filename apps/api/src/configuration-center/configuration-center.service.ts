@@ -12,6 +12,7 @@ import { JobsService } from "../organization/jobs.service";
 import { LocationsService } from "../organization/locations.service";
 import { CostCentersService } from "../organization/cost-centers.service";
 import { ProfitCentersService } from "../organization/profit-centers.service";
+import { HiringProcessService } from "../employees/hiring/hiring-process.service";
 import type { ConfigurationDomainSummary } from "@aihxm/shared-types";
 
 type RegistryRow = {
@@ -51,7 +52,8 @@ export class ConfigurationCenterService {
     private readonly jobs: JobsService,
     private readonly locations: LocationsService,
     private readonly costCenters: CostCentersService,
-    private readonly profitCenters: ProfitCentersService
+    private readonly profitCenters: ProfitCentersService,
+    private readonly hiring: HiringProcessService
   ) {}
 
   async getSummary(claims: RequestClaims): Promise<ConfigurationDomainSummary[]> {
@@ -128,6 +130,15 @@ export class ConfigurationCenterService {
           // Same phase — ProfitCentersService.list() gated on
           // profit_center.view.all/profit_center.manage.all.
           return (await this.profitCenters.list(claims)).length;
+        case "core_employee_hiring":
+          // Core Employee Enterprise Phase 3 — HiringProcessService.
+          // listCardDefinitions() applies the same entitlement-then-RBAC
+          // gate (`employee` module, then employee.manage.all) as every
+          // other case here, and lazily seeds the fixed 20-card catalogue
+          // for a company that has never opened this screen before (the
+          // same "reuse the real method" acceptance already noted for
+          // tax_slab below).
+          return (await this.hiring.listCardDefinitions(claims)).length;
         case "tax_slab":
           // listTaxSlabs lazily seeds the default FBR bracket table the
           // first time a payroll-enabled tenant has none -- an accepted
