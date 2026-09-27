@@ -116,6 +116,21 @@ function RepeatableListEditor({
   );
 }
 
+// kumail's own feedback on the live wizard (2026-09-27) — Gender/Marital
+// status rendered as free-text inputs read as broken next to Employment
+// Type's own dropdown right below this card. Neither field is backed by a
+// real enum anywhere server-side (`create-employee.dto.ts`'s `gender`/
+// `maritalStatus` are both plain `@IsString()`, no `@IsIn`), and no other
+// screen in this app edits these two fields at all (`EmployeeCreatePage`
+// doesn't collect them; `EmployeeFields.tsx` only ever displays them
+// read-only) — so there was no existing convention to match. These two
+// option lists are this wizard's own first definition of them, stored
+// lowercase for the same reason EMPLOYMENT_TYPES is (`text-xs capitalize`
+// display, lowercase storage, matching how EmployeeFields.tsx's own
+// ENUM_FIELDS already title-cases gender/maritalStatus for display).
+const GENDERS = ["male", "female", "other"];
+const MARITAL_STATUSES = ["single", "married", "divorced", "widowed"];
+
 function PersonalIdentityForm({ data, onChange }: CardFormProps) {
   return (
     <div className="grid grid-cols-2 gap-3">
@@ -132,10 +147,28 @@ function PersonalIdentityForm({ data, onChange }: CardFormProps) {
         <input type="date" value={str(data, "dateOfBirth")} onChange={(e) => set(data, onChange, "dateOfBirth", e.target.value)} className={inputClass()} />
       </Labeled>
       <Labeled label="Gender">
-        <input value={str(data, "gender")} onChange={(e) => set(data, onChange, "gender", e.target.value)} className={inputClass()} />
+        <select value={str(data, "gender")} onChange={(e) => set(data, onChange, "gender", e.target.value)} className={`${inputClass()} capitalize`}>
+          <option value="">Select…</option>
+          {GENDERS.map((g) => (
+            <option key={g} value={g}>
+              {g}
+            </option>
+          ))}
+        </select>
       </Labeled>
       <Labeled label="Marital status">
-        <input value={str(data, "maritalStatus")} onChange={(e) => set(data, onChange, "maritalStatus", e.target.value)} className={inputClass()} />
+        <select
+          value={str(data, "maritalStatus")}
+          onChange={(e) => set(data, onChange, "maritalStatus", e.target.value)}
+          className={`${inputClass()} capitalize`}
+        >
+          <option value="">Select…</option>
+          {MARITAL_STATUSES.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </select>
       </Labeled>
     </div>
   );
@@ -143,29 +176,18 @@ function PersonalIdentityForm({ data, onChange }: CardFormProps) {
 
 const EMPLOYMENT_TYPES = ["permanent", "contract", "probation", "intern"];
 
-function EmploymentForm({ data, onChange }: CardFormProps) {
-  return (
-    <div className="grid grid-cols-2 gap-3">
-      <Labeled label="Employment type">
-        <select value={str(data, "employmentType")} onChange={(e) => set(data, onChange, "employmentType", e.target.value)} className={`${inputClass()} capitalize`}>
-          <option value="">Select…</option>
-          {EMPLOYMENT_TYPES.map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
-          ))}
-        </select>
-      </Labeled>
-      <Labeled label="Date of joining">
-        <input type="date" value={str(data, "dateOfJoining")} onChange={(e) => set(data, onChange, "dateOfJoining", e.target.value)} className={inputClass()} />
-      </Labeled>
-      <Labeled label="Designation">
-        <input value={str(data, "designation")} onChange={(e) => set(data, onChange, "designation", e.target.value)} className={inputClass()} />
-      </Labeled>
-    </div>
-  );
-}
-
+// kumail's own feedback on the live wizard (2026-09-27) — Employment and
+// Organization Assignment read as two separate steps for information that,
+// to him, belongs together (where someone sits AND their employment
+// terms). Per that request, Employment is no longer its own tile in
+// HiringWizardPage's card grid — its three fields render here, inside
+// Organization Assignment's own form, and HiringWizardPage saves both
+// cards' data together whenever this one is saved (see that file's own
+// `EMPLOYMENT_MERGE_TARGET`/`saveMergedOrganizationAssignment` for the
+// mechanics: the "employment" card key still exists and still gets its own
+// row in `hire_process_card_data` — `HiringProcessService.complete()`
+// still reads it as its own card — this is a presentation-layer merge
+// only, not a backend/data-model change).
 function OrganizationAssignmentForm({ data, onChange, options }: CardFormProps) {
   return (
     <div className="grid grid-cols-2 gap-3">
@@ -188,6 +210,22 @@ function OrganizationAssignmentForm({ data, onChange, options }: CardFormProps) 
             </option>
           ))}
         </select>
+      </Labeled>
+      <Labeled label="Employment type">
+        <select value={str(data, "employmentType")} onChange={(e) => set(data, onChange, "employmentType", e.target.value)} className={`${inputClass()} capitalize`}>
+          <option value="">Select…</option>
+          {EMPLOYMENT_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
+      </Labeled>
+      <Labeled label="Date of joining">
+        <input type="date" value={str(data, "dateOfJoining")} onChange={(e) => set(data, onChange, "dateOfJoining", e.target.value)} className={inputClass()} />
+      </Labeled>
+      <Labeled label="Designation">
+        <input value={str(data, "designation")} onChange={(e) => set(data, onChange, "designation", e.target.value)} className={inputClass()} />
       </Labeled>
       <p className="col-span-2 text-xs text-label-tertiary">
         Position and cost center are assigned separately after hiring, from the Position Workbench and this employee's own
@@ -525,7 +563,6 @@ const NOT_YET_WIRED_NOTE =
 
 export const CARD_FORM_REGISTRY: Record<string, (props: CardFormProps) => JSX.Element> = {
   personal_identity: PersonalIdentityForm,
-  employment: EmploymentForm,
   organization_assignment: OrganizationAssignmentForm,
   reporting_relationships: ReportingRelationshipsForm,
   contact: ContactForm,
