@@ -1,6 +1,7 @@
 import { FormEvent, ReactNode, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import type {
+  CostCenterView,
   EmployeeView,
   EmploymentStatus,
   EmploymentType,
@@ -11,6 +12,32 @@ import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { EmployeeFields } from "./EmployeeFields";
 import { OnboardingOffboardingSection } from "../onboarding-offboarding/OnboardingOffboardingSection";
+import { LifecycleActionsPanel } from "./LifecycleActionsPanel";
+import { SubEntityPanel } from "./subentities/SubEntityPanel";
+import {
+  addressesConfig,
+  assetsConfig,
+  contactsConfig,
+  costAllocationsConfig,
+  educationConfig,
+  familyMembersConfig,
+  importantDatesConfig,
+  paymentAccountsConfig,
+  qualificationsConfig,
+} from "./subentities/subEntityConfigs";
+
+/**
+ * Core Employee Enterprise Phases 6-10's frontend catch-up (2026-09-27) —
+ * this page used to be one long scrolling column (Overview fields, Login,
+ * Onboarding/Offboarding, Job History). Adding 8 new sub-entity families
+ * plus 9 lifecycle actions as more stacked sections would have made an
+ * already-long page unusably long, so this page now follows the tabbed
+ * pattern `OrgUnitDetailPage.tsx` already established elsewhere in this
+ * app (plain local `tab` state, `{tab === "X" && (...)}` blocks — no
+ * router or tab library) rather than inventing a second convention.
+ */
+const TABS = ["Overview", "Contact & Address", "Family & Education", "Compensation & Assets", "Lifecycle Actions"] as const;
+type Tab = (typeof TABS)[number];
 
 const EMPLOYMENT_TYPES: EmploymentType[] = ["permanent", "contract", "probation", "intern"];
 const EMPLOYMENT_STATUSES: EmploymentStatus[] = ["active", "on_leave", "terminated"];
@@ -26,8 +53,10 @@ export function EmployeeDetailPage() {
   const { identity } = useAuth();
   const [employee, setEmployee] = useState<EmployeeView | null>(null);
   const [jobHistory, setJobHistory] = useState<JobHistoryEntryView[] | null>(null);
+  const [costCenters, setCostCenters] = useState<CostCenterView[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [tab, setTab] = useState<Tab>("Overview");
 
   const canManage = identity?.roleKeys.includes("hr_admin") ?? false;
 
@@ -44,10 +73,15 @@ export function EmployeeDetailPage() {
   useEffect(() => {
     load();
     setEditing(false);
+    setTab("Overview");
+    api.listCostCenters().then(setCostCenters).catch(() => setCostCenters([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   if (error) return <div className="text-danger text-sm">{error}</div>;
   if (!employee) return <div className="text-label-tertiary text-sm">Loading…</div>;
+
+  const costCenterOptions = costCenters.map((c) => ({ value: c.id, label: c.name }));
 
   return (
     <div className="max-w-2xl">
@@ -55,73 +89,126 @@ export function EmployeeDetailPage() {
         <h1 className="text-2xl font-bold tracking-tight">
           {employee.firstName} {employee.lastName}
         </h1>
-        {canManage && !editing && (
+        {canManage && tab === "Overview" && !editing && (
           <button onClick={() => setEditing(true)} className="text-sm font-semibold text-accent hover:underline">
             Edit
           </button>
         )}
       </div>
-      <p className="text-label-tertiary text-sm font-mono mb-6">{employee.employeeNumber}</p>
+      <p className="text-label-tertiary text-sm font-mono mb-4">{employee.employeeNumber}</p>
 
-      {editing ? (
-        <EditForm
-          employee={employee}
-          onSaved={(updated) => {
-            setEmployee(updated);
-            setEditing(false);
-          }}
-          onCancel={() => setEditing(false)}
-        />
-      ) : (
-        <section className="bg-card rounded-card p-5 shadow-sm mb-6">
-          <EmployeeFields employee={employee} />
-        </section>
-      )}
+      <div className="flex gap-1 border-b border-black/10 mb-4 overflow-x-auto">
+        {TABS.map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap ${
+              tab === t ? "border-accent text-accent" : "border-transparent text-label-tertiary hover:text-label-secondary"
+            }`}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
 
-      {canManage && (
-        <LoginSection
-          key={employee.id}
-          employee={employee}
-          onChanged={(updated) => setEmployee(updated)}
-        />
-      )}
+      {tab === "Overview" && (
+        <>
+          {editing ? (
+            <EditForm
+              employee={employee}
+              onSaved={(updated) => {
+                setEmployee(updated);
+                setEditing(false);
+              }}
+              onCancel={() => setEditing(false)}
+            />
+          ) : (
+            <section className="bg-card rounded-card p-5 shadow-sm mb-6">
+              <EmployeeFields employee={employee} />
+            </section>
+          )}
 
-      <OnboardingOffboardingSection
-        key={`checklists-${employee.id}`}
-        employeeId={employee.id}
-        employmentStatus={employee.employmentStatus}
-        canManage={canManage}
-        onEmployeeTerminated={load}
-      />
+          {canManage && (
+            <LoginSection
+              key={employee.id}
+              employee={employee}
+              onChanged={(updated) => setEmployee(updated)}
+            />
+          )}
 
-      <section className="bg-card rounded-card p-5 shadow-sm">
-        <h2 className="font-semibold text-sm uppercase tracking-wide text-label-tertiary mb-3">
-          Job history
-        </h2>
-        {jobHistory === null && <div className="text-sm text-label-tertiary">Loading…</div>}
-        {jobHistory && jobHistory.length === 0 && (
-          <div className="text-sm text-label-tertiary">No job history recorded.</div>
-        )}
-        {jobHistory && jobHistory.length > 0 && (
-          <div className="divide-y divide-black/5">
-            {jobHistory.map((entry) => (
-              <div key={entry.id} className="py-2.5 flex items-start justify-between gap-4 text-sm">
-                <div>
-                  <span className="font-medium capitalize">{entry.eventType.replace("_", " ")}</span>
-                  {(entry.department || entry.designation) && (
-                    <span className="text-label-tertiary">
-                      {" — "}
-                      {[entry.designation, entry.department].filter(Boolean).join(", ")}
-                    </span>
-                  )}
-                  {entry.notes && <div className="text-xs text-label-tertiary mt-0.5">{entry.notes}</div>}
-                </div>
-                <div className="text-xs text-label-tertiary whitespace-nowrap">{entry.effectiveDate}</div>
+          <OnboardingOffboardingSection
+            key={`checklists-${employee.id}`}
+            employeeId={employee.id}
+            employmentStatus={employee.employmentStatus}
+            canManage={canManage}
+            onEmployeeTerminated={load}
+          />
+
+          <section className="bg-card rounded-card p-5 shadow-sm">
+            <h2 className="font-semibold text-sm uppercase tracking-wide text-label-tertiary mb-3">
+              Job history
+            </h2>
+            {jobHistory === null && <div className="text-sm text-label-tertiary">Loading…</div>}
+            {jobHistory && jobHistory.length === 0 && (
+              <div className="text-sm text-label-tertiary">No job history recorded.</div>
+            )}
+            {jobHistory && jobHistory.length > 0 && (
+              <div className="divide-y divide-black/5">
+                {jobHistory.map((entry) => (
+                  <div key={entry.id} className="py-2.5 flex items-start justify-between gap-4 text-sm">
+                    <div>
+                      <span className="font-medium capitalize">{entry.eventType.replace("_", " ")}</span>
+                      {(entry.department || entry.designation) && (
+                        <span className="text-label-tertiary">
+                          {" — "}
+                          {[entry.designation, entry.department].filter(Boolean).join(", ")}
+                        </span>
+                      )}
+                      {entry.notes && <div className="text-xs text-label-tertiary mt-0.5">{entry.notes}</div>}
+                    </div>
+                    <div className="text-xs text-label-tertiary whitespace-nowrap">{entry.effectiveDate}</div>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        )}
-      </section>
+            )}
+          </section>
+        </>
+      )}
+
+      {/* Core Employee Enterprise Phase 6 — Contact and Address cards' own CRUD surface, outside the hiring flow. */}
+      {tab === "Contact & Address" && (
+        <>
+          <SubEntityPanel employeeId={employee.id} canManage={canManage} config={contactsConfig} />
+          <SubEntityPanel employeeId={employee.id} canManage={canManage} config={addressesConfig} />
+        </>
+      )}
+
+      {/* Core Employee Enterprise Phase 9 — Family, Education and Qualifications cards. */}
+      {tab === "Family & Education" && (
+        <>
+          <SubEntityPanel employeeId={employee.id} canManage={canManage} config={familyMembersConfig} />
+          <SubEntityPanel employeeId={employee.id} canManage={canManage} config={educationConfig} />
+          <SubEntityPanel employeeId={employee.id} canManage={canManage} config={qualificationsConfig} />
+        </>
+      )}
+
+      {/* Core Employee Enterprise Phases 7-9 — Payment/Bank, Cost Allocation, Assets and Important Dates cards. */}
+      {tab === "Compensation & Assets" && (
+        <>
+          <SubEntityPanel employeeId={employee.id} canManage={canManage} config={paymentAccountsConfig} />
+          <SubEntityPanel employeeId={employee.id} canManage={canManage} config={costAllocationsConfig(costCenterOptions)} />
+          <SubEntityPanel employeeId={employee.id} canManage={canManage} config={assetsConfig} />
+          <SubEntityPanel employeeId={employee.id} canManage={canManage} config={importantDatesConfig} />
+        </>
+      )}
+
+      {/* Core Employee Enterprise Phase 10 — the 9 explicit lifecycle transactions. */}
+      {tab === "Lifecycle Actions" &&
+        (canManage ? (
+          <LifecycleActionsPanel employee={employee} onChanged={setEmployee} />
+        ) : (
+          <div className="text-sm text-label-tertiary">Requires HR Admin.</div>
+        ))}
     </div>
   );
 }

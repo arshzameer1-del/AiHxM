@@ -76,6 +76,35 @@ const MyProfilePage = lazy(() =>
     default: m.MyProfilePage,
   })),
 );
+// Core Employee Enterprise Phases 2/3/12's frontend catch-up (2026-09-27) —
+// the Hiring Wizard (drafts entry point + the wizard itself), Bulk Hiring
+// import, Workforce Analytics, and the wizard's own Configuration Center
+// card designer. See claude/core-employee-enterprise-gap-analysis-and-roadmap.md.
+const HiringDraftsPage = lazy(() =>
+  import("./portal/employees/hiring/HiringDraftsPage").then((m) => ({
+    default: m.HiringDraftsPage,
+  })),
+);
+const HiringWizardPage = lazy(() =>
+  import("./portal/employees/hiring/HiringWizardPage").then((m) => ({
+    default: m.HiringWizardPage,
+  })),
+);
+const HiringCardDesignerPage = lazy(() =>
+  import("./portal/employees/hiring/HiringCardDesignerPage").then((m) => ({
+    default: m.HiringCardDesignerPage,
+  })),
+);
+const EmployeeBulkImportPage = lazy(() =>
+  import("./portal/employees/EmployeeBulkImportPage").then((m) => ({
+    default: m.EmployeeBulkImportPage,
+  })),
+);
+const WorkforceAnalyticsPage = lazy(() =>
+  import("./portal/employees/WorkforceAnalyticsPage").then((m) => ({
+    default: m.WorkforceAnalyticsPage,
+  })),
+);
 const AdminCenterPage = lazy(() =>
   import("./portal/admin/AdminCenterPage").then((m) => ({
     default: m.AdminCenterPage,
@@ -299,6 +328,15 @@ export default function App() {
                     path="employees/:id"
                     element={<EmployeeDetailPage />}
                   />
+                  {/* Core Employee Enterprise Phases 2/3/12's frontend
+                    catch-up — Hiring Wizard entry point + wizard itself,
+                    and Bulk Hiring. Same courtesy-nav gate (hr_admin) as
+                    every other route here; the real gates are enforced
+                    server-side by HiringController/EmployeesController. */}
+                  <Route path="employees/hire" element={<HiringDraftsPage />} />
+                  <Route path="employees/hire/:id" element={<HiringWizardPage />} />
+                  <Route path="employees/bulk-import" element={<EmployeeBulkImportPage />} />
+                  <Route path="employees/analytics" element={<WorkforceAnalyticsPage />} />
                   {/* Organization Management Phase 1 — the Hierarchy
                     Explorer. org_unit.view.all/org_unit.manage.all (both
                     seeded in 0066) are the real gates, enforced server-
@@ -359,6 +397,15 @@ export default function App() {
                     whatever this login can actually manage/view, the same
                     courtesy-nav pattern every other route here follows. */}
                   <Route path="configuration-center" element={<ConfigurationCenterPage />} />
+                  {/* Core Employee Enterprise Phase 3's own scoped admin
+                    surface — enable/disable/reorder/required for the
+                    Hiring Wizard's cards. hr_admin-only server-side. Path
+                    MUST match 0083_configuration_center_hiring.sql's own
+                    seeded `admin_route` ('/app/configuration-center/hiring')
+                    — that's the link ConfigurationCenterPage's own
+                    DomainCard renders, driven entirely from that DB row,
+                    not from anything in this file. */}
+                  <Route path="configuration-center/hiring" element={<HiringCardDesignerPage />} />
                   {/* Task #50 — Leave & Attendance. Server-side RBAC/workflow
                     routing decides who can submit/decide/cancel what;
                     LeavePage renders one screen for every role, same

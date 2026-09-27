@@ -206,6 +206,61 @@ import type {
   CreateWorkScheduleAssignmentRuleRequest,
 } from "@aihxm/shared-types";
 
+// Core Employee Enterprise Phases 2-12 — this initiative's backend work
+// (see claude/core-employee-enterprise-gap-analysis-and-roadmap.md) shipped
+// without any frontend to use it; this second import block plus the
+// methods appended near `linkLegacyPosition` below is that catch-up pass.
+// Kept as its own `import type` statement (rather than folded into the
+// alphabetical block above) so this whole addition stays a single,
+// reviewable diff rather than a scatter of insertions through a
+// 200-line list.
+import type {
+  EmployeeContactView,
+  CreateEmployeeContactRequest,
+  UpdateEmployeeContactRequest,
+  EmployeeAddressView,
+  CreateEmployeeAddressRequest,
+  UpdateEmployeeAddressRequest,
+  EmployeeImportantDateView,
+  CreateEmployeeImportantDateRequest,
+  UpdateEmployeeImportantDateRequest,
+  EmployeePaymentAccountView,
+  CreateEmployeePaymentAccountRequest,
+  UpdateEmployeePaymentAccountRequest,
+  EmployeeCostAllocationView,
+  CreateEmployeeCostAllocationRequest,
+  UpdateEmployeeCostAllocationRequest,
+  EmployeeFamilyMemberView,
+  CreateEmployeeFamilyMemberRequest,
+  UpdateEmployeeFamilyMemberRequest,
+  EmployeeEducationView,
+  CreateEmployeeEducationRequest,
+  UpdateEmployeeEducationRequest,
+  EmployeeQualificationView,
+  CreateEmployeeQualificationRequest,
+  UpdateEmployeeQualificationRequest,
+  EmployeeAssetView,
+  CreateEmployeeAssetRequest,
+  UpdateEmployeeAssetRequest,
+  TransferEmployeeRequest,
+  PromoteEmployeeRequest,
+  DemoteEmployeeRequest,
+  SecondEmployeeRequest,
+  AssignActingRoleRequest,
+  ChangeEmployeeManagerRequest,
+  ChangeEmployeeLocationRequest,
+  TerminateEmployeeRequest,
+  ReactivateEmployeeRequest,
+  LifecycleTransactionResult,
+  HireProcessView,
+  HireProcessCardDataView,
+  SaveHireProcessCardRequest,
+  CardDefinitionView,
+  UpdateCardDefinitionRequest,
+  EmployeeAnalyticsSummary,
+  CsvImportResult,
+} from "@aihxm/shared-types";
+
 const TOKEN_KEY = "aihxm.platformAdminToken";
 
 export function getToken(): string | null {
@@ -1376,6 +1431,194 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ positionId }),
     }),
+
+  // --- Core Employee Enterprise Phase 6: Contacts & Addresses ---------------
+  // All 8 sub-entity families below (Contacts through Assets) share the
+  // exact same shape their controllers do: create/list/update, plus a
+  // one-way "end" (or, for Assets, "return") close action instead of a
+  // hard delete — see each controller's own header comment for why (a
+  // reversible status flip on an auditable HR record, not a deletion).
+  listEmployeeContacts: (employeeId: string) =>
+    request<EmployeeContactView[]>(`/employees/contacts?employeeId=${employeeId}`),
+
+  createEmployeeContact: (input: CreateEmployeeContactRequest) =>
+    request<EmployeeContactView>("/employees/contacts", { method: "POST", body: JSON.stringify(input) }),
+
+  updateEmployeeContact: (id: string, patch: UpdateEmployeeContactRequest) =>
+    request<EmployeeContactView>(`/employees/contacts/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  endEmployeeContact: (id: string) => request<EmployeeContactView>(`/employees/contacts/${id}/end`, { method: "POST" }),
+
+  listEmployeeAddresses: (employeeId: string) =>
+    request<EmployeeAddressView[]>(`/employees/addresses?employeeId=${employeeId}`),
+
+  createEmployeeAddress: (input: CreateEmployeeAddressRequest) =>
+    request<EmployeeAddressView>("/employees/addresses", { method: "POST", body: JSON.stringify(input) }),
+
+  updateEmployeeAddress: (id: string, patch: UpdateEmployeeAddressRequest) =>
+    request<EmployeeAddressView>(`/employees/addresses/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  endEmployeeAddress: (id: string) => request<EmployeeAddressView>(`/employees/addresses/${id}/end`, { method: "POST" }),
+
+  // --- Core Employee Enterprise Phase 7: Important Dates ---------------------
+  listEmployeeImportantDates: (employeeId: string) =>
+    request<EmployeeImportantDateView[]>(`/employees/important-dates?employeeId=${employeeId}`),
+
+  createEmployeeImportantDate: (input: CreateEmployeeImportantDateRequest) =>
+    request<EmployeeImportantDateView>("/employees/important-dates", { method: "POST", body: JSON.stringify(input) }),
+
+  updateEmployeeImportantDate: (id: string, patch: UpdateEmployeeImportantDateRequest) =>
+    request<EmployeeImportantDateView>(`/employees/important-dates/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  endEmployeeImportantDate: (id: string) =>
+    request<EmployeeImportantDateView>(`/employees/important-dates/${id}/end`, { method: "POST" }),
+
+  // --- Core Employee Enterprise Phase 8: Payment/Bank & Cost Allocation ------
+  listEmployeePaymentAccounts: (employeeId: string) =>
+    request<EmployeePaymentAccountView[]>(`/employees/payment-accounts?employeeId=${employeeId}`),
+
+  createEmployeePaymentAccount: (input: CreateEmployeePaymentAccountRequest) =>
+    request<EmployeePaymentAccountView>("/employees/payment-accounts", { method: "POST", body: JSON.stringify(input) }),
+
+  updateEmployeePaymentAccount: (id: string, patch: UpdateEmployeePaymentAccountRequest) =>
+    request<EmployeePaymentAccountView>(`/employees/payment-accounts/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  endEmployeePaymentAccount: (id: string) =>
+    request<EmployeePaymentAccountView>(`/employees/payment-accounts/${id}/end`, { method: "POST" }),
+
+  listEmployeeCostAllocations: (employeeId: string) =>
+    request<EmployeeCostAllocationView[]>(`/employees/cost-allocations?employeeId=${employeeId}`),
+
+  createEmployeeCostAllocation: (input: CreateEmployeeCostAllocationRequest) =>
+    request<EmployeeCostAllocationView>("/employees/cost-allocations", { method: "POST", body: JSON.stringify(input) }),
+
+  updateEmployeeCostAllocation: (id: string, patch: UpdateEmployeeCostAllocationRequest) =>
+    request<EmployeeCostAllocationView>(`/employees/cost-allocations/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  endEmployeeCostAllocation: (id: string) =>
+    request<EmployeeCostAllocationView>(`/employees/cost-allocations/${id}/end`, { method: "POST" }),
+
+  // --- Core Employee Enterprise Phase 9: Family, Education, Qualifications, Assets ---
+  listEmployeeFamilyMembers: (employeeId: string) =>
+    request<EmployeeFamilyMemberView[]>(`/employees/family-members?employeeId=${employeeId}`),
+
+  createEmployeeFamilyMember: (input: CreateEmployeeFamilyMemberRequest) =>
+    request<EmployeeFamilyMemberView>("/employees/family-members", { method: "POST", body: JSON.stringify(input) }),
+
+  updateEmployeeFamilyMember: (id: string, patch: UpdateEmployeeFamilyMemberRequest) =>
+    request<EmployeeFamilyMemberView>(`/employees/family-members/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  endEmployeeFamilyMember: (id: string) =>
+    request<EmployeeFamilyMemberView>(`/employees/family-members/${id}/end`, { method: "POST" }),
+
+  listEmployeeEducation: (employeeId: string) =>
+    request<EmployeeEducationView[]>(`/employees/education?employeeId=${employeeId}`),
+
+  createEmployeeEducation: (input: CreateEmployeeEducationRequest) =>
+    request<EmployeeEducationView>("/employees/education", { method: "POST", body: JSON.stringify(input) }),
+
+  updateEmployeeEducation: (id: string, patch: UpdateEmployeeEducationRequest) =>
+    request<EmployeeEducationView>(`/employees/education/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  endEmployeeEducation: (id: string) => request<EmployeeEducationView>(`/employees/education/${id}/end`, { method: "POST" }),
+
+  listEmployeeQualifications: (employeeId: string) =>
+    request<EmployeeQualificationView[]>(`/employees/qualifications?employeeId=${employeeId}`),
+
+  createEmployeeQualification: (input: CreateEmployeeQualificationRequest) =>
+    request<EmployeeQualificationView>("/employees/qualifications", { method: "POST", body: JSON.stringify(input) }),
+
+  updateEmployeeQualification: (id: string, patch: UpdateEmployeeQualificationRequest) =>
+    request<EmployeeQualificationView>(`/employees/qualifications/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  endEmployeeQualification: (id: string) =>
+    request<EmployeeQualificationView>(`/employees/qualifications/${id}/end`, { method: "POST" }),
+
+  listEmployeeAssets: (employeeId: string) =>
+    request<EmployeeAssetView[]>(`/employees/assets?employeeId=${employeeId}`),
+
+  createEmployeeAsset: (input: CreateEmployeeAssetRequest) =>
+    request<EmployeeAssetView>("/employees/assets", { method: "POST", body: JSON.stringify(input) }),
+
+  updateEmployeeAsset: (id: string, patch: UpdateEmployeeAssetRequest) =>
+    request<EmployeeAssetView>(`/employees/assets/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  returnEmployeeAsset: (id: string, returnedDate?: string) =>
+    request<EmployeeAssetView>(`/employees/assets/${id}/return`, {
+      method: "POST",
+      body: JSON.stringify(returnedDate ? { returnedDate } : {}),
+    }),
+
+  // --- Core Employee Enterprise Phase 10: Explicit Lifecycle Transactions ---
+  // One route per named transaction (EmployeeLifecycleController) — each
+  // returns the updated employee AND the job-history row it wrote, so the
+  // UI can show both without a second fetch.
+  transferEmployee: (id: string, input: TransferEmployeeRequest) =>
+    request<LifecycleTransactionResult>(`/employees/${id}/transfer`, { method: "POST", body: JSON.stringify(input) }),
+
+  promoteEmployee: (id: string, input: PromoteEmployeeRequest) =>
+    request<LifecycleTransactionResult>(`/employees/${id}/promote`, { method: "POST", body: JSON.stringify(input) }),
+
+  demoteEmployee: (id: string, input: DemoteEmployeeRequest) =>
+    request<LifecycleTransactionResult>(`/employees/${id}/demote`, { method: "POST", body: JSON.stringify(input) }),
+
+  secondEmployee: (id: string, input: SecondEmployeeRequest) =>
+    request<LifecycleTransactionResult>(`/employees/${id}/second`, { method: "POST", body: JSON.stringify(input) }),
+
+  assignEmployeeActingRole: (id: string, input: AssignActingRoleRequest) =>
+    request<LifecycleTransactionResult>(`/employees/${id}/act`, { method: "POST", body: JSON.stringify(input) }),
+
+  changeEmployeeManager: (id: string, input: ChangeEmployeeManagerRequest) =>
+    request<LifecycleTransactionResult>(`/employees/${id}/change-manager`, { method: "POST", body: JSON.stringify(input) }),
+
+  changeEmployeeLocation: (id: string, input: ChangeEmployeeLocationRequest) =>
+    request<LifecycleTransactionResult>(`/employees/${id}/change-location`, { method: "POST", body: JSON.stringify(input) }),
+
+  terminateEmployeeLifecycle: (id: string, input: TerminateEmployeeRequest) =>
+    request<LifecycleTransactionResult>(`/employees/${id}/terminate`, { method: "POST", body: JSON.stringify(input) }),
+
+  reactivateEmployee: (id: string, input: ReactivateEmployeeRequest) =>
+    request<LifecycleTransactionResult>(`/employees/${id}/reactivate`, { method: "POST", body: JSON.stringify(input) }),
+
+  // --- Core Employee Enterprise Phase 2/3: Hiring Process Engine -------------
+  startHireProcess: () => request<HireProcessView>("/employees/hiring", { method: "POST" }),
+
+  listHiringDrafts: () => request<HireProcessView[]>("/employees/hiring/drafts"),
+
+  getHireProcess: (id: string) => request<HireProcessView>(`/employees/hiring/${id}`),
+
+  getHireProcessCardData: (id: string, cardKey: string) =>
+    request<HireProcessCardDataView | null>(`/employees/hiring/${id}/cards/${cardKey}`),
+
+  saveHireProcessCard: (id: string, cardKey: string, input: SaveHireProcessCardRequest) =>
+    request<{ cardKey: string; status: "pending" | "saved" | "complete" }>(`/employees/hiring/${id}/cards/${cardKey}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }),
+
+  saveHiringDraft: (id: string) => request<HireProcessView>(`/employees/hiring/${id}/draft`, { method: "POST" }),
+
+  advanceHireProcess: (id: string, expectedRevision: number) =>
+    request<HireProcessView>(`/employees/hiring/${id}/next`, { method: "POST", body: JSON.stringify({ expectedRevision }) }),
+
+  cancelHireProcess: (id: string, expectedRevision: number) =>
+    request<HireProcessView>(`/employees/hiring/${id}/cancel`, { method: "POST", body: JSON.stringify({ expectedRevision }) }),
+
+  completeHireProcess: (id: string) => request<HireProcessView>(`/employees/hiring/${id}/complete`, { method: "POST" }),
+
+  // Configuration Center — Phase 3's own scoped admin surface (enable/
+  // disable/reorder/required only; deeper per-field rules are deliberately
+  // out of scope per kumail's own scoping decision #2).
+  listHiringCardConfig: () => request<CardDefinitionView[]>("/configuration/core-employee/hiring"),
+
+  updateHiringCardConfig: (cards: ({ cardKey: string } & UpdateCardDefinitionRequest)[]) =>
+    request<CardDefinitionView[]>("/configuration/core-employee/hiring", { method: "PUT", body: JSON.stringify({ cards }) }),
+
+  // --- Core Employee Enterprise Phase 12: Bulk Hiring & Workforce Analytics ---
+  bulkImportEmployees: (csv: string) =>
+    request<CsvImportResult<EmployeeView>>("/employees/bulk-import", { method: "POST", body: JSON.stringify({ csv }) }),
+
+  getWorkforceAnalyticsSummary: () => request<EmployeeAnalyticsSummary>("/employees/analytics/summary"),
 
   // --- Employee Groups & Leave Policies (Task #49) --------------------------
   // Admin Center's own screen for the Phase 8 resolver: the API already

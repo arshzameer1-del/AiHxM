@@ -38,12 +38,25 @@ export function EmployeeListPage() {
           </p>
         </div>
         {canCreate && (
-          <Link
-            to="/app/employees/new"
-            className="bg-accent text-white rounded-lg px-4 py-2 text-sm font-semibold"
-          >
-            New Employee
-          </Link>
+          <div className="flex items-center gap-3">
+            {/* Core Employee Enterprise Phase 2's frontend catch-up
+              (2026-09-27) — the guided, multi-card Hiring Wizard sits
+              alongside this page's original one-shot quick-create form
+              rather than replacing it; either flow lands on the same
+              employee record. */}
+            <Link
+              to="/app/employees/hire"
+              className="bg-black/5 text-label-primary rounded-lg px-4 py-2 text-sm font-semibold"
+            >
+              Guided Hire
+            </Link>
+            <Link
+              to="/app/employees/new"
+              className="bg-accent text-white rounded-lg px-4 py-2 text-sm font-semibold"
+            >
+              New Employee
+            </Link>
+          </div>
         )}
       </div>
 

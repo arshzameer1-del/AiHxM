@@ -60,7 +60,35 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): 
   const items: NavItem[] = [{ to: "/app", label: "Home", end: true, icon: Home }];
 
   if (hasRole("hr_admin", "line_manager") && hasModule("employee")) {
-    items.push({ to: "/app/employees", label: "Employees", icon: Users });
+    // Core Employee Enterprise Phases 2/12's frontend catch-up (2026-09-27)
+    // — Hiring Wizard, Bulk Hiring and Workforce Analytics all had no way
+    // to reach them from the sidebar at all. Grouped under "Employees"
+    // itself (the same "top-level link is also the group's `to`" pattern
+    // the Organization group already established) rather than flattened
+    // as three more top-level items — same reasoning Organization Phase 9
+    // gave for its own consolidation. Hire/Bulk Import/Analytics are all
+    // hr_admin-only server-side (employee.manage.all), so — like Legacy
+    // Data Reconciliation's own precedent in the Organization group — they
+    // don't show for a line_manager who can otherwise see this group.
+    items.push({
+      to: "/app/employees",
+      label: "Employees",
+      icon: Users,
+      // An empty array is still truthy in JS — the render loop below treats
+      // ANY `children` (checked with a plain `if (item.children)`) as "show
+      // the NavGroup, disclosure arrow and all," so a line_manager without
+      // hr_admin gets `undefined` here, not `[]`, to fall through to a
+      // plain flat NavLink instead of an always-empty expandable group.
+      ...(hasRole("hr_admin")
+        ? {
+            children: [
+              { to: "/app/employees/hire", label: "Hire" },
+              { to: "/app/employees/bulk-import", label: "Bulk Import" },
+              { to: "/app/employees/analytics", label: "Workforce Analytics" },
+            ],
+          }
+        : {}),
+    });
   } else if (roleKeys.length > 0 && hasModule("employee")) {
     items.push({ to: "/app/profile", label: "My Profile", icon: User });
   }
