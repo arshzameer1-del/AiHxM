@@ -2083,37 +2083,44 @@ export const api = {
       body: JSON.stringify(input),
     }),
 
-  // --- Phase 12 (Compensation & Payroll, Decision #14) ---------------------
-  // `payroll.manage.all` (hr_admin) gates compensation/settings/tax-slabs/
-  // run-lifecycle writes; `payroll_review.view.self` (employee_self_service)
-  // only ever sees their own payslip, and only once its run is finalized —
-  // enforced entirely server-side (PayrollService.listPayslips/getPayslip),
-  // same "server already scopes it" posture as every other module here.
-  // Payroll Enterprise Gap Analysis & Roadmap, Phase P1 — compensation is
-  // now a real component model (Basic Salary + named allowances), not one
-  // flat monthlySalary figure. `setCompensation` stays for back-compat
-  // (the Hiring Wizard's Compensation card still calls it — sets ONLY
-  // Basic Salary); everything else uses the component-based calls below.
-  listCompensationComponents: () => request<CompensationComponentView[]>("/payroll/compensation-components"),
+  // --- Core Employee master data (SAP IT0008/IT0014-equivalent) ------------
+  // Moved here from Payroll (2026-09-27, kumail's own architecture
+  // correction): recurring compensation is a fact ABOUT an employee,
+  // maintained the same way every other Core Employee sub-entity is, not a
+  // Payroll-owned record — Payroll only ever reads it to calculate a run.
+  // `employee.manage.all` (hr_admin) gates every write below, the same
+  // permission every other Core Employee sub-entity CRUD surface uses.
+  // Payroll Enterprise Gap Analysis & Roadmap, Phase P1 — compensation is a
+  // real component model (Basic Salary + named allowances), not one flat
+  // monthlySalary figure. `setCompensation` stays for back-compat (the
+  // Hiring Wizard's Compensation card still calls it — sets ONLY Basic
+  // Salary); everything else uses the component-based calls below.
+  listCompensationComponents: () => request<CompensationComponentView[]>("/employees/compensation/components"),
 
   createCompensationComponent: (input: CreateCompensationComponentRequest) =>
-    request<CompensationComponentView>("/payroll/compensation-components", { method: "POST", body: JSON.stringify(input) }),
+    request<CompensationComponentView>("/employees/compensation/components", { method: "POST", body: JSON.stringify(input) }),
 
   updateCompensationComponent: (id: string, patch: UpdateCompensationComponentRequest) =>
-    request<CompensationComponentView>(`/payroll/compensation-components/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+    request<CompensationComponentView>(`/employees/compensation/components/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
 
   setCompensation: (input: SetCompensationRequest) =>
-    request<CompensationView>("/payroll/compensation", { method: "POST", body: JSON.stringify(input) }),
+    request<CompensationView>("/employees/compensation", { method: "POST", body: JSON.stringify(input) }),
 
   setCompensationComponents: (input: SetEmployeeCompensationComponentsRequest) =>
-    request<EmployeeCompensationView>("/payroll/compensation/components", { method: "POST", body: JSON.stringify(input) }),
+    request<EmployeeCompensationView>("/employees/compensation/set-components", { method: "POST", body: JSON.stringify(input) }),
 
   getCurrentCompensation: (employeeId: string) =>
-    request<EmployeeCompensationView>(`/payroll/compensation/${employeeId}`),
+    request<EmployeeCompensationView>(`/employees/compensation/${employeeId}`),
 
   getCompensationHistory: (employeeId: string) =>
-    request<CompensationView[]>(`/payroll/compensation/${employeeId}/history`),
+    request<CompensationView[]>(`/employees/compensation/${employeeId}/history`),
 
+  // --- Payroll (Phase 12, Decision #14) -------------------------------------
+  // `payroll.manage.all` (hr_admin) gates settings/tax-slabs/run-lifecycle
+  // writes; `payroll_review.view.self` (employee_self_service) only ever
+  // sees their own payslip, and only once its run is finalized — enforced
+  // entirely server-side (PayrollService.listPayslips/getPayslip), same
+  // "server already scopes it" posture as every other module here.
   getPayrollSettings: () => request<PayrollSettingsView>("/payroll/settings"),
 
   updatePayrollSettings: (patch: UpdatePayrollSettingsRequest) =>

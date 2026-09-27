@@ -27,13 +27,15 @@ import { EmployeeLifecycleController } from "./employee-lifecycle.controller";
 import { EmployeeLifecycleService } from "./employee-lifecycle.service";
 import { EmployeeAnalyticsController } from "./employee-analytics.controller";
 import { EmployeeAnalyticsService } from "./employee-analytics.service";
+import { EmployeeCompensationController } from "./employee-compensation.controller";
+import { EmployeeCompensationService } from "./employee-compensation.service";
 import { RbacModule } from "../rbac/rbac.module";
 import { EntitlementsModule } from "../entitlements/entitlements.module";
 import { AuditModule } from "../audit/audit.module";
 import { FileStorageModule } from "../file-storage/file-storage.module";
 import { WebhooksModule } from "../webhooks/webhooks.module";
 import { ShiftsModule } from "../shifts/shifts.module";
-import { PayrollModule } from "../payroll/payroll.module";
+import { EffectiveDatingModule } from "../effective-dating/effective-dating.module";
 import { ImportExportModule } from "../import-export/import-export.module";
 import { HrAdministrationModule } from "../hr-administration/hr-administration.module";
 import { CustomFieldsModule } from "../custom-fields/custom-fields.module";
@@ -51,11 +53,13 @@ import { CustomFieldsModule } from "../custom-fields/custom-fields.module";
   // the `organization_assignment`/`reporting_relationships` cards map onto
   // EmployeesService's own existing fields instead of a new DI edge back
   // into that module (see hiring-process.service.ts's own comment).
-  // Phase 8 — PayrollModule likewise imports none of EmployeesModule's own
-  // exports (RbacModule/EntitlementsModule/AuditModule/ImportExportModule/
-  // EffectiveDatingModule only), so importing it here for
-  // PayrollService.setCompensationWithinTransaction() is not circular
-  // either.
+  // Phase 8 (superseded 2026-09-27) — this module used to import
+  // PayrollModule solely for PayrollService.setCompensationWithinTransaction().
+  // Compensation is now Core Employee's own master data
+  // (EmployeeCompensationService, right below), so that cross-module
+  // dependency is gone entirely — EffectiveDatingModule is imported
+  // instead, directly, the same shared-infrastructure import PayrollModule
+  // itself already used it for.
   // HR Administration v2 — HrAdministrationModule imports nothing of
   // EmployeesModule's own (see its own doc comment), so importing it here
   // for EmployeesService/EmployeeLifecycleService's `employment_type`/
@@ -72,7 +76,7 @@ import { CustomFieldsModule } from "../custom-fields/custom-fields.module";
     FileStorageModule,
     WebhooksModule,
     ShiftsModule,
-    PayrollModule,
+    EffectiveDatingModule,
     ImportExportModule,
     HrAdministrationModule,
     CustomFieldsModule,
@@ -103,6 +107,7 @@ import { CustomFieldsModule } from "../custom-fields/custom-fields.module";
     EmployeeAssetsController,
     EmployeeLifecycleController,
     EmployeeAnalyticsController,
+    EmployeeCompensationController,
   ],
   // PersonsService is exported so a later phase's own module can read
   // persons without duplicating this provider; HiringProcessService is
@@ -123,6 +128,7 @@ import { CustomFieldsModule } from "../custom-fields/custom-fields.module";
     EmployeeAssetsService,
     EmployeeLifecycleService,
     EmployeeAnalyticsService,
+    EmployeeCompensationService,
   ],
   exports: [
     EmployeesService,
@@ -139,6 +145,7 @@ import { CustomFieldsModule } from "../custom-fields/custom-fields.module";
     EmployeeAssetsService,
     EmployeeLifecycleService,
     EmployeeAnalyticsService,
+    EmployeeCompensationService,
   ],
 })
 export class EmployeesModule {}

@@ -17,7 +17,8 @@ import { EmployeeEducationService } from "../employee-education.service";
 import { EmployeeQualificationsService } from "../employee-qualifications.service";
 import { EmployeeAssetsService } from "../employee-assets.service";
 import { ShiftsService } from "../../shifts/shifts.service";
-import { PayrollService } from "../../payroll/payroll.service";
+import { EmployeeCompensationService } from "../employee-compensation.service";
+import { EffectiveDatingEngine } from "../../effective-dating/effective-dating.engine";
 import { CustomFieldsService } from "../../custom-fields/custom-fields.service";
 import { CARD_CATALOG } from "./card-catalog";
 import { validateOrganizationAssignmentCard } from "./organization-assignment-validator";
@@ -99,14 +100,29 @@ export class HiringProcessService {
     private readonly shifts?: ShiftsService,
     // Phase 8 — Payment/Bank and Cost Allocation are plain, dependency-light
     // sub-entities like Contact/Addresses/Important Dates, so they get the
-    // same default-instantiation treatment. Compensation reuses
-    // PayrollService instead of a new table (see card-catalog.ts's own
-    // comment) — PayrollService needs an ImportExportService and an
-    // EffectiveDatingEngine this constructor doesn't have on hand, so it
-    // is genuinely optional, the same posture `shifts` above takes.
+    // same default-instantiation treatment. Compensation (2026-09-27,
+    // kumail's own architecture correction) is Core Employee's own master
+    // data now too — EmployeeCompensationService only needs an
+    // EffectiveDatingEngine beyond the four every sub-entity already
+    // takes, and that engine is itself default-instantiable (no
+    // constructor dependencies of its own), so — unlike the old
+    // `payroll?: PayrollService` this replaces, which needed a whole
+    // ImportExportService this constructor had no default for and so was
+    // genuinely optional — this one gets the same eager
+    // default-instantiation treatment `paymentAccounts`/`costAllocations`
+    // right above it already get. Kept at this position (not reordered
+    // next to them) purely to avoid reshuffling every existing positional
+    // constructor call in this codebase's spec files that already passes
+    // something at this position.
     private readonly paymentAccounts: EmployeePaymentAccountsService = new EmployeePaymentAccountsService(db, rbac, entitlements, audit),
     private readonly costAllocations: EmployeeCostAllocationsService = new EmployeeCostAllocationsService(db, rbac, entitlements, audit),
-    private readonly payroll?: PayrollService,
+    private readonly compensation: EmployeeCompensationService = new EmployeeCompensationService(
+      db,
+      rbac,
+      entitlements,
+      audit,
+      new EffectiveDatingEngine()
+    ),
     // Phase 9 — Family/Dependents, Education, Qualifications/Skills and
     // Assets are all plain, dependency-light list entities like Phase 6's
     // Contact/Addresses, so they get the same default-instantiation
@@ -505,11 +521,11 @@ export class HiringProcessService {
    * assignShiftWithinTransaction()` (only when a ShiftsService was wired —
    * see the constructor's own comment); `important_dates`'s `dates` array
    * -> `EmployeeImportantDatesService.createWithinTransaction()`, one row
-   * per entry; `compensation`'s `monthlySalary` -> `PayrollService.
-   * setCompensationWithinTransaction()` (only when a PayrollService was
-   * wired, for the same reason as `shifts`); `payment_bank` -> `Employee
-   * PaymentAccountsService.createWithinTransaction()`; `cost_allocation`'s
-   * `allocations` array -> `EmployeeCostAllocationsService.
+   * per entry; `compensation`'s `monthlySalary` -> `EmployeeCompensationService.
+   * setCompensationWithinTransaction()` (Core Employee's own master data,
+   * 2026-09-27 — see the constructor's own comment); `payment_bank` ->
+   * `EmployeePaymentAccountsService.createWithinTransaction()`;
+   * `cost_allocation`'s `allocations` array -> `EmployeeCostAllocationsService.
    * createWithinTransaction()`, one row per split.
    */
   async complete(claims: RequestClaims, hireProcessId: string): Promise<HireProcessView> {
@@ -618,14 +634,15 @@ export class HiringProcessService {
         });
       }
 
-      // Phase 8 — Compensation: only projected when a PayrollService was
-      // actually wired (see this service's own constructor doc comment).
-      const compensation = dataByCard.get("compensation") ?? {};
-      if (this.payroll && compensation.monthlySalary !== undefined) {
-        await this.payroll.setCompensationWithinTransaction(client, claims, {
+      // Phase 8 — Compensation: Core Employee's own master data
+      // (EmployeeCompensationService, default-instantiated — see this
+      // service's own constructor doc comment), not Payroll's.
+      const compensationCard = dataByCard.get("compensation") ?? {};
+      if (compensationCard.monthlySalary !== undefined) {
+        await this.compensation.setCompensationWithinTransaction(client, claims, {
           employeeId: employee.id,
-          monthlySalary: Number(compensation.monthlySalary),
-          effectiveFrom: (compensation.effectiveFrom as string | undefined) ?? (employment.dateOfJoining as string | undefined) ?? new Date().toISOString().slice(0, 10),
+          monthlySalary: Number(compensationCard.monthlySalary),
+          effectiveFrom: (compensationCard.effectiveFrom as string | undefined) ?? (employment.dateOfJoining as string | undefined) ?? new Date().toISOString().slice(0, 10),
         });
       }
 

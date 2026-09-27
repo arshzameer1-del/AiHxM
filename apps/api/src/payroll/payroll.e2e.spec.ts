@@ -17,10 +17,11 @@ const FIXTURE_CLAIMS: RequestClaims = {
  * Real routes only (payroll.controller.ts) — there is no /payroll/calculate,
  * /payroll/slips/:id, /payroll/reports/statutory, /payroll/export/bank-file
  * or /payroll/audit-trail anywhere in this app. Payroll is a run lifecycle:
- * POST /payroll/compensation to set pay, POST /payroll/runs to open a
- * period, POST /payroll/runs/:id/calculate to produce payslips (a run is
- * re-calculable until finalized), POST /payroll/runs/:id/finalize to lock
- * it, and GET /payroll/runs/:id/disbursement for the bank CSV export —
+ * POST /employees/compensation to set pay (Core Employee master data, not
+ * a Payroll route — see EmployeeCompensationController), POST /payroll/runs
+ * to open a period, POST /payroll/runs/:id/calculate to produce payslips (a
+ * run is re-calculable until finalized), POST /payroll/runs/:id/finalize to
+ * lock it, and GET /payroll/runs/:id/disbursement for the bank CSV export —
  * that CSV *is* this app's "bank file"/disbursement report, there is no
  * separate reports/statutory or export/bank-file endpoint. Payslips are
  * read via GET /payslips and GET /payslips/:id (no "/payroll" prefix on
@@ -123,7 +124,7 @@ describe("Payroll HTTP surface (e2e)", () => {
     staffEmployeeId = empRes.body.id;
 
     await request(app.getHttpServer())
-      .post("/payroll/compensation")
+      .post("/employees/compensation")
       .set("Authorization", `Bearer ${hrAdminToken}`)
       .send({ employeeId: staffEmployeeId, monthlySalary: 150000, effectiveFrom: "2020-01-01" });
   });
@@ -133,13 +134,23 @@ describe("Payroll HTTP surface (e2e)", () => {
     await app.close();
   });
 
-  describe("POST /payroll/compensation and GET /payroll/compensation/:employeeId", () => {
+  // Compensation's real HTTP surface is `employees/compensation*`
+  // (EmployeeCompensationController — Core Employee master data, moved
+  // 2026-09-27, kumail's own architecture correction: the SAP IT0008/
+  // IT0014 equivalent, not a Payroll-owned record). Kept in THIS e2e file
+  // rather than employees.e2e.spec.ts purely because it exercises the
+  // fixture employee this file's own beforeAll already sets compensation
+  // for, right before the payroll run lifecycle tests below consume it —
+  // spinning up a second full Nest app just to relocate it isn't worth
+  // the duplicate boot cost. `employee.manage.all` (hr_admin) is what
+  // actually gates it now, not `payroll.manage.all`.
+  describe("POST /employees/compensation and GET /employees/compensation/:employeeId", () => {
     it("was already set for the fixture employee in beforeAll and shows up as their current compensation", async () => {
-      // Phase P1: GET /payroll/compensation/:employeeId now returns the
+      // Phase P1: GET /employees/compensation/:employeeId returns the
       // employee's CURRENT component-based snapshot (not a history array)
       // — history moved to its own GET .../history route below.
       const res = await request(app.getHttpServer())
-        .get(`/payroll/compensation/${staffEmployeeId}`)
+        .get(`/employees/compensation/${staffEmployeeId}`)
         .set("Authorization", `Bearer ${hrAdminToken}`);
 
       expect(res.status).toBe(200);
@@ -151,9 +162,9 @@ describe("Payroll HTTP surface (e2e)", () => {
       expect(basic.amount).toBe(150000);
     });
 
-    it("GET /payroll/compensation/:employeeId/history returns the full versioned history", async () => {
+    it("GET /employees/compensation/:employeeId/history returns the full versioned history", async () => {
       const res = await request(app.getHttpServer())
-        .get(`/payroll/compensation/${staffEmployeeId}/history`)
+        .get(`/employees/compensation/${staffEmployeeId}/history`)
         .set("Authorization", `Bearer ${hrAdminToken}`);
 
       expect(res.status).toBe(200);
@@ -163,7 +174,7 @@ describe("Payroll HTTP surface (e2e)", () => {
     });
 
     it("rejects without authorization", async () => {
-      const res = await request(app.getHttpServer()).post("/payroll/compensation").send({
+      const res = await request(app.getHttpServer()).post("/employees/compensation").send({
         employeeId: staffEmployeeId,
         monthlySalary: 100000,
         effectiveFrom: "2026-01-01",
@@ -172,9 +183,9 @@ describe("Payroll HTTP surface (e2e)", () => {
       expect(res.status).toBe(401);
     });
 
-    it("denies a caller without payroll.manage.all", async () => {
+    it("denies a caller without employee.manage.all", async () => {
       const res = await request(app.getHttpServer())
-        .post("/payroll/compensation")
+        .post("/employees/compensation")
         .set("Authorization", `Bearer ${outsiderToken}`)
         .send({ employeeId: staffEmployeeId, monthlySalary: 100000, effectiveFrom: "2026-01-01" });
 

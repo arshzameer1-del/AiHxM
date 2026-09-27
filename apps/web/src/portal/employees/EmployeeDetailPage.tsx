@@ -14,6 +14,7 @@ import { EmployeeFields } from "./EmployeeFields";
 import { OnboardingOffboardingSection } from "../onboarding-offboarding/OnboardingOffboardingSection";
 import { LifecycleActionsPanel } from "./LifecycleActionsPanel";
 import { EmployeeCustomFieldsPanel } from "./EmployeeCustomFieldsPanel";
+import { EmployeeCompensationPanel } from "./EmployeeCompensationPanel";
 import { SubEntityPanel } from "./subentities/SubEntityPanel";
 import {
   addressesConfig,
@@ -200,9 +201,14 @@ export function EmployeeDetailPage() {
         </>
       )}
 
-      {/* Core Employee Enterprise Phases 7-9 — Payment/Bank, Cost Allocation, Assets and Important Dates cards. */}
+      {/* Core Employee Enterprise Phases 7-9 — Payment/Bank, Cost Allocation, Assets and Important Dates cards.
+          Compensation (2026-09-27, kumail's own architecture correction) is
+          Core Employee's own master data now too — the SAP IT0008/IT0014
+          equivalent, edited here rather than on a standalone Payroll-page
+          widget. See EmployeeCompensationPanel's own doc comment. */}
       {tab === "Compensation & Assets" && (
         <>
+          <EmployeeCompensationPanel employeeId={employee.id} canManage={canManage} />
           <SubEntityPanel employeeId={employee.id} canManage={canManage} config={paymentAccountsConfig} />
           <SubEntityPanel employeeId={employee.id} canManage={canManage} config={costAllocationsConfig(costCenterOptions)} />
           <SubEntityPanel employeeId={employee.id} canManage={canManage} config={assetsConfig} />

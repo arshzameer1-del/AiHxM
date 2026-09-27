@@ -9,8 +9,7 @@ import { LocalFileStorageService } from "../../file-storage/local-file-storage.s
 import { EffectiveDatingEngine } from "../../effective-dating/effective-dating.engine";
 import { RulesEngine } from "../../rules-engine/rules-engine.engine";
 import { ShiftsService } from "../../shifts/shifts.service";
-import { PayrollService } from "../../payroll/payroll.service";
-import { ImportExportService } from "../../import-export/import-export.service";
+import { EmployeeCompensationService } from "../employee-compensation.service";
 import { EmployeesService } from "../employees.service";
 import { EmployeeCostAllocationsService } from "../employee-cost-allocations.service";
 import { CustomFieldsService } from "../../custom-fields/custom-fields.service";
@@ -39,7 +38,7 @@ describe("HiringProcessService", () => {
     const audit = new AuditService();
     const employees = new EmployeesService(db, rbac, entitlements, audit, new LocalFileStorageService());
     const shifts = new ShiftsService(db, rbac, entitlements, audit, new EffectiveDatingEngine(), new RulesEngine());
-    const payroll = new PayrollService(db, rbac, entitlements, audit, new ImportExportService(), new EffectiveDatingEngine());
+    const compensation = new EmployeeCompensationService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
     hiring = new HiringProcessService(
       db,
       rbac,
@@ -52,7 +51,7 @@ describe("HiringProcessService", () => {
       shifts,
       undefined,
       undefined,
-      payroll
+      compensation
     );
 
     const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -433,9 +432,11 @@ describe("HiringProcessService", () => {
       const { compensationRows, paymentRows, allocationRows } = await db.withClaims(FIXTURE_CLAIMS, async (client) => {
         // Payroll Phase P1 (2026-09-27) retired `employee_compensation` as a
         // live write target — the Hiring Wizard's "compensation" card still
-        // calls PayrollService.setCompensation() with the same
-        // {monthlySalary, effectiveFrom} shape, but that now targets ONLY
-        // the "basic_salary" row in the component-based
+        // calls EmployeeCompensationService.setCompensationWithinTransaction()
+        // (Core Employee's own master data as of a later 2026-09-27
+        // architecture correction — see that service's own doc comment)
+        // with the same {monthlySalary, effectiveFrom} shape, but that
+        // targets ONLY the "basic_salary" row in the component-based
         // `employee_compensation_components` table (see
         // claude/payroll-enterprise-gap-analysis-and-roadmap.md). The old
         // table is kept as a frozen historical record, not written to by

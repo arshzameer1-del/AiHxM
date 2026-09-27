@@ -9,6 +9,7 @@ import { AuditService } from "../audit/audit.service";
 import { ImportExportService } from "../import-export/import-export.service";
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
 import { PayrollService } from "./payroll.service";
+import { EmployeeCompensationService } from "../employees/employee-compensation.service";
 
 const FIXTURE_CLAIMS: RequestClaims = { is_platform_admin: true, company_id: null, sub: "payroll-spec-fixtures" };
 
@@ -92,6 +93,7 @@ describe("PayrollService", () => {
   let audit: AuditService;
   let importExport: ImportExportService;
   let payroll: PayrollService;
+  let compensation: EmployeeCompensationService;
 
   // --- Primary company: compensation/run/payslip/disbursement flows ---
   let companyId: string;
@@ -188,6 +190,7 @@ describe("PayrollService", () => {
     audit = new AuditService();
     importExport = new ImportExportService();
     payroll = new PayrollService(db, rbac, entitlements, audit, importExport, new EffectiveDatingEngine());
+    compensation = new EmployeeCompensationService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
 
     const stamp = Date.now();
 
@@ -227,7 +230,7 @@ describe("PayrollService", () => {
     // file, so every later payroll run in this spec calculates the exact
     // same PKR 150,000/mo Basic Salary for this employee regardless of
     // period length. Uses the back-compat single-component endpoint.
-    await payroll.setCompensation(hrAdminClaims, { employeeId: staffEmployeeId, monthlySalary: 150000, effectiveFrom: "2020-01-01" });
+    await compensation.setCompensation(hrAdminClaims, { employeeId: staffEmployeeId, monthlySalary: 150000, effectiveFrom: "2020-01-01" });
 
     const compEmployee = await createEmployee({});
     compEmployeeId = compEmployee.id;
@@ -257,189 +260,6 @@ describe("PayrollService", () => {
       client.query("DELETE FROM companies WHERE id = ANY($1::uuid[])", [[companyId, secondaryCompanyId]])
     );
     await pool.end();
-  });
-
-  // --- Compensation (back-compat single component) ----------------------
-
-  describe("setCompensation() / getCompensationHistory() — back-compat Basic Salary convenience", () => {
-    it("sets an open-ended Basic Salary row, then a later raise supersedes (not overwrites) it", async () => {
-      const raiseEmployee = await createEmployee({});
-
-      const original = await payroll.setCompensation(hrAdminClaims, {
-        employeeId: raiseEmployee.id,
-        monthlySalary: 100000,
-        effectiveFrom: "2020-01-01",
-      });
-      expect(original.componentKey).toBe("basic_salary");
-      expect(original.amount).toBe(100000);
-      expect(original.effectiveTo).toBeNull();
-
-      const historyAfterFirst = await payroll.getCompensationHistory(hrAdminClaims, raiseEmployee.id);
-      expect(historyAfterFirst).toHaveLength(1);
-
-      const raised = await payroll.setCompensation(hrAdminClaims, {
-        employeeId: raiseEmployee.id,
-        monthlySalary: 120000,
-        effectiveFrom: "2025-06-01",
-      });
-      expect(raised.effectiveTo).toBeNull();
-
-      const history = await payroll.getCompensationHistory(hrAdminClaims, raiseEmployee.id);
-      expect(history).toHaveLength(2);
-      const supersededOriginal = history.find((c) => c.id === original.id)!;
-      // Superseded (day before the new row's effectiveFrom), never deleted.
-      expect(supersededOriginal.effectiveTo).toBe("2025-05-31");
-      const current = history.find((c) => c.id === raised.id)!;
-      expect(current.amount).toBe(120000);
-      expect(current.effectiveTo).toBeNull();
-    });
-
-    it("collapses a same-day second edit into the still-open row rather than opening a second one", async () => {
-      const employee = await createEmployee({});
-      const today = new Date().toISOString().slice(0, 10);
-
-      const first = await payroll.setCompensation(hrAdminClaims, { employeeId: employee.id, monthlySalary: 90000, effectiveFrom: today });
-      const second = await payroll.setCompensation(hrAdminClaims, { employeeId: employee.id, monthlySalary: 95000, effectiveFrom: today });
-      expect(second.id).toBe(first.id);
-      expect(second.amount).toBe(95000);
-
-      const history = await payroll.getCompensationHistory(hrAdminClaims, employee.id);
-      expect(history).toHaveLength(1);
-    });
-
-    it("404s for an employee that does not exist", async () => {
-      await expect(
-        payroll.setCompensation(hrAdminClaims, { employeeId: randomUUID(), monthlySalary: 50000, effectiveFrom: "2026-01-01" })
-      ).rejects.toThrow(NotFoundException);
-      await expect(payroll.getCompensationHistory(hrAdminClaims, randomUUID())).rejects.toThrow(NotFoundException);
-    });
-
-    it("denies a caller without payroll.manage.all", async () => {
-      await expect(
-        payroll.setCompensation(outsiderClaims, { employeeId: compEmployeeId, monthlySalary: 50000, effectiveFrom: "2026-01-01" })
-      ).rejects.toThrow(ForbiddenException);
-      await expect(payroll.getCompensationHistory(outsiderClaims, compEmployeeId)).rejects.toThrow(ForbiddenException);
-      // Even the employee's own self-view permission doesn't grant this —
-      // compensation management is manage.all only, per Decision #14.
-      await expect(payroll.getCompensationHistory(staffClaims, staffEmployeeId)).rejects.toThrow(ForbiddenException);
-    });
-
-    it("404s when the payroll module is disabled for the tenant", async () => {
-      await db.withClaims(FIXTURE_CLAIMS, (client) =>
-        client.query("UPDATE tenant_module_entitlement SET enabled = false WHERE company_id = $1 AND module_key = 'payroll'", [
-          companyId,
-        ])
-      );
-      await expect(
-        payroll.setCompensation(hrAdminClaims, { employeeId: compEmployeeId, monthlySalary: 50000, effectiveFrom: "2026-01-01" })
-      ).rejects.toThrow(NotFoundException);
-      await db.withClaims(FIXTURE_CLAIMS, (client) =>
-        client.query("UPDATE tenant_module_entitlement SET enabled = true WHERE company_id = $1 AND module_key = 'payroll'", [
-          companyId,
-        ])
-      );
-    });
-  });
-
-  // --- Compensation components (Phase P1) --------------------------------
-
-  describe("compensation components — catalog & multi-component amounts", () => {
-    it("lazily seeds the standard 6-component catalog, all taxable, in a stable sort order", async () => {
-      const components = await payroll.listCompensationComponents(hrAdminClaims);
-      expect(components.length).toBeGreaterThanOrEqual(6);
-      const keys = components.map((c) => c.key);
-      expect(keys).toEqual(
-        expect.arrayContaining(["basic_salary", "house_rent_allowance", "medical_allowance", "conveyance_allowance", "utilities_allowance", "other_allowance"])
-      );
-      expect(components.every((c) => c.isTaxable)).toBe(true);
-      expect(components.every((c) => c.isActive)).toBe(true);
-      const basic = components.find((c) => c.key === "basic_salary")!;
-      expect(basic.sortOrder).toBe(0);
-    });
-
-    it("creates a custom component, defaulting to taxable, and rejects a duplicate key", async () => {
-      const created = await payroll.createCompensationComponent(hrAdminClaims, { name: "Fuel Allowance" });
-      expect(created.key).toBe("fuel_allowance");
-      expect(created.isTaxable).toBe(true);
-      expect(created.isActive).toBe(true);
-
-      await expect(payroll.createCompensationComponent(hrAdminClaims, { name: "Fuel Allowance" })).rejects.toThrow(BadRequestException);
-    });
-
-    it("can create a non-taxable custom component explicitly", async () => {
-      const created = await payroll.createCompensationComponent(hrAdminClaims, { name: "Loan Reimbursement", isTaxable: false });
-      expect(created.isTaxable).toBe(false);
-    });
-
-    it("updateCompensationComponent can rename, retax, and deactivate a component", async () => {
-      const created = await payroll.createCompensationComponent(hrAdminClaims, { name: "Temp Component" });
-      const updated = await payroll.updateCompensationComponent(hrAdminClaims, created.id, {
-        name: "Renamed Component",
-        isTaxable: false,
-        isActive: false,
-      });
-      expect(updated.name).toBe("Renamed Component");
-      expect(updated.isTaxable).toBe(false);
-      expect(updated.isActive).toBe(false);
-    });
-
-    it("setCompensationComponents sets multiple components at once; an omitted component is left untouched", async () => {
-      const employee = await createEmployee({});
-      const catalog = await payroll.listCompensationComponents(hrAdminClaims);
-      const basic = catalog.find((c) => c.key === "basic_salary")!;
-      const hra = catalog.find((c) => c.key === "house_rent_allowance")!;
-
-      const first = await payroll.setCompensationComponents(hrAdminClaims, {
-        employeeId: employee.id,
-        effectiveFrom: "2026-01-01",
-        components: [
-          { componentId: basic.id, amount: 80000 },
-          { componentId: hra.id, amount: 20000 },
-        ],
-      });
-      expect(first.totalMonthly).toBe(100000);
-      expect(first.components).toHaveLength(2);
-
-      // Bump ONLY Basic Salary — HRA's existing effective-dated row must
-      // survive untouched (still 20000, still the same row).
-      const hraRowBefore = first.components.find((c) => c.componentId === hra.id)!;
-      const second = await payroll.setCompensationComponents(hrAdminClaims, {
-        employeeId: employee.id,
-        effectiveFrom: "2026-06-01",
-        components: [{ componentId: basic.id, amount: 90000 }],
-      });
-      expect(second.totalMonthly).toBe(110000);
-      const hraRowAfter = second.components.find((c) => c.componentId === hra.id)!;
-      expect(hraRowAfter.id).toBe(hraRowBefore.id);
-      expect(hraRowAfter.amount).toBe(20000);
-
-      const current = await payroll.getCurrentCompensation(hrAdminClaims, employee.id);
-      expect(current.totalMonthly).toBe(110000);
-    });
-
-    it("rejects an unknown or inactive component, and a negative amount", async () => {
-      const employee = await createEmployee({});
-      await expect(
-        payroll.setCompensationComponents(hrAdminClaims, { employeeId: employee.id, effectiveFrom: "2026-01-01", components: [{ componentId: randomUUID(), amount: 1000 }] })
-      ).rejects.toThrow(BadRequestException);
-
-      const inactive = await payroll.createCompensationComponent(hrAdminClaims, { name: "Will Deactivate" });
-      await payroll.updateCompensationComponent(hrAdminClaims, inactive.id, { isActive: false });
-      await expect(
-        payroll.setCompensationComponents(hrAdminClaims, { employeeId: employee.id, effectiveFrom: "2026-01-01", components: [{ componentId: inactive.id, amount: 1000 }] })
-      ).rejects.toThrow(BadRequestException);
-
-      const catalog = await payroll.listCompensationComponents(hrAdminClaims);
-      const basic = catalog.find((c) => c.key === "basic_salary")!;
-      await expect(
-        payroll.setCompensationComponents(hrAdminClaims, { employeeId: employee.id, effectiveFrom: "2026-01-01", components: [{ componentId: basic.id, amount: -5 }] })
-      ).rejects.toThrow(BadRequestException);
-    });
-
-    it("denies a caller without payroll.manage.all", async () => {
-      await expect(payroll.listCompensationComponents(outsiderClaims)).rejects.toThrow(ForbiddenException);
-      await expect(payroll.createCompensationComponent(outsiderClaims, { name: "X" })).rejects.toThrow(ForbiddenException);
-    });
   });
 
   // --- Settings & tax slabs (secondary tenant) -------------------------
@@ -686,7 +506,12 @@ describe("PayrollService", () => {
         ]);
         const id = company.rows[0].id as string;
         await client.query(
-          "INSERT INTO tenant_module_entitlement (company_id, module_key, enabled) VALUES ($1, 'payroll', true)",
+          // 'employee' entitlement is needed too — this describe block's
+          // tests call compensation.setCompensation(), which now lives on
+          // EmployeeCompensationService and gates on the 'employee' module
+          // (2026-09-27, kumail's own architecture correction), not
+          // 'payroll'.
+          "INSERT INTO tenant_module_entitlement (company_id, module_key, enabled) VALUES ($1, 'payroll', true), ($1, 'employee', true)",
           [id]
         );
         return id;
@@ -711,7 +536,7 @@ describe("PayrollService", () => {
       await payroll.setTaxSlabs(pinHrClaims, { slabs: [{ minAnnualIncome: 0, maxAnnualIncome: null, baseTax: 0, ratePercent: 50 }] });
 
       const employee = await createEmployeeIn(pinCompanyId, { dateOfJoining: "2020-01-01" });
-      await payroll.setCompensation(pinHrClaims, { employeeId: employee.id, monthlySalary: 100000, effectiveFrom: "2020-01-01" });
+      await compensation.setCompensation(pinHrClaims, { employeeId: employee.id, monthlySalary: 100000, effectiveFrom: "2020-01-01" });
 
       // A one-day run 20 days ago falls inside generation A's window
       // (started 30 days ago), not generation B's (starts today).
@@ -739,7 +564,7 @@ describe("PayrollService", () => {
       await payroll.updateSettings(pinHrClaims, { eobiEmployeeRatePercent: 2 });
 
       const employee = await createEmployeeIn(pinCompanyId, { dateOfJoining: "2020-01-01" });
-      await payroll.setCompensation(pinHrClaims, { employeeId: employee.id, monthlySalary: 50000, effectiveFrom: "2020-01-01" });
+      await compensation.setCompensation(pinHrClaims, { employeeId: employee.id, monthlySalary: 50000, effectiveFrom: "2020-01-01" });
 
       // A different past period than the tax-slabs test above (same
       // company, same describe block) uses, so the two runs don't collide
@@ -821,7 +646,7 @@ describe("PayrollService", () => {
       // so priorYtd is 0/0 and expectedIncomeTax() below is directly
       // comparable without needing any other test's history.
       const mathEmployee = await createEmployee({ dateOfJoining: "2020-01-01" });
-      await payroll.setCompensation(hrAdminClaims, { employeeId: mathEmployee.id, monthlySalary: 150000, effectiveFrom: "2020-01-01" });
+      await compensation.setCompensation(hrAdminClaims, { employeeId: mathEmployee.id, monthlySalary: 150000, effectiveFrom: "2020-01-01" });
 
       const periodStart = "2027-01-01";
       const periodEnd = "2027-01-31";
@@ -849,11 +674,11 @@ describe("PayrollService", () => {
 
     it("sums MULTIPLE compensation components into gross pay, and excludes a non-taxable component from taxable income", async () => {
       const employee = await createEmployee({ dateOfJoining: "2020-01-01" });
-      const catalog = await payroll.listCompensationComponents(hrAdminClaims);
+      const catalog = await compensation.listCompensationComponents(hrAdminClaims);
       const basic = catalog.find((c) => c.key === "basic_salary")!;
-      const nonTaxable = await payroll.createCompensationComponent(hrAdminClaims, { name: "Tax-Free Perk", isTaxable: false });
+      const nonTaxable = await compensation.createCompensationComponent(hrAdminClaims, { name: "Tax-Free Perk", isTaxable: false });
 
-      await payroll.setCompensationComponents(hrAdminClaims, {
+      await compensation.setCompensationComponents(hrAdminClaims, {
         employeeId: employee.id,
         effectiveFrom: "2020-01-01",
         components: [
@@ -880,13 +705,13 @@ describe("PayrollService", () => {
 
     it("prorates a mid-period compensation change across both segments", async () => {
       const raiseEmployee = await createEmployee({});
-      await payroll.setCompensation(hrAdminClaims, {
+      await compensation.setCompensation(hrAdminClaims, {
         employeeId: raiseEmployee.id,
         monthlySalary: 100000,
         effectiveFrom: "2020-01-01",
       });
       // 2027-02 has 28 days; raise takes effect exactly halfway through.
-      await payroll.setCompensation(hrAdminClaims, {
+      await compensation.setCompensation(hrAdminClaims, {
         employeeId: raiseEmployee.id,
         monthlySalary: 120000,
         effectiveFrom: "2027-02-15",
@@ -909,7 +734,7 @@ describe("PayrollService", () => {
 
     it("deducts approved unpaid leave from gross pay, prorating EOBI by the paid-days ratio", async () => {
       const leaveEmployee = await createEmployee({});
-      await payroll.setCompensation(hrAdminClaims, {
+      await compensation.setCompensation(hrAdminClaims, {
         employeeId: leaveEmployee.id,
         monthlySalary: 93000, // divides evenly by 31 days -> exact PKR 3,000/day
         effectiveFrom: "2020-01-01",
@@ -969,7 +794,7 @@ describe("PayrollService", () => {
   describe("year-to-date income tax accumulation (Phase P1)", () => {
     it("a second FINALIZED run in the same tax year reduces this period's tax by what was already withheld", async () => {
       const employee = await createEmployee({ dateOfJoining: "2020-01-01" });
-      await payroll.setCompensation(hrAdminClaims, { employeeId: employee.id, monthlySalary: 400000, effectiveFrom: "2020-01-01" });
+      await compensation.setCompensation(hrAdminClaims, { employeeId: employee.id, monthlySalary: 400000, effectiveFrom: "2020-01-01" });
 
       // First run of tax year 2029 (Jul 2028): priorYtd is 0/0.
       const run1 = await payroll.createRun(hrAdminClaims, { periodStart: "2028-07-01", periodEnd: "2028-07-31" });
@@ -996,7 +821,7 @@ describe("PayrollService", () => {
 
     it("a run in a DIFFERENT tax year does not inherit the prior tax year's YTD", async () => {
       const employee = await createEmployee({ dateOfJoining: "2020-01-01" });
-      await payroll.setCompensation(hrAdminClaims, { employeeId: employee.id, monthlySalary: 500000, effectiveFrom: "2020-01-01" });
+      await compensation.setCompensation(hrAdminClaims, { employeeId: employee.id, monthlySalary: 500000, effectiveFrom: "2020-01-01" });
 
       // Last month of tax year 2028.
       const run1 = await payroll.createRun(hrAdminClaims, { periodStart: "2028-06-01", periodEnd: "2028-06-30" });
@@ -1013,7 +838,7 @@ describe("PayrollService", () => {
 
     it("recalculating a not-yet-finalized run never double-counts its own prior calculation", async () => {
       const employee = await createEmployee({ dateOfJoining: "2020-01-01" });
-      await payroll.setCompensation(hrAdminClaims, { employeeId: employee.id, monthlySalary: 250000, effectiveFrom: "2020-01-01" });
+      await compensation.setCompensation(hrAdminClaims, { employeeId: employee.id, monthlySalary: 250000, effectiveFrom: "2020-01-01" });
 
       const run = await payroll.createRun(hrAdminClaims, { periodStart: "2027-10-01", periodEnd: "2027-10-31" });
       await payroll.calculateRun(hrAdminClaims, run.id);
@@ -1065,7 +890,7 @@ describe("PayrollService", () => {
       // permission/entitlement failure paths — give it a compensation
       // record here, otherwise calculateRun() collects a "No compensation
       // record" error for it instead of producing a payslip.
-      await payroll.setCompensation(hrAdminClaims, {
+      await compensation.setCompensation(hrAdminClaims, {
         employeeId: compEmployeeId,
         monthlySalary: 80000,
         effectiveFrom: "2020-01-01",

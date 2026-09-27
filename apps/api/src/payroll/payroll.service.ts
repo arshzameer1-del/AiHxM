@@ -9,46 +9,21 @@ import { ImportExportService } from "../import-export/import-export.service";
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
 import type {
   CalculatePayrollRunResponse,
-  CompensationComponentView,
-  CompensationView,
-  CreateCompensationComponentRequest,
   CreatePayrollRunRequest,
-  EmployeeCompensationView,
   PayrollCalculationError,
   PayrollCalculationStep,
   PayrollRunView,
   PayrollSettingsView,
   PayslipView,
-  SetCompensationRequest,
-  SetEmployeeCompensationComponentsRequest,
   SetTaxSlabsRequest,
   TaxSlabSetView,
   TaxSlabView,
-  UpdateCompensationComponentRequest,
   UpdatePayrollSettingsRequest,
 } from "@aihxm/shared-types";
 
 const MODULE_KEY = "payroll" as const;
 const HR_MANAGE_PERMISSION = "payroll.manage.all";
 const SELF_VIEW_PERMISSION = "payroll_review.view.self";
-const BASIC_SALARY_KEY = "basic_salary";
-
-// The standard starter compensation-component catalog, lazily seeded per
-// company the first time PayrollService needs one and finds none — the
-// same lazy-seed pattern already used for tax slabs/payroll settings.
-// Every component defaults to taxable=true: Payroll Enterprise Gap
-// Analysis Phase P1 deliberately does NOT presume any allowance is
-// tax-exempt without a real accountant confirming a specific exemption
-// applies (see claude/statutory-payroll-rates-pakistan.md). A tenant's
-// HR/Finance admin can flip is_taxable per component, or add their own.
-const DEFAULT_COMPONENTS: Array<{ key: string; name: string; sortOrder: number }> = [
-  { key: BASIC_SALARY_KEY, name: "Basic Salary", sortOrder: 0 },
-  { key: "house_rent_allowance", name: "House Rent Allowance", sortOrder: 1 },
-  { key: "medical_allowance", name: "Medical Allowance", sortOrder: 2 },
-  { key: "conveyance_allowance", name: "Conveyance Allowance", sortOrder: 3 },
-  { key: "utilities_allowance", name: "Utilities Allowance", sortOrder: 4 },
-  { key: "other_allowance", name: "Other Allowance", sortOrder: 5 },
-];
 
 // The default FBR salaried-individual tax slabs (Tax Year 2027 / FY2026-27),
 // lazily seeded per-company the first time PayrollService needs a
@@ -93,15 +68,6 @@ function toIsoDate(value: unknown): string {
 function toIsoDateOrNull(value: unknown): string | null {
   if (value === null || value === undefined) return null;
   return toIsoDate(value);
-}
-
-function slugify(name: string): string {
-  const slug = name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-  return slug || "component";
 }
 
 // Calendar days, inclusive of both ends. Deliberately not business-day
@@ -156,41 +122,6 @@ function taxFromSlabs(annualIncome: number, slabs: TaxSlabView[]): number {
     slabs.find((s) => annualIncome >= s.minAnnualIncome && (s.maxAnnualIncome === null || annualIncome <= s.maxAnnualIncome)) ??
     slabs[slabs.length - 1];
   return Math.max(0, bracket.baseTax + (bracket.ratePercent / 100) * (annualIncome - bracket.minAnnualIncome));
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function rowToComponent(row: any): CompensationComponentView {
-  return {
-    id: row.id,
-    companyId: row.company_id,
-    key: row.key,
-    name: row.name,
-    isTaxable: row.is_taxable,
-    isActive: row.is_active,
-    sortOrder: row.sort_order,
-    createdAt: toIso(row.created_at) as string,
-  };
-}
-
-/** Maps one `employee_compensation_components` row JOINed to its
- * `compensation_components` catalog row (columns aliased `component_*`
- * by every query below) into the flattened `CompensationView` shape. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function rowToCompensationRow(row: any): CompensationView {
-  return {
-    id: row.id,
-    companyId: row.company_id,
-    employeeId: row.employee_id,
-    componentId: row.component_id,
-    componentKey: row.component_key,
-    componentName: row.component_name,
-    isTaxable: row.component_is_taxable,
-    amount: Number(row.amount),
-    effectiveFrom: toIsoDate(row.effective_from),
-    effectiveTo: toIsoDateOrNull(row.effective_to),
-    createdByUserAccountId: row.created_by_user_account_id,
-    createdAt: toIso(row.created_at) as string,
-  };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -278,14 +209,20 @@ function rowToPayslip(row: any): PayslipView {
  *
  * Payroll Enterprise Gap Analysis & Roadmap, Phase P1 (2026-09-27,
  * claude/payroll-enterprise-gap-analysis-and-roadmap.md) rebuilt this
- * file's compensation and tax-calculation core:
+ * file's tax-calculation core:
  *
- *  - Compensation is now a real component model (Basic Salary + named
+ *  - Compensation is a real component model (Basic Salary + named
  *    allowances), not one flat `monthly_salary` figure — see
  *    `compensation_components`/`employee_compensation_components`
- *    (migration 0092) and `setCompensationComponents()` below.
- *  - `payroll_settings` (EOBI/social-security) is now effective-dated
- *    like `tax_slabs` already was, and a run resolves BOTH as of its own
+ *    (migration 0092). Compensation is Core Employee master data (moved
+ *    2026-09-27, kumail's own architecture correction — the SAP
+ *    IT0008/IT0014 equivalent): `EmployeeCompensationService`
+ *    (`apps/api/src/employees/employee-compensation.service.ts`) owns
+ *    every write to it. This service only ever READS it — a direct SQL
+ *    join inside `calculateOnePayslip()` below, exactly like it reads
+ *    `leave_requests` for unpaid leave — never through that service.
+ *  - `payroll_settings` (EOBI/social-security) is effective-dated like
+ *    `tax_slabs` already was, and a run resolves BOTH as of its own
  *    `periodEnd` (`loadSettingsAsOf()`/`loadTaxSlabsAsOf()`) instead of
  *    always reading "whatever is current right now".
  *  - Income tax uses a real year-to-date cumulative average-rate method
@@ -303,228 +240,6 @@ export class PayrollService {
     private readonly importExport: ImportExportService,
     private readonly effectiveDating: EffectiveDatingEngine
   ) {}
-
-  // --- Compensation components (catalog) -----------------------------------
-
-  async listCompensationComponents(claims: RequestClaims): Promise<CompensationComponentView[]> {
-    await this.requireHrManage(claims);
-    return this.db.withClaims(claims, (client) => this.loadOrSeedComponents(client, claims));
-  }
-
-  async createCompensationComponent(claims: RequestClaims, input: CreateCompensationComponentRequest): Promise<CompensationComponentView> {
-    await this.requireHrManage(claims);
-    const name = input.name.trim();
-    if (!name) throw new BadRequestException("A component name is required");
-    const key = (input.key?.trim() || slugify(name)).toLowerCase();
-    return this.db.withClaims(claims, async (client) => {
-      await this.loadOrSeedComponents(client, claims);
-      const existing = await client.query("SELECT 1 FROM compensation_components WHERE company_id = $1 AND key = $2", [
-        claims.company_id,
-        key,
-      ]);
-      if ((existing.rowCount ?? 0) > 0) {
-        throw new BadRequestException(`A compensation component with key "${key}" already exists`);
-      }
-      const maxSort = await client.query("SELECT COALESCE(MAX(sort_order), -1) AS max FROM compensation_components WHERE company_id = $1", [
-        claims.company_id,
-      ]);
-      const result = await client.query(
-        `INSERT INTO compensation_components (company_id, key, name, is_taxable, sort_order)
-         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [claims.company_id, key, name, input.isTaxable ?? true, Number(maxSort.rows[0].max) + 1]
-      );
-      await this.audit.record(client, claims, {
-        companyId: claims.company_id ?? null,
-        action: "compensation_component.create",
-        target: result.rows[0].id,
-        metadata: { key, name },
-      });
-      return rowToComponent(result.rows[0]);
-    });
-  }
-
-  async updateCompensationComponent(
-    claims: RequestClaims,
-    id: string,
-    patch: UpdateCompensationComponentRequest
-  ): Promise<CompensationComponentView> {
-    await this.requireHrManage(claims);
-    return this.db.withClaims(claims, async (client) => {
-      const existing = await client.query("SELECT * FROM compensation_components WHERE id = $1", [id]);
-      if (existing.rowCount === 0) throw new NotFoundException("Compensation component not found");
-      const current = existing.rows[0];
-      const result = await client.query(
-        `UPDATE compensation_components
-         SET name = $2, is_taxable = $3, is_active = $4, sort_order = $5
-         WHERE id = $1 RETURNING *`,
-        [
-          id,
-          patch.name?.trim() || current.name,
-          patch.isTaxable ?? current.is_taxable,
-          patch.isActive ?? current.is_active,
-          patch.sortOrder ?? current.sort_order,
-        ]
-      );
-      await this.audit.record(client, claims, { companyId: claims.company_id ?? null, action: "compensation_component.update", target: id });
-      return rowToComponent(result.rows[0]);
-    });
-  }
-
-  // --- Compensation (per-employee amounts) ---------------------------------
-
-  /**
-   * Back-compat, single-component convenience — the Hiring Wizard's
-   * Compensation card still calls this shape (`{employeeId, monthlySalary,
-   * effectiveFrom}`); it now sets ONLY the "Basic Salary" component
-   * (seeding the standard catalog for the tenant first if needed) rather
-   * than writing to the retired `employee_compensation` table. Anyone
-   * paying more than Basic Salary uses `setCompensationComponents()`.
-   */
-  async setCompensation(claims: RequestClaims, input: SetCompensationRequest): Promise<CompensationView> {
-    await this.requireHrManage(claims);
-    return this.db.withClaims(claims, (client) => this.setCompensationWithinTransaction(client, claims, input));
-  }
-
-  /**
-   * Core Employee Enterprise Phase 8 — split out of `setCompensation()`
-   * above for exactly the reason `EmployeesService.createWithinTransaction()`
-   * exists: HiringProcessService's `compensation` card calls this
-   * directly, inside the SAME transaction that creates the new employee.
-   */
-  async setCompensationWithinTransaction(client: PoolClient, claims: RequestClaims, input: SetCompensationRequest): Promise<CompensationView> {
-    const employee = await this.loadEmployee(client, input.employeeId);
-    if (!employee) throw new NotFoundException("Employee not found");
-
-    const components = await this.loadOrSeedComponents(client, claims);
-    const basic = components.find((c) => c.key === BASIC_SALARY_KEY);
-    if (!basic) throw new Error("Basic Salary component missing from catalog — this should never happen");
-
-    const row = await this.applyOneComponent(client, claims, {
-      employeeId: input.employeeId,
-      componentId: basic.id,
-      amount: input.monthlySalary,
-      effectiveFrom: input.effectiveFrom,
-    });
-    await this.audit.record(client, claims, {
-      companyId: claims.company_id ?? null,
-      action: "compensation.set",
-      target: input.employeeId,
-      metadata: { componentKey: BASIC_SALARY_KEY, amount: input.monthlySalary, effectiveFrom: input.effectiveFrom },
-    });
-    return { ...row, componentKey: basic.key, componentName: basic.name, isTaxable: basic.isTaxable };
-  }
-
-  /**
-   * Sets one or more components' amounts for an employee as of the same
-   * date in one call. A component left out of `input.components` is
-   * untouched — bumping just Basic Salary doesn't require resubmitting
-   * every allowance (each component is independently effective-dated).
-   */
-  async setCompensationComponents(claims: RequestClaims, input: SetEmployeeCompensationComponentsRequest): Promise<EmployeeCompensationView> {
-    await this.requireHrManage(claims);
-    if (input.components.length === 0) throw new BadRequestException("At least one component amount is required");
-    return this.db.withClaims(claims, async (client) => {
-      const employee = await this.loadEmployee(client, input.employeeId);
-      if (!employee) throw new NotFoundException("Employee not found");
-
-      const catalog = await this.loadOrSeedComponents(client, claims);
-      const byId = new Map(catalog.map((c) => [c.id, c]));
-      for (const entry of input.components) {
-        const component = byId.get(entry.componentId);
-        if (!component) throw new BadRequestException(`Unknown compensation component: ${entry.componentId}`);
-        if (!component.isActive) throw new BadRequestException(`Compensation component "${component.name}" is not active`);
-        if (entry.amount < 0) throw new BadRequestException("A component amount cannot be negative");
-      }
-
-      for (const entry of input.components) {
-        await this.applyOneComponent(client, claims, {
-          employeeId: input.employeeId,
-          componentId: entry.componentId,
-          amount: entry.amount,
-          effectiveFrom: input.effectiveFrom,
-        });
-      }
-      await this.audit.record(client, claims, {
-        companyId: claims.company_id ?? null,
-        action: "compensation.set_components",
-        target: input.employeeId,
-        metadata: { effectiveFrom: input.effectiveFrom, componentIds: input.components.map((c) => c.componentId) },
-      });
-      return this.loadCurrentCompensation(client, claims, input.employeeId);
-    });
-  }
-
-  private async applyOneComponent(
-    client: PoolClient,
-    claims: RequestClaims,
-    input: { employeeId: string; componentId: string; amount: number; effectiveFrom: string }
-  ): Promise<CompensationView> {
-    const { row } = await this.effectiveDating.applyVersionedRow(client, {
-      table: "employee_compensation_components",
-      scope: { employee_id: input.employeeId, component_id: input.componentId },
-      extraInsertColumns: { company_id: claims.company_id, created_by_user_account_id: claims.sub },
-      data: { amount: input.amount },
-      effectiveFrom: input.effectiveFrom,
-    });
-    const withComponent = await client.query(
-      `SELECT ecc.*, cc.key AS component_key, cc.name AS component_name, cc.is_taxable AS component_is_taxable
-       FROM employee_compensation_components ecc
-       JOIN compensation_components cc ON cc.id = ecc.component_id
-       WHERE ecc.id = $1`,
-      [(row as { id: string }).id]
-    );
-    return rowToCompensationRow(withComponent.rows[0]);
-  }
-
-  /** The employee's current (as-of-today) compensation across every
-   * active component they have an open row for. */
-  async getCurrentCompensation(claims: RequestClaims, employeeId: string): Promise<EmployeeCompensationView> {
-    await this.requireHrManage(claims);
-    return this.db.withClaims(claims, async (client) => {
-      const employee = await this.loadEmployee(client, employeeId);
-      if (!employee) throw new NotFoundException("Employee not found");
-      return this.loadCurrentCompensation(client, claims, employeeId);
-    });
-  }
-
-  private async loadCurrentCompensation(client: PoolClient, claims: RequestClaims, employeeId: string): Promise<EmployeeCompensationView> {
-    await this.loadOrSeedComponents(client, claims);
-    const result = await client.query(
-      `SELECT ecc.*, cc.key AS component_key, cc.name AS component_name, cc.is_taxable AS component_is_taxable, cc.sort_order
-       FROM employee_compensation_components ecc
-       JOIN compensation_components cc ON cc.id = ecc.component_id
-       WHERE ecc.employee_id = $1 AND ecc.effective_to IS NULL AND cc.is_active = true
-       ORDER BY cc.sort_order ASC`,
-      [employeeId]
-    );
-    const components = result.rows.map(rowToCompensationRow);
-    return {
-      employeeId,
-      asOfDate: toIsoDate(new Date()),
-      components,
-      totalMonthly: Number(components.reduce((sum, c) => sum + c.amount, 0).toFixed(2)),
-    };
-  }
-
-  /** Full effective-dated history across EVERY component (active or
-   * retired) an employee has ever had, newest first — mirrors
-   * `TaxSlabsForm`'s own history endpoint shape. */
-  async getCompensationHistory(claims: RequestClaims, employeeId: string): Promise<CompensationView[]> {
-    await this.requireHrManage(claims);
-    return this.db.withClaims(claims, async (client) => {
-      const employee = await this.loadEmployee(client, employeeId);
-      if (!employee) throw new NotFoundException("Employee not found");
-      const result = await client.query(
-        `SELECT ecc.*, cc.key AS component_key, cc.name AS component_name, cc.is_taxable AS component_is_taxable
-         FROM employee_compensation_components ecc
-         JOIN compensation_components cc ON cc.id = ecc.component_id
-         WHERE ecc.employee_id = $1
-         ORDER BY ecc.effective_from DESC, cc.sort_order ASC`,
-        [employeeId]
-      );
-      return result.rows.map(rowToCompensationRow);
-    });
-  }
 
   // --- Settings & tax slabs -----------------------------------------------
 
@@ -740,7 +455,14 @@ export class PayrollService {
       const periodEnd = toIsoDate(run.period_end);
       const daysInPeriod = inclusiveDayCount(periodStart, periodEnd);
 
-      await this.loadOrSeedComponents(client, claims);
+      // Compensation is Core Employee master data now (moved 2026-09-27,
+      // kumail's own architecture correction — see
+      // EmployeeCompensationService's own doc comment) — this service only
+      // reads it (the direct SQL join inside calculateOnePayslip() below),
+      // never seeds or writes it. A tenant with no compensation catalog
+      // yet simply has every employee collect a "No compensation record
+      // covers this employee for this period" error below, the same as
+      // any other genuinely-missing-data case this loop already handles.
       const settings = await this.loadSettingsAsOf(client, claims, periodEnd);
       const taxSlabs = await this.loadTaxSlabsAsOf(client, claims, periodEnd);
 
@@ -1118,28 +840,6 @@ export class PayrollService {
       netPay: Number(netPay.toFixed(2)),
       calculationBreakdown: breakdown,
     };
-  }
-
-  private async loadOrSeedComponents(client: PoolClient, claims: RequestClaims): Promise<CompensationComponentView[]> {
-    const existing = await client.query("SELECT * FROM compensation_components WHERE company_id = $1 ORDER BY sort_order ASC", [
-      claims.company_id,
-    ]);
-    if ((existing.rowCount ?? 0) > 0) return existing.rows.map(rowToComponent);
-    const inserted: unknown[] = [];
-    for (const component of DEFAULT_COMPONENTS) {
-      const result = await client.query(
-        `INSERT INTO compensation_components (company_id, key, name, is_taxable, sort_order)
-         VALUES ($1, $2, $3, true, $4)
-         ON CONFLICT (company_id, key) DO NOTHING RETURNING *`,
-        [claims.company_id, component.key, component.name, component.sortOrder]
-      );
-      if ((result.rowCount ?? 0) > 0) inserted.push(result.rows[0]);
-    }
-    if (inserted.length > 0) return inserted.map(rowToComponent) as CompensationComponentView[];
-    const retry = await client.query("SELECT * FROM compensation_components WHERE company_id = $1 ORDER BY sort_order ASC", [
-      claims.company_id,
-    ]);
-    return retry.rows.map(rowToComponent);
   }
 
   private async loadOrSeedSettings(client: PoolClient, claims: RequestClaims): Promise<PayrollSettingsView> {

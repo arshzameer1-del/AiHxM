@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import type { PayrollRunView, PayrollSettingsView, PayslipView, TaxSlabSetView, TaxSlabView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
-import { CompensationForm, CreateRunForm, PayrollSettingsForm, TaxSlabsForm } from "./PayrollAdminForms";
+import { CreateRunForm, PayrollSettingsForm, TaxSlabsForm } from "./PayrollAdminForms";
 import { RUN_STATUS_LABELS, RUN_STATUS_STYLES, pkr } from "./payrollLabels";
 
 function describeError(err: unknown): string {
@@ -494,9 +494,15 @@ export function PayrollPage() {
         <div className="space-y-6">
           <RunsSection refreshKey={refreshKey} onChanged={bump} />
 
-          <CollapsibleSection title="Compensation" forceOpen={focusSection === "compensation"} sectionId="compensation">
-            <CompensationForm onSaved={bump} />
-          </CollapsibleSection>
+          {focusSection === "compensation" && (
+            <div className="bg-card rounded-card p-5 shadow-sm text-sm text-label-tertiary">
+              Compensation now lives on each employee's own profile — open an
+              employee and use the "Compensation & Assets" tab. This keeps
+              recurring pay as employee master data (the same way SAP's
+              IT0008/IT0014 infotypes work), with Payroll only reading it to
+              calculate a run.
+            </div>
+          )}
 
           <CollapsibleSection title="Settings & Tax Slabs" forceOpen={focusSection === "tax-slabs"} sectionId="tax-slabs">
             <SettingsAndSlabsSection />
