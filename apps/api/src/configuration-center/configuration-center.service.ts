@@ -69,9 +69,29 @@ export class ConfigurationCenterService {
       return result.rows;
     });
 
+    // Live production measurement (2026-10-02): this page was taking
+    // 20-25+ seconds to load -- each of the ~15 registry rows was
+    // counted one at a time, each `countFor()` opening its own pooled
+    // connection (runInTenantContext's own BEGIN/SET/COMMIT round trip)
+    // and sometimes an onward network hop to a different domain
+    // service. Sequentially, that's 15 round trips stacked end to end;
+    // nothing about the result depends on ordering (each case is an
+    // independent read against a different table/service), so running
+    // them concurrently and re-sorting into registry order afterward is
+    // a pure latency win with no behavior change. Promise.allSettled
+    // (not Promise.all) because an unexpected non-Forbidden/NotFound
+    // throw from one domain must not cancel the others -- it still
+    // surfaces below exactly as it would have sequentially.
+    const results = await Promise.allSettled(
+      registryRows.map((row) => this.countFor(row.domain_key, claims))
+    );
+
     const summaries: ConfigurationDomainSummary[] = [];
-    for (const row of registryRows) {
-      const count = await this.countFor(row.domain_key, claims);
+    for (let i = 0; i < registryRows.length; i++) {
+      const row = registryRows[i];
+      const outcome = results[i];
+      if (outcome.status === "rejected") throw outcome.reason;
+      const count = outcome.value;
       if (count === null) continue; // no access to this domain -- omit the card entirely
       summaries.push({
         domainKey: row.domain_key,
