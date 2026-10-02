@@ -1967,7 +1967,7 @@ describe("PayrollService", () => {
       await payroll.finalizeRun(hrAdminClaims, run.id);
       const payslip = (await payroll.listPayslips(hrAdminClaims, { payrollRunId: run.id })).find((p) => p.employeeId === staffEmployeeId)!;
 
-      const csv = await payroll.generateDisbursementFile(hrAdminClaims, run.id);
+      const { csv } = await payroll.generateDisbursementFile(hrAdminClaims, run.id);
       const lines = csv.split("\n");
       expect(lines[0]).toBe("employeeNumber,bankAccountNumber,netPay");
       expect(csv).not.toContain(staffEmployeeId); // the internal UUID never appears
@@ -1980,6 +1980,243 @@ describe("PayrollService", () => {
       await submitAndApprove(run.id);
       await payroll.finalizeRun(hrAdminClaims, run.id);
       await expect(payroll.generateDisbursementFile(outsiderClaims, run.id)).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  // --- Phase P5: real bank details + duplicate-payment protection ----------
+
+  describe("generateDisbursementFile() — Phase P5 (real bank details, exclusions, duplicate-payment protection)", () => {
+    async function insertPaymentAccount(
+      employeeId: string,
+      opts: {
+        paymentMethod?: "bank_transfer" | "cash" | "cheque";
+        bankName?: string;
+        accountTitle?: string;
+        accountNumber?: string;
+        iban?: string;
+        branchCode?: string;
+      } = {}
+    ): Promise<void> {
+      await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query(
+          `INSERT INTO employee_payment_accounts
+             (company_id, employee_id, payment_method, bank_name, account_title, account_number, iban, branch_code, is_primary)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)`,
+          [
+            companyId,
+            employeeId,
+            opts.paymentMethod ?? "bank_transfer",
+            opts.bankName ?? null,
+            opts.accountTitle ?? null,
+            opts.accountNumber ?? null,
+            opts.iban ?? null,
+            opts.branchCode ?? null,
+          ]
+        )
+      );
+    }
+
+    it("prefers the employee's active primary payment account (Core Employee's Payment/Bank card) over the legacy flat column, and surfaces every configured field", async () => {
+      const employee = await createEmployee({ dateOfJoining: "2020-01-01" }); // no legacy bankAccountNumber at all
+      await compensation.setCompensation(hrAdminClaims, { employeeId: employee.id, monthlySalary: 100000, effectiveFrom: "2020-01-01" });
+      await insertPaymentAccount(employee.id, {
+        bankName: "Habib Bank Limited",
+        accountTitle: "Test Employee",
+        accountNumber: "01234567890123",
+        iban: "PK01HABB0001234567890123",
+        branchCode: "0123",
+      });
+
+      const runId = await createFinalizedRun("2031-01-01", "2031-01-31");
+      const { csv, batch, excluded } = await payroll.generateDisbursementFile(hrAdminClaims, runId);
+      // Default columns (unchanged from before this phase) — but
+      // "bankAccountNumber" now resolves to the payment account's own
+      // account number, since this employee has no legacy fallback at all.
+      // This is a company-wide run on the same shared tenant every other
+      // test in this file also creates employees on, so `excluded` isn't
+      // asserted to be empty overall (plenty of OTHER tests' employees have
+      // no bank details at all) — only that THIS employee specifically is
+      // included, not excluded.
+      expect(csv).toContain(`${employee.employeeNumber},01234567890123,`);
+      expect(excluded.find((e) => e.employeeNumber === employee.employeeNumber)).toBeUndefined();
+      expect(batch.rowCount).toBeGreaterThanOrEqual(1);
+      expect(batch.batchReference).toMatch(new RegExp(`^PB-${runId.slice(0, 8).toUpperCase()}-1$`));
+    });
+
+    it("excludes an employee paid by cash/cheque, or with no usable bank details, with a stated reason — never a blank/wrong account number", async () => {
+      const cashEmployee = await createEmployee({ dateOfJoining: "2020-01-01" });
+      await compensation.setCompensation(hrAdminClaims, { employeeId: cashEmployee.id, monthlySalary: 60000, effectiveFrom: "2020-01-01" });
+      await insertPaymentAccount(cashEmployee.id, { paymentMethod: "cash" });
+
+      const noDetailsEmployee = await createEmployee({ dateOfJoining: "2020-01-01" }); // no payment account, no legacy column
+      await compensation.setCompensation(hrAdminClaims, { employeeId: noDetailsEmployee.id, monthlySalary: 60000, effectiveFrom: "2020-01-01" });
+
+      const runId = await createFinalizedRun("2031-02-01", "2031-02-28");
+      const { csv, excluded } = await payroll.generateDisbursementFile(hrAdminClaims, runId);
+
+      expect(csv).not.toContain(cashEmployee.employeeNumber);
+      expect(csv).not.toContain(noDetailsEmployee.employeeNumber);
+      expect(excluded.find((e) => e.employeeNumber === cashEmployee.employeeNumber)?.reason).toMatch(/not bank transfer/);
+      expect(excluded.find((e) => e.employeeNumber === noDetailsEmployee.employeeNumber)?.reason).toMatch(/No payment account/);
+    });
+
+    it("refuses to regenerate a run's disbursement file without confirmRegenerate once a batch already exists, and tracks every generation", async () => {
+      const runId = await createFinalizedRun("2031-03-01", "2031-03-31");
+
+      const first = await payroll.generateDisbursementFile(hrAdminClaims, runId);
+      await expect(payroll.generateDisbursementFile(hrAdminClaims, runId)).rejects.toThrow(BadRequestException);
+      await expect(payroll.generateDisbursementFile(hrAdminClaims, runId)).rejects.toThrow(/already generated/);
+
+      const second = await payroll.generateDisbursementFile(hrAdminClaims, runId, true);
+      expect(second.batch.id).not.toBe(first.batch.id);
+      expect(second.batch.batchReference).not.toBe(first.batch.batchReference);
+
+      const history = await payroll.listPaymentBatches(hrAdminClaims, runId);
+      expect(history).toHaveLength(2);
+      expect(history[0].id).toBe(second.batch.id); // newest first
+      expect(history[1].id).toBe(first.batch.id);
+    });
+
+    it("previewDisbursementFile() never writes a batch, and reports the existing one once generated", async () => {
+      const runId = await createFinalizedRun("2031-04-01", "2031-04-30");
+
+      const beforeAny = await payroll.previewDisbursementFile(hrAdminClaims, runId);
+      expect(beforeAny.existingBatch).toBeNull();
+      await payroll.previewDisbursementFile(hrAdminClaims, runId); // called twice — must stay side-effect-free
+      expect(await payroll.listPaymentBatches(hrAdminClaims, runId)).toHaveLength(0);
+
+      const { batch } = await payroll.generateDisbursementFile(hrAdminClaims, runId);
+      const afterGenerate = await payroll.previewDisbursementFile(hrAdminClaims, runId);
+      expect(afterGenerate.existingBatch?.id).toBe(batch.id);
+      expect(await payroll.listPaymentBatches(hrAdminClaims, runId)).toHaveLength(1); // preview still wrote nothing
+    });
+
+    it("voidPaymentBatch() requires a reason, is idempotent-safe against a double-void, and lifts the confirmRegenerate requirement once the only active batch is voided", async () => {
+      const runId = await createFinalizedRun("2031-05-01", "2031-05-31");
+      const { batch } = await payroll.generateDisbursementFile(hrAdminClaims, runId);
+
+      await expect(payroll.voidPaymentBatch(hrAdminClaims, batch.id, "")).rejects.toThrow(BadRequestException);
+
+      const voided = await payroll.voidPaymentBatch(hrAdminClaims, batch.id, "Bank rejected the file — reissuing");
+      expect(voided.status).toBe("voided");
+      expect(voided.voidedReason).toBe("Bank rejected the file — reissuing");
+
+      await expect(payroll.voidPaymentBatch(hrAdminClaims, batch.id, "again")).rejects.toThrow(BadRequestException);
+
+      // No active (non-voided) batch remains, so this proceeds WITHOUT
+      // confirmRegenerate — the guard only ever looks at the most recent
+      // non-voided batch.
+      const reissued = await payroll.generateDisbursementFile(hrAdminClaims, runId);
+      expect(reissued.batch.id).not.toBe(batch.id);
+
+      const history = await payroll.listPaymentBatches(hrAdminClaims, runId);
+      expect(history).toHaveLength(2);
+      expect(history.find((b) => b.id === batch.id)?.status).toBe("voided");
+    });
+
+    it("denies previewDisbursementFile()/listPaymentBatches() to a caller without any payroll-staff permission", async () => {
+      const runId = await createFinalizedRun("2031-06-01", "2031-06-30");
+      await expect(payroll.previewDisbursementFile(outsiderClaims, runId)).rejects.toThrow(ForbiddenException);
+      await expect(payroll.listPaymentBatches(outsiderClaims, runId)).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  // --- Phase P5: tenant-configurable disbursement columns ------------------
+  // Run against the SECONDARY tenant (same isolation reason settings/tax-slab
+  // tests above already use it) so changing the column configuration here
+  // never affects any other test's assertions about the default 3-column CSV.
+
+  describe("getDisbursementSettings() / updateDisbursementSettings() (secondary tenant)", () => {
+    it("lazily seeds the documented default 3-column layout on first access", async () => {
+      const settings = await payroll.getDisbursementSettings(secondaryHrClaims);
+      expect(settings.columns).toEqual(["employeeNumber", "bankAccountNumber", "netPay"]);
+    });
+
+    it("updates the column set, and rejects an unknown column key or an empty list", async () => {
+      const updated = await payroll.updateDisbursementSettings(secondaryHrClaims, {
+        columns: ["employeeNumber", "employeeName", "cnic", "bankName", "accountTitle", "iban", "netPay"],
+      });
+      expect(updated.columns).toEqual(["employeeNumber", "employeeName", "cnic", "bankName", "accountTitle", "iban", "netPay"]);
+
+      const persisted = await payroll.getDisbursementSettings(secondaryHrClaims);
+      expect(persisted.columns).toEqual(updated.columns);
+
+      await expect(
+        // @ts-expect-error — deliberately an invalid key, proving the service re-validates even if a caller bypassed the DTO's own @IsIn check.
+        payroll.updateDisbursementSettings(secondaryHrClaims, { columns: ["notARealColumn"] })
+      ).rejects.toThrow(BadRequestException);
+      await expect(payroll.updateDisbursementSettings(secondaryHrClaims, { columns: [] })).rejects.toThrow(BadRequestException);
+
+      // Restore the default for any later test that might reuse this tenant.
+      await payroll.updateDisbursementSettings(secondaryHrClaims, { columns: ["employeeNumber", "bankAccountNumber", "netPay"] });
+    });
+  });
+
+  // --- Phase P5: cost-center breakdown (Section 20 costing wiring) ---------
+
+  describe("getCostCenterBreakdown()", () => {
+    async function createCostCenter(name: string): Promise<string> {
+      return db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const result = await client.query(
+          "INSERT INTO cost_centers (company_id, code, name) VALUES ($1, $2, $3) RETURNING id",
+          [companyId, `CC-${randomUUID().slice(0, 6)}`, name]
+        );
+        return result.rows[0].id as string;
+      });
+    }
+
+    async function allocate(employeeId: string, costCenterId: string, percentage: number, isPrimary: boolean): Promise<void> {
+      await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query(
+          `INSERT INTO employee_cost_allocations (company_id, employee_id, cost_center_id, allocation_percentage, is_primary)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [companyId, employeeId, costCenterId, percentage, isPrimary]
+        )
+      );
+    }
+
+    it("splits gross/net pay proportionally across an employee's cost allocations, and buckets an employee with none as Unallocated", async () => {
+      const engineering = await createCostCenter("Engineering");
+      const sales = await createCostCenter("Sales");
+
+      const splitEmployee = await createEmployee({ dateOfJoining: "2020-01-01" });
+      await compensation.setCompensation(hrAdminClaims, { employeeId: splitEmployee.id, monthlySalary: 100000, effectiveFrom: "2020-01-01" });
+      await allocate(splitEmployee.id, engineering, 60, true);
+      await allocate(splitEmployee.id, sales, 40, false);
+
+      const unallocatedEmployee = await createEmployee({ dateOfJoining: "2020-01-01" });
+      await compensation.setCompensation(hrAdminClaims, { employeeId: unallocatedEmployee.id, monthlySalary: 50000, effectiveFrom: "2020-01-01" });
+
+      const run = await payroll.createRun(hrAdminClaims, { periodStart: "2031-07-01", periodEnd: "2031-07-31" });
+      await payroll.calculateRun(hrAdminClaims, run.id);
+      const payslips = await payroll.listPayslips(hrAdminClaims, { payrollRunId: run.id });
+      const splitSlip = payslips.find((p) => p.employeeId === splitEmployee.id)!;
+      const unallocatedSlip = payslips.find((p) => p.employeeId === unallocatedEmployee.id)!;
+
+      const breakdown = await payroll.getCostCenterBreakdown(hrAdminClaims, run.id);
+      const engRow = breakdown.rows.find((r) => r.costCenterId === engineering)!;
+      const salesRow = breakdown.rows.find((r) => r.costCenterId === sales)!;
+      const unallocatedRow = breakdown.rows.find((r) => r.costCenterId === null)!;
+
+      expect(engRow.costCenterName).toBe("Engineering");
+      expect(engRow.totalNetPay).toBeCloseTo(Number((splitSlip.netPay * 0.6).toFixed(2)), 2);
+      expect(salesRow.totalNetPay).toBeCloseTo(Number((splitSlip.netPay * 0.4).toFixed(2)), 2);
+      // This is a company-wide run on the same shared tenant every other
+      // test in this file also creates employees on, so the Unallocated
+      // bucket also picks up every OTHER test's employee with no active
+      // cost allocation — only assert `unallocatedEmployee`'s own net pay
+      // is included (an at-least, not an exact total for that bucket).
+      expect(unallocatedRow.costCenterName).toBe("Unallocated");
+      expect(unallocatedRow.totalNetPay).toBeGreaterThanOrEqual(unallocatedSlip.netPay - 0.01);
+      // The two brand-new, uniquely-named cost centers this test created are
+      // only ever allocated to `splitEmployee` — their sum IS exactly that
+      // employee's full net pay, with nothing double-counted or dropped.
+      expect(Number((engRow.totalNetPay + salesRow.totalNetPay).toFixed(2))).toBeCloseTo(splitSlip.netPay, 2);
+    });
+
+    it("denies a caller without any payroll-staff permission", async () => {
+      const run = await payroll.createRun(hrAdminClaims, { periodStart: "2031-08-01", periodEnd: "2031-08-31" });
+      await expect(payroll.getCostCenterBreakdown(outsiderClaims, run.id)).rejects.toThrow(ForbiddenException);
     });
   });
 
@@ -2095,9 +2332,9 @@ describe("PayrollService", () => {
       await expect(payrollWithWebhooks.generateDisbursementFile(outsiderClaims, run.id)).rejects.toThrow(ForbiddenException);
       expect(enqueueSpy).not.toHaveBeenCalled();
 
-      const csv = await payrollWithWebhooks.generateDisbursementFile(hrAdminClaims, run.id);
-      const dataLines = csv.split("\n").slice(1).filter((l) => l.trim().length > 0);
-      const csvTotal = Number(dataLines.reduce((sum, l) => sum + Number(l.split(",").pop()), 0).toFixed(2));
+      const { csv } = await payrollWithWebhooks.generateDisbursementFile(hrAdminClaims, run.id);
+      const dataLines = csv.split("\n").slice(1).filter((l: string) => l.trim().length > 0);
+      const csvTotal = Number(dataLines.reduce((sum: number, l: string) => sum + Number(l.split(",").pop()), 0).toFixed(2));
 
       expect(enqueueSpy).toHaveBeenCalledTimes(1);
       const [eventCompanyId, eventType, payload] = enqueueSpy.mock.calls[0];

@@ -375,7 +375,7 @@ describe("Payroll Areas + payroll Data Scope", () => {
       const runId = await approvedRun(regionalClaims, "2026-03-01", "2026-03-31", khiAreaId);
       const finalized = await payroll.finalizeRun(regionalClaims, runId);
       expect(finalized.status).toBe("finalized");
-      const csv = await payroll.generateDisbursementFile(regionalClaims, runId);
+      const { csv } = await payroll.generateDisbursementFile(regionalClaims, runId);
       expect(csv).toContain("PK-PA-1");
       expect(csv).not.toContain("PK-PA-2");
     });
