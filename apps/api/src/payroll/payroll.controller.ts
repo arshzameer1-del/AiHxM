@@ -7,13 +7,16 @@ import { PayrollService } from "./payroll.service";
 import { UpdatePayrollSettingsDto } from "./dto/update-payroll-settings.dto";
 import { SetTaxSlabsDto } from "./dto/set-tax-slabs.dto";
 import { CreatePayrollRunDto } from "./dto/create-payroll-run.dto";
+import { ReversePayrollRunDto } from "./dto/reverse-payroll-run.dto";
 import { DecideLeaveRequestDto } from "../leave/dto/decide-leave-request.dto";
 
 /**
  * Any real session can call these (SessionGuard) — PayrollService's own
- * entitlement + `payroll.manage.all` / `payroll_review.view.self`
- * permission checks are what actually decide who succeeds, the same
- * split every module since Phase 4 has used.
+ * entitlement + permission checks (`payroll.calculate.all` /
+ * `.finalize.all` / `.disburse.all` / `.approve.all` /
+ * `payroll_review.view.self` — see PayrollService's own header constants)
+ * are what actually decide who succeeds, the same split every module
+ * since Phase 4 has used.
  */
 @Controller()
 @UseGuards(SessionGuard)
@@ -102,6 +105,13 @@ export class PayrollController {
     res.setHeader("Content-Type", "text/csv");
     res.setHeader("Content-Disposition", `attachment; filename="payroll-disbursement-${id}.csv"`);
     res.send(csv);
+  }
+
+  // Phase P2 — Correction/Reversal. Only a `finalized` run can be
+  // reversed; see PayrollService.reverseRun()'s own doc comment.
+  @Post("payroll/runs/:id/reverse")
+  reverseRun(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: ReversePayrollRunDto) {
+    return this.payroll.reverseRun(claims, id, dto);
   }
 
   @Get("payslips")

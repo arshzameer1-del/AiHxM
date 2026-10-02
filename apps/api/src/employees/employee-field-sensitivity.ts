@@ -1,4 +1,4 @@
-import type { FieldSensitivityTier, EmployeeFieldSensitivityEntry } from "@aihxm/shared-types";
+import type { FieldAccess, FieldSensitivityTier, EmployeeFieldSensitivityEntry } from "@aihxm/shared-types";
 
 /**
  * Core Employee Enterprise Phase 11 — gap #10 from the audit: a real,
@@ -64,4 +64,44 @@ export function restrictedFieldsExposed(exposedFieldKeys: readonly string[]): Em
   return exposedFieldKeys
     .map((fieldKey) => ({ fieldKey, tier: sensitivityTierOf(fieldKey) }))
     .filter((entry) => entry.tier === "restricted" || entry.tier === "highly_restricted");
+}
+
+/**
+ * Cross-module integration audit Item 8 (2026-10-01) — the tiers stop being
+ * labels-only. The permission that unlocks Restricted/Highly Restricted
+ * fields BY DEFAULT (seeded by 0099_employee_view_sensitive_permission.sql,
+ * granted to hr_admin), following the `.all` permission-key convention.
+ */
+export const VIEW_SENSITIVE_PERMISSION = "employee.view_sensitive.all";
+
+/** The two tiers the default floor protects — the same two Phase 11
+ * already audit-logs on view. */
+export function isFloorProtectedTier(tier: FieldSensitivityTier): boolean {
+  return tier === "restricted" || tier === "highly_restricted";
+}
+
+/** Every field classified above `normal`. EmployeesService unions this into
+ * the set of fields it runs through field-level filtering at all, so a
+ * field newly classified here can never be served unfiltered just because
+ * someone forgot to also add it to that service's own list. */
+export function classifiedFieldKeys(): string[] {
+  return Object.keys(EMPLOYEE_FIELD_SENSITIVITY);
+}
+
+/**
+ * The default access (for `RbacService.evaluateFieldAccess()`'s
+ * `unruledDefaults`) of every floor-protected field: `view` for a caller
+ * holding `VIEW_SENSITIVE_PERMISSION`, `hidden` otherwise. Only consulted
+ * for a field the caller's roles have NO explicit `field_permission_rules`
+ * row for — an explicit rule always wins (the tiers are a safety floor,
+ * not an override of a deliberate configuration). Fields below
+ * `restricted` are not in the map, so they keep the engine's plain
+ * default-deny.
+ */
+export function sensitivityFloorDefaults(hasViewSensitivePermission: boolean): Map<string, FieldAccess> {
+  const defaults = new Map<string, FieldAccess>();
+  for (const [fieldKey, tier] of Object.entries(EMPLOYEE_FIELD_SENSITIVITY)) {
+    if (isFloorProtectedTier(tier)) defaults.set(fieldKey, hasViewSensitivePermission ? "view" : "hidden");
+  }
+  return defaults;
 }

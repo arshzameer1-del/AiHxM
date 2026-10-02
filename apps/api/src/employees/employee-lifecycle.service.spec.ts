@@ -297,6 +297,237 @@ describe("EmployeeLifecycleService", () => {
     ).rejects.toThrow(ForbiddenException);
   });
 
+  describe("Organization Management sync (cross-module integration audit Item 2) — org-side tables actually change", () => {
+    async function seat(orgUnitId: string, status: "vacant" | "filled" = "vacant"): Promise<string> {
+      return db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const result = await client.query(
+          "INSERT INTO positions (company_id, org_unit_id, position_title, status) VALUES ($1, $2, $3, $4) RETURNING id",
+          [companyId, orgUnitId, `Seat ${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, status]
+        );
+        return result.rows[0].id as string;
+      });
+    }
+    async function orgState(employeeId: string) {
+      return db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const emp = await client.query("SELECT org_unit_id, position_id, manager_id, location_id, designation FROM employees WHERE id = $1", [
+          employeeId,
+        ]);
+        const assignments = await client.query(
+          "SELECT * FROM employee_org_assignments WHERE employee_id = $1 ORDER BY created_at",
+          [employeeId]
+        );
+        const relationships = await client.query("SELECT * FROM org_relationships WHERE employee_id = $1 ORDER BY created_at", [employeeId]);
+        const history = await client.query("SELECT count(*)::int AS c FROM employee_job_history WHERE employee_id = $1", [employeeId]);
+        return {
+          employee: emp.rows[0],
+          assignments: assignments.rows,
+          activePrimary: assignments.rows.filter((a) => a.assignment_type === "primary" && a.status === "active"),
+          relationships: relationships.rows,
+          historyCount: history.rows[0].c as number,
+        };
+      });
+    }
+    async function positionStatus(positionId: string): Promise<string> {
+      return db.withClaims(FIXTURE_CLAIMS, async (client) => (await client.query("SELECT status FROM positions WHERE id = $1", [positionId])).rows[0].status);
+    }
+
+    it("transfer(): fills a named seat, replaces the primary assignment, and vacates a seat left behind in the old org unit", async () => {
+      const employeeId = await createEmployee();
+      const seatA = await seat(orgUnitAId);
+
+      // Into a seat in the employee's current unit.
+      const first = await lifecycle.transfer(hrAdminClaims, employeeId, { positionId: seatA, effectiveDate: "2026-10-01" });
+      expect(first.employee.positionId).toBe(seatA);
+      expect(await positionStatus(seatA)).toBe("filled");
+      let state = await orgState(employeeId);
+      expect(state.activePrimary).toHaveLength(1);
+      expect(state.activePrimary[0]).toMatchObject({ org_unit_id: orgUnitAId, position_id: seatA, location_id: locationAId });
+
+      // Out to unit B with no new seat: the unit-A seat cannot come along.
+      const second = await lifecycle.transfer(hrAdminClaims, employeeId, { orgUnitId: orgUnitBId, locationId: locationBId, effectiveDate: "2026-11-01" });
+      expect(second.employee.positionId).toBeNull();
+      expect(await positionStatus(seatA)).toBe("vacant");
+      state = await orgState(employeeId);
+      expect(state.assignments.filter((a) => a.assignment_type === "primary")).toHaveLength(2);
+      expect(state.assignments[0].status).toBe("ended");
+      expect(state.activePrimary).toHaveLength(1);
+      expect(state.activePrimary[0]).toMatchObject({ org_unit_id: orgUnitBId, position_id: null, location_id: locationBId });
+
+      // The ended slot keeps a closed, effective-dated version history.
+      const versions = await db.withClaims(FIXTURE_CLAIMS, async (client) =>
+        (
+          await client.query(
+            "SELECT status, effective_from, effective_to FROM employee_org_assignment_versions WHERE employee_org_assignment_id = $1 ORDER BY effective_from",
+            [state.assignments[0].id]
+          )
+        ).rows
+      );
+      expect(versions.map((v) => v.status)).toEqual(["active", "ended"]);
+      expect(versions[0].effective_to).not.toBeNull();
+    });
+
+    it("transfer() into a seat that is not vacant fails and rolls back the employee update and history row", async () => {
+      const employeeId = await createEmployee();
+      const taken = await seat(orgUnitBId, "filled");
+      const before = await orgState(employeeId);
+      await expect(
+        lifecycle.transfer(hrAdminClaims, employeeId, { orgUnitId: orgUnitBId, positionId: taken, effectiveDate: "2026-10-01" })
+      ).rejects.toThrow(BadRequestException);
+      const after = await orgState(employeeId);
+      expect(after.employee.org_unit_id).toBe(orgUnitAId);
+      expect(after.historyCount).toBe(before.historyCount);
+      expect(after.assignments).toHaveLength(0);
+    });
+
+    it("promote()/demote() with a positionId vacate the old seat, occupy the new one, and move the org unit with the seat", async () => {
+      const employeeId = await createEmployee();
+      const seatA = await seat(orgUnitAId);
+      const seatB = await seat(orgUnitBId);
+      await lifecycle.transfer(hrAdminClaims, employeeId, { positionId: seatA, effectiveDate: "2026-10-01" });
+
+      const promoted = await lifecycle.promote(hrAdminClaims, employeeId, {
+        designation: "Finance Lead",
+        positionId: seatB,
+        effectiveDate: "2026-10-15",
+      });
+      expect(promoted.employee.positionId).toBe(seatB);
+      expect(promoted.employee.orgUnitId).toBe(orgUnitBId);
+      expect(promoted.employee.department).toBe("Finance");
+      expect(await positionStatus(seatA)).toBe("vacant");
+      expect(await positionStatus(seatB)).toBe("filled");
+      let state = await orgState(employeeId);
+      expect(state.activePrimary[0]).toMatchObject({ org_unit_id: orgUnitBId, position_id: seatB });
+
+      const demoted = await lifecycle.demote(hrAdminClaims, employeeId, { designation: "Engineer", positionId: seatA, effectiveDate: "2026-11-01" });
+      expect(demoted.employee.positionId).toBe(seatA);
+      expect(await positionStatus(seatB)).toBe("vacant");
+      state = await orgState(employeeId);
+      expect(state.activePrimary[0]).toMatchObject({ org_unit_id: orgUnitAId, position_id: seatA });
+
+      // A designation-only promotion touches no org-side table.
+      const assignmentsBefore = state.assignments.length;
+      await lifecycle.promote(hrAdminClaims, employeeId, { designation: "Senior Engineer", effectiveDate: "2026-12-01" });
+      expect((await orgState(employeeId)).assignments).toHaveLength(assignmentsBefore);
+      expect(await positionStatus(seatA)).toBe("filled");
+    });
+
+    it("second() opens a 'secondment' assignment slot (primary untouched) and a 'secondment' relationship to the host manager", async () => {
+      const hostManager = await createEmployee({ designation: "Finance Manager", orgUnitId: orgUnitBId });
+      const employeeId = await createEmployee();
+      await lifecycle.transfer(hrAdminClaims, employeeId, { orgUnitId: orgUnitAId, effectiveDate: "2026-10-01" });
+
+      await lifecycle.second(hrAdminClaims, employeeId, {
+        orgUnitId: orgUnitBId,
+        locationId: locationBId,
+        managerEmployeeId: hostManager,
+        effectiveDate: "2026-10-05",
+        endDate: "2027-01-05",
+      });
+      const state = await orgState(employeeId);
+      const secondment = state.assignments.find((a) => a.assignment_type === "secondment");
+      expect(secondment).toMatchObject({ status: "active", org_unit_id: orgUnitBId, location_id: locationBId });
+      expect(state.activePrimary[0]).toMatchObject({ org_unit_id: orgUnitAId });
+      expect(state.relationships).toHaveLength(1);
+      expect(state.relationships[0]).toMatchObject({ relationship_type: "secondment", manager_employee_id: hostManager, status: "active" });
+      // The effective-dated history row carries the same type (0103 widened
+      // both tables' CHECK constraints), and the employee's solid-line
+      // manager is untouched — a secondment is not a manager change.
+      const versions = await db.withClaims(FIXTURE_CLAIMS, async (client) =>
+        (await client.query("SELECT relationship_type FROM org_relationship_versions WHERE org_relationship_id = $1", [state.relationships[0].id])).rows
+      );
+      expect(versions.map((v) => v.relationship_type)).toEqual(["secondment"]);
+      expect(state.employee.manager_id).toBeNull();
+    });
+
+    it("assignActingRole() records the acted-in position on an 'acting' slot WITHOUT occupying it, plus an 'acting' relationship", async () => {
+      const incumbent = await createEmployee();
+      const headSeat = await seat(orgUnitAId);
+      await lifecycle.transfer(hrAdminClaims, incumbent, { positionId: headSeat, effectiveDate: "2026-10-01" });
+      const supervisor = await createEmployee({ designation: "Director" });
+      const employeeId = await createEmployee();
+
+      await lifecycle.assignActingRole(hrAdminClaims, employeeId, {
+        designation: "Acting Head of Engineering",
+        positionId: headSeat,
+        managerEmployeeId: supervisor,
+        effectiveDate: "2026-10-10",
+        endDate: "2026-12-10",
+      });
+      const state = await orgState(employeeId);
+      expect(state.assignments.find((a) => a.assignment_type === "acting")).toMatchObject({ position_id: headSeat, status: "active" });
+      expect(state.employee.position_id).toBeNull();
+      expect(await positionStatus(headSeat)).toBe("filled");
+      expect((await orgState(incumbent)).employee.position_id).toBe(headSeat);
+      expect(state.relationships[0]).toMatchObject({ relationship_type: "acting", manager_employee_id: supervisor });
+    });
+
+    it("changeManager() writes a 'direct' org_relationships row, supersedes it on the next change, and rejects a reporting cycle atomically", async () => {
+      const managerA = await createEmployee({ designation: "Manager A" });
+      const managerB = await createEmployee({ designation: "Manager B" });
+      const employeeId = await createEmployee();
+
+      await lifecycle.changeManager(hrAdminClaims, employeeId, { managerId: managerA, effectiveDate: "2026-10-01" });
+      let state = await orgState(employeeId);
+      expect(state.employee.manager_id).toBe(managerA);
+      expect(state.relationships).toHaveLength(1);
+      expect(state.relationships[0]).toMatchObject({ relationship_type: "direct", manager_employee_id: managerA, status: "active" });
+
+      await lifecycle.changeManager(hrAdminClaims, employeeId, { managerId: managerB, effectiveDate: "2026-11-01" });
+      state = await orgState(employeeId);
+      expect(state.employee.manager_id).toBe(managerB);
+      const direct = state.relationships.filter((r) => r.relationship_type === "direct");
+      expect(direct.map((r) => [r.manager_employee_id, r.status])).toEqual([
+        [managerA, "ended"],
+        [managerB, "active"],
+      ]);
+
+      // managerB now (transitively) manages employeeId; making employeeId
+      // managerB's manager would close a loop — and must roll back the
+      // employees.manager_id write too, not just skip the relationship.
+      const managerBHistoryBefore = (await orgState(managerB)).historyCount;
+      await expect(lifecycle.changeManager(hrAdminClaims, managerB, { managerId: employeeId, effectiveDate: "2026-11-02" })).rejects.toThrow(
+        BadRequestException
+      );
+      const managerBState = await orgState(managerB);
+      expect(managerBState.employee.manager_id).toBeNull();
+      expect(managerBState.relationships).toHaveLength(0);
+      expect(managerBState.historyCount).toBe(managerBHistoryBefore);
+    });
+
+    it("changeLocation() replaces the primary assignment with the new location", async () => {
+      const employeeId = await createEmployee();
+      await lifecycle.transfer(hrAdminClaims, employeeId, { orgUnitId: orgUnitAId, effectiveDate: "2026-10-01" });
+      await lifecycle.changeLocation(hrAdminClaims, employeeId, { locationId: locationBId, effectiveDate: "2026-10-20" });
+      const state = await orgState(employeeId);
+      expect(state.activePrimary).toHaveLength(1);
+      expect(state.activePrimary[0]).toMatchObject({ org_unit_id: orgUnitAId, location_id: locationBId });
+    });
+
+    it("terminate() vacates (never abolishes) the seat and ends every open assignment; reactivate() leaves both alone", async () => {
+      const employeeId = await createEmployee();
+      const seatA = await seat(orgUnitAId);
+      await lifecycle.transfer(hrAdminClaims, employeeId, { positionId: seatA, effectiveDate: "2026-10-01" });
+      await lifecycle.second(hrAdminClaims, employeeId, { orgUnitId: orgUnitBId, effectiveDate: "2026-10-02", endDate: "2026-12-01" });
+
+      const terminated = await lifecycle.terminate(hrAdminClaims, employeeId, { terminationDate: "2026-10-31" });
+      expect(terminated.employee.positionId).toBeNull();
+      expect(await positionStatus(seatA)).toBe("vacant");
+      let state = await orgState(employeeId);
+      expect(state.assignments.length).toBeGreaterThanOrEqual(2);
+      expect(state.assignments.every((a) => a.status === "ended")).toBe(true);
+      const unassignAudit = await db.withClaims(FIXTURE_CLAIMS, async (client) =>
+        (await client.query("SELECT metadata FROM audit_log WHERE action = 'position.unassign' AND target = $1", [seatA])).rows
+      );
+      expect(unassignAudit[0].metadata.source).toBe("employee_lifecycle:termination");
+
+      await lifecycle.reactivate(hrAdminClaims, employeeId, { effectiveDate: "2026-12-01" });
+      state = await orgState(employeeId);
+      expect(state.employee.position_id).toBeNull();
+      expect(state.assignments.every((a) => a.status === "ended")).toBe(true);
+      expect(await positionStatus(seatA)).toBe("vacant");
+    });
+  });
+
   describe("reasonCode validation against the HR Administration catalog (v2, 2026-09-27)", () => {
     // A SEPARATE EmployeeLifecycleService instance, wired with a real
     // HrReferenceCatalogService — the top-level `lifecycle` instance above
@@ -360,6 +591,71 @@ describe("EmployeeLifecycleService", () => {
         effectiveDate: "2026-10-01",
       });
       expect(result.jobHistory.reasonCode).toBeNull();
+    });
+  });
+
+  // Cross-module integration audit (2026-10-01), gap #3/#7 —
+  // 0111_write_scope_data_scope_enforcement.sql's write-side enforcement,
+  // applied here to the shared `execute()` helper so it covers all 9
+  // lifecycle transactions at once. Only `transfer()`/`terminate()` are
+  // exercised directly below (one "simple field patch" transaction and
+  // one "ends the record" transaction) — every other transaction funnels
+  // through the exact same `execute()` call this gate lives in.
+  describe("Data Scope on write (employee.manage.scoped, gap #3/#7)", () => {
+    let regionalHrClaims: RequestClaims;
+
+    beforeAll(async () => {
+      const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const regionalHrUserId = await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const result = await client.query("INSERT INTO user_accounts (email, password_hash) VALUES ($1, 'x') RETURNING id", [
+          `lifecycle-regional-hr-${stamp}@example.com`,
+        ]);
+        return result.rows[0].id as string;
+      });
+      await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const role = await client.query("SELECT id FROM roles WHERE key = 'regional_hr'");
+        await client.query("INSERT INTO user_role_assignments (user_account_id, company_id, role_id) VALUES ($1, $2, $3)", [
+          regionalHrUserId,
+          companyId,
+          role.rows[0].id,
+        ]);
+        // Scoped to org unit A (Engineering) only — org unit B (Finance)
+        // stays out of this caller's reach.
+        await client.query(
+          "INSERT INTO data_scope_assignments (user_account_id, company_id, scope_type, scope_entity_id) VALUES ($1, $2, 'org_unit', $3)",
+          [regionalHrUserId, companyId, orgUnitAId]
+        );
+      });
+      regionalHrClaims = { is_platform_admin: false, company_id: companyId, sub: regionalHrUserId };
+    });
+
+    it("regional_hr can transfer an employee who is currently inside their assigned org unit", async () => {
+      const employeeId = await createEmployee({ orgUnitId: orgUnitAId });
+      const result = await lifecycle.transfer(regionalHrClaims, employeeId, {
+        orgUnitId: orgUnitAId,
+        locationId: locationBId,
+        effectiveDate: "2026-10-02",
+      });
+      expect(result.employee.locationId).toBe(locationBId);
+    });
+
+    it("regional_hr cannot transfer or terminate an employee currently outside their assigned org unit", async () => {
+      const employeeId = await createEmployee({ orgUnitId: orgUnitBId });
+      await expect(
+        lifecycle.transfer(regionalHrClaims, employeeId, { orgUnitId: orgUnitAId, effectiveDate: "2026-10-02" })
+      ).rejects.toThrow(ForbiddenException);
+      await expect(lifecycle.terminate(regionalHrClaims, employeeId, { terminationDate: "2026-10-02" })).rejects.toThrow(
+        ForbiddenException
+      );
+    });
+
+    it("hr_admin (unscoped .all) is unaffected", async () => {
+      const employeeId = await createEmployee({ orgUnitId: orgUnitBId });
+      const result = await lifecycle.transfer(hrAdminClaims, employeeId, {
+        orgUnitId: orgUnitAId,
+        effectiveDate: "2026-10-02",
+      });
+      expect(result.employee.orgUnitId).toBe(orgUnitAId);
     });
   });
 });

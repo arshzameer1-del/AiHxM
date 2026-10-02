@@ -29,6 +29,7 @@ import { EffectiveDatingModule } from "../effective-dating/effective-dating.modu
 import { WorkflowModule } from "../workflow/workflow.module";
 import { WebhooksModule } from "../webhooks/webhooks.module";
 import { EmployeesModule } from "../employees/employees.module";
+import { OrgOccupancyModule } from "./occupancy/org-occupancy.module";
 
 /**
  * Organization Management, Phase 5 — wraps `OrgChangesService.executeDueChanges()`
@@ -133,7 +134,12 @@ class OrgChangeExecutionScheduler {
  * that service's own header comment for the full rationale.
  */
 @Module({
-  imports: [RbacModule, EntitlementsModule, AuditModule, EffectiveDatingModule, WorkflowModule, WebhooksModule, EmployeesModule],
+  // Cross-module integration audit (2026-10-01) — OrgOccupancyModule holds
+  // the transaction-scoped occupancy writes PositionsService (Workbench)
+  // and OrgChangesService (reorg cascade) share with EmployeesModule's
+  // hiring/lifecycle flows; see that module's own doc comment for why it
+  // sits below both rather than inside either.
+  imports: [RbacModule, EntitlementsModule, AuditModule, EffectiveDatingModule, WorkflowModule, WebhooksModule, EmployeesModule, OrgOccupancyModule],
   controllers: [
     OrgUnitsController,
     JobsController,

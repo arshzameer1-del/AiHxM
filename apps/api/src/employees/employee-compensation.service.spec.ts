@@ -239,6 +239,55 @@ describe("EmployeeCompensationService", () => {
       expect(created.isTaxable).toBe(false);
     });
 
+    it("Phase P3, Section 1 — a 'deduction'-type component is forced non-taxable even if isTaxable: true is passed, and stays immutable across updates", async () => {
+      const created = await compensation.createCompensationComponent(hrAdminClaims, {
+        name: "Society Membership Fee",
+        componentType: "deduction",
+        isTaxable: true, // deliberately asked for — must still be forced false
+      });
+      expect(created.componentType).toBe("deduction");
+      expect(created.isTaxable).toBe(false);
+
+      // componentType is immutable after creation (same posture as `key`)
+      // — updateCompensationComponent has no field for it — and isTaxable
+      // stays forced false even if a later patch asks to retax it.
+      const updated = await compensation.updateCompensationComponent(hrAdminClaims, created.id, { isTaxable: true });
+      expect(updated.componentType).toBe("deduction");
+      expect(updated.isTaxable).toBe(false);
+    });
+
+    it("an 'earning'-type component defaults componentType to 'earning' when not specified", async () => {
+      const created = await compensation.createCompensationComponent(hrAdminClaims, { name: "Explicit Earning Default" });
+      expect(created.componentType).toBe("earning");
+    });
+
+    it("loadCurrentCompensation() splits totals into totalEarnings/totalDeductions, with totalMonthly as their difference", async () => {
+      const employee = await createEmployee();
+      const catalog = await compensation.listCompensationComponents(hrAdminClaims);
+      const basic = catalog.find((c) => c.key === "basic_salary")!;
+      const deduction = await compensation.createCompensationComponent(hrAdminClaims, {
+        name: "Health Insurance Premium (Comp Spec)",
+        componentType: "deduction",
+      });
+
+      const result = await compensation.setCompensationComponents(hrAdminClaims, {
+        employeeId: employee.id,
+        effectiveFrom: "2026-01-01",
+        components: [
+          { componentId: basic.id, amount: 100000 },
+          { componentId: deduction.id, amount: 4000 },
+        ],
+      });
+      expect(result.totalEarnings).toBe(100000);
+      expect(result.totalDeductions).toBe(4000);
+      expect(result.totalMonthly).toBe(96000);
+
+      const current = await compensation.getCurrentCompensation(hrAdminClaims, employee.id);
+      expect(current.totalEarnings).toBe(100000);
+      expect(current.totalDeductions).toBe(4000);
+      expect(current.totalMonthly).toBe(96000);
+    });
+
     it("updateCompensationComponent can rename, retax, and deactivate a component", async () => {
       const created = await compensation.createCompensationComponent(hrAdminClaims, { name: "Temp Component" });
       const updated = await compensation.updateCompensationComponent(hrAdminClaims, created.id, {

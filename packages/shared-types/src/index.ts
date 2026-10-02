@@ -1533,6 +1533,23 @@ export type SetCustomFieldValueRequest = {
 // and mirrored under `employee` so the same field also shows on the
 // employee's own profile after hiring (kumail's second scoping choice).
 
+// "then 2" Phase 3 (2026-10-02, gap-table item #3) — the field-level
+// validation/default/conditional-display depth beyond enable/disable/
+// required. See 0108_hiring_card_field_depth.sql for the full rationale.
+export type FieldValidationRules = {
+  pattern?: string;
+  minLength?: number;
+  maxLength?: number;
+  min?: number;
+  max?: number;
+};
+
+export type FieldConditionalOn = {
+  fieldKey: string;
+  operator: "equals" | "notEquals";
+  value: string;
+};
+
 export type CardFieldDefinitionView = {
   cardKey: string;
   fieldKey: string;
@@ -1540,6 +1557,9 @@ export type CardFieldDefinitionView = {
   isEnabled: boolean;
   isRequired: boolean;
   sortOrder: number;
+  defaultValue: string | null;
+  validationRules: FieldValidationRules | null;
+  conditionalOn: FieldConditionalOn | null;
 };
 
 /** What one card's field-configuration screen (and the live Hiring Wizard) needs: this card's built-in fields plus whatever custom fields have been added to it. */
@@ -1552,6 +1572,9 @@ export type CardFieldsConfigView = {
 export type UpdateCardFieldConfigRequest = {
   isEnabled?: boolean;
   isRequired?: boolean;
+  defaultValue?: string | null;
+  validationRules?: FieldValidationRules | null;
+  conditionalOn?: FieldConditionalOn | null;
 };
 
 export type AddCardCustomFieldRequest = {
@@ -2204,7 +2227,12 @@ export type JobHistoryEventType =
   | "acting"
   | "manager_change"
   | "location_change"
-  | "reactivation";
+  | "reactivation"
+  // Cross-module integration follow-up (2026-10-01) — written only by
+  // `PositionsService.assignEmployee()` (the Position Workbench) when the
+  // assignment moves the employee into a seat in a different org unit;
+  // see 0104_employee_job_history_position_assignment_event.sql.
+  | "position_assignment";
 
 export type JobHistoryEntryView = {
   id: string;
@@ -2255,6 +2283,10 @@ export type TransferEmployeeRequest = {
   department?: string;
   locationId?: string;
   location?: string;
+  /** Cross-module integration audit Item 2 (2026-10-01) — optional new
+   * (vacant) Position; the old seat is vacated and the primary org
+   * assignment replaced in the same transaction. */
+  positionId?: string;
   effectiveDate: string;
   reasonCode?: string;
   notes?: string;
@@ -2263,6 +2295,8 @@ export type TransferEmployeeRequest = {
 export type PromoteEmployeeRequest = {
   designation: string;
   salaryBand?: string;
+  /** Optional new (vacant) Position — see TransferEmployeeRequest.positionId. */
+  positionId?: string;
   effectiveDate: string;
   reasonCode?: string;
   notes?: string;
@@ -2271,6 +2305,8 @@ export type PromoteEmployeeRequest = {
 export type DemoteEmployeeRequest = {
   designation: string;
   salaryBand?: string;
+  /** Optional new (vacant) Position — see TransferEmployeeRequest.positionId. */
+  positionId?: string;
   effectiveDate: string;
   reasonCode?: string;
   notes?: string;
@@ -2286,6 +2322,8 @@ export type SecondEmployeeRequest = {
   designation?: string;
   locationId?: string;
   location?: string;
+  /** Optional host-side supervisor — creates a `temporary` org relationship. */
+  managerEmployeeId?: string;
   effectiveDate: string;
   endDate: string;
   reasonCode?: string;
@@ -2296,6 +2334,10 @@ export type AssignActingRoleRequest = {
   designation: string;
   orgUnitId?: string;
   department?: string;
+  /** Position acted in — recorded on the `acting` assignment, NOT occupied. */
+  positionId?: string;
+  /** Optional supervisor for the acting period — an `acting` org relationship. */
+  managerEmployeeId?: string;
   effectiveDate: string;
   endDate: string;
   reasonCode?: string;
@@ -2379,6 +2421,155 @@ export type UpdateHrReferenceCatalogItemRequest = {
 
 export type ReorderHrReferenceCatalogItemsRequest = {
   orderedIds: string[];
+};
+
+// --- HR Administration v2 "then 2" Phase 2 (2026-10-02) — Business
+// Policies, gap-table item #8. See hr-business-policy.service.ts's own
+// class doc comment for the full design rationale (named, rules-carrying
+// objects, one generic table, exactly-one-default-per-type-per-company).
+export type HrBusinessPolicyView = {
+  id: string;
+  companyId: string;
+  policyType: string;
+  code: string;
+  name: string;
+  description: string | null;
+  rules: Record<string, unknown>;
+  isDefault: boolean;
+  sortOrder: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type HrBusinessPolicyTypeSummary = {
+  policyType: string;
+  label: string;
+  description: string;
+  rulesShape: string;
+  wiredInto: string;
+  policyCount: number;
+  hasDefault: boolean;
+};
+
+export type CreateHrBusinessPolicyRequest = {
+  policyType: string;
+  code: string;
+  name: string;
+  description?: string;
+  rules?: Record<string, unknown>;
+  isDefault?: boolean;
+};
+
+export type UpdateHrBusinessPolicyRequest = {
+  name?: string;
+  description?: string;
+  rules?: Record<string, unknown>;
+  isDefault?: boolean;
+  isActive?: boolean;
+};
+
+export type ReorderHrBusinessPoliciesRequest = {
+  orderedIds: string[];
+};
+
+// --- HR Administration v2 "then 2" Phases 4+5 (2026-10-02, consolidated)
+// — Configuration Hierarchy & Resolution / Mapping Engine, gap-table
+// items #11+#12. See configuration-rule-mapping.service.ts's own class
+// doc comment, and 0109_configuration_rule_mappings.sql's header
+// comment, for the full design rationale and the deliberate scope-level
+// bounding (org_unit/location/employee only).
+export type ConfigurationRuleMappingScopeType = "org_unit" | "location" | "employee";
+
+export type ConfigurationRuleMappingView = {
+  id: string;
+  companyId: string;
+  configDomain: string;
+  configKey: string;
+  scopeType: ConfigurationRuleMappingScopeType;
+  scopeValue: string;
+  ruleValue: Record<string, unknown>;
+  priority: number | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateConfigurationRuleMappingRequest = {
+  configDomain: string;
+  configKey: string;
+  scopeType: ConfigurationRuleMappingScopeType;
+  scopeValue: string;
+  ruleValue?: Record<string, unknown>;
+  priority?: number;
+};
+
+export type UpdateConfigurationRuleMappingRequest = {
+  ruleValue?: Record<string, unknown>;
+  priority?: number | null;
+  isActive?: boolean;
+};
+
+// The resolution primitive's return shape — the single most specific
+// ACTIVE override that matched, or null (caller falls back to the
+// plain company-wide default).
+export type ResolvedConfigurationOverride = {
+  scopeType: ConfigurationRuleMappingScopeType;
+  scopeValue: string;
+  ruleValue: Record<string, unknown>;
+};
+
+// --- HR Administration v2 "then 2" Phase 6 (2026-10-02) — Configuration
+// Publish Lifecycle, gap-table item #13. See
+// configuration-change-request.service.ts's own class doc comment, and
+// 0110_configuration_change_requests.sql's header comment, for the full
+// design rationale (a wrapper lifecycle around the three existing
+// configuration engines, not a rearchitecture of any of them; the
+// deliberate merging of Validate/Dependency-Check/Impact-Preview into one
+// `validate()` call and of Effective-Date/Active into one `published`
+// state).
+export type ConfigurationChangeDomain = "hr_reference_catalog_item" | "hr_business_policy" | "configuration_rule_mapping";
+export type ConfigurationChangeOperation = "create" | "update" | "deactivate";
+export type ConfigurationChangeStatus = "draft" | "validated" | "pending_approval" | "approved" | "rejected" | "published" | "retired";
+
+export type ConfigurationChangeValidationResult = {
+  hasBlockingIssues: boolean;
+  warnings: string[];
+  impactPreview: string;
+};
+
+export type ConfigurationChangeRequestView = {
+  id: string;
+  companyId: string;
+  configDomain: ConfigurationChangeDomain;
+  operation: ConfigurationChangeOperation;
+  targetId: string | null;
+  payload: Record<string, unknown>;
+  status: ConfigurationChangeStatus;
+  effectiveFrom: string | null;
+  beforeSnapshot: Record<string, unknown> | null;
+  validationResult: ConfigurationChangeValidationResult | null;
+  rejectionReason: string | null;
+  previousChangeId: string | null;
+  submittedBy: string | null;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  publishedAt: string | null;
+  retiredAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateConfigurationChangeRequestRequest = {
+  configDomain: ConfigurationChangeDomain;
+  operation: ConfigurationChangeOperation;
+  targetId?: string;
+  payload?: Record<string, unknown>;
+  effectiveFrom?: string;
+};
+
+export type RejectConfigurationChangeRequestRequest = {
+  reason: string;
 };
 
 // --- Core Employee Enterprise Phase 11: Sensitivity Tier Classification ---
@@ -3250,6 +3441,15 @@ export type AssignSystemAdminRoleRequest = {
  * component (`CompensationView` below) carries a history. Lazily seeded
  * with a standard 6-component starter set the first time a tenant has
  * none, the same pattern used for tax slabs/payroll settings. */
+/** Payroll Enterprise Gap Analysis Phase P3 (2026-10-02) — a component is
+ * either an `earning` (added to gross, taxable per `isTaxable`) or a
+ * `deduction` (a recurring "Benefits"-style item — a health-insurance
+ * premium, a society membership fee — subtracted from NET pay, never
+ * gross/taxable gross; always non-taxable by construction, enforced in
+ * `EmployeeCompensationService`, not just a UI default). Defaults to
+ * `earning` for every pre-existing component. */
+export type CompensationComponentType = "earning" | "deduction";
+
 export type CompensationComponentView = {
   id: string;
   companyId: string;
@@ -3258,8 +3458,10 @@ export type CompensationComponentView = {
   /** Deliberately defaults to true for every component, including the
    * seeded starter set — this codebase never presumes an allowance is
    * tax-exempt without a real accountant confirming the exemption
-   * applies (see `claude/statutory-payroll-rates-pakistan.md`). */
+   * applies (see `claude/statutory-payroll-rates-pakistan.md`). Forced
+   * `false` for every `deduction`-type component. */
   isTaxable: boolean;
+  componentType: CompensationComponentType;
   isActive: boolean;
   sortOrder: number;
   createdAt: string;
@@ -3270,6 +3472,8 @@ export type CreateCompensationComponentRequest = {
   /** Slugified from name when omitted. */
   key?: string;
   isTaxable?: boolean;
+  /** Defaults to "earning". */
+  componentType?: CompensationComponentType;
 };
 
 export type UpdateCompensationComponentRequest = {
@@ -3292,6 +3496,7 @@ export type CompensationView = {
   componentKey: string;
   componentName: string;
   isTaxable: boolean;
+  componentType: CompensationComponentType;
   amount: number;
   effectiveFrom: string;
   /** null = this is the current amount for this component. */
@@ -3329,7 +3534,143 @@ export type EmployeeCompensationView = {
   employeeId: string;
   asOfDate: string;
   components: CompensationView[];
+  /** Sum of every `earning`-type component's amount. */
+  totalEarnings: number;
+  /** Sum of every `deduction`-type component's amount (a positive
+   * number — the amount subtracted, not already negated). */
+  totalDeductions: number;
+  /** `totalEarnings - totalDeductions` — kept for back-compat with
+   * callers from before Phase P3's deduction components existed, when
+   * this was simply the sum of every (then earnings-only) component. */
   totalMonthly: number;
+};
+
+/**
+ * Payroll Enterprise Gap Analysis Phase P3 — the SAP IT0045 equivalent:
+ * a loan or salary advance issued to an employee, recovered via a fixed
+ * per-period installment until paid off. Core-Employee-owned (same
+ * `employee.manage.all`/`employee.view` gate every other sub-entity
+ * uses); Payroll only ever reads it, exactly like recurring compensation.
+ */
+export type EmployeeLoanType = "loan" | "salary_advance";
+export type EmployeeLoanStatus = "active" | "closed" | "cancelled";
+
+export type EmployeeLoanView = {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  loanType: EmployeeLoanType;
+  reason: string | null;
+  principalAmount: number;
+  installmentAmount: number;
+  outstandingBalance: number;
+  status: EmployeeLoanStatus;
+  issuedDate: string;
+  createdByUserAccountId: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateEmployeeLoanRequest = {
+  employeeId: string;
+  loanType: EmployeeLoanType;
+  reason?: string;
+  principalAmount: number;
+  installmentAmount: number;
+  issuedDate: string;
+};
+
+export type CancelEmployeeLoanRequest = {
+  reason?: string;
+};
+
+/** One finalized payroll period's worth of installment actually
+ * deducted against a loan — the ledger `EmployeeLoanView.outstandingBalance`
+ * is derived from. */
+export type EmployeeLoanRepaymentView = {
+  id: string;
+  loanId: string;
+  payrollRunId: string;
+  payslipId: string;
+  amount: number;
+  createdAt: string;
+};
+
+/**
+ * Payroll Enterprise Gap Analysis Phase P3, Section 6 — the SAP IT0015
+ * equivalent: a one-time earning or deduction tied to a specific date,
+ * not a recurring component and not (yet — that's the IT0267-equivalent,
+ * Phase P4) tied to a specific off-cycle run. Core-Employee-owned, same
+ * reasoning as `EmployeeLoanView` above.
+ */
+export type AdditionalPaymentType = "earning" | "deduction";
+export type AdditionalPaymentStatus = "pending" | "consumed" | "cancelled";
+
+export type EmployeeAdditionalPaymentView = {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  paymentType: AdditionalPaymentType;
+  label: string;
+  amount: number;
+  isTaxable: boolean;
+  effectiveDate: string;
+  status: AdditionalPaymentStatus;
+  consumedPayrollRunId: string | null;
+  createdByUserAccountId: string;
+  createdAt: string;
+};
+
+export type CreateEmployeeAdditionalPaymentRequest = {
+  employeeId: string;
+  paymentType: AdditionalPaymentType;
+  label: string;
+  amount: number;
+  /** Defaults to true for an earning; forced false for a deduction
+   * (same "never presume a tax treatment" posture every other
+   * compensation type in this file takes). */
+  isTaxable?: boolean;
+  effectiveDate: string;
+};
+
+/**
+ * Payroll Enterprise Gap Analysis Phase P4 — the SAP IT0267 equivalent:
+ * `EmployeeAdditionalPaymentView`'s sibling for a one-time earning or
+ * deduction tied to a SPECIFIC off-cycle payroll run (`payrollRunId`,
+ * fixed at creation — unlike IT0015's date-range matching, there is no
+ * ambiguity about which run consumes it). Core-Employee-owned, same
+ * `employee.manage.all`/`employee.view` gate. This is how HR enters a
+ * bonus amount, an arrears figure, or a final-settlement line (gratuity,
+ * leave encashment — this platform does not compute either from a
+ * statutory formula; HR enters the amount they've already worked out,
+ * the same "don't presume a tax/statutory treatment absent an
+ * accountant's say" posture this file takes everywhere else) against the
+ * off-cycle run that will pay it.
+ */
+export type EmployeeOffCyclePaymentStatus = "pending" | "consumed" | "cancelled";
+
+export type EmployeeOffCyclePaymentView = {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  payrollRunId: string;
+  paymentType: AdditionalPaymentType;
+  label: string;
+  amount: number;
+  isTaxable: boolean;
+  status: EmployeeOffCyclePaymentStatus;
+  createdByUserAccountId: string;
+  createdAt: string;
+};
+
+export type CreateEmployeeOffCyclePaymentRequest = {
+  employeeId: string;
+  payrollRunId: string;
+  paymentType: AdditionalPaymentType;
+  label: string;
+  amount: number;
+  /** Defaults to true for an earning; forced false for a deduction. */
+  isTaxable?: boolean;
 };
 
 export type SocialSecurityScheme = "none" | "pessi" | "sessi";
@@ -3356,6 +3697,16 @@ export type PayrollSettingsView = {
   socialSecurityScheme: SocialSecurityScheme;
   socialSecurityEmployerRatePercent: number;
   socialSecurityWageCeiling: number | null;
+  /**
+   * The standard working month (in hours) used to turn a monthly
+   * compensation figure into an ordinary hourly rate — most directly,
+   * `OvertimeService.priceClaim()`'s overtime-amount divisor
+   * (see migration 0100_overtime_standard_monthly_hours.sql's header
+   * comment for why this lives here rather than on `overtime_policies`).
+   * Defaults to 208 (26 days x 8 hours) for every tenant until an admin
+   * configures a different value for their own working-week convention.
+   */
+  standardMonthlyHours: number;
   effectiveFrom: string;
   effectiveTo: string | null;
   updatedAt: string;
@@ -3368,6 +3719,8 @@ export type UpdatePayrollSettingsRequest = {
   socialSecurityScheme?: SocialSecurityScheme;
   socialSecurityEmployerRatePercent?: number;
   socialSecurityWageCeiling?: number | null;
+  /** Sanity-bounded 100-300; see `PayrollSettingsView.standardMonthlyHours`. */
+  standardMonthlyHours?: number;
 };
 
 // effectiveFrom/effectiveTo (0033_effective_dating_leave_tax.sql): every
@@ -3406,13 +3759,104 @@ export type SetTaxSlabsRequest = {
   }>;
 };
 
+// --- Payroll Formula Engine (0105_payroll_formulas.sql) -----------------
+// Tenant-configurable, effective-dated overrides for the three
+// already-parameterized payslip calculations. No override for a key (the
+// default for every tenant) means the built-in calculation, unchanged.
+
+export type PayrollFormulaKey = "income_tax" | "eobi_employee" | "eobi_employer";
+
+// The wire shape of FormulaExpressionEngine's grammar
+// (apps/api/src/payroll/formula-expression.engine.ts) — a narrow mirror
+// for API consumers, the same precedent `WorkScheduleRuleExpression`
+// set for the Rules Engine. Every node has exactly one operator key.
+export type PayrollFormulaExpression =
+  | { const: number }
+  | { var: string }
+  | { add: PayrollFormulaExpression[] }
+  | { subtract: PayrollFormulaExpression[] }
+  | { multiply: PayrollFormulaExpression[] }
+  | { divide: PayrollFormulaExpression[] }
+  | { min: PayrollFormulaExpression[] }
+  | { max: PayrollFormulaExpression[] }
+  | { round: { value: PayrollFormulaExpression; places: number } }
+  | { percentOf: { value: PayrollFormulaExpression; percent: PayrollFormulaExpression } };
+
+export type PayrollFormulaView = {
+  id: string;
+  companyId: string;
+  formulaKey: PayrollFormulaKey;
+  expression: PayrollFormulaExpression;
+  effectiveFrom: string;
+  /** null = currently open (applies to every run whose periodEnd is on/after effectiveFrom). */
+  effectiveTo: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** Starts an override for a key that has no currently-open one. `effectiveFrom` defaults to today. */
+export type CreatePayrollFormulaRequest = {
+  formulaKey: PayrollFormulaKey;
+  expression: PayrollFormulaExpression;
+  effectiveFrom?: string;
+};
+
+/** Supersedes the (open) override with a new expression from `effectiveFrom` (default today). Same-day = edited in place. */
+export type UpdatePayrollFormulaRequest = {
+  expression: PayrollFormulaExpression;
+  effectiveFrom?: string;
+};
+
+/** Closes the open override; runs whose periodEnd is after `effectiveTo` fall back to the built-in calculation. */
+export type EndDatePayrollFormulaRequest = {
+  effectiveTo: string;
+};
+
+/** One variable a formula key's expression may reference — the stable evaluation-context contract. */
+export type PayrollFormulaVariableView = {
+  name: string;
+  description: string;
+};
+
+export type PayrollFormulaContractView = {
+  formulaKey: PayrollFormulaKey;
+  description: string;
+  variables: PayrollFormulaVariableView[];
+};
+
 // Phase P2: pending_approval/approved are new — a run must be submitted
 // and approved before it can be finalized (PayrollService.finalizeRun()'s
 // own guard). A rejected run reverts to `calculated` rather than a
 // terminal `rejected` state — see 0093_payroll_approval_workflow.sql's
 // header comment for why this deliberately differs from
-// RequisitionStatus/leave request status.
-export type PayrollRunStatus = "draft" | "calculated" | "pending_approval" | "approved" | "finalized";
+// RequisitionStatus/leave request status. `reversed` (Phase P2,
+// 0094_payroll_correction_reversal_and_permission_split.sql) is the one
+// genuinely terminal state: a `finalized` run that's later found to be
+// wrong moves here permanently — its payslips are preserved as-is for the
+// record — and a brand new `draft` run opens for the same period via
+// `PayrollRunView.correctiveRunId`.
+export type PayrollRunStatus = "draft" | "calculated" | "pending_approval" | "approved" | "finalized" | "reversed";
+
+/**
+ * Payroll Enterprise Gap Analysis Phase P4 — `regular` is every run that
+ * existed before this phase (unchanged default/behavior). `off_cycle` is
+ * a bonus/arrears/final-settlement/other run: it skips the single-
+ * active-run-per-period uniqueness check entirely (see
+ * `payroll_runs_active_period_key`'s relaxed WHERE clause,
+ * 0113_payroll_off_cycle_runs.sql) so it can freely coexist with a
+ * regular run, or any number of other off-cycle runs, covering the exact
+ * same period.
+ */
+export type PayrollRunType = "regular" | "off_cycle";
+
+/** Required when `runType` is `off_cycle`, forbidden otherwise.
+ * `final_settlement` additionally requires `targetEmployeeId` (a single
+ * terminated employee — never a batch) and is the only reason that
+ * forces income tax to a full year-to-date true-up
+ * (`PayrollService.calculateOnePayslip()`'s own `isFinalSettlement`
+ * option) and pays off every active loan's FULL outstanding balance
+ * rather than one installment. */
+export type OffCycleReason = "bonus" | "arrears" | "final_settlement" | "other";
 
 export type PayrollRunView = {
   id: string;
@@ -3420,16 +3864,118 @@ export type PayrollRunView = {
   periodStart: string;
   periodEnd: string;
   status: PayrollRunStatus;
+  /** Phase P4. `regular` for every run created before this phase. */
+  runType: PayrollRunType;
+  /** Set iff `runType` is `off_cycle`. */
+  offCycleReason: OffCycleReason | null;
+  /** Set iff this off-cycle run targets exactly one employee (always set
+   * for `final_settlement`; optional for a single-employee bonus/arrears
+   * run; null for a batch bonus/arrears run across many employees). */
+  targetEmployeeId: string | null;
   workflowInstanceId: string | null;
   createdByUserAccountId: string;
   finalizedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Phase P2 follow-up (kumail's own production feedback, 2026-09-28):
+   * an approver deciding a `pending_approval` run needs to see what
+   * they're being asked to sign off on WITHOUT first drilling into every
+   * individual payslip — a live test caught that the original UI let a
+   * Payroll Approver click Approve with zero numbers on screen at all.
+   * `payslipCount`/`totalGrossPay`/`totalNetPay` are always present
+   * (0 for a run with no payslips yet, e.g. right after `createRun()`),
+   * computed fresh from `payslips` on every read — never stored on
+   * `payroll_runs` itself, so they can never drift from the actual rows. */
+  payslipCount: number;
+  totalGrossPay: number;
+  totalNetPay: number;
+  /** Correction/Reversal (Phase P2). All four are null until
+   * `PayrollService.reverseRun()` moves this run to `reversed` — at that
+   * point they're set once and never change again, and `correctiveRunId`
+   * points at the brand new `draft` run opened for the same period. */
+  reversedAt: string | null;
+  reversedByUserAccountId: string | null;
+  reversalReason: string | null;
+  correctiveRunId: string | null;
+  /** Payroll Areas (0101_payroll_areas.sql). `null` = a company-wide run
+   * (every run created before Payroll Areas existed, and still the
+   * default); otherwise only that area's employees are calculated, and a
+   * caller holding only `payroll.*.scoped` can act on it iff the area is
+   * inside their data scope. */
+  payrollAreaId: string | null;
 };
 
 export type CreatePayrollRunRequest = {
   periodStart: string;
   periodEnd: string;
+  /** Omit/null for a company-wide run (requires `payroll.calculate.all`). */
+  payrollAreaId?: string | null;
+  /** Phase P4. Omit for a `regular` run (unchanged default behavior). */
+  runType?: PayrollRunType;
+  /** Required iff `runType` is `off_cycle`; forbidden otherwise. */
+  offCycleReason?: OffCycleReason;
+  /** Required for `final_settlement`; optional single-employee scoping
+   * for `bonus`/`arrears`/`other`; forbidden for a `regular` run. */
+  targetEmployeeId?: string;
+};
+
+// --- Payroll Areas (0101_payroll_areas.sql) -----------------------------
+// The SAP HCM "Payroll Area" equivalent: a named grouping of employees
+// processed together in one payroll run ("Karachi Monthly", "Lahore
+// Weekly"). Its scope links (same shape as `DataScopeAssignmentView`) are
+// what let a `payroll.*.scoped` holder's own data_scope_assignments
+// resolve to "which payroll areas can this user touch".
+
+export type PayrollAreaScopeLinkView = {
+  id: string;
+  payrollAreaId: string;
+  scopeType: DataScopeType;
+  scopeEntityId: string;
+  createdAt: string;
+};
+
+export type PayrollAreaView = {
+  id: string;
+  companyId: string;
+  code: string;
+  name: string;
+  description: string | null;
+  isActive: boolean;
+  /** How many employees currently carry this area as `employees.payroll_area_id`. */
+  employeeCount: number;
+  scopeLinks: PayrollAreaScopeLinkView[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreatePayrollAreaRequest = {
+  code: string;
+  name: string;
+  description?: string | null;
+};
+
+export type UpdatePayrollAreaRequest = {
+  name?: string;
+  description?: string | null;
+  isActive?: boolean;
+};
+
+export type AddPayrollAreaScopeLinkRequest = {
+  scopeType: DataScopeType;
+  scopeEntityId: string;
+};
+
+/** `payrollAreaId: null` removes the employee from any payroll area. */
+export type AssignEmployeePayrollAreaRequest = {
+  employeeId: string;
+  payrollAreaId: string | null;
+};
+
+/** `PayrollService.reverseRun()`'s request body — a reason is mandatory
+ * (Section 36's "capture reason" requirement), never optional the way an
+ * approval decision's `comment` is. */
+export type ReversePayrollRunRequest = {
+  reason: string;
 };
 
 /** One ordered entry in a payslip's `calculationBreakdown` — the direct
@@ -3472,6 +4018,26 @@ export type PayslipView = {
   socialSecurityEmployerContribution: number;
   netPay: number;
   calculationBreakdown: PayrollCalculationStep[];
+  /** Phase P3 (0112_loans_advances_additional_payments.sql) — structured
+   * preview of which loan(s) this payslip's net pay deducted an
+   * installment for, written at calculate() time and read back by
+   * `PayrollService.finalizeRun()` to commit the matching
+   * `employee_loan_repayments` ledger row. Empty for every payslip
+   * calculated before this phase, or with no active loan. */
+  loanDeductions: Array<{ loanId: string; amount: number }>;
+  /** Same preview/commit pattern as `loanDeductions`, for the one-time
+   * Additional Payments (IT0015 equivalent) this payslip's period window
+   * covered. */
+  consumedAdditionalPayments: Array<{ additionalPaymentId: string; amount: number }>;
+  /** Phase P4 (0113_payroll_off_cycle_runs.sql) — same preview/commit
+   * pattern, for the IT0267-equivalent Additional Off-Cycle Payments
+   * entered against THIS SPECIFIC payroll run (`EmployeeOffCyclePaymentView`,
+   * run-id-scoped at creation, unlike the date-range-matched IT0015
+   * entity above). Populated for both off-cycle payslips
+   * (`PayrollService.calculateOffCyclePayslip()`) and a `final_settlement`
+   * payslip (`calculateOnePayslip()`'s own `offCycleRunId` option) —
+   * empty for every regular-run payslip. */
+  consumedOffCyclePayments: Array<{ offCyclePaymentId: string; amount: number }>;
   createdAt: string;
   updatedAt: string;
 };
@@ -4148,8 +4714,11 @@ export type EmployeeOrgAssignmentVersionView = {
  * employee should have at most one open of at a time (DB-enforced),
  * synced point-in-time onto `employees.managerId` on every write (see
  * `EmployeeView.managerId`'s own doc comment). The other four may coexist,
- * any number at once, alongside a `direct` relationship or each other. */
-export type OrgRelationshipType = "direct" | "dotted_line" | "matrix" | "temporary" | "acting";
+ * any number at once, alongside a `direct` relationship or each other.
+ * `secondment` (0103_org_relationship_secondment_type.sql) is the host-side
+ * manager of a secondment (`EmployeeLifecycleService.second()`), which
+ * until then had to reuse `temporary`. */
+export type OrgRelationshipType = "direct" | "dotted_line" | "matrix" | "temporary" | "acting" | "secondment";
 
 export type OrgRelationshipStatus = "active" | "ended";
 
@@ -4202,7 +4771,7 @@ export type OrgRelationshipStatus = "active" | "ended";
  * Payroll's cost data, which is its own, separately-scoped feature, not a
  * field this pass adds.
  *
- * `RL-` (Reporting Line) codes cover the five `OrgRelationshipType`
+ * `RL-` (Reporting Line) codes cover the six `OrgRelationshipType`
  * values `OrgRelationshipsService` already models. Numbered in tens
  * (100, 110, 120, ...) rather than consecutively so a sixth type (the
  * master engineering instruction's own "functional manager"/"delegate"/
@@ -4231,6 +4800,7 @@ export const ORG_REPORTING_RELATIONSHIP_CODES: Record<OrgRelationshipType, { cod
   matrix: { code: "RL-120", label: "Matrix Manager" },
   temporary: { code: "RL-130", label: "Temporary Manager" },
   acting: { code: "RL-140", label: "Acting Manager" },
+  secondment: { code: "RL-150", label: "Secondment Host Manager" },
 };
 
 export type OrgRelationshipView = {
@@ -4238,7 +4808,7 @@ export type OrgRelationshipView = {
   companyId: string;
   /** The report. */
   employeeId: string;
-  /** The manager (or dotted-line/matrix/temporary/acting counterpart). */
+  /** The manager (or dotted-line/matrix/temporary/acting/secondment counterpart). */
   managerEmployeeId: string;
   relationshipType: OrgRelationshipType;
   status: OrgRelationshipStatus;
@@ -4450,6 +5020,17 @@ export type OrgChangeStatus =
 
 export type OrgChangeItemAction = "move" | "rename" | "retype" | "archive" | "activate";
 
+/**
+ * Cross-module integration audit Item 7 (2026-10-01) — what an `archive`
+ * item does about FILLED positions still inside the unit it archives
+ * (0098_org_change_item_position_cascade.sql). `require_vacant` (default):
+ * a blocking validation error, re-checked at execution. `auto_unassign`:
+ * execution vacates those positions (never abolishes them) and ends every
+ * open assignment slot pointing at the unit, in the same transaction,
+ * audited as `source: org_change:<id>`. No effect on other actions.
+ */
+export type OrgChangeCascadeAction = "require_vacant" | "auto_unassign";
+
 export type OrgChangeItemView = {
   id: string;
   orgChangeId: string;
@@ -4459,6 +5040,7 @@ export type OrgChangeItemView = {
   newParentId: string | null;
   newName: string | null;
   newUnitType: string | null;
+  cascadeAction: OrgChangeCascadeAction;
   appliedAt: string | null;
   createdAt: string;
 };
@@ -4479,6 +5061,14 @@ export type OrgChangeImpactSummary = {
    */
   affectedReportingRelationshipCount: number;
   affectedFinancialCenterCount: number;
+  /**
+   * Cross-module integration audit Item 7 (2026-10-01) — FILLED positions
+   * sitting directly in a unit this change ARCHIVES: either blocking
+   * (`require_vacant` items) or about to be vacated (`auto_unassign`).
+   * Optional so impact summaries stored before this field existed still
+   * type-check.
+   */
+  filledPositionsInArchivedUnitsCount?: number;
   warnings: string[];
 };
 
@@ -4509,6 +5099,8 @@ export type CreateOrgChangeItemRequest = {
   newParentId?: string;
   newName?: string;
   newUnitType?: string;
+  /** Defaults to `require_vacant` — see OrgChangeCascadeAction. */
+  cascadeAction?: OrgChangeCascadeAction;
 };
 
 export type CreateOrgChangeRequest = {

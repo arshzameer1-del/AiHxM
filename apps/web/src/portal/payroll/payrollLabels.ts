@@ -15,6 +15,11 @@ export const RUN_STATUS_LABELS: Record<PayrollRunStatus, string> = {
   pending_approval: "Pending approval",
   approved: "Approved",
   finalized: "Finalized",
+  // Phase P2 (Correction/Reversal) — the one genuinely terminal state, set
+  // by PayrollService.reverseRun(). Unlike a rejection at pending_approval
+  // (which reverts in place to `calculated`), a reversed run stays
+  // reversed forever; a fresh `draft` run opens for the same period.
+  reversed: "Reversed",
 };
 
 /** Mirrors LeavePage's STATUS_STYLES pattern. Phase P2 widened the
@@ -22,11 +27,14 @@ export const RUN_STATUS_LABELS: Record<PayrollRunStatus, string> = {
  * finalized (PayrollService.finalizeRun's own guard) — a rejection at
  * pending_approval reverts to `calculated` rather than a terminal state
  * (see 0093_payroll_approval_workflow.sql), so there's no "rejected" style
- * here the way RequisitionStatus/leave request status need one. */
+ * here the way RequisitionStatus/leave request status need one.
+ * `reversed` reuses the same red style every other module's terminal
+ * "didn't go through" status already uses (leaveLabels/requisitionLabels). */
 export const RUN_STATUS_STYLES: Record<PayrollRunStatus, string> = {
   draft: "bg-black/5 text-label-tertiary",
   calculated: "bg-amber-100 text-amber-800",
   pending_approval: "bg-amber-100 text-amber-800",
   approved: "bg-blue-100 text-blue-800",
   finalized: "bg-success/15 text-green-700",
+  reversed: "bg-danger/15 text-red-700",
 };

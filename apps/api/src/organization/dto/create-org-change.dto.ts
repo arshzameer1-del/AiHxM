@@ -12,6 +12,7 @@ import {
 } from "class-validator";
 
 const ITEM_ACTIONS = ["move", "rename", "retype", "archive", "activate"] as const;
+const CASCADE_ACTIONS = ["require_vacant", "auto_unassign"] as const;
 
 /**
  * One proposed mutation within a reorg batch — see
@@ -44,6 +45,13 @@ export class OrgChangeItemDto {
   @IsString()
   @MinLength(1)
   newUnitType?: string;
+
+  // Cross-module integration audit Item 7 (2026-10-01) — see
+  // OrgChangeCascadeAction in shared-types. Optional; omitted means the
+  // safe, blocking `require_vacant`.
+  @IsOptional()
+  @IsIn(CASCADE_ACTIONS)
+  cascadeAction?: (typeof CASCADE_ACTIONS)[number];
 }
 
 export class CreateOrgChangeDto {

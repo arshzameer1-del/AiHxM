@@ -88,12 +88,33 @@ function rowToLeaveRequest(row: any, employeeUserAccountId: string | null): Leav
   };
 }
 
-function inclusiveDayCount(startDate: string, endDate: string): number {
-  // Calendar days, inclusive of both ends.
-  const start = Date.UTC(...(startDate.split("-").map(Number) as [number, number, number]));
-  const end = Date.UTC(...(endDate.split("-").map(Number) as [number, number, number]));
+/**
+ * Calendar days, inclusive of both ends. Exported (2026-10-01, integration
+ * gap audit item 6) as the ONE copy of this arithmetic: PayrollService
+ * used to carry its own hand-copied duplicate (it wasn't exported), and
+ * now imports this one instead — a day Leave counts is, by construction,
+ * the same day Payroll counts.
+ *
+ * `Date.UTC(year, monthIndex, day)` takes a 0-indexed month, so the
+ * 1-indexed ISO calendar month is adjusted before being passed in. This
+ * copy previously passed the raw month (Payroll's duplicate had already
+ * fixed it for itself, see its git history), which silently corrupted any
+ * span crossing a month boundary; that was latent here only because
+ * nothing in this file called the helper any more once countLeaveDays()
+ * replaced it. Fixed as part of making it the shared copy.
+ */
+export function inclusiveDayCount(startDate: string, endDate: string): number {
+  const [startYear, startMonth, startDay] = startDate.split("-").map(Number);
+  const [endYear, endMonth, endDay] = endDate.split("-").map(Number);
+  const start = Date.UTC(startYear, startMonth - 1, startDay);
+  const end = Date.UTC(endYear, endMonth - 1, endDay);
   return Math.round((end - start) / (24 * 60 * 60 * 1000)) + 1;
 }
+
+/** One approved unpaid-leave request's overlap with a queried date range
+ * (already clipped to that range), as Payroll consumes it — see
+ * `LeaveRequestsService.getApprovedUnpaidLeaveDaysInRange()`. */
+export type UnpaidLeaveSegment = { startDate: string; endDate: string; days: number };
 
 function addOneDayIso(dateIso: string): string {
   const [y, m, d] = dateIso.split("-").map(Number) as [number, number, number];
@@ -502,6 +523,55 @@ export class LeaveRequestsService {
       }
       return balances;
     });
+  }
+
+  /**
+   * Cross-module entry point for Payroll (integration gap audit item 6,
+   * 2026-10-01): every APPROVED `unpaid` leave request overlapping
+   * [rangeStart, rangeEnd] (both inclusive), each clipped to that range
+   * and counted in CALENDAR days via this file's own `inclusiveDayCount`.
+   * Replaces the raw `SELECT ... FROM leave_requests` PayrollService used
+   * to run itself — Payroll now asks the module that owns leave_requests
+   * rather than re-deriving its data by hand.
+   *
+   * Calendar days, deliberately — NOT `countLeaveDays()`'s
+   * schedule/holiday-aware count stored in `days_requested`: this method
+   * preserves Payroll's long-standing (Decision #14) unpaid-leave
+   * deduction semantics exactly, which prorate against calendar days in
+   * the period. The per-segment start/end dates are returned too so a
+   * caller prorating against a WORKING-day denominator instead (Payroll's
+   * schedule-aware path, for an employee with an explicit work schedule
+   * assignment) can count working days inside each segment itself
+   * against the same schedule resolution it already performed.
+   *
+   * Takes the caller's already-open, already-RLS-scoped `client` and does
+   * no authorization of its own — the same cross-service shape
+   * `WorkScheduleResolutionService.resolve()` uses; Payroll authorizes
+   * its own caller (`payroll.calculate.all`) before reaching this.
+   */
+  async getApprovedUnpaidLeaveDaysInRange(
+    client: PoolClient,
+    employeeId: string,
+    rangeStart: string,
+    rangeEnd: string
+  ): Promise<{ totalDays: number; segments: UnpaidLeaveSegment[] }> {
+    const result = await client.query(
+      `SELECT start_date, end_date FROM leave_requests
+       WHERE employee_id = $1 AND leave_type = 'unpaid' AND status = 'approved'
+         AND start_date <= $3 AND end_date >= $2
+       ORDER BY start_date ASC`,
+      [employeeId, rangeStart, rangeEnd]
+    );
+    const segments: UnpaidLeaveSegment[] = [];
+    for (const leave of result.rows) {
+      const leaveStart = toIsoDate(leave.start_date);
+      const leaveEnd = toIsoDate(leave.end_date);
+      const startDate = leaveStart > rangeStart ? leaveStart : rangeStart;
+      const endDate = leaveEnd < rangeEnd ? leaveEnd : rangeEnd;
+      if (endDate < startDate) continue;
+      segments.push({ startDate, endDate, days: inclusiveDayCount(startDate, endDate) });
+    }
+    return { totalDays: segments.reduce((sum, s) => sum + s.days, 0), segments };
   }
 
   // -----------------------------------------------------------------

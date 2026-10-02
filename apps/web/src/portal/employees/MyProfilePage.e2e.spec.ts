@@ -1,4 +1,5 @@
 import { test, expect, Page } from "@playwright/test";
+import { getSharedSession, loginToApp } from "../../e2e-support/real-session";
 
 /**
  * My Profile E2E Tests (Self-Service Portal)
@@ -23,31 +24,26 @@ import { test, expect, Page } from "@playwright/test";
 const PORTAL_URL = "http://localhost:5173/app";
 
 async function loginAsEmployee(page: Page) {
-  await page.evaluate(() => {
-    localStorage.setItem("authToken", "test-employee-token");
-    localStorage.setItem(
-      "identity",
-      JSON.stringify({
-        sub: "employee-123",
-        is_platform_admin: false,
-        company_id: "test-company",
-        roleKeys: ["employee_self_service"],
-      })
-    );
-  });
-
-  await page.goto("/app");
-  await page.waitForSelector("nav", { timeout: 5000 });
+  // Real-session fix (2026-10-01): this used to write a fake
+  // "test-employee-token" string to a localStorage key ("authToken")
+  // nothing in the app reads — see real-session.ts's header comment for
+  // the full writeup of why that never actually logged anyone in. Now a
+  // genuinely signed-up employee_self_service session, shared across the
+  // whole e2e run via global-setup.ts.
+  await loginToApp(page, getSharedSession("employee_self_service"));
 }
 
 test.describe("My Profile Portal (Self-Service)", () => {
   test("Employee can access My Profile page", async ({ page }) => {
     await loginAsEmployee(page);
 
-    // Navigate to profile
+    // Navigate to profile. `/profile|me|my/i` as a substring match was a
+    // strict-mode trap: "Home" and "Assignments" both contain "me" (hoME,
+    // assignMEnts), so three nav links matched instead of one. The real
+    // nav label is "My Profile" — match on the word, anchored.
     const profileLink = page
       .locator("nav a, [aria-label*='Profile']")
-      .filter({ hasText: /profile|me|my/i });
+      .filter({ hasText: /my profile/i });
 
     if (await profileLink.isVisible()) {
       await profileLink.click();
@@ -56,11 +52,12 @@ test.describe("My Profile Portal (Self-Service)", () => {
       await page.goto("/app/profile");
     }
 
-    // Expect profile page to load
-    const profileHeading = page
-      .locator("h1, h2")
-      .filter({ hasText: /profile|my profile/i });
-    await expect(profileHeading).toBeVisible();
+    // Expect profile page to load. MyProfilePage.tsx's own h1 is the
+    // employee's name ("E2E employee self service"), not the word
+    // "profile" — see EmployeeListPage.e2e.spec.ts's identical note. The
+    // URL plus "any h1 rendered" is what's actually stable here.
+    await expect(page).toHaveURL(/\/app\/profile/);
+    await expect(page.locator("h1").first()).toBeVisible();
   });
 
   test("Employee can view personal information", async ({ page }) => {
@@ -318,6 +315,10 @@ test.describe("My Profile Portal (Self-Service)", () => {
   test("Profile has accessibility features", async ({ page }) => {
     await loginAsEmployee(page);
     await page.goto("/app/profile");
+    // The page's own data fetch (the employee's own record) resolves
+    // after `goto()` does — wait for the real content to actually land
+    // rather than counting headings against a still-loading page.
+    await page.waitForSelector("h1", { timeout: 10000 });
 
     // Verify proper heading hierarchy
     const headings = page.locator("h1, h2, h3");

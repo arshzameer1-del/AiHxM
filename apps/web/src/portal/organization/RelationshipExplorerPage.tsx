@@ -9,6 +9,7 @@ const TYPE_LABELS: Record<OrgRelationshipType, string> = {
   matrix: "Matrix",
   temporary: "Temporary",
   acting: "Acting",
+  secondment: "Secondment",
 };
 const RELATIONSHIP_TYPES = Object.keys(TYPE_LABELS) as OrgRelationshipType[];
 
@@ -190,7 +191,7 @@ function RelationshipRow({
  * Organization Management, Phase 3 — the Relationship Explorer: pick an
  * employee, see who they report to (every typed relationship where they
  * are the report — one open `direct`, plus any concurrently-open
- * dotted_line/matrix/temporary/acting ones), create a new one, and end an
+ * dotted_line/matrix/temporary/acting/secondment ones), create a new one, and end an
  * existing one. A simple list, not an org-chart visualization — the master
  * instruction's own Section 12 calls for the typed relationship data to
  * exist and be manageable; a graphical chart is explicitly named as a
@@ -250,7 +251,7 @@ export function RelationshipExplorerPage() {
           <h1 className="text-2xl font-bold tracking-tight">Relationship Explorer</h1>
           <p className="text-sm text-label-tertiary mt-1">
             Who an employee reports to — one direct (solid-line) manager at a time, plus any dotted-line, matrix,
-            temporary, or acting relationships alongside it.
+            temporary, acting, or secondment relationships alongside it.
           </p>
         </div>
       </div>

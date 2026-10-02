@@ -172,6 +172,113 @@ export const HR_CATALOG_REGISTRY: HrCatalogTypeDefinition[] = [
     description: "Reasons recorded when an employee returns from an extended leave or a terminated employee is reactivated.",
     wiredInto: "Employee Profile → Lifecycle Actions → Reactivate.",
   },
+
+  // --- 6.3 Personal & Reference Catalogs (gap-table item #7, 2026-10-01) ---
+  // Six of the seven below already have a real, exposed data field —
+  // each previously a hardcoded CHECK constraint or unconstrained free
+  // text, both replaced by application-level validation against this
+  // registry this same phase (0106_hr_administration_personal_reference_catalogs.sql's
+  // own header comment has the full per-catalog mapping).
+  {
+    catalogType: "family_relationship_type",
+    groupLabel: "Personal & Reference Catalogs",
+    label: "Family Relationship Types",
+    description: "The relationships available when recording an employee's family members / dependents (spouse, child, parent, etc.).",
+    wiredInto: "Employee Profile → Family & Education, and the Hiring Wizard's Family/Dependents card.",
+  },
+  {
+    catalogType: "marital_status",
+    groupLabel: "Personal & Reference Catalogs",
+    label: "Marital Status",
+    description: "The marital status values available for an employee's personal record.",
+    wiredInto: "Hiring Wizard's Personal Identity card.",
+  },
+  {
+    catalogType: "qualification_type",
+    groupLabel: "Personal & Reference Catalogs",
+    label: "Qualification Types",
+    description: "The categories available when recording an employee's qualifications/skills (certificate, license, skill, etc.).",
+    wiredInto: "Employee Profile → Family & Education, and the Hiring Wizard's Qualifications/Skills card.",
+  },
+  {
+    catalogType: "address_type",
+    groupLabel: "Personal & Reference Catalogs",
+    label: "Address Types",
+    description: "The address types available on an employee's record (permanent, current, mailing).",
+    wiredInto: "Employee Profile → Contact & Address, and the Hiring Wizard's Addresses card.",
+  },
+  {
+    catalogType: "contact_type",
+    groupLabel: "Personal & Reference Catalogs",
+    label: "Contact Types",
+    description: "The contact method types available on an employee's record (business email, personal phone, emergency contact, etc.).",
+    wiredInto: "Employee Profile → Contact & Address, and the Hiring Wizard's Contact card.",
+  },
+  {
+    catalogType: "document_type",
+    groupLabel: "Personal & Reference Catalogs",
+    label: "Document Types",
+    description: "The document types available when uploading a file to an employee's document vault (CNIC, passport, degree certificate, etc.).",
+    wiredInto: "Employee document upload (POST /employees/:id/documents).",
+  },
+  // The following are registered and seeded so an hr_admin can already
+  // see and manage them here, but — like several of this file's own
+  // `lifecycle_reason:*` entries above — none has a consuming field yet.
+  // `nationality` is the nearest exception: the column exists
+  // (persons.nationality, 0081_person_identity.sql) but no UI or API path
+  // writes it today (persons.service.ts's own doc comment: no Person
+  // UI/API surface exists yet). Honestly labeled rather than implying any
+  // of these already govern real data — wiring each to a real field is
+  // separately-scoped follow-up work.
+  {
+    catalogType: "nationality",
+    groupLabel: "Personal & Reference Catalogs",
+    label: "Nationality",
+    description: "The nationality values available for an employee's personal record.",
+    wiredInto: "Not yet consumed by any field — persons.nationality exists in the schema but has no UI/API write path yet. Seeded and editable, ready for future wiring.",
+  },
+  {
+    catalogType: "language",
+    groupLabel: "Personal & Reference Catalogs",
+    label: "Language",
+    description: "The spoken/primary language values available for an employee's personal record.",
+    wiredInto: "Not yet consumed by any field — seeded and editable, ready for future wiring.",
+  },
+  {
+    catalogType: "education_level",
+    groupLabel: "Personal & Reference Catalogs",
+    label: "Education Levels",
+    description: "The education level values available on an employee's education entries (matriculation, bachelors, masters, etc.).",
+    wiredInto: "Not yet consumed by any field — seeded and editable, ready for future wiring into the Education card.",
+  },
+  {
+    catalogType: "institution_type",
+    groupLabel: "Personal & Reference Catalogs",
+    label: "Institution Types",
+    description: "The institution type values available on an employee's education entries (university, college, vocational institute, etc.).",
+    wiredInto: "Not yet consumed by any field — seeded and editable, ready for future wiring into the Education card.",
+  },
+  {
+    catalogType: "certification_type",
+    groupLabel: "Personal & Reference Catalogs",
+    label: "Certification Types",
+    description: "A finer classification of certificate-type qualifications (professional, vendor, compliance/regulatory, etc.).",
+    wiredInto: "Not yet consumed by any field — seeded and editable, ready for future wiring into the Qualifications/Skills card.",
+  },
+  {
+    catalogType: "document_category",
+    groupLabel: "Personal & Reference Catalogs",
+    label: "Document Categories",
+    description: "A grouping of document types for the employee document vault (identity, educational, employment, financial, etc.).",
+    wiredInto: "Not yet consumed by any field — seeded and editable, ready for future wiring into the document vault.",
+  },
+  {
+    catalogType: "id_document_type",
+    groupLabel: "Personal & Reference Catalogs",
+    label: "ID Document Types",
+    description: "The government identity document types a person's primary identifier can be (CNIC, NICOP, Passport, B-Form).",
+    wiredInto: "Not yet consumed by any field — seeded and editable, ready for future wiring onto the Person record.",
+  },
 ];
 
 const REGISTRY_BY_TYPE = new Map(HR_CATALOG_REGISTRY.map((entry) => [entry.catalogType, entry]));

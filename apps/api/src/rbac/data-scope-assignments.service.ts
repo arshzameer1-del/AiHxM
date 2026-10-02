@@ -12,7 +12,13 @@ import type { AssignDataScopeRequest, DataScopeAssignmentView, DataScopeType } f
 // lookup map feeding a template-interpolated table name into raw SQL)
 // keeps every query string here a fixed literal, matching how every other
 // service in this codebase writes its `mustExistX()` checks.
-async function scopeEntityExists(
+//
+// Exported (Payroll Areas, 0101_payroll_areas.sql) so
+// PayrollAreasService.addScopeLink() validates its own
+// `payroll_area_scope_links` rows — the same polymorphic scope_type/
+// scope_entity_id shape as this table — with exactly this check rather
+// than a second copy of it.
+export async function scopeEntityExists(
   client: PoolClient,
   scopeType: DataScopeType,
   scopeEntityId: string,

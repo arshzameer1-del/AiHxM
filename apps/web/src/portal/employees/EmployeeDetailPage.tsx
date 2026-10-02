@@ -5,6 +5,7 @@ import type {
   EmployeeView,
   EmploymentStatus,
   EmploymentType,
+  HrReferenceCatalogItemView,
   JobHistoryEntryView,
   TenantRoleKey,
 } from "@aihxm/shared-types";
@@ -15,6 +16,8 @@ import { OnboardingOffboardingSection } from "../onboarding-offboarding/Onboardi
 import { LifecycleActionsPanel } from "./LifecycleActionsPanel";
 import { EmployeeCustomFieldsPanel } from "./EmployeeCustomFieldsPanel";
 import { EmployeeCompensationPanel } from "./EmployeeCompensationPanel";
+import { EmployeeLoansPanel } from "./EmployeeLoansPanel";
+import { EmployeeAdditionalPaymentsPanel } from "./EmployeeAdditionalPaymentsPanel";
 import { SubEntityPanel } from "./subentities/SubEntityPanel";
 import {
   addressesConfig,
@@ -57,6 +60,14 @@ export function EmployeeDetailPage() {
   const [employee, setEmployee] = useState<EmployeeView | null>(null);
   const [jobHistory, setJobHistory] = useState<JobHistoryEntryView[] | null>(null);
   const [costCenters, setCostCenters] = useState<CostCenterView[]>([]);
+  // HR Administration v2 "then 2" Phase 1 (2026-10-01) — same catalog-
+  // with-hardcoded-fallback treatment `costCenterOptions` below already
+  // established, for the 4 personal/reference catalogs this phase wires
+  // into these sub-entity panels.
+  const [contactTypes, setContactTypes] = useState<HrReferenceCatalogItemView[]>([]);
+  const [addressTypes, setAddressTypes] = useState<HrReferenceCatalogItemView[]>([]);
+  const [relationshipTypes, setRelationshipTypes] = useState<HrReferenceCatalogItemView[]>([]);
+  const [qualificationTypes, setQualificationTypes] = useState<HrReferenceCatalogItemView[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [tab, setTab] = useState<Tab>("Overview");
@@ -78,6 +89,10 @@ export function EmployeeDetailPage() {
     setEditing(false);
     setTab("Overview");
     api.listCostCenters().then(setCostCenters).catch(() => setCostCenters([]));
+    api.listHrCatalogItems("contact_type").then(setContactTypes).catch(() => setContactTypes([]));
+    api.listHrCatalogItems("address_type").then(setAddressTypes).catch(() => setAddressTypes([]));
+    api.listHrCatalogItems("family_relationship_type").then(setRelationshipTypes).catch(() => setRelationshipTypes([]));
+    api.listHrCatalogItems("qualification_type").then(setQualificationTypes).catch(() => setQualificationTypes([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
@@ -85,6 +100,10 @@ export function EmployeeDetailPage() {
   if (!employee) return <div className="text-label-tertiary text-sm">Loading…</div>;
 
   const costCenterOptions = costCenters.map((c) => ({ value: c.id, label: c.name }));
+  const contactTypeOptions = contactTypes.map((t) => ({ value: t.code, label: t.label }));
+  const addressTypeOptions = addressTypes.map((t) => ({ value: t.code, label: t.label }));
+  const relationshipOptions = relationshipTypes.map((t) => ({ value: t.code, label: t.label }));
+  const qualificationTypeOptions = qualificationTypes.map((t) => ({ value: t.code, label: t.label }));
 
   return (
     <div className="max-w-2xl">
@@ -188,17 +207,17 @@ export function EmployeeDetailPage() {
       {/* Core Employee Enterprise Phase 6 — Contact and Address cards' own CRUD surface, outside the hiring flow. */}
       {tab === "Contact & Address" && (
         <>
-          <SubEntityPanel employeeId={employee.id} canManage={canManage} config={contactsConfig} />
-          <SubEntityPanel employeeId={employee.id} canManage={canManage} config={addressesConfig} />
+          <SubEntityPanel employeeId={employee.id} canManage={canManage} config={contactsConfig(contactTypeOptions)} />
+          <SubEntityPanel employeeId={employee.id} canManage={canManage} config={addressesConfig(addressTypeOptions)} />
         </>
       )}
 
       {/* Core Employee Enterprise Phase 9 — Family, Education and Qualifications cards. */}
       {tab === "Family & Education" && (
         <>
-          <SubEntityPanel employeeId={employee.id} canManage={canManage} config={familyMembersConfig} />
+          <SubEntityPanel employeeId={employee.id} canManage={canManage} config={familyMembersConfig(relationshipOptions)} />
           <SubEntityPanel employeeId={employee.id} canManage={canManage} config={educationConfig} />
-          <SubEntityPanel employeeId={employee.id} canManage={canManage} config={qualificationsConfig} />
+          <SubEntityPanel employeeId={employee.id} canManage={canManage} config={qualificationsConfig(qualificationTypeOptions)} />
         </>
       )}
 
@@ -210,6 +229,12 @@ export function EmployeeDetailPage() {
       {tab === "Compensation & Assets" && (
         <>
           <EmployeeCompensationPanel employeeId={employee.id} canManage={canManage} />
+          {/* Payroll Enterprise Gap Analysis Phase P3 (2026-10-02) — Loans/
+              Salary Advances (IT0045) and Additional Payments (IT0015),
+              Core-Employee-owned the same way Compensation is (see each
+              panel's own doc comment). */}
+          <EmployeeLoansPanel employeeId={employee.id} canManage={canManage} />
+          <EmployeeAdditionalPaymentsPanel employeeId={employee.id} canManage={canManage} />
           <SubEntityPanel employeeId={employee.id} canManage={canManage} config={paymentAccountsConfig} />
           <SubEntityPanel employeeId={employee.id} canManage={canManage} config={costAllocationsConfig(costCenterOptions)} />
           <SubEntityPanel employeeId={employee.id} canManage={canManage} config={assetsConfig} />

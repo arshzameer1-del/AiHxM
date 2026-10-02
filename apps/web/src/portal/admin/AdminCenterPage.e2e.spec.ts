@@ -1,350 +1,177 @@
 import { test, expect, Page } from "@playwright/test";
+import { getSharedSession, loginToApp } from "../../e2e-support/real-session";
 
 /**
- * Admin Center E2E Tests (Task #52)
+ * Admin Center E2E Tests (Task #49)
  *
- * Tests HR administration workflows:
- * - Employee group creation and membership management
- * - Leave policy configuration
- * - Workflow template management
- * - Role and permission assignment
+ * Real-session fix (2026-10-01): this file's own `loginAsHrAdmin` wrote a
+ * fake "test-token" to the wrong localStorage key ("authToken" instead of
+ * `api/client.ts`'s real `aihxm.platformAdminToken`) and never navigated
+ * to `/app` afterward — see `real-session.ts`'s header comment for the
+ * full writeup of why neither bug alone nor both together ever actually
+ * logged anyone in. Every test here either asserted against the
+ * unauthenticated `/login` redirect or silently no-op'd through an
+ * `if (await x.isVisible())` guard.
  *
- * Role tested:
- * - hr_admin: Full access to all admin center features
- *
- * Prerequisites:
- * - Backend API running on http://localhost:3000
- * - Frontend dev server running on http://localhost:5173
- * - Test database seeded with test company
+ * Rewriting against the real, authenticated page also surfaced a scope
+ * mismatch: `AdminCenterPage.tsx` (Task #49) has five tabs — Employee
+ * Groups, Leave Policies, Shifts & Work Schedule, Holidays, and
+ * Onboarding & Offboarding — and no "Workflow Templates" tab at all.
+ * Workflow template management lives on `/app/system-admin`
+ * (`SystemAdminPage.e2e.spec.ts`), not here; the two "Workflow Template"
+ * tests this file had are dropped rather than kept failing against a tab
+ * that was simply never built on this page.
  */
 
-const PORTAL_URL = "http://localhost:5173/app";
+async function loginAsHrAdmin(page: Page) {
+  await loginToApp(page, getSharedSession("hr_admin"));
+}
 
-test.describe("Admin Center Portal (Task #52)", () => {
-  test("HR Admin can view Employee Groups", async ({ page }) => {
+test.describe("Admin Center Portal (Task #49)", () => {
+  test("HR Admin can view all five Admin Center tabs", async ({ page }) => {
+    await loginAsHrAdmin(page);
     await page.goto("/app/admin");
 
-    // Expect admin center to load
-    await expect(
-      page.locator("h1, h2").filter({ hasText: /admin|settings|configuration/i })
-    ).toBeVisible();
+    await expect(page.locator("h1")).toHaveText("Admin Center");
 
-    // Navigate to Employee Groups section
-    const groupsTab = page
-      .locator("[role='tab']")
-      .filter({ hasText: /groups|employee groups/i });
-
-    if (await groupsTab.isVisible()) {
-      await groupsTab.click();
+    // AdminCenterPage.tsx's own tabs are plain <button>s with no
+    // role="tab" — the original `[role='tab']` locator this file used
+    // elsewhere never matched any of them.
+    for (const label of [
+      "Employee Groups",
+      "Leave Policies",
+      "Shifts & Work Schedule",
+      "Holidays",
+      "Onboarding & Offboarding",
+    ]) {
+      await expect(page.locator("button", { hasText: label })).toBeVisible();
     }
 
-    // Verify groups list
-    const groupsList = page
-      .locator("[data-testid='employee-groups']")
-      .or(page.locator("text=Employee Groups"))
-      .or(page.locator("table"));
-
-    if (await groupsList.isVisible()) {
-      await expect(groupsList).toBeVisible();
-    }
+    // Employee Groups is the default tab; a brand-new company has none yet.
+    await expect(page.locator("text=No employee groups yet")).toBeVisible();
   });
 
-  test("HR Admin can create Employee Group", async ({ page }) => {
+  test("HR Admin can create an Employee Group with a condition", async ({ page }) => {
+    await loginAsHrAdmin(page);
     await page.goto("/app/admin");
 
-    // Navigate to Employee Groups
-    const groupsTab = page
-      .locator("[role='tab']")
-      .filter({ hasText: /groups/i });
-    if (await groupsTab.isVisible()) {
-      await groupsTab.click();
-    }
+    await page.locator("button", { hasText: "New Group" }).click();
 
-    // Look for "New Group" button
-    const newGroupButton = page
-      .locator("button:has-text('New Group')")
-      .or(page.locator("button:has-text('Create Group')")
-    );
+    const form = page.locator("form");
+    await expect(form).toBeVisible();
 
-    if (await newGroupButton.isVisible()) {
-      await newGroupButton.click();
+    // GroupForm's labels have no htmlFor (see this file's accessibility
+    // test below for the correctly-failing a11y gap this surfaces) — the
+    // real DOM only has a label immediately followed by its control.
+    const timestamp = Date.now();
+    const groupName = `E2E Engineering ${timestamp}`;
+    await form.locator("label", { hasText: "Name" }).locator("+ input").fill(groupName);
+    await form
+      .locator("label", { hasText: "Description (optional)" })
+      .locator("+ input")
+      .fill("Group for all engineering department members");
 
-      // Expect form to open
-      const form = page.locator("form").or(page.locator("[role='dialog']"));
-      await expect(form).toBeVisible({ timeout: 5000 });
+    // One condition row ships pre-filled (field="department", equals="")
+    // — fill its "equals" value rather than adding a second row.
+    await form.locator("input[placeholder='e.g. Engineering']").fill("Engineering");
 
-      // Fill group details
-      const groupName = page.locator('input[name="groupName"]').or(
-        page.locator('input[name="name"]')
-      );
-      if (await groupName.isVisible()) {
-        const timestamp = Date.now();
-        await groupName.fill(`Engineering Team ${timestamp}`);
-      }
+    await page.locator("button", { hasText: "Create group" }).click();
 
-      const groupDescription = page.locator('textarea[name="description"]');
-      if (await groupDescription.isVisible()) {
-        await groupDescription.fill("Group for all engineering department members");
-      }
-
-      // Select members (multiselect)
-      const memberSelect = page.locator('select[name="members"]').or(
-        page.locator("[aria-label*='Members']")
-      );
-      if (await memberSelect.isVisible()) {
-        // Select first few options
-        const options = await memberSelect.locator("option").count();
-        if (options > 1) {
-          await memberSelect.selectOption({ index: 1 });
-        }
-      }
-
-      // Submit form
-      const submitButton = page
-        .locator('button:has-text("Create")')
-        .or(page.locator('button:has-text("Save")'));
-      await submitButton.click();
-
-      // Expect success
-      await expect(
-        page
-          .locator("text=created")
-          .or(page.locator("text=success"))
-      ).toBeVisible({ timeout: 5000 });
-    }
+    // GroupForm has no toast/success banner — onSaved() just closes the
+    // form and reloads the list, so the new group's own card is the
+    // real, only confirmation.
+    await expect(page.locator("h3", { hasText: groupName })).toBeVisible({ timeout: 5000 });
   });
 
-  test("HR Admin can configure Leave Policies", async ({ page }) => {
+  test("HR Admin can view Leave Policies", async ({ page }) => {
+    await loginAsHrAdmin(page);
     await page.goto("/app/admin");
 
-    // Navigate to Leave Policies section
-    const policiesTab = page
-      .locator("[role='tab']")
-      .filter({ hasText: /leave.*polic|policy/i });
+    await page.locator("button", { hasText: "Leave Policies" }).click();
 
-    if (await policiesTab.isVisible()) {
-      await policiesTab.click();
-    }
-
-    // Verify policies list
-    const policiesList = page
-      .locator("[data-testid='leave-policies']")
-      .or(page.locator("text=Leave Policies"))
-      .or(page.locator("table"));
-
-    if (await policiesList.isVisible()) {
-      await expect(policiesList).toBeVisible();
-    }
+    await expect(page.locator("text=No leave policies yet")).toBeVisible();
   });
 
-  test("HR Admin can create Leave Policy", async ({ page }) => {
+  test("HR Admin can create a Leave Policy", async ({ page }) => {
+    await loginAsHrAdmin(page);
     await page.goto("/app/admin");
 
-    // Navigate to Leave Policies
-    const policiesTab = page
-      .locator("[role='tab']")
-      .filter({ hasText: /leave.*polic|policy/i });
-    if (await policiesTab.isVisible()) {
-      await policiesTab.click();
-    }
+    await page.locator("button", { hasText: "Leave Policies" }).click();
+    await page.locator("button", { hasText: "New Policy" }).click();
 
-    // Look for "New Policy" button
-    const newPolicyButton = page
-      .locator("button:has-text('New Policy')")
-      .or(page.locator("button:has-text('Create Policy')")
-    );
+    const form = page.locator("form");
+    await expect(form).toBeVisible();
 
-    if (await newPolicyButton.isVisible()) {
-      await newPolicyButton.click();
+    const timestamp = Date.now();
+    const policyName = `E2E Custom Policy ${timestamp}`;
+    // PolicyForm's "Name" label is ambiguous with DayField's own labels
+    // only by substring, not exact text — `{ exact: true }` picks the
+    // lone "Name" label over "Annual leave (days/yr)" etc.
+    await form.locator("label", { hasText: "Name", exact: true }).locator("+ input").fill(policyName);
+    await form.locator("label", { hasText: "Annual leave (days/yr)" }).locator("+ input").fill("20");
+    await form.locator("label", { hasText: "Casual leave (days/yr)" }).locator("+ input").fill("10");
+    await form.locator("label", { hasText: "Sick leave (days/yr)" }).locator("+ input").fill("8");
 
-      // Expect form to open
-      const form = page.locator("form").or(page.locator("[role='dialog']"));
-      await expect(form).toBeVisible({ timeout: 5000 });
+    await page.locator("button", { hasText: "Create policy" }).click();
 
-      // Fill policy details
-      const policyName = page.locator('input[name="policyName"]').or(
-        page.locator('input[name="name"]')
-      );
-      if (await policyName.isVisible()) {
-        const timestamp = Date.now();
-        await policyName.fill(`Custom Leave Policy ${timestamp}`);
-      }
-
-      const policyType = page.locator('select[name="type"]').or(
-        page.locator("[aria-label*='Type']")
-      );
-      if (await policyType.isVisible()) {
-        await policyType.selectOption("annual");
-      }
-
-      // Days allocated
-      const daysInput = page
-        .locator('input[name="daysAllocated"]')
-        .or(page.locator('input[name="days"]'));
-      if (await daysInput.isVisible()) {
-        await daysInput.fill("20");
-      }
-
-      // Carryover settings
-      const carryoverInput = page
-        .locator('input[name="carryoverDays"]')
-        .or(page.locator('input[name="carryover"]'));
-      if (await carryoverInput.isVisible()) {
-        await carryoverInput.fill("5");
-      }
-
-      // Submit form
-      const submitButton = page
-        .locator('button:has-text("Create")')
-        .or(page.locator('button:has-text("Save")'));
-      await submitButton.click();
-
-      // Expect success
-      await expect(
-        page
-          .locator("text=created")
-          .or(page.locator("text=success"))
-      ).toBeVisible({ timeout: 5000 });
-    }
+    await expect(page.locator("text=" + policyName)).toBeVisible({ timeout: 5000 });
   });
 
-  test("HR Admin can view Workflow Templates", async ({ page }) => {
-    await page.goto("/app/admin");
-
-    // Navigate to Workflow Templates section
-    const templatesTab = page
-      .locator("[role='tab']")
-      .filter({ hasText: /workflow|template/i });
-
-    if (await templatesTab.isVisible()) {
-      await templatesTab.click();
-    }
-
-    // Verify templates list
-    const templatesList = page
-      .locator("[data-testid='workflow-templates']")
-      .or(page.locator("text=Workflow Templates"))
-      .or(page.locator("table"));
-
-    if (await templatesList.isVisible()) {
-      await expect(templatesList).toBeVisible();
-    }
-  });
-
-  test("HR Admin can edit Workflow Template", async ({ page }) => {
-    await page.goto("/app/admin");
-
-    // Navigate to Workflow Templates
-    const templatesTab = page
-      .locator("[role='tab']")
-      .filter({ hasText: /workflow|template/i });
-    if (await templatesTab.isVisible()) {
-      await templatesTab.click();
-    }
-
-    // Find a template to edit
-    const templateRow = page.locator("table tbody tr").or(
-      page.locator(".template-card")
-    );
-
-    if ((await templateRow.count()) > 0) {
-      // Look for edit button
-      const editButton = templateRow
-        .first()
-        .locator("button:has-text('Edit')")
-        .or(templateRow.first().locator("button:has-text('Configure')"));
-
-      if (await editButton.isVisible()) {
-        await editButton.click();
-
-        // Expect form or detail view
-        const form = page.locator("form").or(page.locator("[data-testid='template-form']"));
-        if (await form.isVisible()) {
-          // Modify workflow steps (add approver, change order, etc.)
-          const stepInput = page
-            .locator('input[name="stepName"]')
-            .or(page.locator('input[placeholder*="step" i]'));
-
-          if (await stepInput.isVisible()) {
-            // Can modify steps or add new ones
-            const addStepButton = form.locator('button:has-text("Add Step")').or(
-              form.locator('button:has-text("Add")')
-            );
-
-            if (await addStepButton.isVisible()) {
-              await addStepButton.click();
-            }
-          }
-
-          // Save changes
-          const saveButton = form
-            .locator('button:has-text("Save")')
-            .or(form.locator('button:has-text("Update")'));
-          if (await saveButton.isVisible()) {
-            await saveButton.click();
-
-            // Expect success
-            await expect(
-              page
-                .locator("text=saved")
-                .or(page.locator("text=success"))
-            ).toBeVisible({ timeout: 5000 });
-          }
-        }
-      }
-    }
-  });
-
-  test("Portal navigation includes Admin Center menu item", async ({
-    page,
-  }) => {
+  test("Portal navigation includes Admin Center menu item", async ({ page }) => {
+    await loginAsHrAdmin(page);
     await page.goto("/app");
 
-    const adminNavLink = page.locator("nav a").filter({
-      hasText: /admin|settings/i,
-    });
+    const adminNavLink = page.locator("nav a").filter({ hasText: "Admin Center" });
+    await expect(adminNavLink).toBeVisible();
 
-    if (await adminNavLink.isVisible()) {
-      await adminNavLink.click();
-      await expect(page).toHaveURL(/\/app\/admin/);
-    }
+    await adminNavLink.click();
+    await expect(page).toHaveURL(/\/app\/admin/);
   });
 });
 
 test.describe("Admin Center Responsiveness", () => {
-  test("Admin forms are responsive on mobile", async ({ page }) => {
+  test("Employee Group form is usable on mobile", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 });
 
+    await loginAsHrAdmin(page);
     await page.goto("/app/admin");
+    await page.locator("button", { hasText: "New Group" }).click();
 
-    // Find any visible form
     const form = page.locator("form");
-    if (await form.isVisible()) {
-      const inputs = form.locator("input, select, textarea");
-      for (let i = 0; i < Math.min(3, await inputs.count()); i++) {
-        const input = inputs.nth(i);
-        const boundingBox = await input.boundingBox();
-        if (boundingBox) {
-          expect(boundingBox.width).toBeLessThanOrEqual(375);
-        }
+    await expect(form).toBeVisible();
+
+    const inputs = form.locator("input, select, textarea");
+    const count = await inputs.count();
+    expect(count).toBeGreaterThan(0);
+    for (let i = 0; i < count; i++) {
+      const box = await inputs.nth(i).boundingBox();
+      if (box) {
+        expect(box.width).toBeLessThanOrEqual(375);
       }
     }
   });
 });
 
 test.describe("Admin Center Accessibility", () => {
-  test("Admin form inputs have proper labels", async ({ page }) => {
+  test("Employee Group form inputs have properly associated labels", async ({ page }) => {
+    await loginAsHrAdmin(page);
     await page.goto("/app/admin");
+    await page.locator("button", { hasText: "New Group" }).click();
 
-    // Find first input
-    const firstInput = page.locator("input").first();
-    if ((await firstInput.count()) > 0) {
-      const inputName = await firstInput.getAttribute("name");
-      const hasLabel =
-        (await page.locator(`label[for="${inputName}"]`).count()) > 0 ||
-        (await firstInput.evaluate((el) => el.hasAttribute("aria-label")));
+    const form = page.locator("form");
+    await expect(form).toBeVisible();
 
-      expect(hasLabel).toBe(true);
-    }
+    // Genuine, pre-existing accessibility gap — same pattern already
+    // found and deliberately left failing in EmployeeCreatePage's,
+    // LeaveRequestForm's, and RequisitionForm's own e2e specs:
+    // GroupForm's <label> elements have no `htmlFor`/`id`, and its
+    // <input>/<select> elements have no `name` or `aria-label`. Left
+    // failing on purpose so it keeps reporting the real gap.
+    const firstInput = form.locator("input, select").first();
+    const id = await firstInput.getAttribute("id");
+    const hasAriaLabel = await firstInput.evaluate((el) => el.hasAttribute("aria-label"));
+    const hasAssociatedLabel = id ? (await page.locator(`label[for="${id}"]`).count()) > 0 : false;
+
+    expect(hasAssociatedLabel || hasAriaLabel).toBe(true);
   });
 });

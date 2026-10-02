@@ -277,7 +277,7 @@ describe("OrgRelationshipsService", () => {
         expect((await employees.get(hrAdminClaims, target)).managerId).toBe(bob);
       });
 
-      it("legacy EmployeesService.create()/update() managerId writes do not create an org_relationships row (documented gap)", async () => {
+      it("legacy EmployeesService.create() managerId writes do not create an org_relationships row (documented gap; update() now syncs — see employees.service.spec.ts)", async () => {
         const legacyTarget = await employees.create(hrAdminClaims, { firstName: "Legacy", lastName: "Path", managerId: bob });
         expect(legacyTarget.managerId).toBe(bob);
 
@@ -289,11 +289,13 @@ describe("OrgRelationshipsService", () => {
         const target = (await employees.create(hrAdminClaims, { firstName: "Guarded", lastName: "Target" })).id;
         const relationship = await relationships.create(hrAdminClaims, { employeeId: target, managerEmployeeId: bob, relationshipType: "direct" });
 
-        // Simulate a legacy direct write that changes managerId out from
-        // under this relationship's own record (still logically "ended"
-        // from the relationship's perspective, but the guard must not
-        // stomp on the newer value).
-        await employees.update(hrAdminClaims, target, { managerId: carol });
+        // Simulate an out-of-band write that changes managerId out from
+        // under this relationship's own record (the guard must not stomp
+        // on the newer value). Raw SQL, not EmployeesService.update(): a
+        // PATCH managerId now supersedes the open direct relationship
+        // itself (cross-module integration follow-up, 2026-10-01), so it
+        // can no longer leave this relationship open behind it.
+        await db.withClaims(FIXTURE_CLAIMS, (client) => client.query("UPDATE employees SET manager_id = $2 WHERE id = $1", [target, carol]));
 
         await relationships.end(hrAdminClaims, relationship.id);
         expect((await employees.get(hrAdminClaims, target)).managerId).toBe(carol);

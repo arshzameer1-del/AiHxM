@@ -9,8 +9,10 @@ import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engi
 import { WorkflowService } from "../workflow/workflow.service";
 import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
 import { buildOrgEventPayload } from "../webhooks/org-event-payload.util";
+import { OrgOccupancyService } from "./occupancy/org-occupancy.service";
 import type {
   CreateOrgChangeRequest,
+  OrgChangeCascadeAction,
   OrgChangeImpactSummary,
   OrgChangeItemAction,
   OrgChangeItemView,
@@ -63,6 +65,7 @@ type OrgChangeItemRow = {
   new_parent_id: string | null;
   new_name: string | null;
   new_unit_type: string | null;
+  cascade_action: OrgChangeCascadeAction;
   applied_at: unknown;
   created_at: unknown;
 };
@@ -82,6 +85,7 @@ function rowToItem(row: OrgChangeItemRow): OrgChangeItemView {
     newParentId: row.new_parent_id,
     newName: row.new_name,
     newUnitType: row.new_unit_type,
+    cascadeAction: row.cascade_action ?? "require_vacant",
     appliedAt: row.applied_at ? toIso(row.applied_at) : null,
     createdAt: toIso(row.created_at),
   };
@@ -163,7 +167,12 @@ export class OrgChangesService {
     private readonly audit: AuditService,
     private readonly effectiveDating: EffectiveDatingEngine,
     private readonly workflow: WorkflowService,
-    private readonly webhooks?: WebhookDispatchService
+    private readonly webhooks?: WebhookDispatchService,
+    // Cross-module integration audit Item 7 (2026-10-01) — the shared,
+    // transaction-scoped occupancy writer an `auto_unassign` archive item
+    // cascades through (see applyItem()). Default-instantiated, appended
+    // last, so positional spec constructions keep working.
+    private readonly occupancy: OrgOccupancyService = new OrgOccupancyService(audit, effectiveDating, webhooks)
   ) {}
 
   async create(claims: RequestClaims, input: CreateOrgChangeRequest): Promise<OrgChangeView> {
@@ -180,9 +189,18 @@ export class OrgChangesService {
       let sequence = 1;
       for (const item of input.items) {
         await client.query(
-          `INSERT INTO org_change_items (org_change_id, sequence, org_unit_id, action, new_parent_id, new_name, new_unit_type)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-          [changeId, sequence++, item.orgUnitId, item.action, item.newParentId ?? null, item.newName ?? null, item.newUnitType ?? null]
+          `INSERT INTO org_change_items (org_change_id, sequence, org_unit_id, action, new_parent_id, new_name, new_unit_type, cascade_action)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [
+            changeId,
+            sequence++,
+            item.orgUnitId,
+            item.action,
+            item.newParentId ?? null,
+            item.newName ?? null,
+            item.newUnitType ?? null,
+            item.cascadeAction ?? "require_vacant",
+          ]
         );
       }
 
@@ -331,6 +349,36 @@ export class OrgChangesService {
         }
       }
 
+      // Cross-module integration audit Item 7 — an archived unit must not be
+      // left holding FILLED positions (occupants' employees.position_id and
+      // open assignment slots would dangle into a unit that no longer
+      // accepts assignments). `require_vacant` makes that a blocking error
+      // here; `auto_unassign` downgrades it to a warning naming exactly what
+      // execution will vacate. Only `archive` can orphan anything: a
+      // move/rename/retype leaves every position validly inside a live unit.
+      for (const item of items) {
+        if (!knownUnitIds.has(item.org_unit_id)) continue;
+        if (item.action !== "archive") {
+          if (item.cascade_action === "auto_unassign") {
+            warnings.push(`Item ${item.sequence}: cascadeAction "auto_unassign" only applies to "archive" items and will be ignored`);
+          }
+          continue;
+        }
+        const { filled, openAssignments } = await this.countUnitOccupancy(client, claims.company_id!, item.org_unit_id);
+        if (filled > 0 && item.cascade_action !== "auto_unassign") {
+          errors.push(
+            `Item ${item.sequence}: ${filled} filled position(s) in this unit must be vacated or reassigned before this change can execute ` +
+              `(or set cascadeAction "auto_unassign" to vacate them as part of this change)`
+          );
+        } else if (item.cascade_action === "auto_unassign" && (filled > 0 || openAssignments > 0)) {
+          warnings.push(
+            `Item ${item.sequence}: executing will vacate ${filled} filled position(s) in this unit and end ${openAssignments} open assignment(s) pointing at it`
+          );
+        } else if (openAssignments > 0) {
+          warnings.push(`Item ${item.sequence}: ${openAssignments} open assignment(s) still point at this unit and will remain after it is archived`);
+        }
+      }
+
       const overlapping = await client.query<{ org_unit_id: string }>(
         `SELECT DISTINCT oci.org_unit_id FROM org_change_items oci
          JOIN org_changes oc ON oc.id = oci.org_change_id
@@ -448,7 +496,22 @@ export class OrgChangesService {
         [claims.company_id, affectedIds]
       );
 
+      // Item 7 — filled seats directly inside each unit this change archives.
+      const archivedUnitIds = [...new Set(items.filter((i) => i.action === "archive").map((i) => i.org_unit_id))];
+      const filledInArchived = archivedUnitIds.length
+        ? await client.query<{ c: string }>(
+            `SELECT count(*)::text AS c FROM positions WHERE company_id = $1 AND org_unit_id = ANY($2::uuid[]) AND status = 'filled'`,
+            [claims.company_id, archivedUnitIds]
+          )
+        : { rows: [{ c: "0" }] };
+      const filledPositionsInArchivedUnitsCount = Number(filledInArchived.rows[0].c);
+
       const warnings: string[] = [];
+      if (filledPositionsInArchivedUnitsCount > 0) {
+        warnings.push(
+          `${filledPositionsInArchivedUnitsCount} filled position(s) sit in unit(s) this change archives — they will be vacated ("auto_unassign") or block execution ("require_vacant").`
+        );
+      }
       if (affectedIds.length > 25) {
         warnings.push(`This change affects a large subtree (${affectedIds.length} org units) — review carefully before approving.`);
       }
@@ -459,6 +522,7 @@ export class OrgChangesService {
         affectedEmployeeCount: Number(employeeCount.rows[0].c),
         affectedReportingRelationshipCount: Number(relationshipCount.rows[0].c),
         affectedFinancialCenterCount: Number(financialCenterCount.rows[0].c),
+        filledPositionsInArchivedUnitsCount,
         warnings,
       };
 
@@ -705,6 +769,7 @@ export class OrgChangesService {
     }
     const row = before.rows[0];
 
+    let cascade: { vacatedPositionIds: string[]; endedAssignmentIds: string[] } | null = null;
     const next = {
       parent_id: row.parent_id as string | null,
       unit_type: row.unit_type as string,
@@ -740,6 +805,7 @@ export class OrgChangesService {
       next.unit_type = item.new_unit_type;
     } else if (item.action === "archive") {
       next.status = "archived";
+      cascade = await this.cascadeArchive(client, claims, item, effectiveFrom);
     } else if (item.action === "activate") {
       next.status = "active";
     }
@@ -761,8 +827,66 @@ export class OrgChangesService {
       companyId: claims.company_id ?? null,
       action: `org_unit.${item.action}`,
       target: item.org_unit_id,
-      metadata: { viaOrgChangeItemId: item.id },
+      metadata: {
+        viaOrgChangeItemId: item.id,
+        ...(cascade ? { cascadeAction: item.cascade_action, orgChangeId: item.org_change_id, ...cascade } : {}),
+      },
     });
+  }
+
+  /**
+   * Item 7 — the execution-time half of the filled-position rule
+   * validate() enforces. Re-checked here under row locks because data can
+   * change between approval and the effective date (someone fills a seat
+   * in the meantime). `require_vacant`: throw, so executeInternal() marks
+   * the change `failed` with this exact reason and the unit is NOT
+   * archived (this item's transaction rolls back). `auto_unassign`: vacate
+   * each filled seat (never abolish) and end every open assignment slot
+   * pointing at the unit — same transaction as the archive itself, every
+   * audit row tagged `org_change:<id>`.
+   */
+  private async cascadeArchive(
+    client: PoolClient,
+    claims: RequestClaims,
+    item: OrgChangeItemRow,
+    effectiveFrom: string
+  ): Promise<{ vacatedPositionIds: string[]; endedAssignmentIds: string[] }> {
+    const filled = await client.query<{ id: string }>(
+      `SELECT id FROM positions WHERE company_id = $1 AND org_unit_id = $2 AND status = 'filled' ORDER BY id FOR UPDATE`,
+      [claims.company_id, item.org_unit_id]
+    );
+    if (item.cascade_action !== "auto_unassign") {
+      if ((filled.rowCount ?? 0) > 0) {
+        throw new Error(
+          `${filled.rowCount} filled position(s) in this unit must be vacated or reassigned first (cascadeAction is "require_vacant")`
+        );
+      }
+      return { vacatedPositionIds: [], endedAssignmentIds: [] };
+    }
+    const source = `org_change:${item.org_change_id}`;
+    for (const position of filled.rows) {
+      await this.occupancy.vacatePositionWithinTransaction(client, claims, { positionId: position.id, effectiveFrom, source });
+    }
+    const ended = await this.occupancy.endAssignmentsWithinTransaction(client, claims, {
+      orgUnitId: item.org_unit_id,
+      effectiveFrom,
+      source,
+    });
+    return { vacatedPositionIds: filled.rows.map((p) => p.id), endedAssignmentIds: ended.map((a) => a.id) };
+  }
+
+  private async countUnitOccupancy(
+    client: PoolClient,
+    companyId: string,
+    orgUnitId: string
+  ): Promise<{ filled: number; openAssignments: number }> {
+    const result = await client.query<{ filled: string; open_assignments: string }>(
+      `SELECT
+         (SELECT count(*) FROM positions WHERE company_id = $1 AND org_unit_id = $2 AND status = 'filled')::text AS filled,
+         (SELECT count(*) FROM employee_org_assignments WHERE company_id = $1 AND org_unit_id = $2 AND status = 'active')::text AS open_assignments`,
+      [companyId, orgUnitId]
+    );
+    return { filled: Number(result.rows[0].filled), openAssignments: Number(result.rows[0].open_assignments) };
   }
 
   /**

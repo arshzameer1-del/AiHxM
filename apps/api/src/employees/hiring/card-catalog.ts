@@ -16,10 +16,10 @@
  * Phase 1/4 — no new mapping code needed); and Phase 6's
  * reporting_relationships -> `managerId`, the same pre-existing legacy
  * field EmployeesService.create() already writes. All three reuse fields
- * `CreateEmployeeRequest` already had — see HiringProcessService.complete()'s
- * own comment for why `positionId`/cost-center occupancy are deliberately
- * NOT wired here (Section 17: cross-domain effects go through the
- * `employee.hire.completed` event, not a synchronous cross-module call).
+ * `CreateEmployeeRequest` already had. `organization_assignment.positionId`
+ * is NOT a `CreateEmployeeRequest` field; since 2026-10-01 it is occupied
+ * separately at completion via `OrgOccupancyService` (same transaction) —
+ * see HiringProcessService.complete()'s own comment.
  * Contact/Addresses (also Phase 6) project onto their OWN dedicated
  * tables instead (`employee_contacts`/`employee_addresses`), fetched and
  * inserted separately in complete() — not part of this constant, since

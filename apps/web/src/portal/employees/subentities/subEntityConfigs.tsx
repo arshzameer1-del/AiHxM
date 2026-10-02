@@ -22,7 +22,14 @@ import type { SubEntityPanelConfig } from "./SubEntityPanel";
  * definition in shared-types).
  */
 
-const CONTACT_TYPE_OPTIONS = [
+// HR Administration v2 "then 2" Phase 1 (2026-10-01) — `contactType` moved
+// onto this tenant's own `contact_type` catalog
+// (EmployeeContactsService.createWithinTransaction()'s own
+// validateActiveCode() call); these fallbacks are only what the dropdown
+// shows if that catalog fails to load, the same
+// `costCenterOptions`-as-a-parameter shape `costAllocationsConfig` below
+// already established for a dynamic option list.
+const FALLBACK_CONTACT_TYPE_OPTIONS = [
   { value: "business_email", label: "Business email" },
   { value: "personal_email", label: "Personal email" },
   { value: "business_phone", label: "Business phone" },
@@ -30,75 +37,84 @@ const CONTACT_TYPE_OPTIONS = [
   { value: "emergency_contact", label: "Emergency contact" },
 ];
 
-export const contactsConfig: SubEntityPanelConfig<EmployeeContactView> = {
-  title: "Contact",
-  addLabel: "+ Add contact",
-  emptyLabel: "No contacts on file.",
-  createFields: [
-    { key: "contactType", label: "Type", type: "select", required: true, options: CONTACT_TYPE_OPTIONS },
-    { key: "value", label: "Value", type: "text", required: true, placeholder: "email or phone number" },
-    { key: "label", label: "Label", type: "text", placeholder: "optional" },
-    { key: "isPrimary", label: "Primary", type: "checkbox" },
-  ],
-  updateFields: [
-    { key: "value", label: "Value", type: "text", required: true },
-    { key: "label", label: "Label", type: "text" },
-    { key: "isPrimary", label: "Primary", type: "checkbox" },
-  ],
-  renderSummary: (item) => ({
-    primary: `${CONTACT_TYPE_OPTIONS.find((o) => o.value === item.contactType)?.label ?? item.contactType} — ${item.value}${item.isPrimary ? " ★" : ""}`,
-    secondary: item.label ?? undefined,
-  }),
-  openStatus: "active",
-  closedStatusLabel: "Ended",
-  closeActionLabel: "End",
-  closeConfirm: (item) => `End this contact (${item.value})? It will no longer show as active.`,
-  list: (employeeId) => api.listEmployeeContacts(employeeId),
-  create: (employeeId, values) => api.createEmployeeContact({ employeeId, ...values } as Parameters<typeof api.createEmployeeContact>[0]),
-  update: (id, values) => api.updateEmployeeContact(id, values as Parameters<typeof api.updateEmployeeContact>[1]),
-  close: (id) => api.endEmployeeContact(id),
-};
+export function contactsConfig(contactTypeOptions: { value: string; label: string }[]): SubEntityPanelConfig<EmployeeContactView> {
+  const options = contactTypeOptions.length > 0 ? contactTypeOptions : FALLBACK_CONTACT_TYPE_OPTIONS;
+  return {
+    title: "Contact",
+    addLabel: "+ Add contact",
+    emptyLabel: "No contacts on file.",
+    createFields: [
+      { key: "contactType", label: "Type", type: "select", required: true, options },
+      { key: "value", label: "Value", type: "text", required: true, placeholder: "email or phone number" },
+      { key: "label", label: "Label", type: "text", placeholder: "optional" },
+      { key: "isPrimary", label: "Primary", type: "checkbox" },
+    ],
+    updateFields: [
+      { key: "value", label: "Value", type: "text", required: true },
+      { key: "label", label: "Label", type: "text" },
+      { key: "isPrimary", label: "Primary", type: "checkbox" },
+    ],
+    renderSummary: (item) => ({
+      primary: `${options.find((o) => o.value === item.contactType)?.label ?? item.contactType} — ${item.value}${item.isPrimary ? " ★" : ""}`,
+      secondary: item.label ?? undefined,
+    }),
+    openStatus: "active",
+    closedStatusLabel: "Ended",
+    closeActionLabel: "End",
+    closeConfirm: (item) => `End this contact (${item.value})? It will no longer show as active.`,
+    list: (employeeId) => api.listEmployeeContacts(employeeId),
+    create: (employeeId, values) => api.createEmployeeContact({ employeeId, ...values } as Parameters<typeof api.createEmployeeContact>[0]),
+    update: (id, values) => api.updateEmployeeContact(id, values as Parameters<typeof api.updateEmployeeContact>[1]),
+    close: (id) => api.endEmployeeContact(id),
+  };
+}
 
-const ADDRESS_TYPE_OPTIONS = [
+// Same treatment for `addressType` -> this tenant's own `address_type`
+// catalog (EmployeeAddressesService.createWithinTransaction()'s own
+// validateActiveCode() call).
+const FALLBACK_ADDRESS_TYPE_OPTIONS = [
   { value: "permanent", label: "Permanent" },
   { value: "current", label: "Current" },
   { value: "mailing", label: "Mailing" },
 ];
 
-export const addressesConfig: SubEntityPanelConfig<EmployeeAddressView> = {
-  title: "Addresses",
-  addLabel: "+ Add address",
-  emptyLabel: "No addresses on file.",
-  createFields: [
-    { key: "addressType", label: "Type", type: "select", required: true, options: ADDRESS_TYPE_OPTIONS },
-    { key: "line1", label: "Address line 1", type: "text", required: true },
-    { key: "line2", label: "Address line 2", type: "text" },
-    { key: "city", label: "City", type: "text" },
-    { key: "stateProvince", label: "State / Province", type: "text" },
-    { key: "postalCode", label: "Postal code", type: "text" },
-    { key: "country", label: "Country", type: "text" },
-  ],
-  updateFields: [
-    { key: "line1", label: "Address line 1", type: "text", required: true },
-    { key: "line2", label: "Address line 2", type: "text" },
-    { key: "city", label: "City", type: "text" },
-    { key: "stateProvince", label: "State / Province", type: "text" },
-    { key: "postalCode", label: "Postal code", type: "text" },
-    { key: "country", label: "Country", type: "text" },
-  ],
-  renderSummary: (item) => ({
-    primary: `${ADDRESS_TYPE_OPTIONS.find((o) => o.value === item.addressType)?.label ?? item.addressType} — ${item.line1}`,
-    secondary: [item.city, item.stateProvince, item.country].filter(Boolean).join(", ") || undefined,
-  }),
-  openStatus: "active",
-  closedStatusLabel: "Ended",
-  closeActionLabel: "End",
-  closeConfirm: () => "End this address? It will no longer show as active.",
-  list: (employeeId) => api.listEmployeeAddresses(employeeId),
-  create: (employeeId, values) => api.createEmployeeAddress({ employeeId, ...values } as Parameters<typeof api.createEmployeeAddress>[0]),
-  update: (id, values) => api.updateEmployeeAddress(id, values as Parameters<typeof api.updateEmployeeAddress>[1]),
-  close: (id) => api.endEmployeeAddress(id),
-};
+export function addressesConfig(addressTypeOptions: { value: string; label: string }[]): SubEntityPanelConfig<EmployeeAddressView> {
+  const options = addressTypeOptions.length > 0 ? addressTypeOptions : FALLBACK_ADDRESS_TYPE_OPTIONS;
+  return {
+    title: "Addresses",
+    addLabel: "+ Add address",
+    emptyLabel: "No addresses on file.",
+    createFields: [
+      { key: "addressType", label: "Type", type: "select", required: true, options },
+      { key: "line1", label: "Address line 1", type: "text", required: true },
+      { key: "line2", label: "Address line 2", type: "text" },
+      { key: "city", label: "City", type: "text" },
+      { key: "stateProvince", label: "State / Province", type: "text" },
+      { key: "postalCode", label: "Postal code", type: "text" },
+      { key: "country", label: "Country", type: "text" },
+    ],
+    updateFields: [
+      { key: "line1", label: "Address line 1", type: "text", required: true },
+      { key: "line2", label: "Address line 2", type: "text" },
+      { key: "city", label: "City", type: "text" },
+      { key: "stateProvince", label: "State / Province", type: "text" },
+      { key: "postalCode", label: "Postal code", type: "text" },
+      { key: "country", label: "Country", type: "text" },
+    ],
+    renderSummary: (item) => ({
+      primary: `${options.find((o) => o.value === item.addressType)?.label ?? item.addressType} — ${item.line1}`,
+      secondary: [item.city, item.stateProvince, item.country].filter(Boolean).join(", ") || undefined,
+    }),
+    openStatus: "active",
+    closedStatusLabel: "Ended",
+    closeActionLabel: "End",
+    closeConfirm: () => "End this address? It will no longer show as active.",
+    list: (employeeId) => api.listEmployeeAddresses(employeeId),
+    create: (employeeId, values) => api.createEmployeeAddress({ employeeId, ...values } as Parameters<typeof api.createEmployeeAddress>[0]),
+    update: (id, values) => api.updateEmployeeAddress(id, values as Parameters<typeof api.updateEmployeeAddress>[1]),
+    close: (id) => api.endEmployeeAddress(id),
+  };
+}
 
 const IMPORTANT_DATE_TYPE_OPTIONS = [
   { value: "joining", label: "Joining" },
@@ -208,7 +224,11 @@ export function costAllocationsConfig(costCenterOptions: { value: string; label:
   };
 }
 
-const FAMILY_RELATIONSHIP_OPTIONS = [
+// Same treatment for `relationship` -> this tenant's own
+// `family_relationship_type` catalog
+// (EmployeeFamilyMembersService.createWithinTransaction()/update()'s own
+// validateActiveCode() calls).
+const FALLBACK_FAMILY_RELATIONSHIP_OPTIONS = [
   { value: "spouse", label: "Spouse" },
   { value: "child", label: "Child" },
   { value: "parent", label: "Parent" },
@@ -216,40 +236,43 @@ const FAMILY_RELATIONSHIP_OPTIONS = [
   { value: "other", label: "Other" },
 ];
 
-export const familyMembersConfig: SubEntityPanelConfig<EmployeeFamilyMemberView> = {
-  title: "Family / Dependents",
-  addLabel: "+ Add family member",
-  emptyLabel: "No family members on file.",
-  createFields: [
-    { key: "relationship", label: "Relationship", type: "select", required: true, options: FAMILY_RELATIONSHIP_OPTIONS },
-    { key: "fullName", label: "Full name", type: "text", required: true },
-    { key: "dateOfBirth", label: "Date of birth", type: "date" },
-    { key: "cnic", label: "CNIC", type: "text" },
-    { key: "isDependent", label: "Dependent", type: "checkbox", defaultChecked: true },
-    { key: "isBeneficiary", label: "Beneficiary", type: "checkbox" },
-  ],
-  updateFields: [
-    { key: "relationship", label: "Relationship", type: "select", required: true, options: FAMILY_RELATIONSHIP_OPTIONS },
-    { key: "fullName", label: "Full name", type: "text", required: true },
-    { key: "dateOfBirth", label: "Date of birth", type: "date" },
-    { key: "cnic", label: "CNIC", type: "text" },
-    { key: "isDependent", label: "Dependent", type: "checkbox" },
-    { key: "isBeneficiary", label: "Beneficiary", type: "checkbox" },
-  ],
-  renderSummary: (item) => ({
-    primary: `${item.fullName} (${FAMILY_RELATIONSHIP_OPTIONS.find((o) => o.value === item.relationship)?.label ?? item.relationship})${item.isBeneficiary ? " ★" : ""}`,
-    secondary: item.dateOfBirth ?? undefined,
-  }),
-  openStatus: "active",
-  closedStatusLabel: "Ended",
-  closeActionLabel: "End",
-  closeConfirm: (item) => `End this family member record (${item.fullName})?`,
-  list: (employeeId) => api.listEmployeeFamilyMembers(employeeId),
-  create: (employeeId, values) =>
-    api.createEmployeeFamilyMember({ employeeId, ...values } as Parameters<typeof api.createEmployeeFamilyMember>[0]),
-  update: (id, values) => api.updateEmployeeFamilyMember(id, values as Parameters<typeof api.updateEmployeeFamilyMember>[1]),
-  close: (id) => api.endEmployeeFamilyMember(id),
-};
+export function familyMembersConfig(relationshipOptions: { value: string; label: string }[]): SubEntityPanelConfig<EmployeeFamilyMemberView> {
+  const options = relationshipOptions.length > 0 ? relationshipOptions : FALLBACK_FAMILY_RELATIONSHIP_OPTIONS;
+  return {
+    title: "Family / Dependents",
+    addLabel: "+ Add family member",
+    emptyLabel: "No family members on file.",
+    createFields: [
+      { key: "relationship", label: "Relationship", type: "select", required: true, options },
+      { key: "fullName", label: "Full name", type: "text", required: true },
+      { key: "dateOfBirth", label: "Date of birth", type: "date" },
+      { key: "cnic", label: "CNIC", type: "text" },
+      { key: "isDependent", label: "Dependent", type: "checkbox", defaultChecked: true },
+      { key: "isBeneficiary", label: "Beneficiary", type: "checkbox" },
+    ],
+    updateFields: [
+      { key: "relationship", label: "Relationship", type: "select", required: true, options },
+      { key: "fullName", label: "Full name", type: "text", required: true },
+      { key: "dateOfBirth", label: "Date of birth", type: "date" },
+      { key: "cnic", label: "CNIC", type: "text" },
+      { key: "isDependent", label: "Dependent", type: "checkbox" },
+      { key: "isBeneficiary", label: "Beneficiary", type: "checkbox" },
+    ],
+    renderSummary: (item) => ({
+      primary: `${item.fullName} (${options.find((o) => o.value === item.relationship)?.label ?? item.relationship})${item.isBeneficiary ? " ★" : ""}`,
+      secondary: item.dateOfBirth ?? undefined,
+    }),
+    openStatus: "active",
+    closedStatusLabel: "Ended",
+    closeActionLabel: "End",
+    closeConfirm: (item) => `End this family member record (${item.fullName})?`,
+    list: (employeeId) => api.listEmployeeFamilyMembers(employeeId),
+    create: (employeeId, values) =>
+      api.createEmployeeFamilyMember({ employeeId, ...values } as Parameters<typeof api.createEmployeeFamilyMember>[0]),
+    update: (id, values) => api.updateEmployeeFamilyMember(id, values as Parameters<typeof api.updateEmployeeFamilyMember>[1]),
+    close: (id) => api.endEmployeeFamilyMember(id),
+  };
+}
 
 export const educationConfig: SubEntityPanelConfig<EmployeeEducationView> = {
   title: "Education",
@@ -285,46 +308,53 @@ export const educationConfig: SubEntityPanelConfig<EmployeeEducationView> = {
   close: (id) => api.endEmployeeEducation(id),
 };
 
-const QUALIFICATION_TYPE_OPTIONS = [
+// Same treatment for `qualificationType` -> this tenant's own
+// `qualification_type` catalog
+// (EmployeeQualificationsService.createWithinTransaction()/update()'s own
+// validateActiveCode() calls).
+const FALLBACK_QUALIFICATION_TYPE_OPTIONS = [
   { value: "certificate", label: "Certificate" },
   { value: "license", label: "License" },
   { value: "skill", label: "Skill" },
 ];
 
-export const qualificationsConfig: SubEntityPanelConfig<EmployeeQualificationView> = {
-  title: "Qualifications / Skills",
-  addLabel: "+ Add qualification",
-  emptyLabel: "No qualifications on file.",
-  createFields: [
-    { key: "qualificationType", label: "Type", type: "select", required: true, options: QUALIFICATION_TYPE_OPTIONS },
-    { key: "title", label: "Title", type: "text", required: true },
-    { key: "issuingAuthority", label: "Issuing authority", type: "text" },
-    { key: "issueDate", label: "Issue date", type: "date" },
-    { key: "expiryDate", label: "Expiry date", type: "date" },
-    { key: "proficiencyLevel", label: "Proficiency level", type: "text" },
-  ],
-  updateFields: [
-    { key: "qualificationType", label: "Type", type: "select", required: true, options: QUALIFICATION_TYPE_OPTIONS },
-    { key: "title", label: "Title", type: "text", required: true },
-    { key: "issuingAuthority", label: "Issuing authority", type: "text" },
-    { key: "issueDate", label: "Issue date", type: "date" },
-    { key: "expiryDate", label: "Expiry date", type: "date" },
-    { key: "proficiencyLevel", label: "Proficiency level", type: "text" },
-  ],
-  renderSummary: (item) => ({
-    primary: `${item.title} (${QUALIFICATION_TYPE_OPTIONS.find((o) => o.value === item.qualificationType)?.label ?? item.qualificationType})`,
-    secondary: item.issuingAuthority ?? undefined,
-  }),
-  openStatus: "active",
-  closedStatusLabel: "Ended",
-  closeActionLabel: "End",
-  closeConfirm: (item) => `End this qualification (${item.title})?`,
-  list: (employeeId) => api.listEmployeeQualifications(employeeId),
-  create: (employeeId, values) =>
-    api.createEmployeeQualification({ employeeId, ...values } as Parameters<typeof api.createEmployeeQualification>[0]),
-  update: (id, values) => api.updateEmployeeQualification(id, values as Parameters<typeof api.updateEmployeeQualification>[1]),
-  close: (id) => api.endEmployeeQualification(id),
-};
+export function qualificationsConfig(qualificationTypeOptions: { value: string; label: string }[]): SubEntityPanelConfig<EmployeeQualificationView> {
+  const options = qualificationTypeOptions.length > 0 ? qualificationTypeOptions : FALLBACK_QUALIFICATION_TYPE_OPTIONS;
+  return {
+    title: "Qualifications / Skills",
+    addLabel: "+ Add qualification",
+    emptyLabel: "No qualifications on file.",
+    createFields: [
+      { key: "qualificationType", label: "Type", type: "select", required: true, options },
+      { key: "title", label: "Title", type: "text", required: true },
+      { key: "issuingAuthority", label: "Issuing authority", type: "text" },
+      { key: "issueDate", label: "Issue date", type: "date" },
+      { key: "expiryDate", label: "Expiry date", type: "date" },
+      { key: "proficiencyLevel", label: "Proficiency level", type: "text" },
+    ],
+    updateFields: [
+      { key: "qualificationType", label: "Type", type: "select", required: true, options },
+      { key: "title", label: "Title", type: "text", required: true },
+      { key: "issuingAuthority", label: "Issuing authority", type: "text" },
+      { key: "issueDate", label: "Issue date", type: "date" },
+      { key: "expiryDate", label: "Expiry date", type: "date" },
+      { key: "proficiencyLevel", label: "Proficiency level", type: "text" },
+    ],
+    renderSummary: (item) => ({
+      primary: `${item.title} (${options.find((o) => o.value === item.qualificationType)?.label ?? item.qualificationType})`,
+      secondary: item.issuingAuthority ?? undefined,
+    }),
+    openStatus: "active",
+    closedStatusLabel: "Ended",
+    closeActionLabel: "End",
+    closeConfirm: (item) => `End this qualification (${item.title})?`,
+    list: (employeeId) => api.listEmployeeQualifications(employeeId),
+    create: (employeeId, values) =>
+      api.createEmployeeQualification({ employeeId, ...values } as Parameters<typeof api.createEmployeeQualification>[0]),
+    update: (id, values) => api.updateEmployeeQualification(id, values as Parameters<typeof api.updateEmployeeQualification>[1]),
+    close: (id) => api.endEmployeeQualification(id),
+  };
+}
 
 export const assetsConfig: SubEntityPanelConfig<EmployeeAssetView> = {
   title: "Assets",

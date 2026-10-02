@@ -20,6 +20,8 @@ import { ProfitCentersService } from "../organization/profit-centers.service";
 import { EmployeesService } from "../employees/employees.service";
 import { HiringProcessService } from "../employees/hiring/hiring-process.service";
 import { LocalFileStorageService } from "../file-storage/local-file-storage.service";
+import { OnboardingService } from "../onboarding-offboarding/onboarding.service";
+import { OffboardingService } from "../onboarding-offboarding/offboarding.service";
 import { ConfigurationCenterService } from "./configuration-center.service";
 
 const FIXTURE_CLAIMS: RequestClaims = { is_platform_admin: true, company_id: null, sub: "config-center-spec-fixtures" };
@@ -47,6 +49,8 @@ describe("ConfigurationCenterService", () => {
   let costCenters: CostCentersService;
   let profitCenters: ProfitCentersService;
   let hiring: HiringProcessService;
+  let onboarding: OnboardingService;
+  let offboarding: OffboardingService;
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: process.env.APP_DATABASE_URL });
@@ -67,6 +71,8 @@ describe("ConfigurationCenterService", () => {
     profitCenters = new ProfitCentersService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
     const employees = new EmployeesService(db, rbac, entitlements, audit, new LocalFileStorageService());
     hiring = new HiringProcessService(db, rbac, entitlements, audit, employees);
+    onboarding = new OnboardingService(db, rbac, entitlements, audit);
+    offboarding = new OffboardingService(db, rbac, entitlements, audit, employees);
     configurationCenter = new ConfigurationCenterService(
       db,
       employeeGroups,
@@ -80,7 +86,9 @@ describe("ConfigurationCenterService", () => {
       locations,
       costCenters,
       profitCenters,
-      hiring
+      hiring,
+      onboarding,
+      offboarding
     );
   });
 
@@ -138,7 +146,7 @@ describe("ConfigurationCenterService", () => {
     let systemAdminOnlyClaims: RequestClaims;
 
     beforeAll(async () => {
-      companyId = await createFixtureCompany("Config Center Co");
+      companyId = await createFixtureCompany("Config Center Co", ["employee", "leave", "payroll", "recruitment", "exit"]);
 
       const hrAdminUserId = await createUser(`config-center-hr-${Date.now()}@example.com`);
       await assignRole(hrAdminUserId, companyId, "hr_admin");
@@ -174,6 +182,12 @@ describe("ConfigurationCenterService", () => {
       await locations.create(hrAdminClaims, { name: "Config Center Test Location", locationType: "site" });
       await costCenters.create(hrAdminClaims, { name: "Config Center Test Cost Center" });
       await profitCenters.create(hrAdminClaims, { name: "Config Center Test Profit Center" });
+      // Onboarding & Offboarding checklist-item TEMPLATES — real rows so
+      // onboarding_checklist_template/offboarding_checklist_template's
+      // counts are provably non-zero too, same discipline as every other
+      // domain above.
+      await onboarding.createItemTemplate(hrAdminClaims, { title: "Config Center Test Onboarding Item", category: "hr", responsibleRole: "all" });
+      await offboarding.createItemTemplate(hrAdminClaims, { title: "Config Center Test Offboarding Item", category: "hr", responsibleRole: "all" });
     });
 
     it("includes every domain hr_admin can manage, with real counts, but omits Workflow Templates", async () => {
@@ -216,6 +230,21 @@ describe("ConfigurationCenterService", () => {
       expect(byKey.profit_center).toBeDefined();
       expect(byKey.profit_center.count).toBeGreaterThanOrEqual(1);
 
+      // Onboarding & Offboarding — checklist-item TEMPLATE cards, backed
+      // by OnboardingService.listItemTemplates()/OffboardingService.
+      // listItemTemplates(), not a duplicated count query. Recruitment
+      // and Performance deliberately have no corresponding card at all
+      // (no registry row — see 0095's own header comment and the
+      // matching comment in countFor()): neither module has a "setup
+      // data" catalog to surface.
+      expect(byKey.onboarding_checklist_template).toBeDefined();
+      expect(byKey.onboarding_checklist_template.count).toBeGreaterThanOrEqual(1);
+      expect(byKey.onboarding_checklist_template.adminRoute).toBe("/app/admin?tab=checklists");
+      expect(byKey.offboarding_checklist_template).toBeDefined();
+      expect(byKey.offboarding_checklist_template.count).toBeGreaterThanOrEqual(1);
+      expect(summary.map((s) => s.domainKey)).not.toContain("recruitment");
+      expect(summary.map((s) => s.domainKey)).not.toContain("performance");
+
       // hr_admin does not hold workflow_template.manage.all (that's
       // system_admin's job, per Decision #20) -- this proves the
       // aggregator really defers to WorkflowService's own RBAC check
@@ -244,6 +273,12 @@ describe("ConfigurationCenterService", () => {
       expect(domainKeys).not.toContain("employee_group");
       expect(domainKeys).not.toContain("tax_slab");
       expect(domainKeys).not.toContain("workflow_template");
+      // employee_self_service holds neither onboarding.manage.all nor
+      // offboarding.manage.all (0036's seed grants both only to
+      // hr_admin) -- these cards are omitted the same way the others
+      // above are.
+      expect(domainKeys).not.toContain("onboarding_checklist_template");
+      expect(domainKeys).not.toContain("offboarding_checklist_template");
       expect(domainKeys).toEqual(expect.arrayContaining(["holiday", "custom_field"]));
     });
 
@@ -309,6 +344,12 @@ describe("ConfigurationCenterService", () => {
       const domainKeys = summary.map((s) => s.domainKey);
 
       expect(domainKeys).not.toContain("tax_slab");
+      // This fixture company also never enabled `recruitment`/`exit` --
+      // the same 404-not-403 regression this test pins for tax_slab
+      // applies identically to onboarding/offboarding's own
+      // entitlements.isModuleEnabled() gate.
+      expect(domainKeys).not.toContain("onboarding_checklist_template");
+      expect(domainKeys).not.toContain("offboarding_checklist_template");
       expect(domainKeys).toEqual(
         expect.arrayContaining([
           "leave_policy",

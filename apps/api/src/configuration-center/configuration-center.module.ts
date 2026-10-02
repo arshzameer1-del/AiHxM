@@ -9,6 +9,7 @@ import { PayrollModule } from "../payroll/payroll.module";
 import { CustomFieldsModule } from "../custom-fields/custom-fields.module";
 import { OrganizationModule } from "../organization/organization.module";
 import { EmployeesModule } from "../employees/employees.module";
+import { OnboardingOffboardingModule } from "../onboarding-offboarding/onboarding-offboarding.module";
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { EmployeesModule } from "../employees/employees.module";
     CustomFieldsModule,
     OrganizationModule,
     EmployeesModule,
+    OnboardingOffboardingModule,
   ],
   controllers: [ConfigurationCenterController],
   providers: [ConfigurationCenterService],

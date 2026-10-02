@@ -12,8 +12,17 @@ import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
 import { ImportExportService } from "../import-export/import-export.service";
 import { PersonsService } from "./persons.service";
 import { formatEmployeeNumber, parseEmployeeNumberSequence } from "./employee-number.util";
-import { listFieldSensitivity, restrictedFieldsExposed } from "./employee-field-sensitivity";
+import {
+  classifiedFieldKeys,
+  listFieldSensitivity,
+  restrictedFieldsExposed,
+  sensitivityFloorDefaults,
+  VIEW_SENSITIVE_PERMISSION,
+} from "./employee-field-sensitivity";
 import { HrReferenceCatalogService } from "../hr-administration/hr-reference-catalog.service";
+import { HrBusinessPolicyService } from "../hr-administration/hr-business-policy.service";
+import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
+import { OrgOccupancyService } from "../organization/occupancy/org-occupancy.service";
 import type {
   CreateEmployeeRequest,
   CsvImportResult,
@@ -33,11 +42,24 @@ const MODULE_KEY = "employee" as const;
 const OBJECT_KEY = "employee";
 const VIEW_PERMISSION = "employee.view";
 const MANAGE_PERMISSION = "employee.manage.all";
+// Cross-module integration audit (2026-10-01), gap #3/#7 — the write-side
+// Data Scope alternative to MANAGE_PERMISSION, same convention 0079/0102/
+// 0111 established: a caller holding only `employee.manage.scoped` can
+// update (which is also how termination happens, via `employmentStatus`)
+// only employees inside their assigned org-unit subtree or location
+// subtree. See `resolveManageAccess()`'s own doc comment.
+const SCOPED_MANAGE_PERMISSION_BASE = "employee.manage";
 // Decision #20 (Task #52) — lets a System Admin (who does not hold
 // employee.manage.all) provision logins too, without granting them full
 // HR-Admin employee-management rights. See requireModuleAndAccountPermission().
 const ACCOUNT_PERMISSION = "user_account.manage.all";
-const SENSITIVE_FIELDS = ["cnic", "dateOfBirth", "salaryBand", "bankAccountNumber", "terminationReason"] as const;
+// Cross-module integration audit Item 8 (2026-10-01) — unioned with every
+// field employee-field-sensitivity.ts classifies above `normal`, so a field
+// classified there is always field-filtered even if this list is not
+// updated alongside it.
+const SENSITIVE_FIELDS: readonly string[] = Array.from(
+  new Set(["cnic", "dateOfBirth", "salaryBand", "bankAccountNumber", "terminationReason", ...classifiedFieldKeys()])
+);
 // Decision #12, widened by Decision #20 and Phase P2 — the only roles
 // `createLogin()` is allowed to grant. Deliberately excludes the Phase 4
 // `rbac_demo_*` proof-of-concept roles. `system_admin` was added here so
@@ -245,7 +267,24 @@ export class EmployeesService {
     // undefined, the same way `webhooks?.enqueue()` no-ops — every real
     // caller (NestJS's DI container, EmployeesModule -> HrAdministrationModule)
     // always gets a real instance.
-    private readonly hrCatalog?: HrReferenceCatalogService
+    private readonly hrCatalog?: HrReferenceCatalogService,
+    // HR Administration v2 "then 2" Phase 2 (2026-10-02) — same optional
+    // pattern as `hrCatalog` immediately above, for the same reason:
+    // `maybeSeedProbationEndDate()`/`enforceRehireCooldown()` below no-op
+    // when this is undefined, so every spec file that hand-constructs
+    // EmployeesService without it keeps working unchanged. Added AFTER
+    // `hrCatalog` (not before) so every existing positional call site —
+    // including `employees.service.spec.ts`'s own `employeesWithCatalog`,
+    // which passes exactly 9 positional args ending in `hrCatalog` — is
+    // unaffected; this simply stays undefined for those callers.
+    private readonly businessPolicy?: HrBusinessPolicyService,
+    // Cross-module integration follow-up (2026-10-01) — `update()` keeps
+    // `org_relationships` in sync when a generic PATCH changes
+    // `managerId`. Default-instantiated and appended last, the same
+    // convention EmployeeLifecycleService/HiringProcessService use, so every
+    // spec file that hand-constructs this service positionally keeps
+    // working; Nest's DI supplies the real OrgOccupancyModule instance.
+    private readonly occupancy: OrgOccupancyService = new OrgOccupancyService(audit, new EffectiveDatingEngine(), webhooks)
   ) {}
 
   /** `employment_type` used to be a hardcoded 4-value `CHECK` constraint
@@ -260,11 +299,160 @@ export class EmployeesService {
     await this.hrCatalog.validateActiveCode(client, companyId, "employment_type", employmentType);
   }
 
+  /**
+   * HR Administration v2 "then 2" Phase 1 (2026-10-01) — `maritalStatus`
+   * used to be unconstrained free text (0010_employee_core.sql); this
+   * tenant's own `marital_status` catalog is now the source of truth,
+   * same optional-hrCatalog pattern as `validateEmploymentType()` above.
+   */
+  private async validateMaritalStatus(client: PoolClient, companyId: string, maritalStatus: string | null | undefined): Promise<void> {
+    if (!maritalStatus || !this.hrCatalog) return;
+    await this.hrCatalog.validateActiveCode(client, companyId, "marital_status", maritalStatus);
+  }
+
+  /**
+   * HR Administration v2 "then 2" Phase 1 (2026-10-01) — `documentType`
+   * (employee_documents.document_type) used to be unconstrained free
+   * text; this tenant's own `document_type` catalog is now the source of
+   * truth.
+   */
+  private async validateDocumentType(client: PoolClient, companyId: string, documentType: string | null | undefined): Promise<void> {
+    if (!documentType || !this.hrCatalog) return;
+    await this.hrCatalog.validateActiveCode(client, companyId, "document_type", documentType);
+  }
+
+  /**
+   * HR Administration v2 "then 2" Phase 2 (2026-10-02) — the Rehire
+   * Policy's real enforcement. Only ever meaningful at hire time: a
+   * rehire is detected the same deterministic way `persons.service.ts`'s
+   * own `findOrCreateForHire()` doc comment describes — a CNIC that
+   * matches an existing person in this tenant. Gated on `cnic` being
+   * supplied (no CNIC means `findOrCreateForHire()` always creates a
+   * brand-new person, never a match) and on this company having a prior
+   * TERMINATED employment for that same person — two employees sharing a
+   * CNIC who are both still active (the genuine "second concurrent
+   * employment" case that same doc comment also covers) is not a rehire
+   * and is never blocked here. Default `cooldownDays` is 0 (see
+   * `0107_hr_business_policies.sql`'s own seed), which this method
+   * treats as "no restriction" — so no existing tenant's hiring behavior
+   * changes until they explicitly raise it from HR Administration.
+   */
+  private async enforceRehireCooldown(
+    client: PoolClient,
+    claims: RequestClaims,
+    personId: string | null | undefined,
+    cnic: string | null | undefined,
+    // "then 2" Phases 4+5 (2026-10-02) — the hire's own org unit/location,
+    // so a scoped Rehire Policy override (set from HR Administration)
+    // applies here too, not just the company-wide default. There is no
+    // `employeeId` to scope by yet at this point in `create()` — the row
+    // doesn't exist until just after this call — which is fine: an
+    // employee-level override only ever makes sense for an EXISTING
+    // employee, never for the hire that is still being created.
+    orgContext: { locationId?: string | null; orgUnitId?: string | null } = {}
+  ): Promise<void> {
+    if (!cnic || !personId || !this.businessPolicy) return;
+    const rules = await this.businessPolicy.resolveEffectivePolicy(client, claims.company_id!, "rehire", orgContext);
+    const cooldownDays = typeof rules?.cooldownDays === "number" ? rules.cooldownDays : 0;
+    if (cooldownDays <= 0) return;
+    const prior = await client.query<{ termination_date: Date }>(
+      `SELECT termination_date FROM employees
+       WHERE company_id = $1 AND person_id = $2 AND employment_status = 'terminated' AND termination_date IS NOT NULL
+       ORDER BY termination_date DESC LIMIT 1`,
+      [claims.company_id, personId]
+    );
+    if (prior.rowCount === 0) return;
+    const eligibleFrom = new Date(prior.rows[0].termination_date);
+    eligibleFrom.setUTCDate(eligibleFrom.getUTCDate() + cooldownDays);
+    if (new Date() < eligibleFrom) {
+      throw new BadRequestException(
+        `This person's last employment here ended too recently to be rehired yet — this company's Rehire Policy requires a ${cooldownDays}-day wait, so they become eligible on ${eligibleFrom.toISOString().slice(0, 10)}.`
+      );
+    }
+  }
+
+  /**
+   * HR Administration v2 "then 2" Phase 2 (2026-10-02) — the Probation
+   * Policy's real enforcement: a new hire whose `employment_type` is
+   * exactly `'probation'` (the same literal code
+   * `0012_employee_groups_leave_policy.sql`'s own `employment_type`
+   * `CHECK` already uses, and `0090`'s own seeded `employment_type`
+   * catalog item) gets a `probation_end` Important Date auto-computed
+   * from the Probation Policy's `durationDays`, counted from their
+   * `dateOfJoining` — unless the hire (or, for the Hiring Wizard, that
+   * same transaction's own `important_dates` card projection, which
+   * always runs AFTER this and supersedes any existing active row of
+   * the same date_type) already set one explicitly. Deliberately scoped
+   * to CREATE time only, not `update()` — retroactively seeding or
+   * moving a probation end date just because `employmentType` was
+   * edited later is a bigger, separately-scoped behavior change, not a
+   * plain field edit.
+   */
+  private async maybeSeedProbationEndDate(
+    client: PoolClient,
+    claims: RequestClaims,
+    employeeId: string,
+    employmentType: string | null | undefined,
+    dateOfJoining: Date | string | null | undefined,
+    // "then 2" Phases 4+5 (2026-10-02) — same reasoning as
+    // `enforceRehireCooldown()`'s own `orgContext` param, except this
+    // call happens AFTER the employee row is inserted, so a real
+    // `employeeId` is available too — the most specific override level,
+    // checked first by `resolveEffectivePolicy()`/`resolveOverride()`.
+    orgContext: { locationId?: string | null; orgUnitId?: string | null } = {}
+  ): Promise<void> {
+    if (employmentType !== "probation" || !dateOfJoining || !this.businessPolicy) return;
+    const rules = await this.businessPolicy.resolveEffectivePolicy(client, claims.company_id!, "probation", {
+      employeeId,
+      ...orgContext,
+    });
+    const durationDays = typeof rules?.durationDays === "number" ? rules.durationDays : null;
+    if (!durationDays || durationDays <= 0) return;
+    await client.query(
+      `INSERT INTO employee_important_dates (company_id, employee_id, date_type, date_value, label)
+       VALUES ($1, $2, 'probation_end', ($3::date + ($4 || ' days')::interval)::date, 'Auto-computed from Probation Policy')`,
+      [claims.company_id, employeeId, dateOfJoining, durationDays]
+    );
+  }
+
   async create(claims: RequestClaims, input: CreateEmployeeRequest): Promise<EmployeeView> {
     await this.requireModuleAndManagePermission(claims);
     if (!claims.company_id) throw new ForbiddenException();
 
-    return this.db.withClaims(claims, (client) => this.createWithinTransaction(client, claims, input));
+    return this.db.withClaims(claims, async (client) => {
+      const employee = await this.createWithinTransaction(client, claims, input);
+
+      // Cross-module integration follow-up (2026-10-01): hiring with a
+      // `managerId` used to set only the `employees.manager_id` column,
+      // leaving no `org_relationships` row behind it — the same gap the
+      // generic PATCH path had before it started calling this shared sync
+      // (see `update()`'s own comment on its own call to this method).
+      // Deliberately kept HERE, in the public wrapper, rather than inside
+      // `createWithinTransaction()` itself: that method's own doc comment
+      // explains it is ALSO the Hiring Process wizard's own create step
+      // (`HiringProcessService.complete()`), which already opens its own
+      // `direct` relationship from the Reporting Relationships card via
+      // `OrgOccupancyService.createRelationshipWithinTransaction()` right
+      // after calling it — syncing here too would double-write (end the
+      // just-created row and immediately replace it with an identical
+      // one). This is employee creation, so there is no PRIOR relationship
+      // to end — only ever the "create" branch inside
+      // `syncDirectManagerFromEmployeeWithinTransaction()` runs (its own
+      // no-prior-relationship `endRelationshipsWithinTransaction` call is
+      // a no-op for a brand-new employee). `syncEmployeeManagerId` stays
+      // false inside that method, so it never re-writes the column the
+      // INSERT above already set.
+      if (input.managerId) {
+        await this.occupancy.syncDirectManagerFromEmployeeWithinTransaction(client, claims, {
+          employeeId: employee.id,
+          managerEmployeeId: input.managerId,
+          effectiveFrom: input.dateOfJoining ?? undefined,
+          source: "employee_create",
+        });
+      }
+
+      return employee;
+    });
   }
 
   /**
@@ -287,6 +475,7 @@ export class EmployeesService {
    */
   async createWithinTransaction(client: PoolClient, claims: RequestClaims, input: CreateEmployeeRequest): Promise<EmployeeView> {
       await this.validateEmploymentType(client, claims.company_id!, input.employmentType);
+      await this.validateMaritalStatus(client, claims.company_id!, input.maritalStatus);
       const employeeNumber = await this.assignEmployeeNumber(client, claims.company_id!, input.employeeNumber);
       const department = await this.resolveDepartment(client, claims.company_id!, input.orgUnitId, input.department);
       const location = await this.resolveLocation(client, claims.company_id!, input.locationId, input.location);
@@ -300,6 +489,10 @@ export class EmployeesService {
         cnic: input.cnic,
         dateOfBirth: input.dateOfBirth,
         gender: input.gender,
+      });
+      await this.enforceRehireCooldown(client, claims, personId, input.cnic, {
+        locationId: input.locationId,
+        orgUnitId: input.orgUnitId,
       });
 
       const result = await client.query(
@@ -345,6 +538,11 @@ export class EmployeesService {
          VALUES ($1, $2, 'hire', $3, $4, $5, $6, $7)`,
         [claims.company_id, row.id, row.date_of_joining, row.department, row.designation, row.salary_band, claims.sub]
       );
+
+      await this.maybeSeedProbationEndDate(client, claims, row.id, row.employment_type, row.date_of_joining, {
+        locationId: row.location_id,
+        orgUnitId: row.org_unit_id,
+      });
 
       const employee = rowToEmployee(row) as EmployeeView;
 
@@ -516,9 +714,10 @@ export class EmployeesService {
       // target (the record's own manager's login identity, resolved via
       // a self-join so RbacService never needs to know employees have
       // managers at all).
-      const [scope, fieldRules, result] = await Promise.all([
+      const [scope, fieldRules, floorDefaults, result] = await Promise.all([
         this.rbac.resolveViewScope(claims, VIEW_PERMISSION),
         this.rbac.loadFieldPermissionRules(claims, OBJECT_KEY, SENSITIVE_FIELDS),
+        this.resolveSensitivityFloor(claims),
         client.query(
           `SELECT e.*, mgr.user_account_id AS manager_user_account_id
            FROM employees e
@@ -537,7 +736,8 @@ export class EmployeesService {
           SENSITIVE_FIELDS,
           row.user_account_id,
           row.manager_user_account_id,
-          claims.sub
+          claims.sub,
+          floorDefaults
         );
         if (filtered) out.push(filtered as EmployeeView);
       }
@@ -558,6 +758,17 @@ export class EmployeesService {
     return listFieldSensitivity();
   }
 
+  /**
+   * Item 8 — the sensitivity-tier default floor for this caller, resolved
+   * ONCE per request (same posture as resolveViewScope()). Restricted/
+   * Highly Restricted fields with no explicit field rule for the caller's
+   * roles default to visible only with `employee.view_sensitive.all`;
+   * see `sensitivityFloorDefaults()`.
+   */
+  private async resolveSensitivityFloor(claims: RequestClaims) {
+    return sensitivityFloorDefaults(await this.rbac.can(claims, VIEW_SENSITIVE_PERMISSION));
+  }
+
   async get(claims: RequestClaims, id: string): Promise<EmployeeView> {
     if (!(await this.entitlements.isModuleEnabled(claims, MODULE_KEY))) {
       throw new NotFoundException("Employee not found");
@@ -573,9 +784,10 @@ export class EmployeesService {
       if (result.rowCount === 0) throw new NotFoundException("Employee not found");
       const row = result.rows[0];
 
-      const [scope, fieldRules] = await Promise.all([
+      const [scope, fieldRules, floorDefaults] = await Promise.all([
         this.rbac.resolveViewScope(claims, VIEW_PERMISSION),
         this.rbac.loadFieldPermissionRules(claims, OBJECT_KEY, SENSITIVE_FIELDS),
+        this.resolveSensitivityFloor(claims),
       ]);
       const employee = rowToEmployee(row);
       const filtered = this.rbac.filterRecordFieldsWithScope(
@@ -585,7 +797,8 @@ export class EmployeesService {
         SENSITIVE_FIELDS,
         row.user_account_id,
         row.manager_user_account_id,
-        claims.sub
+        claims.sub,
+        floorDefaults
       );
       if (!filtered) throw new NotFoundException("Employee not found");
 
@@ -616,18 +829,20 @@ export class EmployeesService {
   }
 
   async update(claims: RequestClaims, id: string, patch: UpdateEmployeeRequest): Promise<EmployeeView> {
-    await this.requireModuleAndManagePermission(claims);
+    const scope = await this.resolveManageAccess(claims);
 
     return this.db.withClaims(claims, async (client) => {
       const current = await client.query("SELECT * FROM employees WHERE id = $1", [id]);
       if (current.rowCount === 0) throw new NotFoundException("Employee not found");
       const before = current.rows[0];
+      this.assertInManageScope(scope, before);
 
       if (patch.employmentStatus === "terminated" && !patch.terminationDate && !before.termination_date) {
         throw new BadRequestException("terminationDate is required when setting employmentStatus to terminated");
       }
 
       await this.validateEmploymentType(client, claims.company_id!, patch.employmentType);
+      await this.validateMaritalStatus(client, claims.company_id!, patch.maritalStatus);
 
       const nextOrgUnitId = patch.orgUnitId ?? before.org_unit_id;
       // Organization Management Phase 1: whenever an org unit is linked
@@ -703,6 +918,10 @@ export class EmployeesService {
         salary_band: patch.salaryBand ?? before.salary_band,
         bank_account_number: patch.bankAccountNumber ?? before.bank_account_number,
       };
+      // A scoped caller may not move an employee's org unit/location to
+      // one outside their own data scope, even though they were allowed
+      // to touch the employee in its CURRENT (in-scope) location.
+      this.assertInManageScope(scope, { org_unit_id: next.org_unit_id, location_id: next.location_id });
 
       const result = await client.query(
         `UPDATE employees SET
@@ -739,6 +958,25 @@ export class EmployeesService {
         ]
       );
       const after = result.rows[0];
+
+      // Cross-module integration follow-up (2026-10-01): a manager change
+      // through this generic PATCH used to patch only the column, leaving
+      // the open `direct` org_relationships row pointing at the old
+      // manager. It now goes through the SAME shared write path as
+      // EmployeeLifecycleService.changeManager()
+      // (`syncDirectManagerFromEmployeeWithinTransaction()`), on this
+      // transaction's client — a reporting cycle / terminated / unknown
+      // manager rejects and rolls back the whole update. Ping-pong guard:
+      // that method never writes `employees.manager_id` (the UPDATE above
+      // is the one writer of it here), and OrgRelationshipsService's
+      // opposite-direction sync never calls back into this service.
+      if ((after.manager_id ?? null) !== (before.manager_id ?? null)) {
+        await this.occupancy.syncDirectManagerFromEmployeeWithinTransaction(client, claims, {
+          employeeId: id,
+          managerEmployeeId: after.manager_id ?? null,
+          source: "employee_update",
+        });
+      }
 
       await this.autoRecordJobHistory(client, claims, before, after);
 
@@ -812,6 +1050,7 @@ export class EmployeesService {
       const employee = await client.query("SELECT id, company_id FROM employees WHERE id = $1", [employeeId]);
       if (employee.rowCount === 0) throw new NotFoundException("Employee not found");
       const companyId = employee.rows[0].company_id;
+      await this.validateDocumentType(client, companyId, documentType);
 
       // Tenant Management gap-fill Phase 1 item #10 — storage quota
       // enforcement. UsageService.getSummary() (TM-027/028) already
@@ -1106,6 +1345,119 @@ export class EmployeesService {
     if (!(await this.rbac.can(claims, MANAGE_PERMISSION))) {
       throw new ForbiddenException("Not permitted to manage employee records");
     }
+  }
+
+  /**
+   * Cross-module integration audit (2026-10-01), gap #3/#7 — Data Scope
+   * write-side sibling of `requireModuleAndManagePermission()`, used only
+   * by `update()` (hence also termination, which is just `update()` with
+   * `employmentStatus: "terminated"`). `.manage.all` wins outright
+   * (unrestricted, every other method on this service is unaffected);
+   * otherwise a caller holding only `employee.manage.scoped` gets back
+   * their assigned org-unit subtree and location subtree ids, checked
+   * against the SPECIFIC employee being written by
+   * `assertInManageScope()` below; otherwise (neither) throws — same
+   * fail-closed posture `PositionsService.resolveManageAccess()`
+   * established for this same gap.
+   */
+  private async resolveManageAccess(
+    claims: RequestClaims
+  ): Promise<{ unrestricted: boolean; orgUnitIds: string[]; locationIds: string[] }> {
+    if (!(await this.entitlements.isModuleEnabled(claims, MODULE_KEY))) {
+      throw new NotFoundException();
+    }
+    if (await this.rbac.can(claims, MANAGE_PERMISSION)) {
+      return { unrestricted: true, orgUnitIds: [], locationIds: [] };
+    }
+    if (!(await this.rbac.hasScopedPermission(claims, SCOPED_MANAGE_PERMISSION_BASE))) {
+      throw new ForbiddenException("Not permitted to manage employee records");
+    }
+    const [assignedOrgUnitIds, assignedLocationIds] = await Promise.all([
+      this.rbac.resolveDataScopeEntityIds(claims, "org_unit"),
+      this.rbac.resolveDataScopeEntityIds(claims, "location"),
+    ]);
+    const [orgUnitIds, locationIds] = await Promise.all([
+      this.expandOrgUnitIdsToSubtree(claims, assignedOrgUnitIds),
+      this.expandLocationIdsToSubtree(claims, assignedLocationIds),
+    ]);
+    return { unrestricted: false, orgUnitIds, locationIds };
+  }
+
+  /** Throws unless `record` (the employee's CURRENT, or a patch's
+   * PROPOSED, org unit / location) falls inside `scope` — called once for
+   * the existing row and, when a patch would change either field, once
+   * more for the new values, so a scoped caller can neither touch an
+   * employee outside their region nor move one into/out of it. */
+  private assertInManageScope(
+    scope: { unrestricted: boolean; orgUnitIds: string[]; locationIds: string[] },
+    record: { org_unit_id: string | null; location_id: string | null }
+  ): void {
+    if (scope.unrestricted) return;
+    const inOrgUnit = Boolean(record.org_unit_id) && scope.orgUnitIds.includes(record.org_unit_id as string);
+    const inLocation = Boolean(record.location_id) && scope.locationIds.includes(record.location_id as string);
+    if (!inOrgUnit && !inLocation) {
+      throw new ForbiddenException("Employee is outside your assigned data scope");
+    }
+  }
+
+  /** Every assigned org-unit id plus all of its descendants — the same
+   * duplicated-rather-than-injected recursive CTE
+   * `PositionsService.expandOrgUnitIdsToSubtree()` already established
+   * for this identical gap, so this module doesn't need a reverse import
+   * of OrganizationModule just for this one query. */
+  private async expandOrgUnitIdsToSubtree(claims: RequestClaims, rootIds: string[]): Promise<string[]> {
+    if (rootIds.length === 0) return [];
+    return this.db.withClaims(claims, async (client) => {
+      const ids = new Set<string>();
+      for (const rootId of rootIds) {
+        const exists = await client.query("SELECT 1 FROM org_units WHERE id = $1 AND company_id = $2", [
+          rootId,
+          claims.company_id,
+        ]);
+        if (exists.rowCount === 0) continue;
+        ids.add(rootId);
+        const descendants = await client.query<{ id: string }>(
+          `WITH RECURSIVE subtree AS (
+             SELECT id FROM org_units WHERE company_id = $1 AND id = $2
+             UNION ALL
+             SELECT ou.id FROM org_units ou JOIN subtree s ON ou.parent_id = s.id WHERE ou.company_id = $1
+           )
+           SELECT id FROM subtree WHERE id != $2`,
+          [claims.company_id, rootId]
+        );
+        for (const row of descendants.rows) ids.add(row.id);
+      }
+      return Array.from(ids);
+    });
+  }
+
+  /** Every assigned location id plus all of its descendants — same shape
+   * as `expandOrgUnitIdsToSubtree()` immediately above, over `locations`'
+   * own `parent_id` hierarchy (`LocationsService`'s own subtree query). */
+  private async expandLocationIdsToSubtree(claims: RequestClaims, rootIds: string[]): Promise<string[]> {
+    if (rootIds.length === 0) return [];
+    return this.db.withClaims(claims, async (client) => {
+      const ids = new Set<string>();
+      for (const rootId of rootIds) {
+        const exists = await client.query("SELECT 1 FROM locations WHERE id = $1 AND company_id = $2", [
+          rootId,
+          claims.company_id,
+        ]);
+        if (exists.rowCount === 0) continue;
+        ids.add(rootId);
+        const descendants = await client.query<{ id: string }>(
+          `WITH RECURSIVE subtree AS (
+             SELECT id FROM locations WHERE company_id = $1 AND id = $2
+             UNION ALL
+             SELECT l.id FROM locations l JOIN subtree s ON l.parent_id = s.id WHERE l.company_id = $1
+           )
+           SELECT id FROM subtree WHERE id != $2`,
+          [claims.company_id, rootId]
+        );
+        for (const row of descendants.rows) ids.add(row.id);
+      }
+      return Array.from(ids);
+    });
   }
 
   /**

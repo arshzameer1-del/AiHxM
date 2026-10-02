@@ -1,4 +1,4 @@
-import { IsDateString } from "class-validator";
+import { IsDateString, IsOptional, IsUUID } from "class-validator";
 
 export class CreatePayrollRunDto {
   @IsDateString()
@@ -6,4 +6,9 @@ export class CreatePayrollRunDto {
 
   @IsDateString()
   periodEnd!: string;
+
+  /** Payroll Areas (0101_payroll_areas.sql) — omit/null for a company-wide run. */
+  @IsOptional()
+  @IsUUID()
+  payrollAreaId?: string | null;
 }

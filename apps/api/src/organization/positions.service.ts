@@ -8,6 +8,7 @@ import { AuditService } from "../audit/audit.service";
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
 import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
 import { buildOrgEventPayload } from "../webhooks/org-event-payload.util";
+import { OrgOccupancyService } from "./occupancy/org-occupancy.service";
 import type {
   CreatePositionRequest,
   PositionStatus,
@@ -29,6 +30,13 @@ const VIEW_PERMISSION = "position.view.all";
 // HR is scoped by org unit, Regional Finance by cost center, and both
 // permissions ride on this same `position.view.scoped` key).
 const SCOPED_VIEW_PERMISSION_BASE = "position.view";
+// Cross-module integration audit (2026-10-01), gap #3/#7 — the write-side
+// sibling of SCOPED_VIEW_PERMISSION_BASE. Same two dimensions (org unit
+// subtree OR a tagged cost center), same "caller's side only" resolution,
+// but gating create/update/freeze/unfreeze/abolish/reactivate/assign/
+// unassign instead of list/get. See `resolveManageAccess()`'s own doc
+// comment.
+const SCOPED_MANAGE_PERMISSION_BASE = "position.manage";
 
 type PositionRow = {
   id: string;
@@ -144,8 +152,19 @@ export class PositionsService {
     // `org.position.changed` domain event, fired at every one of this
     // service's own already-audited mutation points (create/update/
     // freeze/unfreeze/abolish/reactivate/assign/unassign).
-    private readonly webhooks?: WebhookDispatchService
-  ) {}
+    private readonly webhooks?: WebhookDispatchService,
+    // Cross-module integration audit (2026-10-01) — the shared,
+    // transaction-scoped occupancy writer (see `assignEmployee()`). Default-
+    // instantiated from this service's own dependencies, the same
+    // "optional-with-default" convention HiringProcessService uses, so the
+    // many spec files that hand-construct `PositionsService` positionally
+    // keep working unchanged.
+    occupancy?: OrgOccupancyService
+  ) {
+    this.occupancy = occupancy ?? new OrgOccupancyService(audit, effectiveDating, webhooks);
+  }
+
+  private readonly occupancy: OrgOccupancyService;
 
   private publishChanged(claims: RequestClaims, changeType: string, position: PositionView): void {
     this.webhooks
@@ -154,7 +173,8 @@ export class PositionsService {
   }
 
   async create(claims: RequestClaims, input: CreatePositionRequest): Promise<PositionView> {
-    await this.requireManage(claims);
+    const scope = await this.resolveManageAccess(claims);
+    this.assertInManageScope(scope, { org_unit_id: input.orgUnitId, cost_center_id: input.costCenterId ?? null });
     return this.db.withClaims(claims, async (client) => {
       await this.mustExistOrgUnit(client, claims.company_id!, input.orgUnitId);
 
@@ -290,9 +310,10 @@ export class PositionsService {
   /** Retitle/recode/reassign-job/reparent-org-unit/adjust-headcount in
    * place — status transitions are their own dedicated actions below. */
   async update(claims: RequestClaims, id: string, patch: UpdatePositionRequest): Promise<PositionView> {
-    await this.requireManage(claims);
+    const scope = await this.resolveManageAccess(claims);
     return this.db.withClaims(claims, async (client) => {
       const before = await this.mustExist(client, id);
+      this.assertInManageScope(scope, before);
 
       if (patch.orgUnitId) {
         await this.mustExistOrgUnit(client, claims.company_id!, patch.orgUnitId);
@@ -335,6 +356,10 @@ export class PositionsService {
         cost_center_id: patch.costCenterId === null ? null : patch.costCenterId ?? before.cost_center_id,
         profit_center_id: patch.profitCenterId === null ? null : patch.profitCenterId ?? before.profit_center_id,
       };
+      // A scoped caller may not move a position's org unit/cost center to
+      // one outside their own data scope, even though they were allowed
+      // to touch the position in its CURRENT (in-scope) location.
+      this.assertInManageScope(scope, { org_unit_id: next.org_unit_id, cost_center_id: next.cost_center_id });
 
       const position = await this.applyVersionAndSync(client, claims, id, next, patch.effectiveFrom);
 
@@ -408,9 +433,10 @@ export class PositionsService {
     action: string,
     next: (current: PositionStatus) => PositionStatus
   ): Promise<PositionView> {
-    await this.requireManage(claims);
+    const scope = await this.resolveManageAccess(claims);
     return this.db.withClaims(claims, async (client) => {
       const before = await this.mustExist(client, id);
+      this.assertInManageScope(scope, before);
       const nextStatus = next(before.status as PositionStatus);
 
       const data = {
@@ -450,57 +476,83 @@ export class PositionsService {
    * a join table), so moving them to a new seat must free the old one or
    * the old seat would be left permanently marked `filled` with no real
    * occupant.
+   *
+   * Cross-module integration audit (2026-10-01): the actual writes now live
+   * in `OrgOccupancyService.assignPositionWithinTransaction()` — moved
+   * BELOW this module (not duplicated) so hiring completion and the
+   * lifecycle transactions in `EmployeesModule` can run the exact same
+   * occupancy transition inside their own transactions without a circular
+   * module import. This method is unchanged in contract (same gate, same
+   * ConflictException on a non-vacant seat, same audit action, same
+   * `org.position.changed` event); it simply hands its own transaction
+   * client down.
+   *
+   * Cross-module integration follow-up (2026-10-01): a Workbench
+   * assignment used to fill the seat only, leaving the employee's
+   * `employee_org_assignments` primary row (and `employees.org_unit_id`)
+   * describing wherever they were before. The same transaction now also
+   * runs `OrgOccupancyService.syncEmployeeOrgSideToSeatWithinTransaction()`
+   * — org unit/department follow the seat and the open `primary`
+   * assignment is replaced (or opened) to name it — so the Workbench, a
+   * hire and a lifecycle transfer/promotion all leave identical org-side
+   * state behind.
    */
   async assignEmployee(claims: RequestClaims, positionId: string, employeeId: string, effectiveFrom?: string): Promise<PositionView> {
-    await this.requireManage(claims);
+    const scope = await this.resolveManageAccess(claims);
     return this.db.withClaims(claims, async (client) => {
       const position = await this.mustExist(client, positionId);
-      if (position.status !== "vacant") {
-        throw new ConflictException(`Position is ${position.status}, not vacant — it cannot be assigned`);
-      }
-
-      const employeeResult = await client.query<{ id: string; position_id: string | null }>(
-        "SELECT id, position_id FROM employees WHERE id = $1 AND company_id = $2",
+      this.assertInManageScope(scope, position);
+      // Cross-module integration follow-up (2026-10-01): captured BEFORE
+      // either occupancy write below so it reflects the seat the employee
+      // is moving FROM, not the one they're moving to.
+      const before = await client.query<{ org_unit_id: string | null; designation: string | null; salary_band: string | null }>(
+        "SELECT org_unit_id, designation, salary_band FROM employees WHERE id = $1 AND company_id = $2",
         [employeeId, claims.company_id]
       );
-      if (employeeResult.rowCount === 0) throw new NotFoundException("Employee not found");
-      const employee = employeeResult.rows[0];
+      if (before.rowCount === 0) throw new NotFoundException("Employee not found");
+      const beforeRow = before.rows[0];
 
-      if (employee.position_id && employee.position_id !== positionId) {
-        await this.vacate(client, claims, employee.position_id, effectiveFrom);
-      }
-
-      await client.query("UPDATE employees SET position_id = $2, updated_at = now() WHERE id = $1", [
+      const view = await this.occupancy.assignPositionWithinTransaction(client, claims, {
+        positionId,
         employeeId,
-        positionId,
-      ]);
-
-      const updated = await this.applyVersionAndSync(
-        client,
-        claims,
-        positionId,
-        {
-          org_unit_id: position.org_unit_id,
-          job_id: position.job_id,
-          position_code: position.position_code,
-          position_title: position.position_title,
-          headcount_fte: Number(position.headcount_fte),
-          status: "filled",
-          cost_center_id: position.cost_center_id,
-          profit_center_id: position.profit_center_id,
-        },
-        effectiveFrom
-      );
-
-      await this.audit.record(client, claims, {
-        companyId: claims.company_id ?? null,
-        action: "position.assign",
-        target: positionId,
-        metadata: { employeeId },
+        effectiveFrom,
+        source: "position_workbench",
+      });
+      await this.occupancy.syncEmployeeOrgSideToSeatWithinTransaction(client, claims, {
+        employeeId,
+        effectiveFrom,
+        source: "position_workbench",
       });
 
-      const view = rowToPosition(updated);
-      this.publishChanged(claims, "position.assign", view);
+      // Cross-module integration follow-up (2026-10-01): a Workbench
+      // assignment that moves the employee into a seat in a DIFFERENT org
+      // unit used to leave `employees.org_unit_id`/`department` updated
+      // (the prior follow-up above, `syncEmployeeOrgSideToSeatWithinTransaction`)
+      // but no trace in `employee_job_history` — the same trail
+      // `EmployeeLifecycleService.transfer()` already writes for the
+      // equivalent lifecycle-surface move (see that method, and its
+      // shared `execute()` helper's own history INSERT). Keyed off
+      // `org_unit_id` rather than the `department` display name it
+      // derives from: `department` is re-set to match the seat's org
+      // unit on every sync regardless of whether the unit actually
+      // changed, so comparing it would under/over-fire. A same-org-unit
+      // reassignment (filling a different vacant seat in the same unit)
+      // is deliberately not logged here — nothing about the employee's
+      // org placement changed, only which position row points at them.
+      const after = await client.query<{ org_unit_id: string | null; department: string | null }>(
+        "SELECT org_unit_id, department FROM employees WHERE id = $1 AND company_id = $2",
+        [employeeId, claims.company_id]
+      );
+      const afterRow = after.rows[0];
+      if (afterRow && afterRow.org_unit_id !== beforeRow.org_unit_id) {
+        await client.query(
+          `INSERT INTO employee_job_history
+             (company_id, employee_id, event_type, effective_date, department, designation, salary_band, recorded_by_user_account_id)
+           VALUES ($1, $2, 'position_assignment', COALESCE($3, CURRENT_DATE), $4, $5, $6, $7)`,
+          [claims.company_id, employeeId, effectiveFrom ?? null, afterRow.department, beforeRow.designation, beforeRow.salary_band, claims.sub]
+        );
+      }
+
       return view;
     });
   }
@@ -509,60 +561,33 @@ export class PositionsService {
    * flip it back to `vacant`. A no-op (returns the position unchanged) if
    * it wasn't `filled` to begin with — unassigning an already-vacant
    * position isn't an error, the same "setStatus is a no-op if already
-   * there" posture OrgUnitsService.setStatus() takes. */
+   * there" posture OrgUnitsService.setStatus() takes. Delegates to
+   * `OrgOccupancyService` for the same reason `assignEmployee()` does,
+   * including the follow-up org-side sync: the former occupant's open
+   * `primary` assignment stops naming this seat (org unit/location kept). */
   async unassignEmployee(claims: RequestClaims, positionId: string, effectiveFrom?: string): Promise<PositionView> {
-    await this.requireManage(claims);
+    const scope = await this.resolveManageAccess(claims);
     return this.db.withClaims(claims, async (client) => {
       const position = await this.mustExist(client, positionId);
-      if (position.status !== "filled") {
-        return rowToPosition(position);
-      }
-      const updated = await this.vacate(client, claims, positionId, effectiveFrom);
-
-      await this.audit.record(client, claims, {
-        companyId: claims.company_id ?? null,
-        action: "position.unassign",
-        target: positionId,
+      this.assertInManageScope(scope, position);
+      const occupants = await client.query<{ id: string }>("SELECT id FROM employees WHERE position_id = $1 AND company_id = $2", [
+        positionId,
+        claims.company_id,
+      ]);
+      const view = await this.occupancy.vacatePositionWithinTransaction(client, claims, {
+        positionId,
+        effectiveFrom,
+        source: "position_workbench",
       });
-
-      const view = rowToPosition(updated);
-      this.publishChanged(claims, "position.unassign", view);
+      for (const occupant of occupants.rows) {
+        await this.occupancy.syncEmployeeOrgSideToSeatWithinTransaction(client, claims, {
+          employeeId: occupant.id,
+          effectiveFrom,
+          source: "position_workbench",
+        });
+      }
       return view;
     });
-  }
-
-  /** Shared by unassignEmployee() and assignEmployee()'s "moving to a new
-   * seat vacates the old one" side effect — clears every employee row
-   * pointing at this position (defensive: the application only ever lets
-   * one at a time via assignEmployee()'s own vacant-check, but this
-   * doesn't rely on that never being violated) and flips the position to
-   * `vacant`. */
-  private async vacate(
-    client: PoolClient,
-    claims: RequestClaims,
-    positionId: string,
-    effectiveFrom?: string
-  ): Promise<Record<string, unknown>> {
-    await client.query("UPDATE employees SET position_id = NULL, updated_at = now() WHERE position_id = $1", [
-      positionId,
-    ]);
-    const before = await this.mustExist(client, positionId);
-    return this.applyVersionAndSync(
-      client,
-      claims,
-      positionId,
-      {
-        org_unit_id: before.org_unit_id,
-        job_id: before.job_id,
-        position_code: before.position_code,
-        position_title: before.position_title,
-        headcount_fte: Number(before.headcount_fte),
-        status: "vacant",
-        cost_center_id: before.cost_center_id,
-        profit_center_id: before.profit_center_id,
-      },
-      effectiveFrom
-    );
   }
 
   /** `GET /organization/positions/:id/history` — every version this
@@ -579,7 +604,8 @@ export class PositionsService {
     });
   }
 
-  /** Shared by update()/transitionStatus()/assignEmployee()/vacate():
+  /** Shared by update()/transitionStatus() (occupancy transitions use
+   * OrgOccupancyService's own copy of this SQL shape):
    * supersedes the open `position_versions` row via the
    * EffectiveDatingEngine, then syncs `positions`' own denormalized
    * current-state columns to match — exactly OrgUnitsService's/
@@ -657,15 +683,6 @@ export class PositionsService {
     if (result.rowCount === 0) throw new NotFoundException("Profit center not found");
   }
 
-  private async requireManage(claims: RequestClaims): Promise<void> {
-    if (!(await this.entitlements.isModuleEnabled(claims, MODULE_KEY))) {
-      throw new NotFoundException();
-    }
-    if (!(await this.rbac.can(claims, MANAGE_PERMISSION))) {
-      throw new ForbiddenException("Not permitted to manage positions");
-    }
-  }
-
   private async requireView(claims: RequestClaims): Promise<void> {
     if (!(await this.entitlements.isModuleEnabled(claims, MODULE_KEY))) {
       throw new NotFoundException();
@@ -741,5 +758,51 @@ export class PositionsService {
       }
       return Array.from(ids);
     });
+  }
+
+  /**
+   * Cross-module integration audit (2026-10-01), gap #3/#7 — write-side
+   * sibling of `resolveViewAccess()`. `.manage.all` wins outright
+   * (unrestricted, exactly today's behavior); otherwise a caller holding
+   * only `position.manage.scoped` gets back their assigned org-unit
+   * subtree and cost-center ids, to be checked against the SPECIFIC
+   * position being written by `assertInManageScope()` below; otherwise
+   * (neither) throws — same fail-closed posture as the view side.
+   */
+  private async resolveManageAccess(
+    claims: RequestClaims
+  ): Promise<{ unrestricted: boolean; orgUnitIds: string[]; costCenterIds: string[] }> {
+    if (!(await this.entitlements.isModuleEnabled(claims, MODULE_KEY))) {
+      throw new NotFoundException();
+    }
+    if (await this.rbac.can(claims, MANAGE_PERMISSION)) {
+      return { unrestricted: true, orgUnitIds: [], costCenterIds: [] };
+    }
+    if (!(await this.rbac.hasScopedPermission(claims, SCOPED_MANAGE_PERMISSION_BASE))) {
+      throw new ForbiddenException("Not permitted to manage positions");
+    }
+    const [assignedOrgUnitIds, costCenterIds] = await Promise.all([
+      this.rbac.resolveDataScopeEntityIds(claims, "org_unit"),
+      this.rbac.resolveDataScopeEntityIds(claims, "cost_center"),
+    ]);
+    const orgUnitIds = await this.expandOrgUnitIdsToSubtree(claims, assignedOrgUnitIds);
+    return { unrestricted: false, orgUnitIds, costCenterIds };
+  }
+
+  /** Throws unless `record` (the position's CURRENT, or a write's
+   * PROPOSED, org unit / cost center) falls inside `scope` — called once
+   * for the existing row and, when a write would change either field,
+   * once more for the new values, so a scoped caller can neither touch a
+   * position outside their region nor move one into/out of it. */
+  private assertInManageScope(
+    scope: { unrestricted: boolean; orgUnitIds: string[]; costCenterIds: string[] },
+    record: { org_unit_id: string | null; cost_center_id: string | null }
+  ): void {
+    if (scope.unrestricted) return;
+    const inOrgUnit = Boolean(record.org_unit_id) && scope.orgUnitIds.includes(record.org_unit_id as string);
+    const inCostCenter = Boolean(record.cost_center_id) && scope.costCenterIds.includes(record.cost_center_id as string);
+    if (!inOrgUnit && !inCostCenter) {
+      throw new ForbiddenException("Position is outside your assigned data scope");
+    }
   }
 }

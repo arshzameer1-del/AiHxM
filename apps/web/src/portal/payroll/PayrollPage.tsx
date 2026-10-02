@@ -1,9 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import type { PayrollRunView, PayrollSettingsView, PayslipView, TaxSlabSetView, TaxSlabView } from "@aihxm/shared-types";
+import type {
+  EmployeeView,
+  PayrollAreaView,
+  PayrollRunView,
+  PayrollSettingsView,
+  PayslipView,
+  TaxSlabSetView,
+  TaxSlabView,
+} from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
-import { CreateRunForm, PayrollSettingsForm, TaxSlabsForm } from "./PayrollAdminForms";
+import { CreateRunForm, OFF_CYCLE_REASON_LABELS, OffCyclePaymentsPanel, PayrollSettingsForm, TaxSlabsForm } from "./PayrollAdminForms";
+import { PayrollAreasSection } from "./PayrollAreasSection";
 import { RUN_STATUS_LABELS, RUN_STATUS_STYLES, pkr } from "./payrollLabels";
 
 function describeError(err: unknown): string {
@@ -66,20 +75,37 @@ function PayslipRow({ payslip }: { payslip: PayslipView }) {
  * Expanded run row. Phase P2 split this into two capabilities that no
  * longer always belong to the same login: `canPrepare` (hr_admin — create,
  * calculate/recalculate, submit for approval, finalize, download the
- * disbursement CSV) and `canApprove` (the new, separate Payroll Approver
- * role — approve/reject a `pending_approval` run). Calculate (re-runnable,
+ * disbursement CSV, and — Correction/Reversal — reverse a finalized run)
+ * and `canApprove` (the new, separate Payroll Approver role — approve/
+ * reject a `pending_approval` run). Calculate (re-runnable,
  * PayrollService.calculateRun's own rule) and finalize (one-way — no
  * "un-finalize" endpoint exists) are unchanged in spirit; finalize now
  * additionally requires the run be `approved`, not just `calculated` —
- * see PayrollService.finalizeRun's own updated guard.
+ * see PayrollService.finalizeRun's own updated guard. Server-side,
+ * `canPrepare`'s reversal action is gated more strictly still — both
+ * `payroll.finalize.all` AND `payroll.disburse.all` — but hr_admin is the
+ * only preparer identity this app has, and it holds both, so `canPrepare`
+ * is the right cosmetic gate here too (see `requirePayrollReverse()`'s own
+ * doc comment on the API side).
  */
 function RunCard({
   run,
+  area,
+  targetEmployee,
   canPrepare,
   canApprove,
   onChanged,
 }: {
   run: PayrollRunView;
+  /** Payroll Areas: the area this run targets, if any — `undefined` with
+   * a non-null `run.payrollAreaId` just means the name lookup hasn't
+   * resolved (or this login can't list areas). */
+  area: PayrollAreaView | undefined;
+  /** Phase P4 — the single employee this off-cycle run targets, if any
+   * (always set for `final_settlement`; optional single-employee scoping
+   * for `bonus`/`arrears`/`other`; `undefined` for a batch run or while
+   * the lookup hasn't resolved). */
+  targetEmployee: EmployeeView | undefined;
   canPrepare: boolean;
   canApprove: boolean;
   onChanged: () => void;
@@ -91,6 +117,28 @@ function RunCard({
   const [calcSummary, setCalcSummary] = useState<string | null>(null);
   const [deciding, setDeciding] = useState<"approved" | "rejected" | null>(null);
   const [comment, setComment] = useState("");
+  // Phase P2 (Correction/Reversal) — mirrors the `deciding`/`comment`
+  // pattern above, but for reversing an already-`finalized` run. A reason
+  // is mandatory server-side (ReversePayrollRunDto), so Confirm stays
+  // disabled until something is typed.
+  const [reversing, setReversing] = useState(false);
+  const [reversalReason, setReversalReason] = useState("");
+  // Real production feedback (kumail, 2026-09-28): a live test showed an
+  // approver could click Approve with zero numbers on screen — the run's
+  // summary lived only behind the (separate, collapsed-by-default) payslip
+  // list. `hasReviewedPayslips` is a one-way latch: it flips true the
+  // first time this card is expanded and stays true even if the approver
+  // collapses it again, so re-collapsing to declutter the screen right
+  // before deciding never re-locks Approve/Reject. It gates the DECISION
+  // buttons only — expanding/reading is always free — and it's a UI
+  // nicety, not the security boundary: `PayrollService.decideApproval()`
+  // enforces the real one server-side regardless of what this card shows.
+  const [hasReviewedPayslips, setHasReviewedPayslips] = useState(false);
+
+  function toggleExpanded() {
+    setExpanded((e) => !e);
+    setHasReviewedPayslips(true);
+  }
 
   useEffect(() => {
     if (!expanded) return;
@@ -185,16 +233,74 @@ function RunCard({
     }
   }
 
+  async function handleReverse() {
+    if (!reversalReason.trim()) return;
+    if (!window.confirm("Reverse this finalized run? This cannot be undone — the original payslips are kept for the record.")) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.reversePayrollRun(run.id, { reason: reversalReason.trim() });
+      setReversing(false);
+      setReversalReason("");
+      onChanged();
+    } catch (err) {
+      // A real 403 here means this login is missing one of the two
+      // permissions reversal requires (payroll.finalize.all AND
+      // payroll.disburse.all) — canPrepare below is a cosmetic gate on
+      // top of that real, server-side one.
+      setError(err instanceof ApiError ? err.message : "Could not reverse this run.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="bg-card rounded-card p-4 shadow-sm">
       <div className="flex items-start justify-between gap-4 flex-wrap">
-        <button className="text-left" onClick={() => setExpanded((e) => !e)}>
-          <div className="font-medium text-sm">
-            {run.periodStart} – {run.periodEnd}
+        <button className="text-left" onClick={toggleExpanded}>
+          <div className="font-medium text-sm flex items-center gap-2 flex-wrap">
+            <span>
+              {run.periodStart} – {run.periodEnd}
+            </span>
+            {/* Payroll Areas — which slice of the company this run pays, so
+                two runs for the same period (one per area) are never
+                ambiguous in this list. */}
+            <span className="text-xs font-normal px-2 py-0.5 rounded-full bg-black/5 text-label-secondary">
+              {run.payrollAreaId ? (area ? `${area.name} (${area.code})` : "Payroll area") : "Company-wide"}
+            </span>
+            {/* Phase P4 — an off-cycle run otherwise looks identical to a
+                regular run in this list; this is the one glance that tells
+                an approver "this is a bonus/arrears/settlement run, not the
+                normal monthly one" before they open it. */}
+            {run.runType === "off_cycle" && (
+              <span className="text-xs font-normal px-2 py-0.5 rounded-full bg-accent/10 text-accent">
+                {run.offCycleReason ? OFF_CYCLE_REASON_LABELS[run.offCycleReason] : "Off-cycle"}
+                {targetEmployee ? ` · ${targetEmployee.employeeNumber} ${targetEmployee.firstName} ${targetEmployee.lastName}` : ""}
+              </span>
+            )}
           </div>
           <div className="text-xs text-label-tertiary mt-0.5">
             {run.finalizedAt ? `Finalized ${new Date(run.finalizedAt).toLocaleDateString()}` : "Not yet finalized"}
           </div>
+          {/* Always visible — not gated behind expanding — so a Payroll
+              Approver sees the actual scale of what they're deciding on
+              (headcount and money) the instant this card renders, before
+              they've clicked anything at all. */}
+          {run.status !== "draft" && (
+            <div className="text-xs text-label-secondary mt-1 font-mono">
+              {run.payslipCount} {run.payslipCount === 1 ? "employee" : "employees"} · net pay {pkr.format(run.totalNetPay)}
+            </div>
+          )}
+          {/* Phase P2 (Correction/Reversal) — the reason is exactly what
+              Section 36's "capture reason" requirement is for; showing it
+              here means anyone looking at the runs list sees why, not just
+              that something changed. */}
+          {run.status === "reversed" && (
+            <div className="text-xs text-danger mt-1">
+              Reversed{run.reversedAt ? ` ${new Date(run.reversedAt).toLocaleDateString()}` : ""}
+              {run.reversalReason ? `: ${run.reversalReason}` : ""}
+            </div>
+          )}
         </button>
         <div className="flex items-center gap-3">
           <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold ${RUN_STATUS_STYLES[run.status]}`}>
@@ -236,7 +342,29 @@ function RunCard({
               Download disbursement CSV
             </button>
           )}
-          {canApprove && run.status === "pending_approval" && !deciding && (
+          {/* Phase P2 (Correction/Reversal) — hr_admin is the only
+              preparer identity this app has, and it holds both
+              payroll.finalize.all and payroll.disburse.all (the "elevated
+              authorization" PayrollService.requirePayrollReverse() checks
+              for), so canPrepare is the right cosmetic gate here too. */}
+          {canPrepare && run.status === "finalized" && !reversing && (
+            <button
+              onClick={() => setReversing(true)}
+              disabled={busy}
+              className="text-xs font-semibold text-danger hover:underline disabled:opacity-50"
+            >
+              Reverse
+            </button>
+          )}
+          {canApprove && run.status === "pending_approval" && !deciding && !hasReviewedPayslips && (
+            <button
+              onClick={toggleExpanded}
+              className="text-xs font-semibold text-accent hover:underline"
+            >
+              Review {run.payslipCount} {run.payslipCount === 1 ? "payslip" : "payslips"} to decide
+            </button>
+          )}
+          {canApprove && run.status === "pending_approval" && !deciding && hasReviewedPayslips && (
             <>
               <button
                 onClick={() => setDeciding("approved")}
@@ -259,6 +387,12 @@ function RunCard({
 
       {deciding && (
         <div className="mt-3 pt-3 border-t border-black/5 space-y-2">
+          <div className="text-xs text-label-secondary">
+            {deciding === "approved" ? "Approving" : "Rejecting"} {run.periodStart} – {run.periodEnd}:{" "}
+            <span className="font-mono">
+              {run.payslipCount} {run.payslipCount === 1 ? "employee" : "employees"}, net pay {pkr.format(run.totalNetPay)}
+            </span>
+          </div>
           <input
             value={comment}
             onChange={(e) => setComment(e.target.value)}
@@ -282,8 +416,50 @@ function RunCard({
         </div>
       )}
 
+      {reversing && (
+        <div className="mt-3 pt-3 border-t border-black/5 space-y-2">
+          <div className="text-xs text-label-secondary">
+            Reversing {run.periodStart} – {run.periodEnd} — this cannot be undone. The original payslips are kept
+            for the record; a new draft run opens for the same period so you can correct and refinalize it.
+          </div>
+          <input
+            value={reversalReason}
+            onChange={(e) => setReversalReason(e.target.value)}
+            placeholder="Reason for reversal (required)"
+            className="w-full rounded-lg border border-black/10 px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-accent"
+          />
+          <div className="flex gap-3 items-center">
+            <button
+              onClick={handleReverse}
+              disabled={busy || !reversalReason.trim()}
+              className="text-xs font-semibold rounded-lg px-3 py-1.5 text-white bg-danger disabled:opacity-50"
+            >
+              Confirm reversal
+            </button>
+            <button
+              onClick={() => {
+                setReversing(false);
+                setReversalReason("");
+              }}
+              className="text-xs text-label-tertiary"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {calcSummary && <p className="text-xs text-label-secondary mt-2">{calcSummary}</p>}
       {error && <p className="text-xs text-danger mt-2">{error}</p>}
+
+      {/* Phase P4 — the queue HR builds up before calculating a
+          bonus/arrears/final-settlement run. Server-side
+          (`EmployeeOffCyclePaymentsService.create`) already refuses a new
+          line once the run is `finalized`/`reversed`, so this mirrors that
+          same cutoff rather than inventing a stricter one. */}
+      {run.runType === "off_cycle" && run.status !== "finalized" && run.status !== "reversed" && (
+        <OffCyclePaymentsPanel run={run} canManage={canPrepare} />
+      )}
 
       {expanded && (
         <div className="mt-4 pt-4 border-t border-black/5 space-y-2">
@@ -312,6 +488,8 @@ function RunsSection({
   onChanged: () => void;
 }) {
   const [runs, setRuns] = useState<PayrollRunView[] | null>(null);
+  const [areasById, setAreasById] = useState<Map<string, PayrollAreaView>>(new Map());
+  const [employeesById, setEmployeesById] = useState<Map<string, EmployeeView>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
 
@@ -320,6 +498,18 @@ function RunsSection({
       .listPayrollRuns()
       .then((r) => setRuns(r.slice().sort((a, b) => b.periodStart.localeCompare(a.periodStart))))
       .catch((err) => setError(describeError(err)));
+    // Inactive areas too — an older run keeps pointing at an area that
+    // has since been deactivated. Name lookup only; never blocks the list.
+    api
+      .listPayrollAreas(true)
+      .then((areas) => setAreasById(new Map(areas.map((a) => [a.id, a]))))
+      .catch(() => undefined);
+    // Phase P4 — name lookup only, for the off-cycle target-employee badge
+    // on RunCard; never blocks the runs list if it fails.
+    api
+      .listEmployees()
+      .then((employees) => setEmployeesById(new Map(employees.map((e) => [e.id, e]))))
+      .catch(() => undefined);
   }, [refreshKey]);
 
   if (error) return <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-secondary">{error}</div>;
@@ -354,7 +544,15 @@ function RunsSection({
       ) : (
         <div className="space-y-3">
           {runs.map((r) => (
-            <RunCard key={r.id} run={r} canPrepare={canPrepare} canApprove={canApprove} onChanged={onChanged} />
+            <RunCard
+              key={r.id}
+              run={r}
+              area={r.payrollAreaId ? areasById.get(r.payrollAreaId) : undefined}
+              targetEmployee={r.targetEmployeeId ? employeesById.get(r.targetEmployeeId) : undefined}
+              canPrepare={canPrepare}
+              canApprove={canApprove}
+              onChanged={onChanged}
+            />
           ))}
         </div>
       )}
@@ -623,6 +821,20 @@ export function PayrollPage() {
               calculate a run.
             </div>
           )}
+
+          {/* Payroll Areas (0101_payroll_areas.sql). hr_admin is the only
+              role seeded with `payroll_area.manage.all`, so it's the
+              management gate; a Payroll Approver can read the list (any
+              payroll-staff permission can — PayrollAreasService.list())
+              to see which employees a run they're deciding on covers.
+              Deep-linkable with ?section=payroll-areas, same as tax slabs. */}
+          <CollapsibleSection
+            title="Payroll Areas"
+            forceOpen={focusSection === "payroll-areas"}
+            sectionId="payroll-areas"
+          >
+            <PayrollAreasSection canManage={isHrAdmin} onChanged={bump} />
+          </CollapsibleSection>
 
           {isHrAdmin && (
             <CollapsibleSection title="Settings & Tax Slabs" forceOpen={focusSection === "tax-slabs"} sectionId="tax-slabs">

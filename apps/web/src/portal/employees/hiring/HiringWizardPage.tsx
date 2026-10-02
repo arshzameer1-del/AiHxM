@@ -197,17 +197,56 @@ export function HiringWizardPage() {
       // falls back to the old hardcoded list when this comes back empty,
       // so a failure here never leaves the field with no options at all.
       api.listHrCatalogItems("employment_type").catch(() => []),
+      // HR Administration v2 "then 2" Phase 1 (2026-10-01) — same catalog-
+      // backed-with-hardcoded-fallback treatment for the 5 personal/
+      // reference catalogs this phase wires into the hiring cards.
+      api.listHrCatalogItems("marital_status").catch(() => []),
+      api.listHrCatalogItems("contact_type").catch(() => []),
+      api.listHrCatalogItems("address_type").catch(() => []),
+      api.listHrCatalogItems("family_relationship_type").catch(() => []),
+      api.listHrCatalogItems("qualification_type").catch(() => []),
     ]).then(
-      ([orgUnits, locations, costCenters, colleagues, shifts, positions, employmentTypes]: [
+      ([
+        orgUnits,
+        locations,
+        costCenters,
+        colleagues,
+        shifts,
+        positions,
+        employmentTypes,
+        maritalStatuses,
+        contactTypes,
+        addressTypes,
+        relationshipTypes,
+        qualificationTypes,
+      ]: [
         OrgUnitView[],
         LocationView[],
         CostCenterView[],
         EmployeeView[],
         ShiftView[],
         PositionView[],
+        HrReferenceCatalogItemView[],
+        HrReferenceCatalogItemView[],
+        HrReferenceCatalogItemView[],
+        HrReferenceCatalogItemView[],
+        HrReferenceCatalogItemView[],
         HrReferenceCatalogItemView[]
       ]) => {
-        setOptions({ orgUnits, locations, costCenters, colleagues, shifts, positions, employmentTypes });
+        setOptions({
+          orgUnits,
+          locations,
+          costCenters,
+          colleagues,
+          shifts,
+          positions,
+          employmentTypes,
+          maritalStatuses,
+          contactTypes,
+          addressTypes,
+          relationshipTypes,
+          qualificationTypes,
+        });
       }
     );
   }, []);
@@ -237,7 +276,31 @@ export function HiringWizardPage() {
             setCardData({ ...(empData?.data ?? {}), ...(orgData?.data ?? {}) });
             setCardRevisions((prev) => ({ ...prev, [MERGE_TARGET_CARD_KEY]: orgData?.revision, [HIDDEN_CARD_KEY]: empData?.revision }));
             const views = [orgFields, empFields].filter((f): f is CardFieldsConfigView => f !== null);
-            if (views.length > 0) setFieldConfig(toRuntimeConfig(views));
+            // C1 fix (2026-10-02) — when this company has the standalone
+            // Employment card disabled (`hasEmploymentCard` false), its
+            // field config is never fetched above (the `hasEmploymentCard
+            // ? ... : Promise.resolve(null)` guards just above this
+            // `.then`) and `handleSaveCard()` never sends Employment's
+            // three fields either (its own `if (hasEmploymentCard)` guard).
+            // But `cardForms.tsx`'s `fieldEnabled()` fails OPEN when a key
+            // has no entry in `builtIn` at all — so without this, the
+            // three fields rendered editable here, kumail could fill them
+            // in, and that data silently vanished on save (never sent,
+            // never persisted). Force them `isEnabled: false` here so the
+            // same `FieldGate` that already hides a disabled field hides
+            // these too, instead of leaving them fail-open. Build the
+            // config even when neither field-config fetch returned
+            // anything (`views.length === 0`), so this still applies on a
+            // field-config fetch failure.
+            if (views.length > 0 || !hasEmploymentCard) {
+              const config = toRuntimeConfig(views);
+              if (!hasEmploymentCard) {
+                for (const key of EMPLOYMENT_FIELD_KEYS) {
+                  config.builtIn[key] = { isEnabled: false, isRequired: false };
+                }
+              }
+              setFieldConfig(config);
+            }
           })
           .catch(() => setCardError("Could not load this card's saved data."))
           .finally(() => setCardLoading(false));

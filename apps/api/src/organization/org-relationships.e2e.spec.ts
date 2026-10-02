@@ -150,6 +150,31 @@ describe("Org Relationships HTTP surface (e2e)", () => {
       expect(res.status).toBe(400);
     });
 
+    it("accepts the 'secondment' relationship type end to end (DTO, CHECK constraint, list filter) without touching managerId (0103)", async () => {
+      const res = await request(app.getHttpServer())
+        .post("/organization/relationships")
+        .set("Authorization", `Bearer ${hrAdminToken}`)
+        .send({ employeeId: otherManagerId, managerEmployeeId: managerId, relationshipType: "secondment" });
+      expect(res.status).toBe(201);
+      expect(res.body.relationshipType).toBe("secondment");
+
+      const listed = await request(app.getHttpServer())
+        .get("/organization/relationships?relationshipType=secondment")
+        .set("Authorization", `Bearer ${hrAdminToken}`);
+      expect(listed.status).toBe(200);
+      expect(listed.body.map((r: { id: string }) => r.id)).toEqual([res.body.id]);
+
+      const history = await request(app.getHttpServer())
+        .get(`/organization/relationships/${res.body.id}/history`)
+        .set("Authorization", `Bearer ${hrAdminToken}`);
+      expect(history.body[0].relationshipType).toBe("secondment");
+
+      const employee = await request(app.getHttpServer())
+        .get(`/employees/${otherManagerId}`)
+        .set("Authorization", `Bearer ${hrAdminToken}`);
+      expect(employee.body.managerId ?? null).toBeNull();
+    });
+
     it("rejects an employee being their own manager", async () => {
       const res = await request(app.getHttpServer())
         .post("/organization/relationships")

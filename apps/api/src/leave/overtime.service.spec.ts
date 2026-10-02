@@ -12,7 +12,8 @@ import { RulesEngine } from "../rules-engine/rules-engine.engine";
 import { HolidaysService } from "../holidays/holidays.service";
 import { ShiftsService } from "../shifts/shifts.service";
 import { WorkScheduleResolutionService } from "../shifts/work-schedule-resolution.service";
-import { OvertimeService } from "./overtime.service";
+import { OVERTIME_STANDARD_MONTHLY_HOURS, OvertimeService } from "./overtime.service";
+import { EmployeeCompensationService } from "../employees/employee-compensation.service";
 
 const FIXTURE_CLAIMS: RequestClaims = { is_platform_admin: true, company_id: null, sub: "overtime-fixtures" };
 
@@ -316,6 +317,133 @@ describe("OvertimeService", () => {
       expect(list.length).toBeGreaterThan(0);
 
       await expect(overtime.listForEmployee(outsiderClaims, staffEmployeeId)).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  /**
+   * 0097_overtime_amount_snapshot.sql — approval prices the claim at
+   * (overtime_minutes / 60) x (monthly compensation on work_date / 208) x
+   * rate_multiplier and SNAPSHOTS it, so a later (even backdated)
+   * compensation change never re-prices an already-approved claim.
+   */
+  describe("approval-time amount snapshot (0097) and getApprovedOvertimeInRange()", () => {
+    let compensation: EmployeeCompensationService;
+
+    beforeAll(async () => {
+      compensation = new EmployeeCompensationService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
+      // 208,000/mo -> exactly 1,000/hr ordinary rate under the 208-hour divisor.
+      await compensation.setCompensation(hrAdminClaims, { employeeId: staffEmployeeId, monthlySalary: 208000, effectiveFrom: "2026-01-01" });
+    });
+
+    function approvedIn(rangeStart: string, rangeEnd: string) {
+      return db.withClaims(hrAdminClaims, (client) => overtime.getApprovedOvertimeInRange(client, staffEmployeeId, rangeStart, rangeEnd));
+    }
+
+    it("prices an approved weekday claim from the work_date's compensation, the policy multiplier, and OVERTIME_STANDARD_MONTHLY_HOURS", async () => {
+      expect(OVERTIME_STANDARD_MONTHLY_HOURS).toBe(208);
+      // Wednesday 2026-02-11: scheduled 480 min, worked 600 -> 120 min overtime @ 1.25 (policy set above).
+      await insertAttendance("2026-02-11", "09:00", "19:00");
+      const claim = await overtime.submit(staffClaims, { employeeId: staffEmployeeId, workDate: "2026-02-11" });
+      expect(claim.overtimeMinutes).toBe(120);
+      expect(claim.rateMultiplier).toBe(1.25);
+
+      // Pending: never priced, never returned to Payroll.
+      expect((await approvedIn("2026-02-11", "2026-02-11")).length).toBe(0);
+
+      await overtime.decide(managerClaims, claim.id, { decision: "approved" });
+      const [approved] = await approvedIn("2026-02-11", "2026-02-11");
+      expect(approved.id).toBe(claim.id);
+      expect(approved.hourlyRate).toBe(1000);
+      // 2h x 1,000/hr x 1.25
+      expect(approved.amount).toBe(2500);
+    });
+
+    it("keeps the snapshotted amount when compensation later changes, even retroactively to before the work_date", async () => {
+      await compensation.setCompensation(hrAdminClaims, { employeeId: staffEmployeeId, monthlySalary: 416000, effectiveFrom: "2026-02-01" });
+      const [approved] = await approvedIn("2026-02-11", "2026-02-11");
+      expect(approved.hourlyRate).toBe(1000);
+      expect(approved.amount).toBe(2500);
+    });
+
+    it("leaves a claim approved before any compensation existed unpriced (null), rather than inventing a zero", async () => {
+      // 2026-02-04's claim was approved earlier in this file, before beforeAll above set any compensation.
+      const [early] = await approvedIn("2026-02-04", "2026-02-04");
+      expect(early.amount).toBeNull();
+      expect(early.hourlyRate).toBeNull();
+    });
+
+    it("never prices a rejected claim, and only returns approved claims within the inclusive range", async () => {
+      await insertAttendance("2026-02-12", "09:00", "18:00");
+      const claim = await overtime.submit(staffClaims, { employeeId: staffEmployeeId, workDate: "2026-02-12" });
+      await overtime.decide(managerClaims, claim.id, { decision: "rejected" });
+      const rows = await db.withClaims(hrAdminClaims, (client) =>
+        client.query("SELECT amount, hourly_rate FROM overtime_records WHERE id = $1", [claim.id])
+      );
+      expect(rows.rows[0].amount).toBeNull();
+      expect(rows.rows[0].hourly_rate).toBeNull();
+
+      const inFebruary = await approvedIn("2026-02-01", "2026-02-28");
+      expect(inFebruary.map((c) => c.workDate)).toEqual(["2026-02-04", "2026-02-11"]);
+    });
+  });
+
+  /**
+   * 0100_overtime_standard_monthly_hours.sql — the 208-hour divisor is now
+   * a per-tenant, effective-dated setting on `payroll_settings`
+   * (`standard_monthly_hours`), resolved by `priceClaim()` as of the
+   * claim's own `work_date`, with `OVERTIME_STANDARD_MONTHLY_HOURS` (208)
+   * as both the column default and the fallback for a tenant with no
+   * `payroll_settings` row at all.
+   */
+  describe("standard_monthly_hours (0100) — configurable per tenant, effective-dated", () => {
+    function approvedOn(workDate: string) {
+      return db.withClaims(hrAdminClaims, (client) =>
+        overtime.getApprovedOvertimeInRange(client, staffEmployeeId, workDate, workDate)
+      );
+    }
+
+    it("still uses the documented 208-hour default when this tenant has no payroll_settings row at all", async () => {
+      // Compensation as of 2026-02-13 is 416,000/mo (set effective 2026-02-01
+      // in the describe block above) -> 416,000 / 208 = 2,000/hr ordinary rate.
+      // Friday 2026-02-13: scheduled 480 min, worked 600 -> 120 min overtime @ 1.25.
+      await insertAttendance("2026-02-13", "09:00", "19:00");
+      const claim = await overtime.submit(staffClaims, { employeeId: staffEmployeeId, workDate: "2026-02-13" });
+      await overtime.decide(managerClaims, claim.id, { decision: "approved" });
+      const [approved] = await approvedOn("2026-02-13");
+      expect(approved.hourlyRate).toBe(2000);
+      expect(approved.amount).toBe(5000);
+    });
+
+    it("prices a claim at the tenant's configured override once one is in force for that work_date", async () => {
+      // A payroll_settings generation this tenant has never touched before
+      // now configuring a 160-hour standard month (e.g. a 5-day/32-hour
+      // week), effective from 2026-02-14 onward only.
+      await db.withClaims(hrAdminClaims, (client) =>
+        client.query(
+          `INSERT INTO payroll_settings (company_id, standard_monthly_hours, effective_from) VALUES ($1, 160, '2026-02-14')`,
+          [companyId]
+        )
+      );
+
+      // Monday 2026-02-16, on/after the override's effective_from: 416,000 / 160 = 2,600/hr.
+      await insertAttendance("2026-02-16", "09:00", "19:00");
+      const claim = await overtime.submit(staffClaims, { employeeId: staffEmployeeId, workDate: "2026-02-16" });
+      await overtime.decide(managerClaims, claim.id, { decision: "approved" });
+      const [approved] = await approvedOn("2026-02-16");
+      expect(approved.hourlyRate).toBe(2600);
+      // 2h x 2,600/hr x 1.25
+      expect(approved.amount).toBe(6500);
+    });
+
+    it("resolves the setting AS OF the claim's own work_date, not today — a date before the override's effective_from still uses 208", async () => {
+      // Friday 2026-01-30, before the override's 2026-02-14 effective_from,
+      // and before the 2026-02-01 compensation raise too: 208,000 / 208 = 1,000/hr.
+      await insertAttendance("2026-01-30", "09:00", "19:00");
+      const claim = await overtime.submit(staffClaims, { employeeId: staffEmployeeId, workDate: "2026-01-30" });
+      await overtime.decide(managerClaims, claim.id, { decision: "approved" });
+      const [approved] = await approvedOn("2026-01-30");
+      expect(approved.hourlyRate).toBe(1000);
+      expect(approved.amount).toBe(2500);
     });
   });
 });

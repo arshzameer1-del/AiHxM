@@ -1,4 +1,5 @@
 import { test, expect, Page } from "@playwright/test";
+import { getSharedSession, loginToApp } from "../../e2e-support/real-session";
 
 /**
  * Leave & Attendance E2E Tests (Task #50)
@@ -21,54 +22,22 @@ import { test, expect, Page } from "@playwright/test";
  * - Test database seeded with test company, employees, leave policies
  */
 
-const API_BASE_URL = "http://localhost:3000";
-const PORTAL_URL = "http://localhost:5173/app";
+// Real-session fix (2026-10-01): `loginAsRole` below (with its fake
+// per-arg token/roleKeys/userId) was never actually called by a single
+// test in this file — every `page.goto("/app/leave")` hit the
+// unauthenticated redirect, same root cause as every other spec in this
+// suite (see real-session.ts's header comment for the full writeup: wrong
+// localStorage key, and even the right key would have needed a real
+// signed JWT). Replaced with real, shared, role-scoped sessions.
 
-interface TestContext {
-  page: Page;
-  companyId: string;
-  hrAdminToken: string;
-  employeeId: string;
-  lineManagerToken: string;
-  lineManagerId: string;
+async function loginAsEmployee(page: Page) {
+  await loginToApp(page, getSharedSession("employee_self_service"));
 }
-
-async function setupTestContext(): Promise<TestContext> {
-  return {
-    page: {} as Page,
-    companyId: "test-company-id",
-    hrAdminToken: "test-hr-admin-token",
-    employeeId: "test-employee-id",
-    lineManagerToken: "test-line-manager-token",
-    lineManagerId: "test-line-manager-id",
-  };
+async function loginAsManager(page: Page) {
+  await loginToApp(page, getSharedSession("line_manager"));
 }
-
-async function loginAsRole(
-  page: Page,
-  token: string,
-  roleKeys: string[],
-  userId: string,
-  companyId: string
-) {
-  await page.evaluate(
-    ({ token, roleKeys, userId, companyId }) => {
-      localStorage.setItem("authToken", token);
-      localStorage.setItem(
-        "identity",
-        JSON.stringify({
-          sub: userId,
-          is_platform_admin: false,
-          company_id: companyId,
-          roleKeys,
-        })
-      );
-    },
-    { token, roleKeys, userId, companyId }
-  );
-
-  await page.goto("/app");
-  await page.waitForSelector("nav", { timeout: 5000 });
+async function loginAsHrAdmin(page: Page) {
+  await loginToApp(page, getSharedSession("hr_admin"));
 }
 
 test.describe("Leave & Attendance Portal (Task #50)", () => {
@@ -80,11 +49,16 @@ test.describe("Leave & Attendance Portal (Task #50)", () => {
   test("Employee can view leave balance and request summary", async ({
     page,
   }) => {
+    await loginAsEmployee(page);
     // Navigate to leave page
     await page.goto("/app/leave");
 
-    // Expect leave page to load with balance summary
-    await expect(page.locator("h1, h2").filter({ hasText: /leave/i })).toBeVisible();
+    // Expect leave page to load with balance summary. `.first()` — a real
+    // loaded page has an h1 ("Leave & Attendance") plus section h2s ("My
+    // Leave", "Leave Requests") that all match /leave/i, tripping the
+    // same strict-mode "resolved to N elements" this whole suite had once
+    // real content started actually rendering.
+    await expect(page.locator("h1, h2").filter({ hasText: /leave/i }).first()).toBeVisible();
 
     // Verify leave balance card is visible
     const balanceCard = page.locator("[data-testid='leave-balance-card']").or(
@@ -103,6 +77,7 @@ test.describe("Leave & Attendance Portal (Task #50)", () => {
   });
 
   test("Employee can submit a new leave request", async ({ page }) => {
+    await loginAsEmployee(page);
     // Navigate to leave request form
     await page.goto("/app/leave");
 
@@ -174,6 +149,7 @@ test.describe("Leave & Attendance Portal (Task #50)", () => {
   test("Manager can view and approve team leave requests", async ({
     page,
   }) => {
+    await loginAsManager(page);
     // Navigate to leave page as manager
     await page.goto("/app/leave");
 
@@ -218,6 +194,7 @@ test.describe("Leave & Attendance Portal (Task #50)", () => {
   });
 
   test("Manager can reject a leave request with comment", async ({ page }) => {
+    await loginAsManager(page);
     await page.goto("/app/leave");
 
     // Find a pending request with reject button
@@ -264,22 +241,19 @@ test.describe("Leave & Attendance Portal (Task #50)", () => {
   test("HR Admin can view all company leave records and analytics", async ({
     page,
   }) => {
+    await loginAsHrAdmin(page);
     await page.goto("/app/leave");
 
-    // Verify page shows all leave records (not just employee's own)
-    const leaveHeader = page.locator("h1, h2").filter({ hasText: /leave/i });
+    // Verify page shows all leave records (not just employee's own).
+    // `.first()` — see the identical note on the employee-balance test
+    // above.
+    const leaveHeader = page.locator("h1, h2").filter({ hasText: /leave/i }).first();
     await expect(leaveHeader).toBeVisible();
 
-    // Verify analytics/summary section
-    const analyticsSection = page
-      .locator("[data-testid='leave-analytics']")
-      .or(page.locator("text=Analytics"))
-      .or(page.locator("text=Summary"));
-
-    if (await analyticsSection.isVisible()) {
-      // Should show stats like total approved, pending, rejected
-      await expect(analyticsSection.locator("text=/\\d+/")).toBeVisible();
-    }
+    // Real finding: LeavePage.tsx's hr_admin view is "Leave Requests" +
+    // a "Submit on behalf" button + the records list/table — there is no
+    // separate analytics/summary section with approved/pending/rejected
+    // counts today, so this doesn't assert one exists.
 
     // Verify full company view (not just employee's requests)
     const leaveRecordsTable = page.locator("table");
@@ -294,40 +268,25 @@ test.describe("Leave & Attendance Portal (Task #50)", () => {
   });
 
   test("Employee can view attendance records", async ({ page }) => {
-    // Navigate to attendance section
-    const attendanceLink = page
-      .locator("nav a")
-      .filter({ hasText: /attendance/i });
-    if (await attendanceLink.isVisible()) {
-      await attendanceLink.click();
-    } else {
-      // If attendance is tab/section on leave page
-      const attendanceTab = page.locator("[role='tab']").filter({
-        hasText: /attendance/i,
-      });
-      if (await attendanceTab.isVisible()) {
-        await attendanceTab.click();
-      }
-    }
+    await loginAsEmployee(page);
+    await page.goto("/app/leave");
 
-    // Expect attendance display
-    const attendanceSection = page.locator("text=Attendance").or(
-      page.locator("[data-testid='attendance-section']")
-    );
-    await expect(attendanceSection).toBeVisible();
-
-    // Verify calendar or list of attendance records
-    const attendanceList = page.locator("table").or(
-      page.locator(".attendance-calendar").or(page.locator(".attendance-list"))
-    );
-    if (await attendanceList.isVisible()) {
-      // Should show check-in/check-out times
-      const timeElements = page.locator("text=/\\d{1,2}:\\d{2}/");
-      await expect(timeElements).toHaveCountGreaterThanOrEqual(1);
-    }
+    // LeavePage.tsx (the `canClock` branch) folds attendance straight
+    // into this same page as a Clock in/out widget — there's no separate
+    // "/attendance" nav link or tab to navigate to, and no literal
+    // "Attendance" text on the page (a bare `text=Attendance` locator
+    // instead matched the "Leave & Attendance" nav link AND h1 AND the
+    // page's own subtitle paragraph — a 3-way strict-mode violation). The
+    // Clock in/out button is the real, stable signal that this widget
+    // rendered.
+    const clockButton = page
+      .locator("button")
+      .filter({ hasText: /clock in|clock out/i });
+    await expect(clockButton).toBeVisible();
   });
 
   test("Employee can view daily attendance summary", async ({ page }) => {
+    await loginAsEmployee(page);
     await page.goto("/app/leave");
 
     // Look for attendance summary card
@@ -355,6 +314,7 @@ test.describe("Leave & Attendance Portal (Task #50)", () => {
   test("Portal navigation includes Leave & Attendance menu item", async ({
     page,
   }) => {
+    await loginAsHrAdmin(page);
     await page.goto("/app");
 
     const leaveNavLink = page.locator("nav a").filter({
@@ -370,7 +330,7 @@ test.describe("Leave & Attendance Portal (Task #50)", () => {
 test.describe("Leave & Attendance Responsiveness", () => {
   test("Leave request form is responsive on mobile", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 });
-
+    await loginAsEmployee(page);
     await page.goto("/app/leave");
 
     // Form or leave request section should be visible
@@ -395,11 +355,22 @@ test.describe("Leave & Attendance Accessibility", () => {
   test("Leave request form has proper labels and associations", async ({
     page,
   }) => {
+    await loginAsEmployee(page);
     await page.goto("/app/leave");
+    // LeaveRequestForm.tsx only mounts after clicking "Request Leave"
+    // (LeavePage.tsx's `showForm` state) — it isn't present on page load.
+    await page.locator("button", { hasText: "Request Leave" }).click();
 
-    const leaveTypeInput = page.locator('select[name="leaveType"]').or(
-      page.locator('[aria-label*="Leave Type"]')
-    );
+    // Real finding (2026-10-01, same pattern as
+    // EmployeeListPage.e2e.spec.ts's "Form labels are properly associated
+    // with inputs" note): LeaveRequestForm.tsx's "Leave type" <select>
+    // has a bare <label> with no `htmlFor`/`id` pairing and no `name` or
+    // `aria-label` on the <select> itself — `select[name="leaveType"]`
+    // matches nothing and hangs rather than reporting absence. Located by
+    // the label's adjacent sibling instead so the assertion below can
+    // actually run (and correctly fail, since there genuinely is no
+    // programmatic label association here).
+    const leaveTypeInput = page.locator('label:has-text("Leave type") + select');
 
     // Verify input has associated label or ARIA label
     const hasLabel =
@@ -416,6 +387,7 @@ test.describe("Leave & Attendance Accessibility", () => {
   test("Leave records table has proper structure for screen readers", async ({
     page,
   }) => {
+    await loginAsHrAdmin(page);
     await page.goto("/app/leave");
 
     // Verify table structure

@@ -40,7 +40,26 @@ export type HiringPickerOptions = {
    * catalog items (active only). Empty on a load failure, in which case the
    * Employment type dropdown below falls back to the old hardcoded list. */
   employmentTypes: HrReferenceCatalogItemView[];
+  /** HR Administration v2 "then 2" Phase 1 (2026-10-01) — same catalog-
+   * with-hardcoded-fallback treatment as `employmentTypes` above, for the
+   * 5 personal/reference catalogs this phase wires into the hiring cards. */
+  maritalStatuses: HrReferenceCatalogItemView[];
+  contactTypes: HrReferenceCatalogItemView[];
+  addressTypes: HrReferenceCatalogItemView[];
+  relationshipTypes: HrReferenceCatalogItemView[];
+  qualificationTypes: HrReferenceCatalogItemView[];
 };
+
+/** Maps a catalog's active items to `{value,label}` select options, or —
+ * on an empty/failed catalog load — the given hardcoded fallback list, the
+ * same `employmentTypes.length > 0 ? ... : FALLBACK_...` shape this file
+ * already uses for Employment type below. */
+function catalogOptions(
+  items: HrReferenceCatalogItemView[],
+  fallback: { value: string; label: string }[]
+): { value: string; label: string }[] {
+  return items.length > 0 ? items.map((t) => ({ value: t.code, label: t.label })) : fallback;
+}
 
 /**
  * Hiring Card Field Configuration (2026-09-27) — the runtime shape
@@ -278,20 +297,23 @@ function RepeatableListEditor({
 
 // kumail's own feedback on the live wizard (2026-09-27) — Gender/Marital
 // status rendered as free-text inputs read as broken next to Employment
-// Type's own dropdown right below this card. Neither field is backed by a
-// real enum anywhere server-side (`create-employee.dto.ts`'s `gender`/
-// `maritalStatus` are both plain `@IsString()`, no `@IsIn`), and no other
-// screen in this app edits these two fields at all (`EmployeeCreatePage`
-// doesn't collect them; `EmployeeFields.tsx` only ever displays them
-// read-only) — so there was no existing convention to match. These two
-// option lists are this wizard's own first definition of them, stored
-// lowercase for the same reason EMPLOYMENT_TYPES is (`text-xs capitalize`
-// display, lowercase storage, matching how EmployeeFields.tsx's own
-// ENUM_FIELDS already title-cases gender/maritalStatus for display).
+// Type's own dropdown right below this card. Gender still has no catalog
+// anywhere in this app, so it keeps this hardcoded list. `maritalStatus`
+// moved onto this tenant's own `marital_status` HR Administration catalog
+// in HR Administration v2 "then 2" Phase 1 (2026-10-01,
+// EmployeesService.validateMaritalStatus()) — FALLBACK_MARITAL_STATUSES
+// below is only what the dropdown shows if that catalog fails to load,
+// matching the FALLBACK_EMPLOYMENT_TYPES precedent further down this file.
 const GENDERS = ["male", "female", "other"];
-const MARITAL_STATUSES = ["single", "married", "divorced", "widowed"];
+const FALLBACK_MARITAL_STATUSES = [
+  { value: "single", label: "Single" },
+  { value: "married", label: "Married" },
+  { value: "divorced", label: "Divorced" },
+  { value: "widowed", label: "Widowed" },
+];
 
-function PersonalIdentityForm({ data, onChange, fieldConfig }: CardFormProps) {
+function PersonalIdentityForm({ data, onChange, options, fieldConfig }: CardFormProps) {
+  const maritalStatusOptions = catalogOptions(options.maritalStatuses, FALLBACK_MARITAL_STATUSES);
   return (
     <div className="grid grid-cols-2 gap-3">
       <FieldGate fieldConfig={fieldConfig} fieldKey="firstName">
@@ -361,9 +383,9 @@ function PersonalIdentityForm({ data, onChange, fieldConfig }: CardFormProps) {
             className={`${inputClass()} capitalize`}
           >
             <option value="">Select…</option>
-            {MARITAL_STATUSES.map((m) => (
-              <option key={m} value={m}>
-                {m}
+            {maritalStatusOptions.map((m) => (
+              <option key={m.value} value={m.value}>
+                {m.label}
               </option>
             ))}
           </select>
@@ -566,32 +588,38 @@ function ReportingRelationshipsForm({ data, onChange, options, fieldConfig }: Ca
   );
 }
 
-const CONTACT_TYPE_FIELDS: SubEntityFieldSpec[] = [
-  {
-    key: "contactType",
-    label: "Type",
-    type: "select",
-    required: true,
-    options: [
-      { value: "business_email", label: "Business email" },
-      { value: "personal_email", label: "Personal email" },
-      { value: "business_phone", label: "Business phone" },
-      { value: "personal_phone", label: "Personal phone" },
-      { value: "emergency_contact", label: "Emergency contact" },
-    ],
-  },
-  { key: "value", label: "Value", type: "text", required: true },
-  { key: "label", label: "Label", type: "text" },
-  { key: "isPrimary", label: "Primary", type: "checkbox" },
+// HR Administration v2 "then 2" Phase 1 (2026-10-01) — `contactType` moved
+// onto this tenant's own `contact_type` catalog (EmployeeContactsService's
+// own validateActiveCode() call); these fallbacks are only what the
+// dropdown shows if that catalog fails to load, matching
+// FALLBACK_EMPLOYMENT_TYPES's precedent.
+const FALLBACK_CONTACT_TYPES = [
+  { value: "business_email", label: "Business email" },
+  { value: "personal_email", label: "Personal email" },
+  { value: "business_phone", label: "Business phone" },
+  { value: "personal_phone", label: "Personal phone" },
+  { value: "emergency_contact", label: "Emergency contact" },
 ];
 
-function ContactForm({ data, onChange, fieldConfig }: CardFormProps) {
+function ContactForm({ data, onChange, options, fieldConfig }: CardFormProps) {
+  const fields: SubEntityFieldSpec[] = [
+    {
+      key: "contactType",
+      label: "Type",
+      type: "select",
+      required: true,
+      options: catalogOptions(options.contactTypes, FALLBACK_CONTACT_TYPES),
+    },
+    { key: "value", label: "Value", type: "text", required: true },
+    { key: "label", label: "Label", type: "text" },
+    { key: "isPrimary", label: "Primary", type: "checkbox" },
+  ];
   return (
     <RepeatableListEditor
       data={data}
       onChange={onChange}
       arrayKey="contacts"
-      fields={applyFieldConfig(CONTACT_TYPE_FIELDS, fieldConfig)}
+      fields={applyFieldConfig(fields, fieldConfig)}
       addLabel="+ Add contact"
       emptyLabel="No contacts added yet."
       summary={(row) => String(row.value ?? "")}
@@ -599,30 +627,33 @@ function ContactForm({ data, onChange, fieldConfig }: CardFormProps) {
   );
 }
 
-const ADDRESS_FIELDS: SubEntityFieldSpec[] = [
-  {
-    key: "addressType",
-    label: "Type",
-    type: "select",
-    required: true,
-    options: [
-      { value: "permanent", label: "Permanent" },
-      { value: "current", label: "Current" },
-      { value: "mailing", label: "Mailing" },
-    ],
-  },
-  { key: "line1", label: "Address line 1", type: "text", required: true },
-  { key: "city", label: "City", type: "text" },
-  { key: "country", label: "Country", type: "text" },
+// Same treatment for `addressType` -> this tenant's own `address_type`
+// catalog (EmployeeAddressesService's own validateActiveCode() call).
+const FALLBACK_ADDRESS_TYPES = [
+  { value: "permanent", label: "Permanent" },
+  { value: "current", label: "Current" },
+  { value: "mailing", label: "Mailing" },
 ];
 
-function AddressesForm({ data, onChange, fieldConfig }: CardFormProps) {
+function AddressesForm({ data, onChange, options, fieldConfig }: CardFormProps) {
+  const fields: SubEntityFieldSpec[] = [
+    {
+      key: "addressType",
+      label: "Type",
+      type: "select",
+      required: true,
+      options: catalogOptions(options.addressTypes, FALLBACK_ADDRESS_TYPES),
+    },
+    { key: "line1", label: "Address line 1", type: "text", required: true },
+    { key: "city", label: "City", type: "text" },
+    { key: "country", label: "Country", type: "text" },
+  ];
   return (
     <RepeatableListEditor
       data={data}
       onChange={onChange}
       arrayKey="addresses"
-      fields={applyFieldConfig(ADDRESS_FIELDS, fieldConfig)}
+      fields={applyFieldConfig(fields, fieldConfig)}
       addLabel="+ Add address"
       emptyLabel="No addresses added yet."
       summary={(row) => String(row.line1 ?? "")}
@@ -788,33 +819,37 @@ function CostAllocationForm({ data, onChange, options, fieldConfig }: CardFormPr
   );
 }
 
-const FAMILY_FIELDS: SubEntityFieldSpec[] = [
-  {
-    key: "relationship",
-    label: "Relationship",
-    type: "select",
-    required: true,
-    options: [
-      { value: "spouse", label: "Spouse" },
-      { value: "child", label: "Child" },
-      { value: "parent", label: "Parent" },
-      { value: "sibling", label: "Sibling" },
-      { value: "other", label: "Other" },
-    ],
-  },
-  { key: "fullName", label: "Full name", type: "text", required: true },
-  { key: "dateOfBirth", label: "Date of birth", type: "date" },
-  { key: "isDependent", label: "Dependent", type: "checkbox", defaultChecked: true },
-  { key: "isBeneficiary", label: "Beneficiary", type: "checkbox" },
+// Same treatment for `relationship` -> this tenant's own
+// `family_relationship_type` catalog (EmployeeFamilyMembersService's own
+// validateActiveCode() call).
+const FALLBACK_RELATIONSHIP_TYPES = [
+  { value: "spouse", label: "Spouse" },
+  { value: "child", label: "Child" },
+  { value: "parent", label: "Parent" },
+  { value: "sibling", label: "Sibling" },
+  { value: "other", label: "Other" },
 ];
 
-function FamilyDependentsForm({ data, onChange, fieldConfig }: CardFormProps) {
+function FamilyDependentsForm({ data, onChange, options, fieldConfig }: CardFormProps) {
+  const fields: SubEntityFieldSpec[] = [
+    {
+      key: "relationship",
+      label: "Relationship",
+      type: "select",
+      required: true,
+      options: catalogOptions(options.relationshipTypes, FALLBACK_RELATIONSHIP_TYPES),
+    },
+    { key: "fullName", label: "Full name", type: "text", required: true },
+    { key: "dateOfBirth", label: "Date of birth", type: "date" },
+    { key: "isDependent", label: "Dependent", type: "checkbox", defaultChecked: true },
+    { key: "isBeneficiary", label: "Beneficiary", type: "checkbox" },
+  ];
   return (
     <RepeatableListEditor
       data={data}
       onChange={onChange}
       arrayKey="members"
-      fields={applyFieldConfig(FAMILY_FIELDS, fieldConfig)}
+      fields={applyFieldConfig(fields, fieldConfig)}
       addLabel="+ Add family member"
       emptyLabel="No family members added yet."
       summary={(row) => String(row.fullName ?? "")}
@@ -842,29 +877,33 @@ function EducationForm({ data, onChange, fieldConfig }: CardFormProps) {
   );
 }
 
-const QUALIFICATION_FIELDS: SubEntityFieldSpec[] = [
-  {
-    key: "qualificationType",
-    label: "Type",
-    type: "select",
-    required: true,
-    options: [
-      { value: "certificate", label: "Certificate" },
-      { value: "license", label: "License" },
-      { value: "skill", label: "Skill" },
-    ],
-  },
-  { key: "title", label: "Title", type: "text", required: true },
-  { key: "issuingAuthority", label: "Issuing authority", type: "text" },
+// Same treatment for `qualificationType` -> this tenant's own
+// `qualification_type` catalog (EmployeeQualificationsService's own
+// validateActiveCode() call).
+const FALLBACK_QUALIFICATION_TYPES = [
+  { value: "certificate", label: "Certificate" },
+  { value: "license", label: "License" },
+  { value: "skill", label: "Skill" },
 ];
 
-function QualificationsSkillsForm({ data, onChange, fieldConfig }: CardFormProps) {
+function QualificationsSkillsForm({ data, onChange, options, fieldConfig }: CardFormProps) {
+  const fields: SubEntityFieldSpec[] = [
+    {
+      key: "qualificationType",
+      label: "Type",
+      type: "select",
+      required: true,
+      options: catalogOptions(options.qualificationTypes, FALLBACK_QUALIFICATION_TYPES),
+    },
+    { key: "title", label: "Title", type: "text", required: true },
+    { key: "issuingAuthority", label: "Issuing authority", type: "text" },
+  ];
   return (
     <RepeatableListEditor
       data={data}
       onChange={onChange}
       arrayKey="items"
-      fields={applyFieldConfig(QUALIFICATION_FIELDS, fieldConfig)}
+      fields={applyFieldConfig(fields, fieldConfig)}
       addLabel="+ Add qualification"
       emptyLabel="No qualifications added yet."
       summary={(row) => String(row.title ?? "")}

@@ -5,6 +5,7 @@ import type { RequestClaims } from "../database/tenant-context";
 import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
+import { HrReferenceCatalogService } from "../hr-administration/hr-reference-catalog.service";
 import type { CreateEmployeeContactRequest, EmployeeContactView, UpdateEmployeeContactRequest } from "@aihxm/shared-types";
 
 // Reuses the employee record's own permission keys rather than inventing
@@ -58,7 +59,8 @@ export class EmployeeContactsService {
     private readonly db: DatabaseService,
     private readonly rbac: RbacService,
     private readonly entitlements: EntitlementsService,
-    private readonly audit: AuditService
+    private readonly audit: AuditService,
+    private readonly hrCatalog: HrReferenceCatalogService
   ) {}
 
   async create(claims: RequestClaims, input: CreateEmployeeContactRequest): Promise<EmployeeContactView> {
@@ -72,6 +74,12 @@ export class EmployeeContactsService {
     input: CreateEmployeeContactRequest
   ): Promise<EmployeeContactView> {
     await this.mustExistEmployee(client, claims.company_id!, input.employeeId);
+    // HR Administration v2 "then 2" Phase 1 (2026-10-01) — `contactType`
+    // used to be a hardcoded CHECK constraint; this tenant's own
+    // `contact_type` catalog is now the source of truth. Only checked on
+    // create — contactType is immutable after creation (see
+    // UpdateEmployeeContactRequest's own Omit).
+    await this.hrCatalog.validateActiveCode(client, claims.company_id!, "contact_type", input.contactType);
 
     if (input.isPrimary) {
       await client.query(

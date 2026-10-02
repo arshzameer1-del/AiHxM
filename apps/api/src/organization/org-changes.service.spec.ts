@@ -451,6 +451,164 @@ describe("OrgChangesService", () => {
     });
   });
 
+  describe("archive cascade to filled Positions (cross-module integration audit Item 7)", () => {
+    let companyId: string;
+    let hrAdminClaims: RequestClaims;
+
+    beforeAll(async () => {
+      companyId = await createFixtureCompany("Reorg Cascade Co");
+      const hrAdminUserId = await createUser(`reorg-cascade-hr-${Date.now()}@example.com`);
+      await assignRole(hrAdminUserId, companyId, "hr_admin");
+      await assignRole(hrAdminUserId, companyId, "rbac_demo_full_access");
+      hrAdminClaims = { is_platform_admin: false, company_id: companyId, sub: hrAdminUserId };
+      const roleId = (await db.withClaims(FIXTURE_CLAIMS, (client) => client.query("SELECT id FROM roles WHERE key = 'hr_admin'"))).rows[0].id;
+      await workflow.createTemplate(hrAdminClaims, {
+        key: "org_reorganization",
+        name: "Reorganization Approval",
+        objectKey: "org_reorganization",
+        steps: [{ stepOrder: 1, name: "HR Admin approves", approvers: [{ approverType: "role", roleId }] }],
+      });
+    });
+
+    /** A unit with one FILLED seat: occupant's employees.position_id set and
+     * an open primary assignment pointing at unit + seat. */
+    async function unitWithFilledSeat(name: string) {
+      const unit = await orgUnits.create(hrAdminClaims, { name, unitType: "department" });
+      return db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const position = await client.query(
+          "INSERT INTO positions (company_id, org_unit_id, position_title, status) VALUES ($1, $2, 'Cascade Seat', 'filled') RETURNING id",
+          [companyId, unit.id]
+        );
+        const employee = await client.query(
+          `INSERT INTO employees (company_id, employee_number, first_name, last_name, org_unit_id, position_id)
+           VALUES ($1, $2, 'Seat', 'Holder', $3, $4) RETURNING id`,
+          [companyId, `CAS-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, unit.id, position.rows[0].id]
+        );
+        const assignment = await client.query(
+          `INSERT INTO employee_org_assignments (company_id, employee_id, assignment_type, org_unit_id, position_id, status)
+           VALUES ($1, $2, 'primary', $3, $4, 'active') RETURNING id`,
+          [companyId, employee.rows[0].id, unit.id, position.rows[0].id]
+        );
+        return { unitId: unit.id, positionId: position.rows[0].id as string, employeeId: employee.rows[0].id as string, assignmentId: assignment.rows[0].id as string };
+      });
+    }
+
+    async function approveNow(changeId: string) {
+      await orgChanges.validate(hrAdminClaims, changeId);
+      await orgChanges.analyzeImpact(hrAdminClaims, changeId);
+      const submitted = await orgChanges.submitForApproval(hrAdminClaims, changeId);
+      return orgChanges.decide(hrAdminClaims, submitted.id, { decision: "approved" });
+    }
+
+    it("default (require_vacant): validate() blocks archiving a unit with filled positions, naming the count, and the change stays draft", async () => {
+      const fx = await unitWithFilledSeat("Blocked Unit");
+      const change = await orgChanges.create(hrAdminClaims, {
+        title: "Archive occupied unit",
+        effectiveDate: "2020-01-01",
+        items: [{ orgUnitId: fx.unitId, action: "archive" }],
+      });
+      expect(change.items[0].cascadeAction).toBe("require_vacant");
+
+      const result = await orgChanges.validate(hrAdminClaims, change.id);
+      expect(result.valid).toBe(false);
+      expect(result.errors.join(" ")).toContain("1 filled position(s) in this unit must be vacated or reassigned");
+      expect((await orgChanges.get(hrAdminClaims, change.id)).status).toBe("draft");
+      expect((await orgUnits.get(hrAdminClaims, fx.unitId)).status).toBe("active");
+    });
+
+    it("auto_unassign: validates with a warning, previews the count, and on execution vacates (not abolishes) the seat and ends assignments — audited to the org_change", async () => {
+      const fx = await unitWithFilledSeat("Cascade Unit");
+      const change = await orgChanges.create(hrAdminClaims, {
+        title: "Archive with cascade",
+        effectiveDate: "2020-01-01",
+        items: [{ orgUnitId: fx.unitId, action: "archive", cascadeAction: "auto_unassign" }],
+      });
+
+      const validation = await orgChanges.validate(hrAdminClaims, change.id);
+      expect(validation.valid).toBe(true);
+      expect(validation.warnings.join(" ")).toContain("will vacate 1 filled position(s)");
+      const impact = await orgChanges.analyzeImpact(hrAdminClaims, change.id);
+      expect(impact.filledPositionsInArchivedUnitsCount).toBe(1);
+
+      const submitted = await orgChanges.submitForApproval(hrAdminClaims, change.id);
+      const decided = await orgChanges.decide(hrAdminClaims, submitted.id, { decision: "approved" });
+      expect(decided.status).toBe("published");
+
+      const after = await db.withClaims(FIXTURE_CLAIMS, async (client) => ({
+        unit: (await client.query("SELECT status FROM org_units WHERE id = $1", [fx.unitId])).rows[0],
+        position: (await client.query("SELECT status FROM positions WHERE id = $1", [fx.positionId])).rows[0],
+        employee: (await client.query("SELECT position_id FROM employees WHERE id = $1", [fx.employeeId])).rows[0],
+        assignment: (await client.query("SELECT status FROM employee_org_assignments WHERE id = $1", [fx.assignmentId])).rows[0],
+        audit: (
+          await client.query(
+            "SELECT action, metadata FROM audit_log WHERE company_id = $1 AND action IN ('position.unassign', 'employee_org_assignment.end') AND target IN ($2, $3)",
+            [companyId, fx.positionId, fx.assignmentId]
+          )
+        ).rows,
+        unitAudit: (await client.query("SELECT metadata FROM audit_log WHERE action = 'org_unit.archive' AND target = $1", [fx.unitId])).rows[0],
+      }));
+      expect(after.unit.status).toBe("archived");
+      expect(after.position.status).toBe("vacant");
+      expect(after.employee.position_id).toBeNull();
+      expect(after.assignment.status).toBe("ended");
+      expect(after.audit).toHaveLength(2);
+      for (const row of after.audit) expect(row.metadata.source).toBe(`org_change:${change.id}`);
+      expect(after.unitAudit.metadata).toMatchObject({ cascadeAction: "auto_unassign", orgChangeId: change.id, vacatedPositionIds: [fx.positionId] });
+    });
+
+    it("require_vacant is re-checked at execution: a seat filled after validation fails the change and leaves the unit active and the seat untouched", async () => {
+      const unit = await orgUnits.create(hrAdminClaims, { name: "Late Fill Unit", unitType: "department" });
+      const change = await orgChanges.create(hrAdminClaims, {
+        title: "Archive (filled after validation)",
+        effectiveDate: "2020-01-01",
+        items: [{ orgUnitId: unit.id, action: "archive" }],
+      });
+      expect((await orgChanges.validate(hrAdminClaims, change.id)).valid).toBe(true);
+      await orgChanges.analyzeImpact(hrAdminClaims, change.id);
+      const submitted = await orgChanges.submitForApproval(hrAdminClaims, change.id);
+
+      // Seat filled between approval routing and execution.
+      const positionId = await db.withClaims(FIXTURE_CLAIMS, async (client) =>
+        (
+          await client.query(
+            "INSERT INTO positions (company_id, org_unit_id, position_title, status) VALUES ($1, $2, 'Late Seat', 'filled') RETURNING id",
+            [companyId, unit.id]
+          )
+        ).rows[0].id as string
+      );
+
+      const decided = await orgChanges.decide(hrAdminClaims, submitted.id, { decision: "approved" });
+      expect(decided.status).toBe("failed");
+      expect(decided.failureReason).toContain("must be vacated or reassigned first");
+      expect((await orgUnits.get(hrAdminClaims, unit.id)).status).toBe("active");
+      const seat = await db.withClaims(FIXTURE_CLAIMS, async (client) => (await client.query("SELECT status FROM positions WHERE id = $1", [positionId])).rows[0]);
+      expect(seat.status).toBe("filled");
+    });
+
+    it("archiving a unit with only vacant positions is unaffected; auto_unassign on a non-archive item is flagged as ignored", async () => {
+      const unit = await orgUnits.create(hrAdminClaims, { name: "Vacant Unit", unitType: "department" });
+      await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query("INSERT INTO positions (company_id, org_unit_id, position_title, status) VALUES ($1, $2, 'Empty Seat', 'vacant')", [companyId, unit.id])
+      );
+      const archive = await orgChanges.create(hrAdminClaims, {
+        title: "Archive vacant unit",
+        effectiveDate: "2020-01-01",
+        items: [{ orgUnitId: unit.id, action: "archive" }],
+      });
+      expect((await approveNow(archive.id)).status).toBe("published");
+
+      const other = await orgUnits.create(hrAdminClaims, { name: "Rename Me", unitType: "department" });
+      const rename = await orgChanges.create(hrAdminClaims, {
+        title: "Rename with stray cascade",
+        effectiveDate: "2020-01-01",
+        items: [{ orgUnitId: other.id, action: "rename", newName: "Renamed", cascadeAction: "auto_unassign" }],
+      });
+      const validation = await orgChanges.validate(hrAdminClaims, rename.id);
+      expect(validation.valid).toBe(true);
+      expect(validation.warnings.join(" ")).toContain("only applies to \"archive\" items");
+    });
+  });
+
   describe("tenant isolation", () => {
     it("a change created in one company is invisible to another company's claims", async () => {
       const companyAId = await createFixtureCompany("Reorg Tenant A");

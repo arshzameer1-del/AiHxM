@@ -19,6 +19,45 @@ import type {
 
 const LEAVE_MODULE_KEY = "leave" as const;
 
+/**
+ * The DEFAULT divisor turning a monthly compensation rate into an
+ * ordinary hourly rate for pricing an approved overtime claim: 26
+ * working days x 8 hours, the 48-hour/six-day ordinary working week the
+ * Factories Act 1934 s.34 and the Shops and Establishments Ordinance
+ * 1969 both use.
+ *
+ * As of migration 0100_overtime_standard_monthly_hours.sql this is now a
+ * per-tenant, effective-dated SETTING (`payroll_settings.standard_monthly_hours`
+ * — see that migration's header comment for why it lives on that table
+ * rather than a new one, or on `overtime_policies`), not a hardcoded
+ * global constant. This export remains as the application-level
+ * fallback `resolveStandardMonthlyHours()` below uses for a tenant that
+ * has never configured Payroll settings at all (so has no
+ * `payroll_settings` row yet) — every existing tenant's overtime pricing
+ * is therefore unchanged until an admin explicitly configures a
+ * different value via `PayrollService.updateSettings()`.
+ */
+export const OVERTIME_STANDARD_MONTHLY_HOURS = 208;
+
+/** One approved, priced overtime claim, as Payroll consumes it — see
+ * `OvertimeService.getApprovedOvertimeInRange()`. `amount`/`hourlyRate`
+ * are `null` only for a claim approved while no compensation record
+ * covered its work_date (see 0097's header comment). */
+export type ApprovedOvertimeClaim = {
+  id: string;
+  workDate: string;
+  overtimeMinutes: number;
+  dayType: OvertimeDayType;
+  rateMultiplier: number;
+  hourlyRate: number | null;
+  amount: number | null;
+};
+
+function round(value: number, decimals: number): number {
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
+}
+
 const DEFAULT_POLICY = {
   daily_threshold_minutes: 0,
   rounding_minutes: 1,
@@ -462,19 +501,41 @@ export class OvertimeService {
         throw new ForbiddenException("Not permitted to decide this overtime claim");
       }
 
+      // 0097: price the claim at the moment it becomes payable and
+      // snapshot it — same "resolve once, store the resolved fact"
+      // discipline `rate_multiplier` already follows. Only an approval
+      // is priced; a rejected claim is never payable.
+      const priced =
+        input.decision === "approved"
+          ? await this.priceClaim(
+              client,
+              row.employee_id,
+              row.company_id,
+              toIsoDate(row.work_date),
+              Number(row.overtime_minutes),
+              Number(row.rate_multiplier)
+            )
+          : { hourlyRate: null, amount: null };
+
       const updated = await client.query(
         `UPDATE overtime_records
-         SET status = $2, decided_by_user_account_id = $3, decision_comment = $4, decided_at = now(), updated_at = now()
+         SET status = $2, decided_by_user_account_id = $3, decision_comment = $4, decided_at = now(), updated_at = now(),
+             hourly_rate = $5, amount = $6
          WHERE id = $1
          RETURNING *`,
-        [id, input.decision, claims.sub, input.comment ?? null]
+        [id, input.decision, claims.sub, input.comment ?? null, priced.hourlyRate, priced.amount]
       );
 
       await this.audit.record(client, claims, {
         companyId: row.company_id,
         action: `overtime.${input.decision}`,
         target: id,
-        metadata: { employeeId: row.employee_id, overtimeMinutes: row.overtime_minutes },
+        metadata: {
+          employeeId: row.employee_id,
+          overtimeMinutes: row.overtime_minutes,
+          hourlyRate: priced.hourlyRate,
+          amount: priced.amount,
+        },
       });
 
       return rowToRecordView(
@@ -482,5 +543,111 @@ export class OvertimeService {
         row.employee_user_account_id
       );
     });
+  }
+
+  /**
+   * Resolves the standard-monthly-hours divisor in force on `workDate`
+   * for this tenant, reading `payroll_settings.standard_monthly_hours`
+   * directly — the same read-only cross-module SQL read `priceClaim()`
+   * already uses for `employee_compensation_components`/
+   * `compensation_components` below (PayrollService owns writes to
+   * `payroll_settings` via `updateSettings()`; OvertimeService only ever
+   * reads it, and deliberately does NOT inject/call PayrollService
+   * itself, since PayrollModule already depends on LeaveModule for
+   * OvertimeService — see PayrollService's own constructor comment — so
+   * the reverse dependency would be circular).
+   *
+   * Mirrors `PayrollService.loadSettingsAsOf()`'s resolution exactly
+   * (effective_from <= date <= effective_to, falling back to the
+   * current/only generation), with one deliberate difference: when a
+   * tenant has NO `payroll_settings` row at all yet (Attendance/Overtime
+   * is usable without Payroll ever being configured — see 0097's header
+   * comment on why `priceClaim()` must not depend on Payroll setup),
+   * this returns the documented default `OVERTIME_STANDARD_MONTHLY_HOURS`
+   * rather than lazily seeding `payroll_settings` — seeding a Payroll
+   * table as a side effect of a Leave-module read would reach across the
+   * module boundary further than a read-only query should.
+   */
+  private async resolveStandardMonthlyHours(client: PoolClient, companyId: string, workDate: string): Promise<number> {
+    const result = await client.query<{ standard_monthly_hours: string }>(
+      `SELECT standard_monthly_hours FROM payroll_settings
+       WHERE company_id = $1 AND effective_from <= $2 AND (effective_to IS NULL OR effective_to >= $2)
+       ORDER BY effective_from DESC LIMIT 1`,
+      [companyId, workDate]
+    );
+    if (result.rowCount && result.rowCount > 0) return Number(result.rows[0].standard_monthly_hours);
+    return OVERTIME_STANDARD_MONTHLY_HOURS;
+  }
+
+  /**
+   * (overtime_minutes / 60) x ordinary hourly rate x rate_multiplier, where
+   * the ordinary hourly rate is the sum of every active compensation
+   * component in force on the claim's own `work_date` divided by this
+   * tenant's standard-monthly-hours setting AS OF that same `work_date`
+   * (`resolveStandardMonthlyHours()` above — defaults to
+   * `OVERTIME_STANDARD_MONTHLY_HOURS` until an admin configures a
+   * different value). Reads compensation directly (the same read-only
+   * join PayrollService.calculateOnePayslip() uses —
+   * EmployeeCompensationService owns every WRITE to it). Returns nulls,
+   * rather than throwing, when no compensation covers that date: an
+   * Overtime approval must not depend on Payroll being configured;
+   * Payroll itself refuses to pay an unpriced approved claim loudly
+   * instead (see 0097's header comment).
+   */
+  private async priceClaim(
+    client: PoolClient,
+    employeeId: string,
+    companyId: string,
+    workDate: string,
+    overtimeMinutes: number,
+    rateMultiplier: number
+  ): Promise<{ hourlyRate: number | null; amount: number | null }> {
+    const result = await client.query<{ monthly_rate: string | null; segment_count: number }>(
+      `SELECT SUM(ecc.amount) AS monthly_rate, COUNT(*)::int AS segment_count
+       FROM employee_compensation_components ecc
+       JOIN compensation_components cc ON cc.id = ecc.component_id
+       WHERE ecc.employee_id = $1 AND cc.is_active = true
+         AND ecc.effective_from <= $2 AND (ecc.effective_to IS NULL OR ecc.effective_to >= $2)`,
+      [employeeId, workDate]
+    );
+    if (result.rows[0].segment_count === 0) return { hourlyRate: null, amount: null };
+    const standardMonthlyHours = await this.resolveStandardMonthlyHours(client, companyId, workDate);
+    const hourlyRate = round(Number(result.rows[0].monthly_rate) / standardMonthlyHours, 4);
+    const amount = round((overtimeMinutes / 60) * hourlyRate * rateMultiplier, 2);
+    return { hourlyRate, amount };
+  }
+
+  /**
+   * Cross-module entry point for Payroll (0097 / integration gap audit
+   * item 4): every APPROVED claim whose `work_date` falls in
+   * [rangeStart, rangeEnd] inclusive, with its snapshotted amount. Takes
+   * the caller's already-open, already-RLS-scoped `client` and performs
+   * no authorization of its own — the same cross-service shape
+   * `WorkScheduleResolutionService.resolve()` uses; PayrollService has
+   * already authorized its caller (`payroll.calculate.all`) before it
+   * ever reaches this.
+   */
+  async getApprovedOvertimeInRange(
+    client: PoolClient,
+    employeeId: string,
+    rangeStart: string,
+    rangeEnd: string
+  ): Promise<ApprovedOvertimeClaim[]> {
+    const result = await client.query(
+      `SELECT id, work_date, overtime_minutes, day_type, rate_multiplier, hourly_rate, amount
+       FROM overtime_records
+       WHERE employee_id = $1 AND status = 'approved' AND work_date >= $2 AND work_date <= $3
+       ORDER BY work_date ASC`,
+      [employeeId, rangeStart, rangeEnd]
+    );
+    return result.rows.map((r) => ({
+      id: r.id,
+      workDate: toIsoDate(r.work_date),
+      overtimeMinutes: Number(r.overtime_minutes),
+      dayType: r.day_type,
+      rateMultiplier: Number(r.rate_multiplier),
+      hourlyRate: r.hourly_rate === null ? null : Number(r.hourly_rate),
+      amount: r.amount === null ? null : Number(r.amount),
+    }));
   }
 }

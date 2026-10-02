@@ -1,7 +1,7 @@
 import { IsDateString, IsIn, IsOptional, IsUUID } from "class-validator";
 import type { OrgRelationshipType } from "@aihxm/shared-types";
 
-const RELATIONSHIP_TYPES: OrgRelationshipType[] = ["direct", "dotted_line", "matrix", "temporary", "acting"];
+const RELATIONSHIP_TYPES: OrgRelationshipType[] = ["direct", "dotted_line", "matrix", "temporary", "acting", "secondment"];
 
 export class CreateOrgRelationshipDto {
   @IsUUID()

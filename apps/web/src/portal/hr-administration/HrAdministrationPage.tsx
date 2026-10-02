@@ -1,6 +1,8 @@
 import { FormEvent, useEffect, useState } from "react";
 import type { HrReferenceCatalogItemView, HrReferenceCatalogTypeSummary } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
+import { BusinessPoliciesPanel } from "./BusinessPoliciesPanel";
+import { ChangeRequestsPanel } from "./ChangeRequestsPanel";
 
 /**
  * HR Administration reference-catalog workspace (Core Employee
@@ -302,7 +304,7 @@ function CatalogItemsPanel({ type }: { type: HrReferenceCatalogTypeSummary }) {
   );
 }
 
-export function HrAdministrationPage() {
+function ReferenceCatalogsTab() {
   const [types, setTypes] = useState<HrReferenceCatalogTypeSummary[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -324,40 +326,82 @@ export function HrAdministrationPage() {
   const selectedType = types.find((t) => t.catalogType === selected) ?? types[0] ?? null;
 
   return (
+    <div className="flex gap-6 items-start">
+      <nav className="w-64 shrink-0 space-y-5">
+        {groups.map((group) => (
+          <div key={group.groupLabel}>
+            <div className="text-xs font-semibold uppercase tracking-wide text-label-tertiary mb-1.5 px-1">{group.groupLabel}</div>
+            <div className="flex flex-col gap-0.5">
+              {group.types.map((t) => (
+                <button
+                  key={t.catalogType}
+                  onClick={() => setSelected(t.catalogType)}
+                  className={`flex items-center justify-between gap-2 text-left px-3 py-1.5 rounded-lg text-sm ${
+                    selectedType?.catalogType === t.catalogType ? "bg-accent/10 text-accent font-medium" : "text-label-secondary hover:bg-black/5"
+                  }`}
+                >
+                  <span className="truncate">{t.label}</span>
+                  <span className="text-xs text-label-tertiary shrink-0">{t.activeCount}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </nav>
+
+      <div className="flex-1 min-w-0">{selectedType && <CatalogItemsPanel key={selectedType.catalogType} type={selectedType} />}</div>
+    </div>
+  );
+}
+
+/**
+ * "then 2" Phase 2 (2026-10-02, gap-table item #8) adds a second tab,
+ * Business Policies, to this same workspace rather than a new nav entry
+ * or route — both tabs are HR Administration reference/configuration
+ * data in the v2 spec's own sense (Section 7/19), just two different
+ * shapes of it (flat catalog items vs named, rules-carrying policy
+ * objects). See `BusinessPoliciesPanel.tsx` for that tab's own content.
+ *
+ * "then 2" Phase 6 (2026-10-02, gap-table item #13) adds a third tab,
+ * Change Requests — the Configuration Publish Lifecycle wrapping all of
+ * the above. See `ChangeRequestsPanel.tsx`.
+ */
+export function HrAdministrationPage() {
+  const [tab, setTab] = useState<"catalogs" | "policies" | "changes">("catalogs");
+
+  return (
     <div>
       <h1 className="text-2xl font-bold tracking-tight mb-1">HR Administration</h1>
-      <p className="text-label-tertiary text-sm mb-6">
-        The reference and lookup data your Configuration Center fields and lifecycle actions validate against —
-        employment types and the reason catalogs behind transfers, promotions, terminations and every other
-        employee lifecycle event. This is reference data, not the field-level rules themselves — those live in
-        Configuration Center.
+      <p className="text-label-tertiary text-sm mb-4">
+        The reference, lookup, and policy data your Configuration Center fields and lifecycle actions validate
+        against — employment types and reason catalogs, personal/reference catalogs, and the business policies
+        (probation, rehire, and others) that govern how those transactions behave. This is reference and policy
+        data, not the field-level rules themselves — those live in Configuration Center.
       </p>
 
-      <div className="flex gap-6 items-start">
-        <nav className="w-64 shrink-0 space-y-5">
-          {groups.map((group) => (
-            <div key={group.groupLabel}>
-              <div className="text-xs font-semibold uppercase tracking-wide text-label-tertiary mb-1.5 px-1">{group.groupLabel}</div>
-              <div className="flex flex-col gap-0.5">
-                {group.types.map((t) => (
-                  <button
-                    key={t.catalogType}
-                    onClick={() => setSelected(t.catalogType)}
-                    className={`flex items-center justify-between gap-2 text-left px-3 py-1.5 rounded-lg text-sm ${
-                      selectedType?.catalogType === t.catalogType ? "bg-accent/10 text-accent font-medium" : "text-label-secondary hover:bg-black/5"
-                    }`}
-                  >
-                    <span className="truncate">{t.label}</span>
-                    <span className="text-xs text-label-tertiary shrink-0">{t.activeCount}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          ))}
-        </nav>
-
-        <div className="flex-1 min-w-0">{selectedType && <CatalogItemsPanel key={selectedType.catalogType} type={selectedType} />}</div>
+      <div className="flex gap-1 border-b border-black/10 mb-6">
+        {(
+          [
+            { key: "catalogs", label: "Reference Catalogs" },
+            { key: "policies", label: "Business Policies" },
+            { key: "changes", label: "Change Requests" },
+          ] as const
+        ).map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
+              tab === t.key ? "border-accent text-accent" : "border-transparent text-label-tertiary hover:text-label-secondary"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
+
+      {tab === "catalogs" && <ReferenceCatalogsTab />}
+      {tab === "policies" && <BusinessPoliciesPanel />}
+      {tab === "changes" && <ChangeRequestsPanel />}
     </div>
   );
 }

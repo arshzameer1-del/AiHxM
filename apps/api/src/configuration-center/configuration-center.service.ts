@@ -13,6 +13,8 @@ import { LocationsService } from "../organization/locations.service";
 import { CostCentersService } from "../organization/cost-centers.service";
 import { ProfitCentersService } from "../organization/profit-centers.service";
 import { HiringProcessService } from "../employees/hiring/hiring-process.service";
+import { OnboardingService } from "../onboarding-offboarding/onboarding.service";
+import { OffboardingService } from "../onboarding-offboarding/offboarding.service";
 import type { ConfigurationDomainSummary } from "@aihxm/shared-types";
 
 type RegistryRow = {
@@ -53,7 +55,9 @@ export class ConfigurationCenterService {
     private readonly locations: LocationsService,
     private readonly costCenters: CostCentersService,
     private readonly profitCenters: ProfitCentersService,
-    private readonly hiring: HiringProcessService
+    private readonly hiring: HiringProcessService,
+    private readonly onboarding: OnboardingService,
+    private readonly offboarding: OffboardingService
   ) {}
 
   async getSummary(claims: RequestClaims): Promise<ConfigurationDomainSummary[]> {
@@ -139,6 +143,49 @@ export class ConfigurationCenterService {
           // same "reuse the real method" acceptance already noted for
           // tax_slab below).
           return (await this.hiring.listCardDefinitions(claims)).length;
+        case "onboarding_checklist_template":
+          // Onboarding & Offboarding (0035_onboarding_offboarding.sql) —
+          // OnboardingService.listItemTemplates() applies the same
+          // entitlement-then-RBAC gate (`recruitment` module key,
+          // reused per that migration's own header comment, then
+          // onboarding.manage.all) as every other case here. This counts
+          // the company-configured checklist-item TEMPLATES (the
+          // "definition" half of that migration's definition-vs-instance
+          // split), never the live in-progress `employee_onboarding`
+          // instances those templates get cloned into at initiate() time
+          // — those are transactional, the same reason Position isn't
+          // registered alongside Job above.
+          return (await this.onboarding.listItemTemplates(claims)).length;
+        case "offboarding_checklist_template":
+          // Same migration, the mirror service — OffboardingService.
+          // listItemTemplates() gated on the `exit` module key then
+          // offboarding.manage.all. Counts offboarding checklist-item
+          // templates only, never live `employee_offboarding` instances.
+          return (await this.offboarding.listItemTemplates(claims)).length;
+        // Recruitment (apps/api/src/recruitment/) and Performance
+        // (apps/api/src/performance/) are deliberately NOT registered
+        // here, unlike Onboarding/Offboarding above. Both modules were
+        // read for this increment and neither currently has a reusable
+        // "setup data" catalog to surface:
+        //   - Recruitment: job_requisitions/candidates/applications/
+        //     offers are all transactional records of a real hiring
+        //     process, not configuration. The Kanban pipeline's stage
+        //     order (FORWARD_STAGES) is a fixed code constant, not a
+        //     tenant-configurable/stored template — there is nothing
+        //     here shaped like Job or Org Unit to count.
+        //   - Performance: review_cycles look template-like but aren't —
+        //     each row is one specific, dated review period a company
+        //     runs once (e.g. "H2 2026 Annual Review"), the same
+        //     transactional shape as a leave_request, not a reusable
+        //     policy. The 1-5 rating scale is a hardcoded CHECK
+        //     constraint, and 0019_performance.sql's own header comment
+        //     explicitly documents that a tenant-configurable rating
+        //     scale was deliberately deferred ("not built ahead of
+        //     actual demand"), so there is no rating-scale-definition
+        //     table to register either.
+        // If either module later adds a real templated/configurable
+        // entity (e.g. a tenant-defined rating scale), that is a
+        // one-row INSERT here, the same as every other domain above.
         case "tax_slab":
           // listTaxSlabs lazily seeds the default FBR bracket table the
           // first time a payroll-enabled tenant has none -- an accepted

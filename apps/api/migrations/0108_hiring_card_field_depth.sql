@@ -1,0 +1,44 @@
+-- Core Employee Configuration/HR-Admin v2, "then 2" Phase 3 (2026-10-02)
+-- — gap-table item #3, "Field-level configuration" (per-field validation/
+-- default/conditional-display depth), the next item in the agreed
+-- sequence after Phase 1 (#7) and Phase 2 (#8).
+--
+-- `0091_hiring_card_field_configuration.sql` already built enable/
+-- disable + required + order for a card's built-in fields, but — as
+-- that migration's own gap-table row #3 always said — that was
+-- deliberately a NARROWER slice than this item's full ~35-property list
+-- (Section 4): validation rules, default values, and conditional display
+-- were never built. Sensitivity/FLS and data-scope are explicitly NOT
+-- duplicated here — Phase 11 (`employee-field-sensitivity.ts`) and the
+-- existing RBAC self/team/all data-scope vocabulary already cover those
+-- two, generically, across every employee field; re-inventing a second,
+-- hiring-card-scoped copy of either would fork a concept this codebase
+-- already has one working version of.
+--
+-- Three new, genuinely-missing columns on the SAME table 0091 created —
+-- not a new table, matching this phase's own "extend the existing
+-- generic engine" discipline:
+--   default_value      — a single scalar (as text; the consuming card
+--                         form parses it for its own field type) applied
+--                         when a submitted card is missing this field
+--                         entirely.
+--   validation_rules    — jsonb: {pattern?, minLength?, maxLength?, min?,
+--                         max?}, enforced server-side in
+--                         `HiringProcessService.saveCard()` against
+--                         whatever value is actually present (after
+--                         defaults are applied) — see that method's own
+--                         new call into `applyFieldConfigRules()`
+--                         (card-field-config.service.ts).
+--   conditional_on      — jsonb: {fieldKey, operator, value}. A field
+--                         whose condition is NOT satisfied by the card's
+--                         OWN submitted data is treated as not-required
+--                         even if `is_required` is set — the same
+--                         "required only when actually shown" semantics
+--                         the spec's own conditional-display requirement
+--                         describes. Evaluated against fields on the SAME
+--                         card only (hiring cards are saved one at a
+--                         time, so a cross-card condition has no later
+--                         card's data to read yet).
+ALTER TABLE core_employee_card_field_definitions ADD COLUMN IF NOT EXISTS default_value text;
+ALTER TABLE core_employee_card_field_definitions ADD COLUMN IF NOT EXISTS validation_rules jsonb;
+ALTER TABLE core_employee_card_field_definitions ADD COLUMN IF NOT EXISTS conditional_on jsonb;

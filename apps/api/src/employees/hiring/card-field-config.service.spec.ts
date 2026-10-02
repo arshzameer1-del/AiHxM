@@ -174,4 +174,103 @@ describe("CardFieldConfigService", () => {
     expect(otherView.builtIn.find((f) => f.fieldKey === "maritalStatus")?.isEnabled).toBe(true);
     expect(otherView.custom).toEqual([]);
   });
+
+  describe("applyFieldConfigRules — field-level defaults/validation/conditional-required (\"then 2\" Phase 3, 2026-10-02)", () => {
+    let ruleCompanyId: string;
+    let ruleClaims: RequestClaims;
+
+    beforeAll(async () => {
+      const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      ruleCompanyId = await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const company = await client.query("INSERT INTO companies (name, slug) VALUES ($1, $2) RETURNING id", [
+          `Card Field Rules Co ${stamp}`,
+          `card-field-rules-co-${stamp}`,
+        ]);
+        const id = company.rows[0].id as string;
+        await client.query("INSERT INTO tenant_module_entitlement (company_id, module_key, enabled) VALUES ($1, 'employee', true)", [id]);
+        return id;
+      });
+      const user = await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query("INSERT INTO user_accounts (email, password_hash) VALUES ($1, 'x') RETURNING id", [`card-field-rules-hr-${stamp}@example.com`])
+      );
+      const userId = user.rows[0].id as string;
+      await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const role = await client.query("SELECT id FROM roles WHERE key = 'hr_admin'");
+        await client.query("INSERT INTO user_role_assignments (user_account_id, company_id, role_id) VALUES ($1, $2, $3)", [
+          userId,
+          ruleCompanyId,
+          role.rows[0].id,
+        ]);
+      });
+      ruleClaims = { is_platform_admin: false, company_id: ruleCompanyId, sub: userId };
+    });
+
+    it("fills in a configured default value for a field the caller omits entirely", async () => {
+      await cardFields.updateFieldConfig(ruleClaims, "employment", "designation", { defaultValue: "Staff" });
+      const result = await db.withClaims(ruleClaims, (client) =>
+        cardFields.applyFieldConfigRules(client, ruleCompanyId, "employment", { employmentType: "permanent" })
+      );
+      expect(result.designation).toBe("Staff");
+    });
+
+    it("never overrides a value the caller actually submitted", async () => {
+      const result = await db.withClaims(ruleClaims, (client) =>
+        cardFields.applyFieldConfigRules(client, ruleCompanyId, "employment", { employmentType: "permanent", designation: "Lead" })
+      );
+      expect(result.designation).toBe("Lead");
+    });
+
+    it("rejects a value that fails a configured pattern/length rule, and accepts one that passes", async () => {
+      await cardFields.updateFieldConfig(ruleClaims, "personal_identity", "cnic", {
+        validationRules: { pattern: "^[0-9]{13}$" },
+      });
+      await expect(
+        db.withClaims(ruleClaims, (client) =>
+          cardFields.applyFieldConfigRules(client, ruleCompanyId, "personal_identity", {
+            firstName: "A",
+            lastName: "B",
+            cnic: "not-a-cnic",
+          })
+        )
+      ).rejects.toThrow('"CNIC" doesn\'t match the required format');
+      const ok = await db.withClaims(ruleClaims, (client) =>
+        cardFields.applyFieldConfigRules(client, ruleCompanyId, "personal_identity", {
+          firstName: "A",
+          lastName: "B",
+          cnic: "1234567890123",
+        })
+      );
+      expect(ok.cnic).toBe("1234567890123");
+    });
+
+    it("treats a required field as optional when its conditionalOn condition isn't met, and enforces it once the condition is met", async () => {
+      await cardFields.updateFieldConfig(ruleClaims, "personal_identity", "maritalStatus", {
+        isRequired: true,
+        conditionalOn: { fieldKey: "gender", operator: "equals", value: "female" },
+      });
+
+      // gender !== 'female' → the condition is unmet, so maritalStatus
+      // being absent is NOT an error even though it's marked required.
+      const skipped = await db.withClaims(ruleClaims, (client) =>
+        cardFields.applyFieldConfigRules(client, ruleCompanyId, "personal_identity", { firstName: "A", lastName: "B", gender: "male" })
+      );
+      expect(skipped.maritalStatus).toBeUndefined();
+
+      // gender === 'female' → the condition IS met, so maritalStatus is
+      // now genuinely required.
+      await expect(
+        db.withClaims(ruleClaims, (client) =>
+          cardFields.applyFieldConfigRules(client, ruleCompanyId, "personal_identity", { firstName: "A", lastName: "B", gender: "female" })
+        )
+      ).rejects.toThrow('"Marital status" is required');
+    });
+
+    it("never enforces required/validation/defaults for a list-shaped card (e.g. family_dependents), since the catalog describes one array item's shape, not the card's own top-level data", async () => {
+      await cardFields.updateFieldConfig(ruleClaims, "family_dependents", "relationship", { isRequired: true });
+      const result = await db.withClaims(ruleClaims, (client) =>
+        cardFields.applyFieldConfigRules(client, ruleCompanyId, "family_dependents", { members: [] })
+      );
+      expect(result).toEqual({ members: [] });
+    });
+  });
 });

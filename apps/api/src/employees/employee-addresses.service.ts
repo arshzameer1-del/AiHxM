@@ -5,6 +5,7 @@ import type { RequestClaims } from "../database/tenant-context";
 import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
+import { HrReferenceCatalogService } from "../hr-administration/hr-reference-catalog.service";
 import type { CreateEmployeeAddressRequest, EmployeeAddressView, UpdateEmployeeAddressRequest } from "@aihxm/shared-types";
 
 const MODULE_KEY = "employee" as const;
@@ -57,7 +58,8 @@ export class EmployeeAddressesService {
     private readonly db: DatabaseService,
     private readonly rbac: RbacService,
     private readonly entitlements: EntitlementsService,
-    private readonly audit: AuditService
+    private readonly audit: AuditService,
+    private readonly hrCatalog: HrReferenceCatalogService
   ) {}
 
   async create(claims: RequestClaims, input: CreateEmployeeAddressRequest): Promise<EmployeeAddressView> {
@@ -71,6 +73,12 @@ export class EmployeeAddressesService {
     input: CreateEmployeeAddressRequest
   ): Promise<EmployeeAddressView> {
     await this.mustExistEmployee(client, claims.company_id!, input.employeeId);
+    // HR Administration v2 "then 2" Phase 1 (2026-10-01) — `addressType`
+    // used to be a hardcoded CHECK constraint (permanent/current/mailing);
+    // this tenant's own `address_type` catalog is now the source of
+    // truth. Only checked on create — addressType is immutable after
+    // creation (see UpdateEmployeeAddressRequest's own Omit).
+    await this.hrCatalog.validateActiveCode(client, claims.company_id!, "address_type", input.addressType);
 
     await client.query(
       "UPDATE employee_addresses SET status = 'ended', updated_at = now() WHERE employee_id = $1 AND address_type = $2 AND status = 'active'",

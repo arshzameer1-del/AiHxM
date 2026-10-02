@@ -8,6 +8,7 @@ import { AuditService } from "../audit/audit.service";
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
 import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
 import { buildOrgEventPayload } from "../webhooks/org-event-payload.util";
+import { assertNoReportingCycle } from "./occupancy/org-occupancy.service";
 import type {
   CreateOrgRelationshipRequest,
   OrgRelationshipType,
@@ -105,22 +106,22 @@ export type RelationshipListFilters = {
  *     this relationship through some other path is never clobbered — the
  *     same defensive guard PositionsService.vacate() documents for
  *     `employees.positionId`).
- *   - A non-`direct` relationship (dotted_line/matrix/temporary/acting)
+ *   - A non-`direct` relationship (dotted_line/matrix/temporary/acting/secondment)
  *     NEVER touches `employees.managerId` — that column is specifically
  *     the "solid-line manager," which only a `direct` relationship
  *     represents.
  *
- * KNOWN, DELIBERATE GAP (documented here and in the phase report, not an
- * oversight): `EmployeesService.create()`/`update()` ALSO write
- * `employees.managerId` directly from their own pre-existing `managerId`
- * input field — that behavior is UNCHANGED and MUST keep working (this
- * phase's backward-compatibility mandate). That legacy write path does
- * NOT create or update a corresponding `org_relationships` row. In other
- * words: the sync is complete in the direction org_relationships ->
- * employees.managerId, but NOT in the reverse direction
- * employees.managerId -> org_relationships. A tenant that keeps using only
- * the legacy `managerId` field never gets a typed relationship record for
- * it; a tenant that adopts this typed API gets both.
+ * REVERSE DIRECTION (employees.managerId -> org_relationships): closed
+ * for `EmployeeLifecycleService.changeManager()`, hiring completion, and
+ * (cross-module integration follow-up, 2026-10-01) the generic
+ * `EmployeesService.update()` PATCH — all three go through
+ * `OrgOccupancyService.syncDirectManagerFromEmployeeWithinTransaction()`
+ * /`createRelationshipWithinTransaction(syncEmployeeManagerId: false)`.
+ * Neither direction is reactive: this service writes `employees.manager_id`
+ * with plain SQL and never calls EmployeesService, and those callers never
+ * call back into this service, so the two can never ping-pong. The one
+ * remaining legacy path is a plain `EmployeesService.create()` with a
+ * `managerId` (no typed row yet — still covered by this service's spec).
  *
  * CYCLE PREVENTION (Section 12 / phase brief item #3): before creating or
  * updating a `direct` relationship, `assertNoCycle()` walks the ascending
@@ -357,23 +358,11 @@ export class OrgRelationshipsService {
    * direction instead of descending children.
    */
   private async assertNoCycle(client: PoolClient, employeeId: string, managerEmployeeId: string): Promise<void> {
-    const result = await client.query(
-      `WITH RECURSIVE chain AS (
-         SELECT manager_employee_id AS mgr, ARRAY[manager_employee_id] AS path
-         FROM org_relationships
-         WHERE employee_id = $1 AND relationship_type = 'direct' AND status = 'active'
-         UNION ALL
-         SELECT r.manager_employee_id, chain.path || r.manager_employee_id
-         FROM org_relationships r
-         JOIN chain ON r.employee_id = chain.mgr
-         WHERE r.relationship_type = 'direct' AND r.status = 'active' AND NOT r.manager_employee_id = ANY(chain.path)
-       )
-       SELECT 1 FROM chain WHERE mgr = $2 LIMIT 1`,
-      [managerEmployeeId, employeeId]
-    );
-    if ((result.rowCount ?? 0) > 0) {
-      throw new BadRequestException("This would create a manager reporting cycle");
-    }
+    // Cross-module integration audit (2026-10-01) — the recursive-CTE
+    // walk itself moved to `assertNoReportingCycle()` so the lifecycle
+    // `changeManager()` path (via OrgOccupancyService) enforces the exact
+    // same rule; behavior here is unchanged.
+    await assertNoReportingCycle(client, employeeId, managerEmployeeId);
   }
 
   /** The one place this service ever writes `employees.managerId` — see

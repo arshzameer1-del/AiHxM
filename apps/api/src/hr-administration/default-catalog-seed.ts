@@ -91,4 +91,85 @@ export const DEFAULT_CATALOG_SEED: { catalogType: string; code: string; label: s
 
   { catalogType: "lifecycle_reason:return_from_leave", code: "leave_completed", label: "Leave period completed", sortOrder: 0 },
   { catalogType: "lifecycle_reason:return_from_leave", code: "early_return", label: "Early return from leave", sortOrder: 1 },
+
+  // HR Administration v2, "then 2" Phase 1 (2026-10-01, gap-table item #7)
+  // — same list 0106_hr_administration_personal_reference_catalogs.sql
+  // seeded for every company that existed at migration time; kept here so
+  // a company created afterward gets the identical starter set lazily,
+  // the same "ensureX() seeds once per company" rule this file's own doc
+  // comment already documents.
+  { catalogType: "family_relationship_type", code: "spouse", label: "Spouse", sortOrder: 0 },
+  { catalogType: "family_relationship_type", code: "child", label: "Child", sortOrder: 1 },
+  { catalogType: "family_relationship_type", code: "parent", label: "Parent", sortOrder: 2 },
+  { catalogType: "family_relationship_type", code: "sibling", label: "Sibling", sortOrder: 3 },
+  { catalogType: "family_relationship_type", code: "other", label: "Other", sortOrder: 4 },
+
+  { catalogType: "qualification_type", code: "certificate", label: "Certificate", sortOrder: 0 },
+  { catalogType: "qualification_type", code: "license", label: "License", sortOrder: 1 },
+  { catalogType: "qualification_type", code: "skill", label: "Skill", sortOrder: 2 },
+
+  { catalogType: "address_type", code: "permanent", label: "Permanent", sortOrder: 0 },
+  { catalogType: "address_type", code: "current", label: "Current", sortOrder: 1 },
+  { catalogType: "address_type", code: "mailing", label: "Mailing", sortOrder: 2 },
+
+  { catalogType: "contact_type", code: "business_email", label: "Business email", sortOrder: 0 },
+  { catalogType: "contact_type", code: "personal_email", label: "Personal email", sortOrder: 1 },
+  { catalogType: "contact_type", code: "business_phone", label: "Business phone", sortOrder: 2 },
+  { catalogType: "contact_type", code: "personal_phone", label: "Personal phone", sortOrder: 3 },
+  { catalogType: "contact_type", code: "emergency_contact", label: "Emergency contact", sortOrder: 4 },
+
+  { catalogType: "document_type", code: "cnic", label: "CNIC", sortOrder: 0 },
+  { catalogType: "document_type", code: "cnic_copy", label: "CNIC copy", sortOrder: 1 },
+  { catalogType: "document_type", code: "passport", label: "Passport", sortOrder: 2 },
+  { catalogType: "document_type", code: "driving_license", label: "Driving license", sortOrder: 3 },
+  { catalogType: "document_type", code: "degree_certificate", label: "Degree certificate", sortOrder: 4 },
+  { catalogType: "document_type", code: "experience_letter", label: "Experience letter", sortOrder: 5 },
+  { catalogType: "document_type", code: "offer_letter", label: "Offer letter", sortOrder: 6 },
+  { catalogType: "document_type", code: "bank_statement", label: "Bank statement", sortOrder: 7 },
+  { catalogType: "document_type", code: "photograph", label: "Photograph", sortOrder: 8 },
+  { catalogType: "document_type", code: "other", label: "Other", sortOrder: 9 },
+
+  { catalogType: "marital_status", code: "single", label: "Single", sortOrder: 0 },
+  { catalogType: "marital_status", code: "married", label: "Married", sortOrder: 1 },
+  { catalogType: "marital_status", code: "divorced", label: "Divorced", sortOrder: 2 },
+  { catalogType: "marital_status", code: "widowed", label: "Widowed", sortOrder: 3 },
+
+  { catalogType: "nationality", code: "pk", label: "Pakistani", sortOrder: 0 },
+  { catalogType: "nationality", code: "other", label: "Other", sortOrder: 1 },
+
+  { catalogType: "language", code: "ur", label: "Urdu", sortOrder: 0 },
+  { catalogType: "language", code: "en", label: "English", sortOrder: 1 },
+  { catalogType: "language", code: "pa", label: "Punjabi", sortOrder: 2 },
+  { catalogType: "language", code: "sd", label: "Sindhi", sortOrder: 3 },
+  { catalogType: "language", code: "ps", label: "Pashto", sortOrder: 4 },
+  { catalogType: "language", code: "other", label: "Other", sortOrder: 5 },
+
+  { catalogType: "education_level", code: "matric", label: "Matriculation", sortOrder: 0 },
+  { catalogType: "education_level", code: "intermediate", label: "Intermediate", sortOrder: 1 },
+  { catalogType: "education_level", code: "bachelors", label: "Bachelors", sortOrder: 2 },
+  { catalogType: "education_level", code: "masters", label: "Masters", sortOrder: 3 },
+  { catalogType: "education_level", code: "phd", label: "PhD", sortOrder: 4 },
+  { catalogType: "education_level", code: "other", label: "Other", sortOrder: 5 },
+
+  { catalogType: "institution_type", code: "university", label: "University", sortOrder: 0 },
+  { catalogType: "institution_type", code: "college", label: "College", sortOrder: 1 },
+  { catalogType: "institution_type", code: "vocational", label: "Vocational institute", sortOrder: 2 },
+  { catalogType: "institution_type", code: "online", label: "Online platform", sortOrder: 3 },
+  { catalogType: "institution_type", code: "other", label: "Other", sortOrder: 4 },
+
+  { catalogType: "certification_type", code: "professional", label: "Professional certification", sortOrder: 0 },
+  { catalogType: "certification_type", code: "vendor", label: "Vendor certification", sortOrder: 1 },
+  { catalogType: "certification_type", code: "compliance", label: "Compliance / regulatory", sortOrder: 2 },
+  { catalogType: "certification_type", code: "other", label: "Other", sortOrder: 3 },
+
+  { catalogType: "document_category", code: "identity", label: "Identity", sortOrder: 0 },
+  { catalogType: "document_category", code: "educational", label: "Educational", sortOrder: 1 },
+  { catalogType: "document_category", code: "employment", label: "Employment", sortOrder: 2 },
+  { catalogType: "document_category", code: "financial", label: "Financial", sortOrder: 3 },
+  { catalogType: "document_category", code: "other", label: "Other", sortOrder: 4 },
+
+  { catalogType: "id_document_type", code: "cnic", label: "CNIC", sortOrder: 0 },
+  { catalogType: "id_document_type", code: "nicop", label: "NICOP", sortOrder: 1 },
+  { catalogType: "id_document_type", code: "passport", label: "Passport", sortOrder: 2 },
+  { catalogType: "id_document_type", code: "b_form", label: "B-Form", sortOrder: 3 },
 ];

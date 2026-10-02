@@ -29,6 +29,12 @@ import { EmployeeAnalyticsController } from "./employee-analytics.controller";
 import { EmployeeAnalyticsService } from "./employee-analytics.service";
 import { EmployeeCompensationController } from "./employee-compensation.controller";
 import { EmployeeCompensationService } from "./employee-compensation.service";
+import { EmployeeLoansController } from "./employee-loans.controller";
+import { EmployeeLoansService } from "./employee-loans.service";
+import { EmployeeAdditionalPaymentsController } from "./employee-additional-payments.controller";
+import { EmployeeAdditionalPaymentsService } from "./employee-additional-payments.service";
+import { EmployeeOffCyclePaymentsController } from "./employee-offcycle-payments.controller";
+import { EmployeeOffCyclePaymentsService } from "./employee-offcycle-payments.service";
 import { RbacModule } from "../rbac/rbac.module";
 import { EntitlementsModule } from "../entitlements/entitlements.module";
 import { AuditModule } from "../audit/audit.module";
@@ -39,6 +45,7 @@ import { EffectiveDatingModule } from "../effective-dating/effective-dating.modu
 import { ImportExportModule } from "../import-export/import-export.module";
 import { HrAdministrationModule } from "../hr-administration/hr-administration.module";
 import { CustomFieldsModule } from "../custom-fields/custom-fields.module";
+import { OrgOccupancyModule } from "../organization/occupancy/org-occupancy.module";
 
 @Module({
   // Phase 3 item #4 — WebhooksModule is deliberately slim (exports only
@@ -69,6 +76,13 @@ import { CustomFieldsModule } from "../custom-fields/custom-fields.module";
   // CardFieldConfigService's "add custom field" action AND for
   // HiringProcessService's optional `customFields` constructor param is
   // not circular either.
+  // Cross-module integration audit (2026-10-01) — OrgOccupancyModule is
+  // the one piece of Organization Management this module now depends on
+  // (hiring completion fills the selected Position; lifecycle transactions
+  // keep employee_org_assignments/positions/org_relationships in sync). It
+  // is deliberately NOT OrganizationModule: it imports only Audit/
+  // EffectiveDating/Webhooks, so this is not the circular dependency the
+  // comment above warns about — see org-occupancy.module.ts.
   imports: [
     RbacModule,
     EntitlementsModule,
@@ -80,6 +94,7 @@ import { CustomFieldsModule } from "../custom-fields/custom-fields.module";
     ImportExportModule,
     HrAdministrationModule,
     CustomFieldsModule,
+    OrgOccupancyModule,
   ],
   // Core Employee Enterprise Phase 2/3 — HiringController (the hire
   // process engine) and HiringConfigurationController (Phase 3's scoped
@@ -108,6 +123,9 @@ import { CustomFieldsModule } from "../custom-fields/custom-fields.module";
     EmployeeLifecycleController,
     EmployeeAnalyticsController,
     EmployeeCompensationController,
+    EmployeeLoansController,
+    EmployeeAdditionalPaymentsController,
+    EmployeeOffCyclePaymentsController,
   ],
   // PersonsService is exported so a later phase's own module can read
   // persons without duplicating this provider; HiringProcessService is
@@ -129,6 +147,9 @@ import { CustomFieldsModule } from "../custom-fields/custom-fields.module";
     EmployeeLifecycleService,
     EmployeeAnalyticsService,
     EmployeeCompensationService,
+    EmployeeLoansService,
+    EmployeeAdditionalPaymentsService,
+    EmployeeOffCyclePaymentsService,
   ],
   exports: [
     EmployeesService,
@@ -146,6 +167,9 @@ import { CustomFieldsModule } from "../custom-fields/custom-fields.module";
     EmployeeLifecycleService,
     EmployeeAnalyticsService,
     EmployeeCompensationService,
+    EmployeeLoansService,
+    EmployeeAdditionalPaymentsService,
+    EmployeeOffCyclePaymentsService,
   ],
 })
 export class EmployeesModule {}

@@ -5,6 +5,7 @@ import type { RequestClaims } from "../database/tenant-context";
 import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
+import { HrReferenceCatalogService } from "../hr-administration/hr-reference-catalog.service";
 import type {
   CreateEmployeeFamilyMemberRequest,
   EmployeeFamilyMemberView,
@@ -53,7 +54,8 @@ export class EmployeeFamilyMembersService {
     private readonly db: DatabaseService,
     private readonly rbac: RbacService,
     private readonly entitlements: EntitlementsService,
-    private readonly audit: AuditService
+    private readonly audit: AuditService,
+    private readonly hrCatalog: HrReferenceCatalogService
   ) {}
 
   async create(claims: RequestClaims, input: CreateEmployeeFamilyMemberRequest): Promise<EmployeeFamilyMemberView> {
@@ -67,6 +69,12 @@ export class EmployeeFamilyMembersService {
     input: CreateEmployeeFamilyMemberRequest
   ): Promise<EmployeeFamilyMemberView> {
     await this.mustExistEmployee(client, claims.company_id!, input.employeeId);
+    // HR Administration v2 "then 2" Phase 1 (2026-10-01) — `relationship`
+    // used to be a hardcoded CHECK constraint (spouse/child/parent/sibling/
+    // other); this tenant's own `family_relationship_type` catalog is now
+    // the source of truth, same pattern as EmployeesService's own
+    // `validateEmploymentType()`.
+    await this.hrCatalog.validateActiveCode(client, claims.company_id!, "family_relationship_type", input.relationship);
 
     const inserted = await client.query(
       `INSERT INTO employee_family_members
@@ -110,6 +118,9 @@ export class EmployeeFamilyMembersService {
     await this.requireManage(claims);
     return this.db.withClaims(claims, async (client) => {
       const before = await this.mustExist(client, id);
+      if (patch.relationship) {
+        await this.hrCatalog.validateActiveCode(client, claims.company_id!, "family_relationship_type", patch.relationship);
+      }
       const result = await client.query(
         `UPDATE employee_family_members SET
            relationship = COALESCE($2, relationship),

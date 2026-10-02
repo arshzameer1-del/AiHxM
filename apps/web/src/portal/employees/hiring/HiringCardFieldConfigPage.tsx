@@ -42,6 +42,102 @@ function describeError(err: unknown): string {
   return "Something went wrong loading this.";
 }
 
+/**
+ * "then 2" Phase 3 (2026-10-02, gap-table item #3) — the field-level
+ * depth beyond enable/disable/required: a default value, validation
+ * rules, and a conditional-display condition, each enforced server-side
+ * by `CardFieldConfigService.applyFieldConfigRules()` (see that method's
+ * own doc comment). Edited as a small structured form, not raw JSON —
+ * unlike a Business Policy's `rules` (which genuinely differ in shape
+ * per policy type), every field here shares the exact same shape, so a
+ * dedicated form reads better than a JSON textarea would.
+ */
+function FieldRulesForm({ field, onCancel, onSaved }: { field: CardFieldDefinitionView; onCancel: () => void; onSaved: () => void }) {
+  const { cardKey } = useParams<{ cardKey: string }>();
+  const [defaultValue, setDefaultValue] = useState(field.defaultValue ?? "");
+  const [pattern, setPattern] = useState(field.validationRules?.pattern ?? "");
+  const [minLength, setMinLength] = useState(field.validationRules?.minLength?.toString() ?? "");
+  const [maxLength, setMaxLength] = useState(field.validationRules?.maxLength?.toString() ?? "");
+  const [min, setMin] = useState(field.validationRules?.min?.toString() ?? "");
+  const [max, setMax] = useState(field.validationRules?.max?.toString() ?? "");
+  const [conditionField, setConditionField] = useState(field.conditionalOn?.fieldKey ?? "");
+  const [conditionOp, setConditionOp] = useState<"equals" | "notEquals">(field.conditionalOn?.operator ?? "equals");
+  const [conditionValue, setConditionValue] = useState(field.conditionalOn?.value ?? "");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!cardKey) return;
+    setError(null);
+    const rules: Record<string, number | string> = {};
+    if (pattern.trim()) rules.pattern = pattern.trim();
+    if (minLength.trim()) rules.minLength = Number(minLength);
+    if (maxLength.trim()) rules.maxLength = Number(maxLength);
+    if (min.trim()) rules.min = Number(min);
+    if (max.trim()) rules.max = Number(max);
+    setSaving(true);
+    try {
+      await api.updateCardFieldConfig(cardKey, field.fieldKey, {
+        defaultValue: defaultValue.trim() || null,
+        validationRules: Object.keys(rules).length > 0 ? (rules as never) : null,
+        conditionalOn: conditionField.trim() ? { fieldKey: conditionField.trim(), operator: conditionOp, value: conditionValue } : null,
+      });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not save these rules.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="bg-black/5 rounded-lg p-3 space-y-3 mt-2">
+      <div>
+        <label className="block text-xs font-medium mb-1">Default value</label>
+        <input
+          value={defaultValue}
+          onChange={(e) => setDefaultValue(e.target.value)}
+          placeholder="Applied when this field is left blank"
+          className={inputClass}
+        />
+      </div>
+      <div>
+        <div className="text-xs font-medium mb-1">Validation</div>
+        <div className="grid grid-cols-2 gap-2">
+          <input value={pattern} onChange={(e) => setPattern(e.target.value)} placeholder="Pattern (regex, optional)" className={inputClass} />
+          <div className="grid grid-cols-2 gap-2">
+            <input value={minLength} onChange={(e) => setMinLength(e.target.value)} placeholder="Min length" className={inputClass} />
+            <input value={maxLength} onChange={(e) => setMaxLength(e.target.value)} placeholder="Max length" className={inputClass} />
+          </div>
+          <input value={min} onChange={(e) => setMin(e.target.value)} placeholder="Min value" className={inputClass} />
+          <input value={max} onChange={(e) => setMax(e.target.value)} placeholder="Max value" className={inputClass} />
+        </div>
+      </div>
+      <div>
+        <div className="text-xs font-medium mb-1">Only required when another field on this card matches</div>
+        <div className="grid grid-cols-3 gap-2">
+          <input value={conditionField} onChange={(e) => setConditionField(e.target.value)} placeholder="Field key" className={inputClass} />
+          <select value={conditionOp} onChange={(e) => setConditionOp(e.target.value as "equals" | "notEquals")} className={inputClass}>
+            <option value="equals">equals</option>
+            <option value="notEquals">does not equal</option>
+          </select>
+          <input value={conditionValue} onChange={(e) => setConditionValue(e.target.value)} placeholder="Value" className={inputClass} />
+        </div>
+      </div>
+      {error && <div className="text-danger text-xs">{error}</div>}
+      <div className="flex gap-3">
+        <button type="submit" disabled={saving} className="bg-accent text-white rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-50">
+          {saving ? "Saving…" : "Save rules"}
+        </button>
+        <button type="button" onClick={onCancel} className="text-xs font-medium text-label-tertiary hover:text-label-primary">
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function AddCustomFieldForm({ cardKey, onCancel, onAdded }: { cardKey: string; onCancel: () => void; onAdded: () => void }) {
   const [fieldKey, setFieldKey] = useState("");
   const [label, setLabel] = useState("");
@@ -143,6 +239,7 @@ export function HiringCardFieldConfigPage() {
   const [rowError, setRowError] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [editingRulesKey, setEditingRulesKey] = useState<string | null>(null);
 
   function load() {
     if (!cardKey) return;
@@ -213,30 +310,50 @@ export function HiringCardFieldConfigPage() {
         {builtIn.length > 0 && (
           <div className="divide-y divide-black/5">
             {builtIn.map((field) => (
-              <div key={field.fieldKey} className="py-2.5 flex items-center justify-between gap-3">
-                <div className={`text-sm ${field.isEnabled ? "" : "text-label-tertiary"}`}>{field.label}</div>
-                <div className="flex items-center gap-4 shrink-0">
-                  <label className="flex items-center gap-1.5 text-xs">
-                    <input
-                      type="checkbox"
-                      checked={field.isRequired}
-                      disabled={busyKey === field.fieldKey || !field.isEnabled}
-                      onChange={() => toggleBuiltIn(field, { isRequired: !field.isRequired })}
-                      className="rounded border-black/20"
-                    />
-                    Required
-                  </label>
-                  <label className="flex items-center gap-1.5 text-xs">
-                    <input
-                      type="checkbox"
-                      checked={field.isEnabled}
-                      disabled={busyKey === field.fieldKey}
-                      onChange={() => toggleBuiltIn(field, { isEnabled: !field.isEnabled })}
-                      className="rounded border-black/20"
-                    />
-                    Enabled
-                  </label>
+              <div key={field.fieldKey} className="py-2.5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className={`text-sm ${field.isEnabled ? "" : "text-label-tertiary"}`}>{field.label}</div>
+                    {(field.defaultValue || field.validationRules || field.conditionalOn) && (
+                      <div className="text-xs text-label-tertiary mt-0.5 flex gap-2 flex-wrap">
+                        {field.defaultValue && <span>Default: {field.defaultValue}</span>}
+                        {field.validationRules && <span>Validated</span>}
+                        {field.conditionalOn && <span>Conditional on {field.conditionalOn.fieldKey}</span>}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-4 shrink-0">
+                    <button
+                      onClick={() => setEditingRulesKey(editingRulesKey === field.fieldKey ? null : field.fieldKey)}
+                      className="text-xs font-medium text-accent hover:underline"
+                    >
+                      {editingRulesKey === field.fieldKey ? "Close" : "Rules"}
+                    </button>
+                    <label className="flex items-center gap-1.5 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={field.isRequired}
+                        disabled={busyKey === field.fieldKey || !field.isEnabled}
+                        onChange={() => toggleBuiltIn(field, { isRequired: !field.isRequired })}
+                        className="rounded border-black/20"
+                      />
+                      Required
+                    </label>
+                    <label className="flex items-center gap-1.5 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={field.isEnabled}
+                        disabled={busyKey === field.fieldKey}
+                        onChange={() => toggleBuiltIn(field, { isEnabled: !field.isEnabled })}
+                        className="rounded border-black/20"
+                      />
+                      Enabled
+                    </label>
+                  </div>
                 </div>
+                {editingRulesKey === field.fieldKey && (
+                  <FieldRulesForm field={field} onCancel={() => setEditingRulesKey(null)} onSaved={() => { setEditingRulesKey(null); load(); }} />
+                )}
               </div>
             ))}
           </div>

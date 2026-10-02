@@ -7,6 +7,7 @@ import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
 import type {
+  CompensationComponentType,
   CompensationComponentView,
   CompensationView,
   CreateCompensationComponentRequest,
@@ -74,6 +75,7 @@ function rowToComponent(row: any): CompensationComponentView {
     key: row.key,
     name: row.name,
     isTaxable: row.is_taxable,
+    componentType: row.component_type as CompensationComponentType,
     isActive: row.is_active,
     sortOrder: row.sort_order,
     createdAt: toIso(row.created_at) as string,
@@ -93,6 +95,7 @@ function rowToCompensationRow(row: any): CompensationView {
     componentKey: row.component_key,
     componentName: row.component_name,
     isTaxable: row.component_is_taxable,
+    componentType: row.component_type as CompensationComponentType,
     amount: Number(row.amount),
     effectiveFrom: toIsoDate(row.effective_from),
     effectiveTo: toIsoDateOrNull(row.effective_to),
@@ -153,6 +156,13 @@ export class EmployeeCompensationService {
     const name = input.name.trim();
     if (!name) throw new BadRequestException("A component name is required");
     const key = (input.key?.trim() || slugify(name)).toLowerCase();
+    const componentType: CompensationComponentType = input.componentType ?? "earning";
+    // A deduction (Phase P3's "Benefits"-style recurring item) is never
+    // taxable — it reduces net pay directly, so a tax-exempt/taxable
+    // distinction has no meaning for it. Forced here regardless of what
+    // the caller sent, same "the service enforces this, not just the UI"
+    // posture every other invariant in this file already takes.
+    const isTaxable = componentType === "deduction" ? false : input.isTaxable ?? true;
     return this.db.withClaims(claims, async (client) => {
       await this.loadOrSeedComponents(client, claims);
       const existing = await client.query("SELECT 1 FROM compensation_components WHERE company_id = $1 AND key = $2", [
@@ -166,15 +176,15 @@ export class EmployeeCompensationService {
         claims.company_id,
       ]);
       const result = await client.query(
-        `INSERT INTO compensation_components (company_id, key, name, is_taxable, sort_order)
-         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [claims.company_id, key, name, input.isTaxable ?? true, Number(maxSort.rows[0].max) + 1]
+        `INSERT INTO compensation_components (company_id, key, name, is_taxable, component_type, sort_order)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+        [claims.company_id, key, name, isTaxable, componentType, Number(maxSort.rows[0].max) + 1]
       );
       await this.audit.record(client, claims, {
         companyId: claims.company_id ?? null,
         action: "compensation_component.create",
         target: result.rows[0].id,
-        metadata: { key, name },
+        metadata: { key, name, componentType },
       });
       return rowToComponent(result.rows[0]);
     });
@@ -190,17 +200,17 @@ export class EmployeeCompensationService {
       const existing = await client.query("SELECT * FROM compensation_components WHERE id = $1", [id]);
       if (existing.rowCount === 0) throw new NotFoundException("Compensation component not found");
       const current = existing.rows[0];
+      // componentType itself is immutable after creation (same as `key`)
+      // — changing earning<->deduction underneath amounts already set
+      // against it would silently flip what every existing effective-
+      // dated row means. A deduction component stays forced non-taxable
+      // regardless of what's patched, same as create().
+      const isTaxable = current.component_type === "deduction" ? false : patch.isTaxable ?? current.is_taxable;
       const result = await client.query(
         `UPDATE compensation_components
          SET name = $2, is_taxable = $3, is_active = $4, sort_order = $5
          WHERE id = $1 RETURNING *`,
-        [
-          id,
-          patch.name?.trim() || current.name,
-          patch.isTaxable ?? current.is_taxable,
-          patch.isActive ?? current.is_active,
-          patch.sortOrder ?? current.sort_order,
-        ]
+        [id, patch.name?.trim() || current.name, isTaxable, patch.isActive ?? current.is_active, patch.sortOrder ?? current.sort_order]
       );
       await this.audit.record(client, claims, { companyId: claims.company_id ?? null, action: "compensation_component.update", target: id });
       return rowToComponent(result.rows[0]);
@@ -304,7 +314,7 @@ export class EmployeeCompensationService {
       effectiveFrom: input.effectiveFrom,
     });
     const withComponent = await client.query(
-      `SELECT ecc.*, cc.key AS component_key, cc.name AS component_name, cc.is_taxable AS component_is_taxable
+      `SELECT ecc.*, cc.key AS component_key, cc.name AS component_name, cc.is_taxable AS component_is_taxable, cc.component_type
        FROM employee_compensation_components ecc
        JOIN compensation_components cc ON cc.id = ecc.component_id
        WHERE ecc.id = $1`,
@@ -327,7 +337,7 @@ export class EmployeeCompensationService {
   private async loadCurrentCompensation(client: PoolClient, claims: RequestClaims, employeeId: string): Promise<EmployeeCompensationView> {
     await this.loadOrSeedComponents(client, claims);
     const result = await client.query(
-      `SELECT ecc.*, cc.key AS component_key, cc.name AS component_name, cc.is_taxable AS component_is_taxable, cc.sort_order
+      `SELECT ecc.*, cc.key AS component_key, cc.name AS component_name, cc.is_taxable AS component_is_taxable, cc.component_type, cc.sort_order
        FROM employee_compensation_components ecc
        JOIN compensation_components cc ON cc.id = ecc.component_id
        WHERE ecc.employee_id = $1 AND ecc.effective_to IS NULL AND cc.is_active = true
@@ -335,11 +345,15 @@ export class EmployeeCompensationService {
       [employeeId]
     );
     const components = result.rows.map(rowToCompensationRow);
+    const totalEarnings = components.filter((c) => c.componentType === "earning").reduce((sum, c) => sum + c.amount, 0);
+    const totalDeductions = components.filter((c) => c.componentType === "deduction").reduce((sum, c) => sum + c.amount, 0);
     return {
       employeeId,
       asOfDate: toIsoDate(new Date()),
       components,
-      totalMonthly: Number(components.reduce((sum, c) => sum + c.amount, 0).toFixed(2)),
+      totalEarnings: Number(totalEarnings.toFixed(2)),
+      totalDeductions: Number(totalDeductions.toFixed(2)),
+      totalMonthly: Number((totalEarnings - totalDeductions).toFixed(2)),
     };
   }
 
@@ -352,7 +366,7 @@ export class EmployeeCompensationService {
       const employee = await this.loadEmployee(client, employeeId);
       if (!employee) throw new NotFoundException("Employee not found");
       const result = await client.query(
-        `SELECT ecc.*, cc.key AS component_key, cc.name AS component_name, cc.is_taxable AS component_is_taxable
+        `SELECT ecc.*, cc.key AS component_key, cc.name AS component_name, cc.is_taxable AS component_is_taxable, cc.component_type
          FROM employee_compensation_components ecc
          JOIN compensation_components cc ON cc.id = ecc.component_id
          WHERE ecc.employee_id = $1

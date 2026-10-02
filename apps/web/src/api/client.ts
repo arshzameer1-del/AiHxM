@@ -1,9 +1,11 @@
 import type {
+  AddPayrollAreaScopeLinkRequest,
   ApplicationStage,
   ApplicationView,
   AssignableUserView,
   AssignGroupPolicyRequest,
   AssignShiftRequest,
+  AssignEmployeePayrollAreaRequest,
   AssignSystemAdminRoleRequest,
   AttendanceCorrectionRequestView,
   AttendanceRecordView,
@@ -26,9 +28,16 @@ import type {
   CreateApplicationRequest,
   CreateCandidateRequest,
   CreateCompanyRequest,
+  CancelEmployeeLoanRequest,
   CreateCompensationComponentRequest,
+  CreateEmployeeAdditionalPaymentRequest,
   CreateEmployeeGroupRequest,
+  CreateEmployeeLoanRequest,
+  CreateEmployeeOffCyclePaymentRequest,
+  EmployeeAdditionalPaymentView,
   EmployeeCompensationView,
+  EmployeeLoanView,
+  EmployeeOffCyclePaymentView,
   CreateEmployeeLoginRequest,
   CreateEmployeeLoginResponse,
   DeletionImpactPreview,
@@ -39,7 +48,9 @@ import type {
   CreateLeavePolicyRequest,
   CreateOffboardingItemTemplateRequest,
   CreateOnboardingItemTemplateRequest,
+  CreatePayrollAreaRequest,
   CreatePayrollRunRequest,
+  ReversePayrollRunRequest,
   CreatePlatformAdminRequest,
   CreateReviewCycleRequest,
   CreateShiftRequest,
@@ -131,6 +142,7 @@ import type {
   OnboardingItemTemplateView,
   PackageTier,
   PasswordResetRequestResult,
+  PayrollAreaView,
   PayrollRunView,
   PayrollSettingsView,
   PayslipView,
@@ -200,6 +212,7 @@ import type {
   UpdateOffboardingItemTemplateRequest,
   UpdateCompensationComponentRequest,
   UpdateOnboardingItemTemplateRequest,
+  UpdatePayrollAreaRequest,
   UpdatePayrollSettingsRequest,
   UpdateShiftRequest,
   UpdateWorkScheduleAssignmentRuleRequest,
@@ -276,6 +289,29 @@ import type {
   CreateHrReferenceCatalogItemRequest,
   UpdateHrReferenceCatalogItemRequest,
 } from "@aihxm/shared-types";
+
+// HR Administration business policies ("then 2" Phase 2, 2026-10-02) —
+// own import block for the same reason the reference-catalog block above
+// is.
+import type {
+  HrBusinessPolicyView,
+  HrBusinessPolicyTypeSummary,
+  CreateHrBusinessPolicyRequest,
+  UpdateHrBusinessPolicyRequest,
+} from "@aihxm/shared-types";
+
+// Configuration Hierarchy & Resolution / Mapping Engine ("then 2"
+// Phases 4+5, 2026-10-02, gap-table items #11+#12) — own import block,
+// same reason the business-policies block immediately above is.
+import type {
+  ConfigurationRuleMappingView,
+  CreateConfigurationRuleMappingRequest,
+  UpdateConfigurationRuleMappingRequest,
+} from "@aihxm/shared-types";
+
+// Configuration Publish Lifecycle ("then 2" Phase 6, 2026-10-02, gap-table
+// item #13) — own import block, same reason the two blocks above are.
+import type { ConfigurationChangeRequestView, CreateConfigurationChangeRequestRequest } from "@aihxm/shared-types";
 
 // Hiring Card Field Configuration (2026-09-27) — kumail's own request, one
 // level deeper than the card-level toggles above `listHiringCardConfig`
@@ -1756,6 +1792,90 @@ export const api = {
       body: JSON.stringify({ orderedIds }),
     }),
 
+  // --- HR Administration business policies ("then 2" Phase 2,
+  // 2026-10-02, gap-table item #8) — named, rules-carrying configuration
+  // objects (probation, confirmation, document, correction, transfer,
+  // rehire, termination/exit, retention, required-info), sitting
+  // alongside the reference catalog above under the same
+  // `/hr-administration` workspace.
+  listHrBusinessPolicyTypes: () => request<HrBusinessPolicyTypeSummary[]>("/hr-administration/business-policies/types"),
+
+  listHrBusinessPolicies: (policyType: string, includeInactive = false) =>
+    request<HrBusinessPolicyView[]>(
+      `/hr-administration/business-policies/${encodeURIComponent(policyType)}${includeInactive ? "?includeInactive=true" : ""}`
+    ),
+
+  createHrBusinessPolicy: (input: CreateHrBusinessPolicyRequest) =>
+    request<HrBusinessPolicyView>("/hr-administration/business-policies", { method: "POST", body: JSON.stringify(input) }),
+
+  updateHrBusinessPolicy: (id: string, patch: UpdateHrBusinessPolicyRequest) =>
+    request<HrBusinessPolicyView>(`/hr-administration/business-policies/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  reorderHrBusinessPolicies: (policyType: string, orderedIds: string[]) =>
+    request<HrBusinessPolicyView[]>(`/hr-administration/business-policies/${encodeURIComponent(policyType)}/reorder`, {
+      method: "PATCH",
+      body: JSON.stringify({ orderedIds }),
+    }),
+
+  // --- Configuration Hierarchy & Resolution / Mapping Engine ("then 2"
+  // Phases 4+5, 2026-10-02, gap-table items #11+#12) — scoped overrides
+  // (org unit / location / employee) on top of any registered
+  // `configDomain`/`configKey`, sitting alongside the business policies
+  // above under the same `/hr-administration` workspace. Today's only
+  // real consumer is `configDomain: "hr_business_policy"` with one
+  // `configKey` per registered policy type.
+  listConfigurationRuleMappings: (configDomain: string, configKey: string, includeInactive = false) =>
+    request<ConfigurationRuleMappingView[]>(
+      `/hr-administration/rule-mappings/${encodeURIComponent(configDomain)}/${encodeURIComponent(configKey)}${
+        includeInactive ? "?includeInactive=true" : ""
+      }`
+    ),
+
+  createConfigurationRuleMapping: (input: CreateConfigurationRuleMappingRequest) =>
+    request<ConfigurationRuleMappingView>("/hr-administration/rule-mappings", { method: "POST", body: JSON.stringify(input) }),
+
+  updateConfigurationRuleMapping: (id: string, patch: UpdateConfigurationRuleMappingRequest) =>
+    request<ConfigurationRuleMappingView>(`/hr-administration/rule-mappings/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  // --- Configuration Publish Lifecycle ("then 2" Phase 6, 2026-10-02,
+  // gap-table item #13) — Draft -> Validate -> Approve -> Publish ->
+  // Retire wrapping the three HR Administration engines above, sitting
+  // alongside them under the same `/hr-administration` workspace.
+  listConfigurationChangeRequests: (configDomain?: string, status?: string) => {
+    const params = new URLSearchParams();
+    if (configDomain) params.set("configDomain", configDomain);
+    if (status) params.set("status", status);
+    const qs = params.toString();
+    return request<ConfigurationChangeRequestView[]>(`/hr-administration/change-requests${qs ? `?${qs}` : ""}`);
+  },
+
+  createConfigurationChangeRequest: (input: CreateConfigurationChangeRequestRequest) =>
+    request<ConfigurationChangeRequestView>("/hr-administration/change-requests", { method: "POST", body: JSON.stringify(input) }),
+
+  validateConfigurationChangeRequest: (id: string) =>
+    request<ConfigurationChangeRequestView>(`/hr-administration/change-requests/${id}/validate`, { method: "POST" }),
+
+  submitConfigurationChangeRequest: (id: string) =>
+    request<ConfigurationChangeRequestView>(`/hr-administration/change-requests/${id}/submit`, { method: "POST" }),
+
+  approveConfigurationChangeRequest: (id: string) =>
+    request<ConfigurationChangeRequestView>(`/hr-administration/change-requests/${id}/approve`, { method: "POST" }),
+
+  rejectConfigurationChangeRequest: (id: string, reason: string) =>
+    request<ConfigurationChangeRequestView>(`/hr-administration/change-requests/${id}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    }),
+
+  publishConfigurationChangeRequest: (id: string) =>
+    request<ConfigurationChangeRequestView>(`/hr-administration/change-requests/${id}/publish`, { method: "POST" }),
+
+  retireConfigurationChangeRequest: (id: string) =>
+    request<ConfigurationChangeRequestView>(`/hr-administration/change-requests/${id}/retire`, { method: "POST" }),
+
+  rollbackConfigurationChangeRequest: (id: string) =>
+    request<ConfigurationChangeRequestView>(`/hr-administration/change-requests/${id}/rollback`, { method: "POST" }),
+
   // --- Shift Management (0026_shift_management.sql) ---------------------
   listShifts: () => request<ShiftView[]>("/shifts"),
 
@@ -2115,6 +2235,41 @@ export const api = {
   getCompensationHistory: (employeeId: string) =>
     request<CompensationView[]>(`/employees/compensation/${employeeId}/history`),
 
+  // --- Loans / Salary Advances (Payroll Enterprise Gap Analysis Phase P3,
+  // SAP IT0045-equivalent) — Core-Employee-owned, same `employee.manage.all`
+  // gate as compensation above; PayrollService only ever reads this data.
+  listEmployeeLoans: (employeeId: string) => request<EmployeeLoanView[]>(`/employees/loans?employeeId=${employeeId}`),
+
+  createEmployeeLoan: (input: CreateEmployeeLoanRequest) =>
+    request<EmployeeLoanView>("/employees/loans", { method: "POST", body: JSON.stringify(input) }),
+
+  cancelEmployeeLoan: (id: string, input: CancelEmployeeLoanRequest = {}) =>
+    request<EmployeeLoanView>(`/employees/loans/${id}/cancel`, { method: "POST", body: JSON.stringify(input) }),
+
+  // --- Additional Payments (Phase P3, Section 6 — SAP IT0015-equivalent) —
+  // same ownership/permission posture as Loans above.
+  listEmployeeAdditionalPayments: (employeeId: string) =>
+    request<EmployeeAdditionalPaymentView[]>(`/employees/additional-payments?employeeId=${employeeId}`),
+
+  createEmployeeAdditionalPayment: (input: CreateEmployeeAdditionalPaymentRequest) =>
+    request<EmployeeAdditionalPaymentView>("/employees/additional-payments", { method: "POST", body: JSON.stringify(input) }),
+
+  cancelEmployeeAdditionalPayment: (id: string) =>
+    request<EmployeeAdditionalPaymentView>(`/employees/additional-payments/${id}/cancel`, { method: "POST" }),
+
+  // --- Additional Off-Cycle Payments (Phase P4 — SAP IT0267-equivalent) —
+  // same ownership/permission posture as Additional Payments above, but
+  // scoped to one specific off-cycle payroll run from creation (listed by
+  // that run's id, not by employee).
+  listEmployeeOffCyclePayments: (payrollRunId: string) =>
+    request<EmployeeOffCyclePaymentView[]>(`/employees/offcycle-payments?payrollRunId=${payrollRunId}`),
+
+  createEmployeeOffCyclePayment: (input: CreateEmployeeOffCyclePaymentRequest) =>
+    request<EmployeeOffCyclePaymentView>("/employees/offcycle-payments", { method: "POST", body: JSON.stringify(input) }),
+
+  cancelEmployeeOffCyclePayment: (id: string) =>
+    request<EmployeeOffCyclePaymentView>(`/employees/offcycle-payments/${id}/cancel`, { method: "POST" }),
+
   // --- Payroll (Phase 12, Decision #14) -------------------------------------
   // `payroll.manage.all` (hr_admin) gates settings/tax-slabs/run-lifecycle
   // writes; `payroll_review.view.self` (employee_self_service) only ever
@@ -2159,6 +2314,12 @@ export const api = {
   decidePayrollRunApproval: (id: string, input: DecideLeaveRequestRequest) =>
     request<PayrollRunView>(`/payroll/runs/${id}/approval-decision`, { method: "PATCH", body: JSON.stringify(input) }),
 
+  // Phase P2 — Correction/Reversal. Only a `finalized` run can be
+  // reversed; PayrollService.reverseRun() enforces both the status check
+  // and the elevated (finalize + disburse) permission check server-side.
+  reversePayrollRun: (id: string, input: ReversePayrollRunRequest) =>
+    request<PayrollRunView>(`/payroll/runs/${id}/reverse`, { method: "POST", body: JSON.stringify(input) }),
+
   listPayslips: (params?: { payrollRunId?: string; employeeId?: string }) =>
     request<PayslipView[]>(
       `/payslips${
@@ -2169,6 +2330,41 @@ export const api = {
     ),
 
   getPayslip: (id: string) => request<PayslipView>(`/payslips/${id}`),
+
+  // --- Payroll Areas (0101_payroll_areas.sql) -----------------------------
+  // `payroll_area.manage.all` (hr_admin) can create, edit, scope-link and
+  // assign anyone; `payroll_area.manage.scoped` (regional_payroll) only
+  // sees/edits areas inside its own data scope; any payroll-staff
+  // permission can list them (a preparer picking an area for a new run,
+  // an approver reading which area a run covers) — PayrollAreasService's
+  // own permission split, enforced server-side regardless of this client.
+  listPayrollAreas: (includeInactive = false) =>
+    request<PayrollAreaView[]>(`/payroll/areas${includeInactive ? "?includeInactive=true" : ""}`),
+
+  getPayrollArea: (id: string) => request<PayrollAreaView>(`/payroll/areas/${id}`),
+
+  createPayrollArea: (input: CreatePayrollAreaRequest) =>
+    request<PayrollAreaView>("/payroll/areas", { method: "POST", body: JSON.stringify(input) }),
+
+  updatePayrollArea: (id: string, patch: UpdatePayrollAreaRequest) =>
+    request<PayrollAreaView>(`/payroll/areas/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  // Never a hard delete — existing runs keep pointing at the area.
+  deactivatePayrollArea: (id: string) =>
+    request<PayrollAreaView>(`/payroll/areas/${id}/deactivate`, { method: "POST" }),
+
+  addPayrollAreaScopeLink: (id: string, input: AddPayrollAreaScopeLinkRequest) =>
+    request<PayrollAreaView>(`/payroll/areas/${id}/scope-links`, { method: "POST", body: JSON.stringify(input) }),
+
+  removePayrollAreaScopeLink: (id: string, linkId: string) =>
+    request<PayrollAreaView>(`/payroll/areas/${id}/scope-links/${linkId}`, { method: "DELETE" }),
+
+  // `payrollAreaId: null` removes the employee from any payroll area.
+  assignEmployeePayrollArea: (input: AssignEmployeePayrollAreaRequest) =>
+    request<{ employeeId: string; payrollAreaId: string | null }>("/payroll/areas/employee-assignments", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
 
   // The one non-JSON endpoint in this client — GET /payroll/runs/:id/disbursement
   // streams a CSV (Content-Disposition: attachment), not a JSON body, so

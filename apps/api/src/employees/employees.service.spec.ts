@@ -10,6 +10,7 @@ import { EmployeesService } from "./employees.service";
 import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
 import { IntegrationsService } from "../tenant-management/integrations.service";
 import { HrReferenceCatalogService } from "../hr-administration/hr-reference-catalog.service";
+import { HrBusinessPolicyService } from "../hr-administration/hr-business-policy.service";
 
 const FIXTURE_CLAIMS: RequestClaims = { is_platform_admin: true, company_id: null, sub: "employees-spec-fixtures" };
 
@@ -331,6 +332,126 @@ describe("EmployeesService", () => {
     });
   });
 
+  describe("business policy enforcement — Probation and Rehire (HR Administration v2 \"then 2\" Phase 2, 2026-10-02)", () => {
+    let companyId: string;
+    let hrAdminClaims: RequestClaims;
+    // Same "a separate instance, wired with the real service" shape the
+    // employment-type block above uses — the top-level `employees`
+    // instance omits `businessPolicy` entirely (undefined), so every
+    // other describe block in this file keeps testing the
+    // no-policy-wired code path unchanged.
+    let employeesWithPolicy: EmployeesService;
+    let businessPolicy: HrBusinessPolicyService;
+
+    beforeAll(async () => {
+      companyId = await createFixtureCompany("Business Policy Co");
+      const hrAdminUserId = await createUser(`business-policy-hr-${Date.now()}@example.com`);
+      await assignRole(hrAdminUserId, companyId, "hr_admin");
+      hrAdminClaims = { is_platform_admin: false, company_id: companyId, sub: hrAdminUserId };
+
+      const rbac = new RbacService(db);
+      const entitlements = new EntitlementsService(db);
+      const audit = new AuditService();
+      businessPolicy = new HrBusinessPolicyService(db, rbac, entitlements, audit);
+      employeesWithPolicy = new EmployeesService(
+        db,
+        rbac,
+        entitlements,
+        audit,
+        new LocalFileStorageService(),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        businessPolicy
+      );
+    });
+
+    it("auto-computes a probation_end Important Date from the default Probation Policy's durationDays", async () => {
+      const created = await employeesWithPolicy.create(hrAdminClaims, {
+        firstName: "Proby",
+        lastName: "McProbation",
+        employmentType: "probation",
+        dateOfJoining: "2026-01-01",
+      });
+      const dates = await db.withClaims(hrAdminClaims, (client) =>
+        client.query("SELECT date_type, date_value, label FROM employee_important_dates WHERE employee_id = $1", [created.id])
+      );
+      expect(dates.rows).toHaveLength(1);
+      expect(dates.rows[0].date_type).toBe("probation_end");
+      // Default policy is durationDays: 90, counted from 2026-01-01.
+      expect(dates.rows[0].date_value.toISOString().slice(0, 10)).toBe("2026-04-01");
+      expect(dates.rows[0].label).toBe("Auto-computed from Probation Policy");
+    });
+
+    it("does not seed a probation_end date for a non-probation hire", async () => {
+      const created = await employeesWithPolicy.create(hrAdminClaims, {
+        firstName: "Perm",
+        lastName: "Anent",
+        employmentType: "permanent",
+        dateOfJoining: "2026-01-01",
+      });
+      const dates = await db.withClaims(hrAdminClaims, (client) =>
+        client.query("SELECT 1 FROM employee_important_dates WHERE employee_id = $1", [created.id])
+      );
+      expect(dates.rowCount).toBe(0);
+    });
+
+    it("allows an immediate rehire when the Rehire Policy's cooldownDays is 0 (the seeded default)", async () => {
+      const cnic = `${Date.now()}-REHIRE-ALLOWED`;
+      const first = await employeesWithPolicy.create(hrAdminClaims, { firstName: "Rehire", lastName: "Allowed", cnic });
+      await db.withClaims(hrAdminClaims, (client) =>
+        client.query("UPDATE employees SET employment_status = 'terminated', termination_date = CURRENT_DATE WHERE id = $1", [first.id])
+      );
+      const second = await employeesWithPolicy.create(hrAdminClaims, { firstName: "Rehire", lastName: "Allowed Again", cnic });
+      expect(second.personId).toBe(first.personId);
+    });
+
+    it("rejects a rehire inside the configured cooldown window, and allows it once the window has passed", async () => {
+      const cnic = `${Date.now()}-REHIRE-BLOCKED`;
+      const first = await employeesWithPolicy.create(hrAdminClaims, { firstName: "Rehire", lastName: "Blocked", cnic });
+
+      const policyList = await businessPolicy.listPolicies(hrAdminClaims, "rehire");
+      await businessPolicy.update(hrAdminClaims, policyList[0].id, { rules: { cooldownDays: 30 } });
+
+      // Terminated yesterday — well inside a 30-day cooldown.
+      await db.withClaims(hrAdminClaims, (client) =>
+        client.query(
+          "UPDATE employees SET employment_status = 'terminated', termination_date = CURRENT_DATE - INTERVAL '1 day' WHERE id = $1",
+          [first.id]
+        )
+      );
+      await expect(
+        employeesWithPolicy.create(hrAdminClaims, { firstName: "Rehire", lastName: "Blocked Retry", cnic })
+      ).rejects.toThrow(BadRequestException);
+
+      // Terminated 31 days ago — past the 30-day cooldown, now eligible.
+      await db.withClaims(hrAdminClaims, (client) =>
+        client.query("UPDATE employees SET termination_date = CURRENT_DATE - INTERVAL '31 days' WHERE id = $1", [first.id])
+      );
+      const rehired = await employeesWithPolicy.create(hrAdminClaims, { firstName: "Rehire", lastName: "Blocked Eventually", cnic });
+      expect(rehired.personId).toBe(first.personId);
+
+      // Restore the default cooldown so this doesn't leak into other
+      // assertions sharing this fixture company.
+      await businessPolicy.update(hrAdminClaims, policyList[0].id, { rules: { cooldownDays: 0 } });
+    });
+
+    it("never blocks two concurrently active employments sharing a CNIC (not a rehire — see persons.service.ts)", async () => {
+      const policyList = await businessPolicy.listPolicies(hrAdminClaims, "rehire");
+      await businessPolicy.update(hrAdminClaims, policyList[0].id, { rules: { cooldownDays: 365 } });
+
+      const cnic = `${Date.now()}-CONCURRENT`;
+      const first = await employeesWithPolicy.create(hrAdminClaims, { firstName: "Concurrent", lastName: "One" });
+      expect(first).toBeTruthy();
+      const second = await employeesWithPolicy.create(hrAdminClaims, { firstName: "Concurrent", lastName: "Two", cnic });
+      const third = await employeesWithPolicy.create(hrAdminClaims, { firstName: "Concurrent", lastName: "Three", cnic });
+      expect(third.personId).toBe(second.personId);
+
+      await businessPolicy.update(hrAdminClaims, policyList[0].id, { rules: { cooldownDays: 0 } });
+    });
+  });
+
   describe("org chart, RBAC field visibility, document vault, and job history", () => {
     let companyId: string;
     let hrAdminClaims: RequestClaims;
@@ -629,6 +750,129 @@ describe("EmployeesService", () => {
    * proving the optional-dependency design doesn't secretly break
    * anything for it — so this uses its own instance instead.
    */
+  describe("sensitivity tiers as an enforced default floor (cross-module integration audit Item 8)", () => {
+    let companyId: string;
+    let employeeId: string;
+    const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const roleKeys = {
+      viewer: `item8_viewer_${stamp}`,
+      sensitiveViewer: `item8_sensitive_viewer_${stamp}`,
+      narrowed: `item8_narrowed_${stamp}`,
+      widened: `item8_widened_${stamp}`,
+    };
+    const claimsByRole: Record<string, RequestClaims> = {};
+
+    /** A throwaway role holding `employee.view.all` plus whatever extra
+     * permissions/field rules a scenario needs — and, crucially, NO field
+     * rules unless listed, which is the "tenant hasn't configured this
+     * field" case the floor exists for. */
+    async function createRole(key: string, permissions: string[], rules: Array<{ field: string; access: string }>) {
+      await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const role = await client.query("INSERT INTO roles (key, name) VALUES ($1, $1) RETURNING id", [key]);
+        const roleId = role.rows[0].id;
+        await client.query(
+          "INSERT INTO role_permissions (role_id, permission_id) SELECT $1, id FROM permissions WHERE key = ANY($2::text[])",
+          [roleId, ["employee.view.all", ...permissions]]
+        );
+        for (const rule of rules) {
+          await client.query("INSERT INTO field_permission_rules (role_id, object_key, field_key, access) VALUES ($1, 'employee', $2, $3)", [
+            roleId,
+            rule.field,
+            rule.access,
+          ]);
+        }
+      });
+    }
+
+    beforeAll(async () => {
+      companyId = await createFixtureCompany("Sensitivity Floor Co");
+      const hrUser = await createUser(`item8-hr-${stamp}@example.com`);
+      await assignRole(hrUser, companyId, "hr_admin");
+      const hrClaims: RequestClaims = { is_platform_admin: false, company_id: companyId, sub: hrUser };
+      employeeId = (
+        await employees.create(hrClaims, {
+          firstName: "Zara",
+          lastName: "Floor",
+          cnic: "33333-3333333-3",
+          dateOfBirth: "1990-03-03",
+          bankAccountNumber: "PK36SCBL0000001123456702",
+        })
+      ).id;
+
+      await createRole(roleKeys.viewer, [], []);
+      await createRole(roleKeys.sensitiveViewer, ["employee.view_sensitive.all"], []);
+      await createRole(roleKeys.narrowed, ["employee.view_sensitive.all"], [{ field: "bankAccountNumber", access: "hidden" }]);
+      await createRole(roleKeys.widened, [], [{ field: "cnic", access: "view" }]);
+      for (const [name, key] of Object.entries(roleKeys)) {
+        const userId = await createUser(`item8-${name}-${stamp}@example.com`);
+        await assignRole(userId, companyId, key);
+        claimsByRole[name] = { is_platform_admin: false, company_id: companyId, sub: userId };
+      }
+    });
+
+    afterAll(async () => {
+      await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        await client.query("DELETE FROM user_role_assignments WHERE role_id IN (SELECT id FROM roles WHERE key = ANY($1::text[]))", [
+          Object.values(roleKeys),
+        ]);
+        await client.query("DELETE FROM roles WHERE key = ANY($1::text[])", [Object.values(roleKeys)]);
+      });
+    });
+
+    it("an unconfigured Highly Restricted field (bankAccountNumber) and Restricted field (cnic) are redacted for a viewer without employee.view_sensitive.all", async () => {
+      const record = await employees.get(claimsByRole.viewer, employeeId);
+      expect(record.firstName).toBe("Zara");
+      expect("bankAccountNumber" in record).toBe(false);
+      expect("cnic" in record).toBe(false);
+      const listed = (await employees.list(claimsByRole.viewer)).find((e) => e.id === employeeId)!;
+      expect("bankAccountNumber" in listed).toBe(false);
+      expect("cnic" in listed).toBe(false);
+    });
+
+    it("the same unconfigured fields are visible to a viewer holding employee.view_sensitive.all — and that exposure is audit-logged", async () => {
+      const record = await employees.get(claimsByRole.sensitiveViewer, employeeId);
+      expect(record.bankAccountNumber).toBe("PK36SCBL0000001123456702");
+      expect(record.cnic).toBe("33333-3333333-3");
+      // The floor covers only Restricted/Highly Restricted — a Confidential
+      // field keeps the engine's plain default-deny.
+      expect("dateOfBirth" in record).toBe(false);
+      const listed = (await employees.list(claimsByRole.sensitiveViewer)).find((e) => e.id === employeeId)!;
+      expect(listed.bankAccountNumber).toBe("PK36SCBL0000001123456702");
+
+      const audit = await db.withClaims(FIXTURE_CLAIMS, async (client) =>
+        (
+          await client.query(
+            "SELECT metadata FROM audit_log WHERE action = 'employee.sensitive_field_viewed' AND target = $1 AND actor = $2 ORDER BY created_at DESC LIMIT 1",
+            [employeeId, claimsByRole.sensitiveViewer.sub]
+          )
+        ).rows[0]
+      );
+      expect(audit.metadata.fields.sort()).toEqual(["bankAccountNumber", "cnic"]);
+    });
+
+    it("an explicit field rule always wins over the floor: 'hidden' narrows a permission holder, 'view' widens a non-holder", async () => {
+      const narrowed = await employees.get(claimsByRole.narrowed, employeeId);
+      expect("bankAccountNumber" in narrowed).toBe(false);
+      expect(narrowed.cnic).toBe("33333-3333333-3");
+
+      const widened = await employees.get(claimsByRole.widened, employeeId);
+      expect(widened.cnic).toBe("33333-3333333-3");
+      expect("bankAccountNumber" in widened).toBe(false);
+    });
+
+    it("hr_admin is seeded with employee.view_sensitive.all (0099)", async () => {
+      const granted = await db.withClaims(FIXTURE_CLAIMS, async (client) =>
+        (
+          await client.query(
+            `SELECT 1 FROM role_permissions rp JOIN roles r ON r.id = rp.role_id JOIN permissions p ON p.id = rp.permission_id
+             WHERE r.key = 'hr_admin' AND p.key = 'employee.view_sensitive.all'`
+          )
+        ).rowCount
+      );
+      expect(granted).toBe(1);
+    });
+  });
+
   describe("webhook events (Phase 3 item #4)", () => {
     let companyId: string;
     let hrAdminUserId: string;
@@ -701,6 +945,251 @@ describe("EmployeesService", () => {
       expect(event).toBeDefined();
       expect(event.payload.employee.id).toBe(created.id);
       expect(event.payload.employee.employmentStatus).toBe("terminated");
+    });
+  });
+  describe("generic PATCH managerId keeps org_relationships in sync (cross-module integration follow-up, 2026-10-01)", () => {
+    let companyId: string;
+    let hrAdminClaims: RequestClaims;
+
+    beforeAll(async () => {
+      companyId = await createFixtureCompany("Patch Manager Sync Co");
+      const hrAdminUserId = await createUser(`patch-mgr-hr-${Date.now()}@example.com`);
+      await assignRole(hrAdminUserId, companyId, "hr_admin");
+      hrAdminClaims = { is_platform_admin: false, company_id: companyId, sub: hrAdminUserId };
+    });
+
+    async function relationshipsOf(employeeId: string) {
+      const result = await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query("SELECT * FROM org_relationships WHERE employee_id = $1 ORDER BY created_at", [employeeId])
+      );
+      return result.rows;
+    }
+    async function managerIdOf(employeeId: string) {
+      const result = await db.withClaims(FIXTURE_CLAIMS, (client) => client.query("SELECT manager_id FROM employees WHERE id = $1", [employeeId]));
+      return result.rows[0].manager_id as string | null;
+    }
+
+    it("creates a direct relationship on the first PATCH, supersedes it on a change, and ignores unrelated PATCHes", async () => {
+      const managerA = (await employees.create(hrAdminClaims, { firstName: "Manager", lastName: "A" })).id;
+      const managerB = (await employees.create(hrAdminClaims, { firstName: "Manager", lastName: "B" })).id;
+      const report = (await employees.create(hrAdminClaims, { firstName: "Patched", lastName: "Report" })).id;
+
+      const first = await employees.update(hrAdminClaims, report, { managerId: managerA });
+      expect(first.managerId).toBe(managerA);
+      let rels = await relationshipsOf(report);
+      expect(rels).toHaveLength(1);
+      expect(rels[0]).toMatchObject({ relationship_type: "direct", manager_employee_id: managerA, status: "active" });
+
+      await employees.update(hrAdminClaims, report, { managerId: managerB });
+      rels = await relationshipsOf(report);
+      expect(rels.map((r) => [r.relationship_type, r.manager_employee_id, r.status])).toEqual([
+        ["direct", managerA, "ended"],
+        ["direct", managerB, "active"],
+      ]);
+      expect(await managerIdOf(report)).toBe(managerB);
+
+      // Same manager again, or a PATCH that doesn't touch managerId at all:
+      // no new relationship rows.
+      await employees.update(hrAdminClaims, report, { managerId: managerB });
+      await employees.update(hrAdminClaims, report, { designation: "Engineer" });
+      expect(await relationshipsOf(report)).toHaveLength(2);
+
+      // Audit trail carries the originating source.
+      const audit = await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query("SELECT metadata FROM audit_log WHERE action = 'org_relationship.create' AND company_id = $1 ORDER BY created_at DESC LIMIT 1", [
+          companyId,
+        ])
+      );
+      expect(audit.rows[0].metadata.source).toBe("employee_update");
+    });
+
+    it("ping-pong guard: a PATCH never re-writes employees.manager_id through the relationship writer, and an org-side-created direct row is reused, not duplicated", async () => {
+      const manager = (await employees.create(hrAdminClaims, { firstName: "Org", lastName: "Manager" })).id;
+      const report = (await employees.create(hrAdminClaims, { firstName: "Org", lastName: "Report" })).id;
+
+      // Simulate the org_relationships -> employees.manager_id direction
+      // (OrgRelationshipsService.create(direct)) having already written both.
+      await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        await client.query(
+          "INSERT INTO org_relationships (company_id, employee_id, manager_employee_id, relationship_type, status) VALUES ($1, $2, $3, 'direct', 'active')",
+          [companyId, report, manager]
+        );
+        await client.query("UPDATE employees SET manager_id = $2 WHERE id = $1", [report, manager]);
+      });
+
+      // PATCHing the same manager is a no-op on the org side.
+      await employees.update(hrAdminClaims, report, { managerId: manager, designation: "Analyst" });
+      const rels = await relationshipsOf(report);
+      expect(rels).toHaveLength(1);
+      expect(rels[0]).toMatchObject({ manager_employee_id: manager, status: "active" });
+      expect(await managerIdOf(report)).toBe(manager);
+    });
+
+    it("rejects a PATCH that would close a reporting cycle, rolling back the manager_id write too", async () => {
+      const top = (await employees.create(hrAdminClaims, { firstName: "Cycle", lastName: "Top" })).id;
+      const bottom = (await employees.create(hrAdminClaims, { firstName: "Cycle", lastName: "Bottom" })).id;
+      await employees.update(hrAdminClaims, bottom, { managerId: top });
+
+      await expect(employees.update(hrAdminClaims, top, { managerId: bottom })).rejects.toThrow(BadRequestException);
+      expect(await managerIdOf(top)).toBeNull();
+      expect(await relationshipsOf(top)).toHaveLength(0);
+    });
+  });
+
+  describe("create() with managerId writes a direct org_relationships row (cross-module integration follow-up, 2026-10-01)", () => {
+    let companyId: string;
+    let hrAdminClaims: RequestClaims;
+
+    beforeAll(async () => {
+      companyId = await createFixtureCompany("Create Manager Sync Co");
+      const hrAdminUserId = await createUser(`create-mgr-hr-${Date.now()}@example.com`);
+      await assignRole(hrAdminUserId, companyId, "hr_admin");
+      hrAdminClaims = { is_platform_admin: false, company_id: companyId, sub: hrAdminUserId };
+    });
+
+    async function relationshipsOf(employeeId: string) {
+      const result = await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query("SELECT * FROM org_relationships WHERE employee_id = $1 ORDER BY created_at", [employeeId])
+      );
+      return result.rows;
+    }
+
+    it("creates an active direct relationship, not just the manager_id column, when a new employee is hired with a manager", async () => {
+      const manager = await employees.create(hrAdminClaims, { firstName: "Create", lastName: "Manager" });
+
+      const report = await employees.create(hrAdminClaims, {
+        firstName: "Create",
+        lastName: "Report",
+        managerId: manager.id,
+      });
+      expect(report.managerId).toBe(manager.id);
+
+      const rels = await relationshipsOf(report.id);
+      expect(rels).toHaveLength(1);
+      expect(rels[0]).toMatchObject({ relationship_type: "direct", manager_employee_id: manager.id, status: "active" });
+
+      const audit = await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query(
+          "SELECT metadata FROM audit_log WHERE action = 'org_relationship.create' AND target = $1 ORDER BY created_at DESC LIMIT 1",
+          [rels[0].id]
+        )
+      );
+      expect(audit.rows[0].metadata.source).toBe("employee_create");
+    });
+
+    it("creates no relationship row when hired without a manager", async () => {
+      const noManager = await employees.create(hrAdminClaims, { firstName: "Create", lastName: "NoManager" });
+      expect(noManager.managerId).toBeFalsy();
+      expect(await relationshipsOf(noManager.id)).toHaveLength(0);
+    });
+
+    it("rolls back the whole hire (no employee row left behind) when the given manager is terminated", async () => {
+      const manager = await employees.create(hrAdminClaims, { firstName: "Create", lastName: "TerminatedManager" });
+      await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query("UPDATE employees SET employment_status = 'terminated' WHERE id = $1", [manager.id])
+      );
+
+      await expect(
+        employees.create(hrAdminClaims, { firstName: "Create", lastName: "OrphanReport", managerId: manager.id })
+      ).rejects.toThrow(BadRequestException);
+
+      const orphan = await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query("SELECT id FROM employees WHERE company_id = $1 AND last_name = 'OrphanReport'", [companyId])
+      );
+      expect(orphan.rowCount).toBe(0);
+    });
+  });
+
+  // Cross-module integration audit (2026-10-01), gap #3/#7 —
+  // 0111_write_scope_data_scope_enforcement.sql's write-side counterpart
+  // to Organization Management Phase 11's read-side `.scoped` permissions
+  // (0078/0079_data_scope_*.sql, exercised in positions.service.spec.ts).
+  // `update()` is where this is enforced (it's also how termination
+  // happens — `employmentStatus: "terminated"` is just a patch).
+  describe("Data Scope on write (employee.manage.scoped, gap #3/#7)", () => {
+    let companyId: string;
+    let hrAdminClaims: RequestClaims;
+    let regionalHrClaims: RequestClaims;
+    let assignedOrgUnitId: string;
+    let otherOrgUnitId: string;
+    let employeeInScopeId: string;
+    let employeeOutOfScopeId: string;
+
+    async function createOrgUnit(name: string) {
+      return db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const result = await client.query(
+          "INSERT INTO org_units (company_id, name, unit_type) VALUES ($1, $2, 'division') RETURNING id",
+          [companyId, name]
+        );
+        return result.rows[0].id as string;
+      });
+    }
+
+    async function assignDataScope(userAccountId: string, scopeType: string, scopeEntityId: string) {
+      await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        await client.query(
+          "INSERT INTO data_scope_assignments (user_account_id, company_id, scope_type, scope_entity_id) VALUES ($1, $2, $3, $4)",
+          [userAccountId, companyId, scopeType, scopeEntityId]
+        );
+      });
+    }
+
+    beforeAll(async () => {
+      companyId = await createFixtureCompany("Employee Scope Co");
+      const stamp = Date.now();
+      const hrAdminUserId = await createUser(`emp-scope-hr-${stamp}@example.com`);
+      const regionalHrUserId = await createUser(`emp-scope-regional-hr-${stamp}@example.com`);
+      await assignRole(hrAdminUserId, companyId, "hr_admin");
+      await assignRole(regionalHrUserId, companyId, "regional_hr");
+      hrAdminClaims = { is_platform_admin: false, company_id: companyId, sub: hrAdminUserId };
+      regionalHrClaims = { is_platform_admin: false, company_id: companyId, sub: regionalHrUserId };
+
+      assignedOrgUnitId = await createOrgUnit("Scoped Division");
+      otherOrgUnitId = await createOrgUnit("Other Division");
+
+      const inScope = await employees.create(hrAdminClaims, {
+        firstName: "In",
+        lastName: "Scope",
+        orgUnitId: assignedOrgUnitId,
+      });
+      employeeInScopeId = inScope.id;
+
+      const outOfScope = await employees.create(hrAdminClaims, {
+        firstName: "Out",
+        lastName: "OfScope",
+        orgUnitId: otherOrgUnitId,
+      });
+      employeeOutOfScopeId = outOfScope.id;
+
+      await assignDataScope(regionalHrUserId, "org_unit", assignedOrgUnitId);
+    });
+
+    it("regional_hr can update an employee inside their assigned org unit", async () => {
+      const updated = await employees.update(regionalHrClaims, employeeInScopeId, { designation: "Regional Lead" });
+      expect(updated.designation).toBe("Regional Lead");
+    });
+
+    it("regional_hr cannot update (or terminate) an employee outside their assigned org unit", async () => {
+      await expect(employees.update(regionalHrClaims, employeeOutOfScopeId, { designation: "Hijacked" })).rejects.toThrow(
+        ForbiddenException
+      );
+      await expect(
+        employees.update(regionalHrClaims, employeeOutOfScopeId, {
+          employmentStatus: "terminated",
+          terminationDate: "2026-10-02",
+        })
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it("regional_hr cannot move an in-scope employee to an org unit outside their scope", async () => {
+      await expect(
+        employees.update(regionalHrClaims, employeeInScopeId, { orgUnitId: otherOrgUnitId })
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it("hr_admin (unscoped .all) is unaffected and can still update either employee", async () => {
+      const updated = await employees.update(hrAdminClaims, employeeOutOfScopeId, { designation: "Still Fine" });
+      expect(updated.designation).toBe("Still Fine");
     });
   });
 });

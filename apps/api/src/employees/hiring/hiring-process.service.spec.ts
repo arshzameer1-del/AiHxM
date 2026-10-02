@@ -337,6 +337,132 @@ describe("HiringProcessService", () => {
     });
   });
 
+  describe("Cross-module integration audit Item 1 — completion occupies the Position and opens Organization Management records", () => {
+    async function fixtureOrgUnit(): Promise<string> {
+      return db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const result = await client.query("INSERT INTO org_units (company_id, unit_type, name) VALUES ($1, 'department', $2) RETURNING id", [
+          companyId,
+          `Item1 Unit ${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        ]);
+        return result.rows[0].id as string;
+      });
+    }
+    async function fixturePosition(orgUnitId: string): Promise<string> {
+      return db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const result = await client.query(
+          "INSERT INTO positions (company_id, org_unit_id, position_title, status) VALUES ($1, $2, $3, 'vacant') RETURNING id",
+          [companyId, orgUnitId, `Item1 Seat ${Date.now()}-${Math.random().toString(36).slice(2, 6)}`]
+        );
+        return result.rows[0].id as string;
+      });
+    }
+    async function driveToReady(orgAssignmentData: Record<string, unknown>, extra: Record<string, Record<string, unknown>> = {}) {
+      let process = await hiring.start(hrAdminClaims);
+      const lastName = `Item1-${Math.random().toString(36).slice(2, 8)}`;
+      await hiring.saveCard(hrAdminClaims, process.id, "personal_identity", { data: { firstName: "Hira", lastName } });
+      await hiring.saveCard(hrAdminClaims, process.id, "employment", { data: { employmentType: "permanent", dateOfJoining: "2026-04-01" } });
+      await hiring.saveCard(hrAdminClaims, process.id, "organization_assignment", { data: orgAssignmentData });
+      for (const [cardKey, data] of Object.entries(extra)) {
+        await hiring.saveCard(hrAdminClaims, process.id, cardKey, { data });
+      }
+      await hiring.saveCard(hrAdminClaims, process.id, "review_completion", { data: { reviewed: true } });
+      process = await hiring.get(hrAdminClaims, process.id);
+      for (let i = 0; i < process.cards.length; i++) {
+        process = await hiring.next(hrAdminClaims, process.id, process.revision);
+      }
+      expect(process.status).toBe("ready_for_completion");
+      return { processId: process.id, lastName };
+    }
+
+    it("fills the position, sets employees.position_id, writes a position_versions row, opens a primary assignment and a direct relationship — atomically with the hire", async () => {
+      const orgUnit = await fixtureOrgUnit();
+      const position = await fixturePosition(orgUnit);
+      const managerId = await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const result = await client.query(
+          "INSERT INTO employees (company_id, employee_number, first_name, last_name) VALUES ($1, $2, 'Item1', 'Manager') RETURNING id",
+          [companyId, `I1M-${Date.now()}`]
+        );
+        return result.rows[0].id as string;
+      });
+      const { processId } = await driveToReady(
+        { orgUnitId: orgUnit, positionId: position, effectiveFrom: "2026-04-01" },
+        { reporting_relationships: { directManagerEmployeeId: managerId } }
+      );
+
+      const completed = await hiring.complete(hrAdminClaims, processId);
+      expect(completed.status).toBe("hired");
+      const employeeId = completed.employeeId as string;
+
+      const state = await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const emp = await client.query("SELECT position_id, org_unit_id, manager_id FROM employees WHERE id = $1", [employeeId]);
+        const pos = await client.query("SELECT status FROM positions WHERE id = $1", [position]);
+        const versions = await client.query(
+          "SELECT status, effective_from, effective_to FROM position_versions WHERE position_id = $1 ORDER BY effective_from, created_at",
+          [position]
+        );
+        const assignments = await client.query("SELECT * FROM employee_org_assignments WHERE employee_id = $1", [employeeId]);
+        const rels = await client.query("SELECT * FROM org_relationships WHERE employee_id = $1", [employeeId]);
+        const audit = await client.query("SELECT metadata FROM audit_log WHERE action = 'position.assign' AND target = $1", [position]);
+        return { emp: emp.rows[0], pos: pos.rows[0], versions: versions.rows, assignments: assignments.rows, rels: rels.rows, audit: audit.rows };
+      });
+
+      expect(state.emp.position_id).toBe(position);
+      expect(state.emp.org_unit_id).toBe(orgUnit);
+      expect(state.emp.manager_id).toBe(managerId);
+      expect(state.pos.status).toBe("filled");
+      expect(state.versions.some((v) => v.status === "filled" && v.effective_to === null)).toBe(true);
+      expect(state.assignments).toHaveLength(1);
+      expect(state.assignments[0]).toMatchObject({ assignment_type: "primary", status: "active", org_unit_id: orgUnit, position_id: position });
+      expect(state.rels).toHaveLength(1);
+      expect(state.rels[0]).toMatchObject({ relationship_type: "direct", status: "active", manager_employee_id: managerId });
+      expect(state.audit[0].metadata.source).toBe(`hire_process:${processId}`);
+    });
+
+    it("derives the org unit from the position when the card names only a position", async () => {
+      const orgUnit = await fixtureOrgUnit();
+      const position = await fixturePosition(orgUnit);
+      const { processId } = await driveToReady({ positionId: position });
+      const completed = await hiring.complete(hrAdminClaims, processId);
+      const row = await db.withClaims(FIXTURE_CLAIMS, async (client) =>
+        (await client.query("SELECT org_unit_id, position_id FROM employees WHERE id = $1", [completed.employeeId])).rows[0]
+      );
+      expect(row).toEqual({ org_unit_id: orgUnit, position_id: position });
+    });
+
+    it("re-validates the seat at completion: a position filled after the card was saved rolls back the WHOLE hire (no half-created employee)", async () => {
+      const orgUnit = await fixtureOrgUnit();
+      const position = await fixturePosition(orgUnit);
+      const { processId, lastName } = await driveToReady({ orgUnitId: orgUnit, positionId: position });
+
+      // Someone else fills the seat between card save and completion.
+      await db.withClaims(FIXTURE_CLAIMS, (client) => client.query("UPDATE positions SET status = 'filled' WHERE id = $1", [position]));
+
+      await expect(hiring.complete(hrAdminClaims, processId)).rejects.toThrow(ConflictException);
+
+      const after = await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const emp = await client.query("SELECT 1 FROM employees WHERE company_id = $1 AND last_name = $2", [companyId, lastName]);
+        const proc = await client.query("SELECT status, employee_id FROM hire_processes WHERE id = $1", [processId]);
+        return { employeeCount: emp.rowCount, proc: proc.rows[0] };
+      });
+      expect(after.employeeCount).toBe(0);
+      expect(after.proc).toEqual({ status: "ready_for_completion", employee_id: null });
+    });
+
+    it("concurrent completions of the same process create exactly one employee and both callers see 'hired'", async () => {
+      const orgUnit = await fixtureOrgUnit();
+      const position = await fixturePosition(orgUnit);
+      const { processId, lastName } = await driveToReady({ orgUnitId: orgUnit, positionId: position });
+      const [a, b] = await Promise.all([hiring.complete(hrAdminClaims, processId), hiring.complete(hrAdminClaims, processId)]);
+      expect(a.status).toBe("hired");
+      expect(b.status).toBe("hired");
+      expect(a.employeeId).toBe(b.employeeId);
+      const count = await db.withClaims(FIXTURE_CLAIMS, async (client) =>
+        (await client.query("SELECT 1 FROM employees WHERE company_id = $1 AND last_name = $2", [companyId, lastName])).rowCount
+      );
+      expect(count).toBe(1);
+    });
+  });
+
   describe("Phase 7 — Working Time / Important Dates cards project onto shift_assignments and employee_important_dates at completion", () => {
     it("assigns the selected shift and records every important date entered on the card", async () => {
       const shift = await db.withClaims(FIXTURE_CLAIMS, async (client) => {

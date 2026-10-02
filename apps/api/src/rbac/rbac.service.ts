@@ -281,19 +281,40 @@ export class RbacService {
    * Pure, in-memory evaluation of a set of rules (from
    * `loadFieldPermissionRules()`) against one record — no DB access, so
    * it's cheap to call once per row in a list endpoint's loop.
+   *
+   * `unruledDefaults` (cross-module integration audit Item 8, 2026-10-01):
+   * the access a field gets when the caller's roles have NO rule row for
+   * it at all — previously always `hidden`, and still `hidden` for any
+   * field not in this map. A field counts as "ruled" as soon as ANY rule
+   * row exists for it, even one whose `condition` doesn't match this
+   * record: a conditional rule is an explicit configuration decision ("only
+   * when terminated"), so a non-match resolves to `hidden`, never falls
+   * through to the default. That is what makes an explicit configuration
+   * always win over the default, in both directions (a rule can widen a
+   * field the default would hide, or `hidden` can narrow one the default
+   * would show). Callers own what the defaults are — this engine stays
+   * generic (EmployeesService derives them from field sensitivity tiers).
    */
   evaluateFieldAccess(
     rules: Array<{ field_key: string; access: FieldAccess; condition: FieldCondition | null }>,
     fieldKeys: readonly string[],
-    record: Record<string, unknown>
+    record: Record<string, unknown>,
+    unruledDefaults?: ReadonlyMap<string, FieldAccess>
   ): Map<string, FieldAccess> {
     const access = new Map<string, FieldAccess>(fieldKeys.map((key) => [key, "hidden" as FieldAccess]));
+    const ruled = new Set<string>();
     for (const row of rules) {
       if (!fieldKeys.includes(row.field_key)) continue;
+      ruled.add(row.field_key);
       if (row.condition && !conditionMatches(row.condition, record)) continue;
       const current = access.get(row.field_key) ?? "hidden";
       if (ACCESS_RANK[row.access] > ACCESS_RANK[current]) {
         access.set(row.field_key, row.access);
+      }
+    }
+    if (unruledDefaults) {
+      for (const key of fieldKeys) {
+        if (!ruled.has(key)) access.set(key, unruledDefaults.get(key) ?? "hidden");
       }
     }
     return access;
@@ -315,7 +336,9 @@ export class RbacService {
     sensitiveFields: readonly string[],
     ownerId: string | null,
     teamOwnerId: string | null,
-    callerSub: string
+    callerSub: string,
+    // Item 8 — see evaluateFieldAccess()'s own doc comment.
+    unruledDefaults?: ReadonlyMap<string, FieldAccess>
   ): Record<string, unknown> | null {
     const visible =
       scope.hasAll ||
@@ -324,7 +347,7 @@ export class RbacService {
     if (!visible) return null;
 
     const applicableFields = sensitiveFields.filter((key) => key in record);
-    const accessByField = this.evaluateFieldAccess(fieldRules, applicableFields, record);
+    const accessByField = this.evaluateFieldAccess(fieldRules, applicableFields, record, unruledDefaults);
 
     const result: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(record)) {

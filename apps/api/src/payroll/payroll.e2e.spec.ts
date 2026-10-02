@@ -396,6 +396,55 @@ describe("Payroll HTTP surface (e2e)", () => {
       expect(res.headers["content-type"]).toContain("text/csv");
       expect(res.text).toContain("PK00-STAFF");
     });
+
+    // Phase P2 — Correction/Reversal. hr_admin holds both payroll.finalize.all
+    // and payroll.disburse.all (granted together by
+    // 0094_payroll_correction_reversal_and_permission_split.sql), which is
+    // exactly the "elevated authorization" reverseRun() requires.
+    it("rejects POST /payroll/runs/:id/reverse without a reason", async () => {
+      const res = await request(app.getHttpServer())
+        .post(`/payroll/runs/${runId}/reverse`)
+        .set("Authorization", `Bearer ${hrAdminToken}`)
+        .send({});
+      expect(res.status).toBe(400);
+    });
+
+    it("denies POST /payroll/runs/:id/reverse to the Payroll Approver — approve.all alone is not the elevated authorization reversal needs", async () => {
+      const res = await request(app.getHttpServer())
+        .post(`/payroll/runs/${runId}/reverse`)
+        .set("Authorization", `Bearer ${approverToken}`)
+        .send({ reason: "Not my call" });
+      expect(res.status).toBe(403);
+    });
+
+    it("reverses the finalized run via POST /payroll/runs/:id/reverse, preserving its payslip and opening a fresh corrective draft run", async () => {
+      const res = await request(app.getHttpServer())
+        .post(`/payroll/runs/${runId}/reverse`)
+        .set("Authorization", `Bearer ${hrAdminToken}`)
+        .send({ reason: "Employee's bank account details were wrong" });
+
+      expect(res.status).toBe(201);
+      expect(res.body.status).toBe("reversed");
+      expect(res.body.reversalReason).toBe("Employee's bank account details were wrong");
+      expect(res.body.correctiveRunId).toBeTruthy();
+      // Section 36's "preserve original result" — the reversed run's own
+      // payslip figures are unchanged from before reversal.
+      expect(res.body.payslipCount).toBeGreaterThanOrEqual(1);
+
+      const correctiveRes = await request(app.getHttpServer())
+        .get(`/payroll/runs/${res.body.correctiveRunId}`)
+        .set("Authorization", `Bearer ${hrAdminToken}`);
+      expect(correctiveRes.status).toBe(200);
+      expect(correctiveRes.body.status).toBe("draft");
+      expect(correctiveRes.body.periodStart).toBe(res.body.periodStart);
+      expect(correctiveRes.body.periodEnd).toBe(res.body.periodEnd);
+
+      const secondReverse = await request(app.getHttpServer())
+        .post(`/payroll/runs/${runId}/reverse`)
+        .set("Authorization", `Bearer ${hrAdminToken}`)
+        .send({ reason: "Trying again" });
+      expect(secondReverse.status).toBe(400);
+    });
   });
 
   describe("GET /payroll/tax-slabs/history", () => {
@@ -447,7 +496,7 @@ describe("Payroll HTTP surface (e2e)", () => {
       expect(finalRes.body[1].effectiveTo).toBeNull();
     });
 
-    it("denies a caller without payroll.manage.all", async () => {
+    it("denies a caller without payroll.calculate.all", async () => {
       const res = await request(app.getHttpServer())
         .get("/payroll/tax-slabs/history")
         .set("Authorization", `Bearer ${outsiderToken}`);

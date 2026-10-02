@@ -64,6 +64,23 @@ describe("WebhookDispatchService", () => {
       ]);
       return result.rows[0].id as string;
     });
+
+    // The sweep tests below assert on `handleDeliverySweep()` picking up
+    // THIS test's own freshly-enqueued event within its SWEEP_BATCH_LIMIT
+    // (50) row batch. That query is intentionally global (no company_id
+    // filter — a real sweep has to cross every tenant), so it's exactly as
+    // easy to starve in a long-lived local dev database as it is correct in
+    // production: every other test suite in this repo that exercises a
+    // webhook-emitting code path (Employees, Organization, Payroll, ...)
+    // leaves its own 'pending'/'failed' rows behind across many past runs,
+    // and `ORDER BY next_attempt_at ASC LIMIT 50` keeps serving those ahead
+    // of anything new. Sweeping out anything old enough that no test run
+    // still in progress could have produced it (a real test file finishes
+    // in well under a minute) keeps this suite deterministic without
+    // touching the sweep's own production query.
+    await db.withClaims(FIXTURE_CLAIMS, (client) =>
+      client.query("DELETE FROM webhook_events WHERE created_at < now() - interval '10 minutes'")
+    );
   });
 
   afterAll(async () => {

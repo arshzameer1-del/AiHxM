@@ -92,8 +92,25 @@ export class HrReferenceCatalogService {
     await this.requireView(claims);
     return this.db.withClaims(claims, async (client) => {
       await this.ensureDefaultCatalogItems(client, claims.company_id!);
+      // HR Administration v2 "then 2" Phase 1 (2026-10-01) — found while
+      // verifying this phase's migration: this query had no explicit
+      // `company_id` filter of its own, relying entirely on the RLS
+      // SELECT policy's `is_platform_admin() OR is_service() OR
+      // company_id = current_company_id()` predicate. Postgres's planner
+      // can't prove that OR'd, function-gated predicate reduces to a plain
+      // equality, so it was a full sequential scan over the ENTIRE table
+      // across every tenant on every call — invisible while the table was
+      // small, but a 9+ second scan once this phase's own 13-catalog seed
+      // pushed it past 3M rows (same root cause `listItems()`'s own doc
+      // comment already calls out, just never applied here). Adding the
+      // explicit, redundant-under-RLS filter — exactly what `listItems()`
+      // already does below — gives the planner a concrete equality on an
+      // indexed column, turning this back into a sub-millisecond Index
+      // Only Scan via `idx_hr_reference_catalog_items_lookup` regardless
+      // of total table size.
       const counts = await client.query(
-        "SELECT catalog_type, count(*)::int AS active_count FROM hr_reference_catalog_items WHERE is_active = true GROUP BY catalog_type"
+        "SELECT catalog_type, count(*)::int AS active_count FROM hr_reference_catalog_items WHERE is_active = true AND company_id = $1 GROUP BY catalog_type",
+        [claims.company_id]
       );
       const countByType = new Map<string, number>(counts.rows.map((r) => [r.catalog_type, r.active_count]));
       return HR_CATALOG_REGISTRY.map((entry) => ({

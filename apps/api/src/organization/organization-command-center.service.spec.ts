@@ -157,8 +157,9 @@ describe("OrganizationCommandCenterService", () => {
       const abolishedJob = await positions.create(hrAdminClaims, { orgUnitId: salesId, positionTitle: "Abolished Seat" });
       await positions.abolish(hrAdminClaims, abolishedJob.id);
 
-      // One active assignment, one ended.
-      await assignments.create(hrAdminClaims, { employeeId: employee.id, assignmentType: "primary", orgUnitId: engineeringId });
+      // One active assignment, one ended. The active one is the primary
+      // the Workbench assignment above opens itself (it now keeps the
+      // employee's primary org assignment in sync with the seat).
       const secondEmployee = await employees.create(hrAdminClaims, { firstName: "Ended", lastName: "Assignment" });
       const endedAssignment = await assignments.create(hrAdminClaims, {
         employeeId: secondEmployee.id,

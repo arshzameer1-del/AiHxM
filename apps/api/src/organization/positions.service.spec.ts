@@ -336,6 +336,124 @@ describe("PositionsService", () => {
         const stillVacant = await positions.get(hrAdminClaims, position.id);
         expect(stillVacant.status).toBe("vacant");
       });
+
+      describe("Workbench assignment keeps the employee's primary org assignment in sync (cross-module integration follow-up, 2026-10-01)", () => {
+        async function primaryRows(employeeId: string) {
+          const result = await db.withClaims(FIXTURE_CLAIMS, (client) =>
+            client.query("SELECT * FROM employee_org_assignments WHERE employee_id = $1 AND assignment_type = 'primary' ORDER BY created_at", [
+              employeeId,
+            ])
+          );
+          return result.rows;
+        }
+        async function employeeRow(employeeId: string) {
+          const result = await db.withClaims(FIXTURE_CLAIMS, (client) =>
+            client.query("SELECT org_unit_id, department, location_id, position_id FROM employees WHERE id = $1", [employeeId])
+          );
+          return result.rows[0];
+        }
+        async function jobHistoryOf(employeeId: string) {
+          const result = await db.withClaims(FIXTURE_CLAIMS, (client) =>
+            client.query("SELECT * FROM employee_job_history WHERE employee_id = $1 ORDER BY created_at", [employeeId])
+          );
+          return result.rows;
+        }
+
+        it("assignEmployee() opens a primary assignment naming the seat (org unit/department follow it); a re-assign supersedes it; unassignEmployee() drops the seat from it", async () => {
+          const financeUnitId = (await orgUnits.create(hrAdminClaims, { name: "Finance Workbench", unitType: "department" })).id;
+          const locationId = await db.withClaims(FIXTURE_CLAIMS, async (client) =>
+            (await client.query("INSERT INTO locations (company_id, location_type, name) VALUES ($1, 'site', 'Workbench HQ') RETURNING id", [companyId]))
+              .rows[0].id as string
+          );
+          const seatA = await positions.create(hrAdminClaims, { orgUnitId: engineeringUnitId, positionTitle: "Workbench Seat A" });
+          const seatB = await positions.create(hrAdminClaims, { orgUnitId: financeUnitId, positionTitle: "Workbench Seat B" });
+          const employee = await employees.create(hrAdminClaims, { firstName: "Workbench", lastName: "Placed", locationId });
+          expect(await primaryRows(employee.id)).toHaveLength(0);
+
+          // Direct Workbench assignment, no prior primary: one is opened.
+          await positions.assignEmployee(hrAdminClaims, seatA.id, employee.id);
+          let rows = await primaryRows(employee.id);
+          expect(rows).toHaveLength(1);
+          expect(rows[0]).toMatchObject({ status: "active", org_unit_id: engineeringUnitId, position_id: seatA.id, location_id: locationId });
+          expect(await employeeRow(employee.id)).toMatchObject({ org_unit_id: engineeringUnitId, department: "Engineering", position_id: seatA.id });
+
+          // Re-assign into a seat in another org unit: old primary ended, new
+          // one names seat B, and the employee's org unit follows the seat.
+          await positions.assignEmployee(hrAdminClaims, seatB.id, employee.id);
+          rows = await primaryRows(employee.id);
+          expect(rows.map((r) => [r.status, r.org_unit_id, r.position_id])).toEqual([
+            ["ended", engineeringUnitId, seatA.id],
+            ["active", financeUnitId, seatB.id],
+          ]);
+          expect(await employeeRow(employee.id)).toMatchObject({ org_unit_id: financeUnitId, department: "Finance Workbench", position_id: seatB.id });
+          expect((await positions.get(hrAdminClaims, seatA.id)).status).toBe("vacant");
+
+          // Unassign: the open primary no longer names a seat, org unit and
+          // location kept.
+          await positions.unassignEmployee(hrAdminClaims, seatB.id);
+          rows = await primaryRows(employee.id);
+          const active = rows.filter((r) => r.status === "active");
+          expect(active).toHaveLength(1);
+          expect(active[0]).toMatchObject({ org_unit_id: financeUnitId, position_id: null, location_id: locationId });
+          expect(rows).toHaveLength(3);
+
+          const audit = await db.withClaims(FIXTURE_CLAIMS, (client) =>
+            client.query(
+              "SELECT metadata FROM audit_log WHERE action = 'employee_org_assignment.create' AND target = $1",
+              [active[0].id]
+            )
+          );
+          expect(audit.rows[0].metadata.source).toBe("position_workbench");
+        });
+
+        it("rolls the primary-assignment sync back with the seat fill when the seat is not vacant", async () => {
+          const seat = await positions.create(hrAdminClaims, { orgUnitId: engineeringUnitId, positionTitle: "Contested Seat" });
+          const holder = await employees.create(hrAdminClaims, { firstName: "Seat", lastName: "Holder" });
+          const contender = await employees.create(hrAdminClaims, { firstName: "Seat", lastName: "Contender" });
+          await positions.assignEmployee(hrAdminClaims, seat.id, holder.id);
+
+          await expect(positions.assignEmployee(hrAdminClaims, seat.id, contender.id)).rejects.toThrow(ConflictException);
+          expect(await primaryRows(contender.id)).toHaveLength(0);
+          expect((await employeeRow(contender.id)).position_id).toBeNull();
+        });
+
+        it("writes an employee_job_history row when assignment moves the employee into a different org unit, but not for a same-unit reseat (cross-module integration follow-up, 2026-10-01)", async () => {
+          const financeUnitId = (await orgUnits.create(hrAdminClaims, { name: "Finance Job History", unitType: "department" })).id;
+          const seatA = await positions.create(hrAdminClaims, { orgUnitId: engineeringUnitId, positionTitle: "History Seat A" });
+          const seatA2 = await positions.create(hrAdminClaims, { orgUnitId: engineeringUnitId, positionTitle: "History Seat A2" });
+          const seatB = await positions.create(hrAdminClaims, { orgUnitId: financeUnitId, positionTitle: "History Seat B" });
+          const employee = await employees.create(hrAdminClaims, {
+            firstName: "History",
+            lastName: "Placed",
+            designation: "Engineer",
+            salaryBand: "E2",
+          });
+          expect(await jobHistoryOf(employee.id)).toHaveLength(1); // the 'hire' row only
+
+          // First assignment: no prior org unit at all (null -> engineering)
+          // is still a change, so it IS logged.
+          await positions.assignEmployee(hrAdminClaims, seatA.id, employee.id);
+          let history = await jobHistoryOf(employee.id);
+          expect(history).toHaveLength(2);
+          expect(history[1]).toMatchObject({
+            event_type: "position_assignment",
+            department: "Engineering",
+            designation: "Engineer",
+            salary_band: "E2",
+          });
+
+          // Re-assigned to a different seat in the SAME org unit: nothing
+          // about the employee's org placement changed, so no new row.
+          await positions.assignEmployee(hrAdminClaims, seatA2.id, employee.id);
+          expect(await jobHistoryOf(employee.id)).toHaveLength(2);
+
+          // Re-assigned into a seat in a DIFFERENT org unit: logged again.
+          await positions.assignEmployee(hrAdminClaims, seatB.id, employee.id);
+          history = await jobHistoryOf(employee.id);
+          expect(history).toHaveLength(3);
+          expect(history[2]).toMatchObject({ event_type: "position_assignment", department: "Finance Job History" });
+        });
+      });
     });
 
     describe("cost center / profit center tagging (Organization Management Phase 4)", () => {
@@ -616,6 +734,64 @@ describe("PositionsService", () => {
     it("get() 404s a scoped caller on a position outside every dimension they hold", async () => {
       await expect(positions.get(regionalHrClaims, positionOutOfScope)).rejects.toThrow(NotFoundException);
       await expect(positions.get(regionalFinanceClaims, positionOutOfScope)).rejects.toThrow(NotFoundException);
+    });
+
+    // Cross-module integration audit (2026-10-01), gap #3/#7 —
+    // 0111_write_scope_data_scope_enforcement.sql gave `regional_hr`/
+    // `regional_finance` the write-side `position.manage.scoped`
+    // alongside their existing read-side `.view.scoped` — these cover the
+    // create/update/assign/unassign paths the audit found were still
+    // `.all`-only even after Phase 11's read-side fix.
+    describe("write-side (position.manage.scoped, gap #3/#7)", () => {
+      it("regional_hr can create a position inside their assigned org unit", async () => {
+        const created = await positions.create(regionalHrClaims, {
+          orgUnitId: assignedOrgUnitId,
+          positionTitle: "Regional HR Created",
+        });
+        expect(created.orgUnitId).toBe(assignedOrgUnitId);
+      });
+
+      it("regional_hr cannot create a position outside their assigned org unit or cost center", async () => {
+        await expect(
+          positions.create(regionalHrClaims, { orgUnitId: otherOrgUnitId, positionTitle: "Should Be Blocked" })
+        ).rejects.toThrow(ForbiddenException);
+      });
+
+      it("regional_hr cannot update a position outside their scope", async () => {
+        await expect(
+          positions.update(regionalHrClaims, positionOutOfScope, { positionTitle: "Renamed by regional_hr" })
+        ).rejects.toThrow(ForbiddenException);
+      });
+
+      it("regional_hr can rename a position inside their scope but cannot move it to an org unit outside their scope", async () => {
+        const renamed = await positions.update(regionalHrClaims, positionInScopeByOrgUnit, {
+          positionTitle: "Renamed In Scope",
+        });
+        expect(renamed.positionTitle).toBe("Renamed In Scope");
+
+        await expect(
+          positions.update(regionalHrClaims, positionInScopeByOrgUnit, { orgUnitId: otherOrgUnitId })
+        ).rejects.toThrow(ForbiddenException);
+      });
+
+      it("regional_hr cannot freeze, assign to, or unassign a position outside their scope", async () => {
+        await expect(positions.freeze(regionalHrClaims, positionOutOfScope)).rejects.toThrow(ForbiddenException);
+        await expect(
+          positions.assignEmployee(regionalHrClaims, positionOutOfScope, "00000000-0000-0000-0000-000000000000")
+        ).rejects.toThrow(ForbiddenException);
+        await expect(positions.unassignEmployee(regionalHrClaims, positionOutOfScope)).rejects.toThrow(ForbiddenException);
+      });
+
+      it("regional_finance (cost-center scope) can update the position tagged with their cost center but not one tagged with no cost center outside their org unit", async () => {
+        const renamed = await positions.update(regionalFinanceClaims, positionInScopeByCostCenterOnly, {
+          positionTitle: "Renamed by regional_finance",
+        });
+        expect(renamed.positionTitle).toBe("Renamed by regional_finance");
+
+        await expect(
+          positions.update(regionalFinanceClaims, positionOutOfScope, { positionTitle: "Should Be Blocked" })
+        ).rejects.toThrow(ForbiddenException);
+      });
     });
   });
 });

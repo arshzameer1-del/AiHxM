@@ -1,4 +1,5 @@
 import { test, expect, Page } from "@playwright/test";
+import { getSharedSession, loginToApp } from "../../e2e-support/real-session";
 
 /**
  * Performance & Goals E2E Tests (Task #53)
@@ -22,54 +23,22 @@ import { test, expect, Page } from "@playwright/test";
  * - Test database seeded with test company, active review cycles
  */
 
-const API_BASE_URL = "http://localhost:3000";
-const PORTAL_URL = "http://localhost:5173/app";
+// Real-session fix (2026-10-01): `loginAsRole` below (with its fake
+// per-arg token/roleKeys/userId) was never actually called by a single
+// test in this file — same root cause as every other spec in this suite
+// (see real-session.ts's header comment for the full writeup).
 
-interface TestContext {
-  page: Page;
-  companyId: string;
-  hrAdminToken: string;
-  employeeId: string;
-  lineManagerToken: string;
-  cycleId: string;
+async function loginAsEmployee(page: Page) {
+  await loginToApp(page, getSharedSession("employee_self_service"));
 }
-
-async function setupTestContext(): Promise<TestContext> {
-  return {
-    page: {} as Page,
-    companyId: "test-company-id",
-    hrAdminToken: "test-hr-admin-token",
-    employeeId: "test-employee-id",
-    lineManagerToken: "test-line-manager-token",
-    cycleId: "test-cycle-id",
-  };
+async function loginAsManager(page: Page) {
+  await loginToApp(page, getSharedSession("line_manager"));
 }
-
-async function loginAsRole(
-  page: Page,
-  token: string,
-  roleKeys: string[],
-  userId: string,
-  companyId: string
-) {
-  await page.evaluate(
-    ({ token, roleKeys, userId, companyId }) => {
-      localStorage.setItem("authToken", token);
-      localStorage.setItem(
-        "identity",
-        JSON.stringify({
-          sub: userId,
-          is_platform_admin: false,
-          company_id: companyId,
-          roleKeys,
-        })
-      );
-    },
-    { token, roleKeys, userId, companyId }
-  );
-
-  await page.goto("/app");
-  await page.waitForSelector("nav", { timeout: 5000 });
+async function loginAsSystemAdmin(page: Page) {
+  await loginToApp(page, getSharedSession("system_admin"));
+}
+async function loginAsHrAdmin(page: Page) {
+  await loginToApp(page, getSharedSession("hr_admin"));
 }
 
 test.describe("Performance & Goals Portal (Task #53)", () => {
@@ -80,6 +49,7 @@ test.describe("Performance & Goals Portal (Task #53)", () => {
   test("Employee can view active performance review cycles", async ({
     page,
   }) => {
+    await loginAsEmployee(page);
     // Navigate to performance page
     await page.goto("/app/performance");
 
@@ -88,11 +58,15 @@ test.describe("Performance & Goals Portal (Task #53)", () => {
       page.locator("h1, h2").filter({ hasText: /performance|review/i })
     ).toBeVisible();
 
-    // Verify cycles section exists
+    // Verify cycles section exists. A loose `text=Review Cycles` substring
+    // match is a strict-mode trap here: Playwright's text engine is
+    // case-insensitive, so it also matches the real empty-state copy "No
+    // review cycles yet" rendered when this freshly-signed-up company has
+    // no cycles configured yet. The real nav element is the PerformancePage
+    // tab button itself (`role="tab"`), which is unambiguous.
     const cyclesSection = page
       .locator("[data-testid='review-cycles']")
-      .or(page.locator("text=Review Cycles"))
-      .or(page.locator("text=Active Reviews"));
+      .or(page.getByRole("tab", { name: "Review Cycles", exact: true }));
 
     await expect(cyclesSection).toBeVisible();
 
@@ -110,6 +84,7 @@ test.describe("Performance & Goals Portal (Task #53)", () => {
   });
 
   test("Employee can submit self-assessment", async ({ page }) => {
+    await loginAsEmployee(page);
     await page.goto("/app/performance");
 
     // Find active review cycle
@@ -189,6 +164,7 @@ test.describe("Performance & Goals Portal (Task #53)", () => {
   });
 
   test("Manager can view and assess direct report", async ({ page }) => {
+    await loginAsManager(page);
     await page.goto("/app/performance");
 
     // Find a direct report to assess
@@ -248,6 +224,7 @@ test.describe("Performance & Goals Portal (Task #53)", () => {
   });
 
   test("Employee can set and track goals", async ({ page }) => {
+    await loginAsEmployee(page);
     await page.goto("/app/performance");
 
     // Navigate to goals section
@@ -332,6 +309,7 @@ test.describe("Performance & Goals Portal (Task #53)", () => {
   });
 
   test("Employee can update goal progress", async ({ page }) => {
+    await loginAsEmployee(page);
     await page.goto("/app/performance");
 
     // Navigate to goals
@@ -398,6 +376,7 @@ test.describe("Performance & Goals Portal (Task #53)", () => {
   });
 
   test("System Admin can access calibration sessions", async ({ page }) => {
+    await loginAsSystemAdmin(page);
     await page.goto("/app/performance");
 
     // Look for calibration or moderation section (System Admin only)
@@ -437,6 +416,7 @@ test.describe("Performance & Goals Portal (Task #53)", () => {
   test("Portal navigation includes Performance & Goals menu item", async ({
     page,
   }) => {
+    await loginAsEmployee(page);
     await page.goto("/app");
 
     const perfNavLink = page.locator("nav a").filter({
@@ -454,7 +434,7 @@ test.describe("Performance Responsiveness", () => {
     page,
   }) => {
     await page.setViewportSize({ width: 375, height: 667 });
-
+    await loginAsEmployee(page);
     await page.goto("/app/performance");
 
     // Navigate to a review (may be in modal or detail view)
@@ -481,6 +461,7 @@ test.describe("Performance Responsiveness", () => {
 
 test.describe("Performance Accessibility", () => {
   test("Review form has proper ARIA labels", async ({ page }) => {
+    await loginAsManager(page);
     await page.goto("/app/performance");
 
     // Find feedback textarea
@@ -500,6 +481,7 @@ test.describe("Performance Accessibility", () => {
   });
 
   test("Goals list has semantic list structure", async ({ page }) => {
+    await loginAsEmployee(page);
     await page.goto("/app/performance");
 
     // Navigate to goals

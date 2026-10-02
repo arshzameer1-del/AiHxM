@@ -5,6 +5,7 @@ import type { RequestClaims } from "../database/tenant-context";
 import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
+import { HrReferenceCatalogService } from "../hr-administration/hr-reference-catalog.service";
 import type {
   CreateEmployeeQualificationRequest,
   EmployeeQualificationView,
@@ -57,7 +58,8 @@ export class EmployeeQualificationsService {
     private readonly db: DatabaseService,
     private readonly rbac: RbacService,
     private readonly entitlements: EntitlementsService,
-    private readonly audit: AuditService
+    private readonly audit: AuditService,
+    private readonly hrCatalog: HrReferenceCatalogService
   ) {}
 
   async create(claims: RequestClaims, input: CreateEmployeeQualificationRequest): Promise<EmployeeQualificationView> {
@@ -71,6 +73,11 @@ export class EmployeeQualificationsService {
     input: CreateEmployeeQualificationRequest
   ): Promise<EmployeeQualificationView> {
     await this.mustExistEmployee(client, claims.company_id!, input.employeeId);
+    // HR Administration v2 "then 2" Phase 1 (2026-10-01) — `qualificationType`
+    // used to be a hardcoded CHECK constraint (certificate/license/skill);
+    // this tenant's own `qualification_type` catalog is now the source of
+    // truth.
+    await this.hrCatalog.validateActiveCode(client, claims.company_id!, "qualification_type", input.qualificationType);
 
     const inserted = await client.query(
       `INSERT INTO employee_qualifications
@@ -114,6 +121,9 @@ export class EmployeeQualificationsService {
     await this.requireManage(claims);
     return this.db.withClaims(claims, async (client) => {
       const before = await this.mustExist(client, id);
+      if (patch.qualificationType) {
+        await this.hrCatalog.validateActiveCode(client, claims.company_id!, "qualification_type", patch.qualificationType);
+      }
       const result = await client.query(
         `UPDATE employee_qualifications SET
            qualification_type = COALESCE($2, qualification_type),

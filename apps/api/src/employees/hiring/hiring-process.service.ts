@@ -20,6 +20,9 @@ import { ShiftsService } from "../../shifts/shifts.service";
 import { EmployeeCompensationService } from "../employee-compensation.service";
 import { EffectiveDatingEngine } from "../../effective-dating/effective-dating.engine";
 import { CustomFieldsService } from "../../custom-fields/custom-fields.service";
+import { CardFieldConfigService } from "./card-field-config.service";
+import { OrgOccupancyService } from "../../organization/occupancy/org-occupancy.service";
+import { HrReferenceCatalogService } from "../../hr-administration/hr-reference-catalog.service";
 import { CARD_CATALOG } from "./card-catalog";
 import { validateOrganizationAssignmentCard } from "./organization-assignment-validator";
 import type {
@@ -83,8 +86,20 @@ export class HiringProcessService {
     // each service's own doc comment). Optional-with-default for the same
     // reason `webhooks` below is: existing spec files that hand-construct
     // this service directly without every dependency don't break.
-    private readonly contacts: EmployeeContactsService = new EmployeeContactsService(db, rbac, entitlements, audit),
-    private readonly addresses: EmployeeAddressesService = new EmployeeAddressesService(db, rbac, entitlements, audit),
+    private readonly contacts: EmployeeContactsService = new EmployeeContactsService(
+      db,
+      rbac,
+      entitlements,
+      audit,
+      new HrReferenceCatalogService(db, rbac, entitlements, audit)
+    ),
+    private readonly addresses: EmployeeAddressesService = new EmployeeAddressesService(
+      db,
+      rbac,
+      entitlements,
+      audit,
+      new HrReferenceCatalogService(db, rbac, entitlements, audit)
+    ),
     private readonly importantDates: EmployeeImportantDatesService = new EmployeeImportantDatesService(db, rbac, entitlements, audit),
     // Phase 7 — the Working Time card's projection onto the existing
     // Shifts module (`ShiftsService.assignShiftWithinTransaction()`).
@@ -130,9 +145,21 @@ export class HiringProcessService {
     // optional above) purely to avoid reshuffling every existing
     // positional constructor call in this codebase's spec files that
     // already passes `payroll` at its current position.
-    private readonly familyMembers: EmployeeFamilyMembersService = new EmployeeFamilyMembersService(db, rbac, entitlements, audit),
+    private readonly familyMembers: EmployeeFamilyMembersService = new EmployeeFamilyMembersService(
+      db,
+      rbac,
+      entitlements,
+      audit,
+      new HrReferenceCatalogService(db, rbac, entitlements, audit)
+    ),
     private readonly education: EmployeeEducationService = new EmployeeEducationService(db, rbac, entitlements, audit),
-    private readonly qualifications: EmployeeQualificationsService = new EmployeeQualificationsService(db, rbac, entitlements, audit),
+    private readonly qualifications: EmployeeQualificationsService = new EmployeeQualificationsService(
+      db,
+      rbac,
+      entitlements,
+      audit,
+      new HrReferenceCatalogService(db, rbac, entitlements, audit)
+    ),
     private readonly assets: EmployeeAssetsService = new EmployeeAssetsService(db, rbac, entitlements, audit),
     private readonly webhooks?: WebhookDispatchService,
     // Hiring Card Field Configuration (2026-09-27) — a custom field added
@@ -144,7 +171,35 @@ export class HiringProcessService {
     // above is — existing spec files that hand-construct this service
     // positionally without it keep working; those flows just don't get
     // custom-field values copied onto the employee.
-    private readonly customFields?: CustomFieldsService
+    private readonly customFields?: CustomFieldsService,
+    // Cross-module integration audit (2026-10-01), Item 1 — the
+    // Organization Assignment card's `positionId` is now actually
+    // OCCUPIED at completion (position -> `filled`, `employees.position_id`
+    // set, `position_versions` row written), a `primary`
+    // `employee_org_assignments` row is opened, and the Reporting
+    // Relationships card's direct manager gets a real `direct`
+    // `org_relationships` row — all on this method's own transaction
+    // client. Default-instantiated (its only dependencies are ones this
+    // constructor already has, plus a dependency-free EffectiveDatingEngine)
+    // and appended LAST, for the same "don't reshuffle every positional
+    // constructor call in the spec files" reason as everything above.
+    private readonly occupancy: OrgOccupancyService = new OrgOccupancyService(audit, new EffectiveDatingEngine(), webhooks),
+    // "then 2" Phase 3 (2026-10-02) — `saveCard()` below calls
+    // `applyFieldConfigRules()` on every card save now, so this needs a
+    // real instance in every flow, not an optional one left undefined in
+    // most tests the way `customFields`/`shifts` above are. Same plain,
+    // dependency-light default-instantiation treatment as
+    // `paymentAccounts`/`costAllocations`/`assets` above — appended LAST
+    // (after `occupancy`, not reshuffled into the group it logically
+    // belongs with) purely to avoid disturbing any existing positional
+    // constructor call in this codebase's spec files.
+    private readonly cardFieldConfig: CardFieldConfigService = new CardFieldConfigService(
+      db,
+      rbac,
+      entitlements,
+      audit,
+      new CustomFieldsService(db, rbac)
+    )
   ) {}
 
   private async requireAccess(claims: RequestClaims): Promise<void> {
@@ -350,6 +405,18 @@ export class HiringProcessService {
         await validateOrganizationAssignmentCard(client, processRow.company_id, input.data, employmentCardData);
       }
 
+      // "then 2" Phase 3 (2026-10-02) — field-level defaults/validation/
+      // conditional-required, enforced against THIS card's own built-in
+      // fields (see `CardFieldConfigService.applyFieldConfigRules()`'s
+      // own doc comment). Runs on every card's own data, not just
+      // `review_completion`'s summary — a bad or missing value is
+      // rejected at the point the card is actually saved, matching this
+      // method's own "reject early, on this transaction" posture for
+      // `organization_assignment` immediately above. `review_completion`
+      // has no built-in fields in `CARD_FIELD_CATALOG` (see that file's
+      // own header comment), so this is a safe no-op for it.
+      const dataWithDefaults = await this.cardFieldConfig.applyFieldConfigRules(client, processRow.company_id, cardKey, input.data);
+
       const existing = await client.query("SELECT revision FROM hire_process_card_data WHERE hire_process_id = $1 AND card_key = $2", [
         hireProcessId,
         cardKey,
@@ -364,7 +431,7 @@ export class HiringProcessService {
          VALUES ($1, $2, $3, $4::jsonb, 1, $5, now())
          ON CONFLICT (hire_process_id, card_key) DO UPDATE SET
            data = $4::jsonb, revision = hire_process_card_data.revision + 1, saved_by_user_account_id = $5, updated_at = now()`,
-        [hireProcessId, processRow.company_id, cardKey, JSON.stringify(input.data), claims.sub]
+        [hireProcessId, processRow.company_id, cardKey, JSON.stringify(dataWithDefaults), claims.sub]
       );
 
       // A required card is "complete" once it holds real data; an
@@ -372,7 +439,7 @@ export class HiringProcessService {
       // 23's full completion formula (dependencies/documents/approval) is
       // scoped down here for the same Field-Metadata reason saveCard()'s
       // own doc comment already gives.
-      const isComplete = definition.isRequired ? Object.keys(input.data).length > 0 : true;
+      const isComplete = definition.isRequired ? Object.keys(dataWithDefaults).length > 0 : true;
       const cardStatus = isComplete ? "complete" : "saved";
       await client.query(
         `UPDATE hire_process_cards SET status = $3, saved_at = now() WHERE hire_process_id = $1 AND card_key = $2`,
@@ -505,17 +572,22 @@ export class HiringProcessService {
    * fields — see card-catalog.ts's own comment); `contact`/`addresses`
    * project onto their own new tables via
    * `EmployeeContactsService`/`EmployeeAddressesService.createWithinTransaction()`.
-   * Deliberately NOT wired here: `organization_assignment.positionId`
-   * occupying the position in Organization Management (marking it
-   * 'filled', writing a `position_versions` row) — that is
-   * `PositionsService.assignEmployee()`'s own job, in a module that
-   * already imports EmployeesModule (importing it back here would be a
-   * circular module dependency), and Section 17 itself is explicit that
-   * cross-domain effects belong on the orchestrated event this method
-   * already fires (`employee.hire.completed`), not a synchronous
-   * cross-module call. A later phase can add a listener that calls
-   * `PositionsService.assignEmployee()` off that event without touching
-   * this method at all.
+   * Cross-module integration audit (2026-10-01), Item 1 — this used to
+   * deliberately drop `organization_assignment.positionId` (Organization
+   * Management imports EmployeesModule, so PositionsService could not be
+   * injected back here, and a listener on `employee.hire.completed` would
+   * run AFTER this transaction commits — it could never roll the new
+   * employee back if the seat turned out to be taken). Now the occupancy
+   * writes go through `OrgOccupancyService` (a slim module both sides
+   * import — see its own class doc comment), on THIS method's transaction
+   * client: the position is re-validated under a row lock (still vacant?
+   * still in the selected org unit?) and filled, a `primary`
+   * `employee_org_assignments` row is opened, and the direct manager gets a
+   * real `direct` `org_relationships` row. Any failure there throws out of
+   * this callback and rolls back the whole completion — employee row,
+   * compensation, every sub-entity — leaving the hire process in
+   * `ready_for_completion` so HR can fix the card and retry, never a
+   * half-created employee.
    *
    * Phase 7/8 add: `working_time`'s `shiftId` -> `ShiftsService.
    * assignShiftWithinTransaction()` (only when a ShiftsService was wired —
@@ -533,6 +605,14 @@ export class HiringProcessService {
     if (!claims.company_id) throw new ForbiddenException();
 
     return this.db.withClaims(claims, async (client) => {
+      // Item 1 (2026-10-01) — row-lock the process FIRST. Completion now
+      // also locks and fills a Position; without this, two concurrent
+      // completions would both create an employee and the loser would
+      // then block on the seat lock and fail with a 409 instead of
+      // returning the winner's result. With it, the loser waits here, then
+      // reads `hired` below and returns idempotently, exactly as Section
+      // 17 asks.
+      await client.query("SELECT id FROM hire_processes WHERE id = $1 FOR UPDATE", [hireProcessId]);
       const processRow = await this.loadProcessOrThrow(client, hireProcessId);
       if (processRow.status === "hired") {
         return this.buildView(client, processRow.company_id, processRow);
@@ -553,6 +633,21 @@ export class HiringProcessService {
       const orgAssignment = dataByCard.get("organization_assignment") ?? {};
       const reporting = dataByCard.get("reporting_relationships") ?? {};
 
+      // Item 1 — a position implies its org unit. If the card named a
+      // position but no org unit, derive the unit from the position so the
+      // employee row, the primary assignment and the seat all agree (the
+      // card validator only cross-checks the two when BOTH are given).
+      const cardPositionId = typeof orgAssignment.positionId === "string" && orgAssignment.positionId ? orgAssignment.positionId : undefined;
+      let cardOrgUnitId = typeof orgAssignment.orgUnitId === "string" && orgAssignment.orgUnitId ? orgAssignment.orgUnitId : undefined;
+      if (cardPositionId && !cardOrgUnitId) {
+        const pos = await client.query<{ org_unit_id: string }>("SELECT org_unit_id FROM positions WHERE id = $1 AND company_id = $2", [
+          cardPositionId,
+          processRow.company_id,
+        ]);
+        if (pos.rowCount === 0) throw new BadRequestException("Selected position was not found");
+        cardOrgUnitId = pos.rows[0].org_unit_id;
+      }
+
       const employee = await this.employees.createWithinTransaction(client, claims, {
         firstName: String(personal.firstName ?? ""),
         lastName: String(personal.lastName ?? ""),
@@ -563,10 +658,51 @@ export class HiringProcessService {
         employmentType: employment.employmentType as EmploymentType | undefined,
         dateOfJoining: employment.dateOfJoining as string | undefined,
         designation: employment.designation as string | undefined,
-        orgUnitId: orgAssignment.orgUnitId as string | undefined,
+        orgUnitId: cardOrgUnitId,
         locationId: orgAssignment.locationId as string | undefined,
         managerId: reporting.directManagerEmployeeId as string | undefined,
       });
+
+      // Item 1 — Organization Management occupancy, same transaction. The
+      // assignment's effective date is the card's own `effectiveFrom`
+      // (validated >= dateOfJoining at save time), else the joining date.
+      const assignmentEffectiveFrom =
+        (orgAssignment.effectiveFrom as string | undefined) ?? (employment.dateOfJoining as string | undefined) ?? undefined;
+      const occupancySource = `hire_process:${hireProcessId}`;
+      if (cardPositionId) {
+        await this.occupancy.assignPositionWithinTransaction(client, claims, {
+          positionId: cardPositionId,
+          employeeId: employee.id,
+          effectiveFrom: assignmentEffectiveFrom,
+          expectedOrgUnitId: cardOrgUnitId,
+          source: occupancySource,
+        });
+      }
+      if (cardOrgUnitId) {
+        await this.occupancy.openAssignmentWithinTransaction(client, claims, {
+          employeeId: employee.id,
+          assignmentType: "primary",
+          orgUnitId: cardOrgUnitId,
+          positionId: cardPositionId ?? null,
+          locationId: (orgAssignment.locationId as string | undefined) ?? null,
+          effectiveFrom: assignmentEffectiveFrom,
+          source: occupancySource,
+        });
+      }
+      const directManagerId = reporting.directManagerEmployeeId as string | undefined;
+      if (directManagerId) {
+        // `employees.manager_id` was already written by
+        // createWithinTransaction() above — hence syncEmployeeManagerId:
+        // false (one writer per column per transaction).
+        await this.occupancy.createRelationshipWithinTransaction(client, claims, {
+          employeeId: employee.id,
+          managerEmployeeId: directManagerId,
+          relationshipType: "direct",
+          effectiveFrom: assignmentEffectiveFrom,
+          syncEmployeeManagerId: false,
+          source: occupancySource,
+        });
+      }
 
       const contactData = dataByCard.get("contact") ?? {};
       const contactEntries = Array.isArray(contactData.contacts) ? (contactData.contacts as Record<string, unknown>[]) : [];
