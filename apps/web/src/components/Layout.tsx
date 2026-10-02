@@ -2,26 +2,25 @@ import { NavLink, Outlet } from "react-router-dom";
 import { LayoutDashboard, ScrollText, ShieldCheck, Palette } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import { AihxmLogo } from "./AihxmLogo";
+import { Topbar, type QuickJumpItem } from "./shell/Topbar";
+import { SIDEBAR_CONTAINER_CLASS, sidebarNavLinkClass as navLinkClass } from "./shell/sidebarTheme";
 
-// Theme alignment pass (2026-09-26) — same change as PortalLayout.tsx's own
-// navLinkClass: a soft tinted pill (bg-accent/10 text-accent) replacing the
-// old solid full-saturation active block, plus an icon per item, so the
-// Platform Admin shell and the tenant-facing shell read as one product
-// rather than two different-looking apps.
-const navLinkClass = ({ isActive }: { isActive: boolean }) =>
-  `flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-    isActive ? "bg-accent/10 text-accent" : "text-label-secondary hover:bg-black/5"
-  }`;
+const QUICK_JUMP_ITEMS: QuickJumpItem[] = [
+  { to: "/", label: "Dashboard" },
+  { to: "/audit-log", label: "Audit Log" },
+  { to: "/platform-admins", label: "Platform Admins" },
+  { to: "/platform-branding", label: "Platform Branding" },
+];
 
 export function Layout() {
-  const { logout } = useAuth();
+  const { identity, logout } = useAuth();
 
   return (
     <div className="min-h-screen flex">
-      <aside className="w-56 shrink-0 border-r border-black/5 bg-card px-3 py-6 flex flex-col">
+      <aside className={SIDEBAR_CONTAINER_CLASS}>
         <div className="px-3 mb-8">
-          <AihxmLogo size={40} />
-          <div className="text-xs text-label-tertiary mt-1.5">Platform Admin</div>
+          <AihxmLogo size={40} className="text-white" />
+          <div className="text-xs text-slate-400 mt-1.5">Platform Admin</div>
         </div>
 
         <nav className="flex flex-col gap-1">
@@ -42,20 +41,20 @@ export function Layout() {
             Platform Branding
           </NavLink>
         </nav>
-
-        <div className="mt-auto px-3">
-          <button
-            onClick={logout}
-            className="text-sm text-label-tertiary hover:text-danger transition-colors"
-          >
-            Log out
-          </button>
-        </div>
       </aside>
 
-      <main className="flex-1 px-8 py-8 max-w-5xl">
-        <Outlet />
-      </main>
+      <div className="flex-1 flex flex-col min-w-0">
+        <Topbar
+          items={QUICK_JUMP_ITEMS}
+          userName={identity?.fullName ?? "Platform Admin"}
+          userEmail={identity?.email ?? ""}
+          roleLabel="Platform Admin"
+          onLogout={logout}
+        />
+        <main className="flex-1 px-8 py-8 max-w-5xl overflow-y-auto">
+          <Outlet />
+        </main>
+      </div>
     </div>
   );
 }

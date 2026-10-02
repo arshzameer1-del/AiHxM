@@ -18,18 +18,21 @@ import {
 import type { ModuleKey, PublicTenantBranding, TenantRoleKey } from "@aihxm/shared-types";
 import { api, publicTenantBrandingAssetUrl } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { Topbar, type QuickJumpItem } from "../components/shell/Topbar";
+import {
+  SIDEBAR_CONTAINER_CLASS,
+  SIDEBAR_GROUP_DIVIDER_CLASS,
+  SIDEBAR_GROUP_TOGGLE_CLASS,
+  sidebarNavLinkClass as navLinkClass,
+} from "../components/shell/sidebarTheme";
 
-// Theme alignment pass (2026-09-26) — the sidebar used to be a plain text
-// list with a solid, full-saturation active block (bg-accent text-white).
-// Every other icon-bearing surface already added since (CompanyDetailPage's
-// tile grid, this file's own children pattern) settled on a soft tinted
-// pill instead (`bg-accent/10 text-accent`) — this brings the persistent
-// nav shell itself in line with that, and with kumail's reference design
-// (icon + label, soft blue pill on the active item, not a solid block).
-const navLinkClass = ({ isActive }: { isActive: boolean }) =>
-  `flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-    isActive ? "bg-accent/10 text-accent" : "text-label-secondary hover:bg-black/5"
-  }`;
+const ROLE_LABELS: Record<TenantRoleKey, string> = {
+  hr_admin: "HR Admin",
+  line_manager: "Line Manager",
+  employee_self_service: "Employee",
+  system_admin: "System Admin",
+  payroll_approver: "Payroll Approver",
+};
 
 // Organization Management Phase 9 (Unified Integration & Synchronization
 // Requirements, Section 2) — `NavItem` finally gets the sub-nav/grouping
@@ -226,17 +229,24 @@ function PortalMark({ companySlug, companyName }: { companySlug: string | null; 
   }, [companySlug]);
 
   if (companySlug && branding?.hasLogo) {
+    // UI Re-skin Phase 2 — the sidebar is now a dark background, but a
+    // tenant's own uploaded mark (TM-015) was never designed against one;
+    // most logos assume a light surface. Wrapping it in a small white
+    // chip keeps every tenant's own branding legible regardless of the
+    // mark's own colors, without asking anyone to re-upload anything.
     return (
-      <img
-        src={publicTenantBrandingAssetUrl(companySlug, "logo")}
-        alt={companyName ?? "Company logo"}
-        className="max-w-full object-contain"
-        style={{ maxHeight: 40 }}
-      />
+      <span className="inline-block bg-white rounded-md px-2 py-1.5">
+        <img
+          src={publicTenantBrandingAssetUrl(companySlug, "logo")}
+          alt={companyName ?? "Company logo"}
+          className="max-w-full object-contain"
+          style={{ maxHeight: 32 }}
+        />
+      </span>
     );
   }
 
-  return <div className="text-lg font-bold tracking-tight">AI HXM</div>;
+  return <div className="text-lg font-bold tracking-tight text-white">AI HXM</div>;
 }
 
 /**
@@ -274,13 +284,13 @@ function NavGroup({ item }: { item: NavItem & { children: NavItem[] } }) {
           onClick={() => setExpanded((current) => !current)}
           aria-expanded={expanded}
           aria-label={expanded ? `Collapse ${item.label}` : `Expand ${item.label}`}
-          className="px-2 py-2 text-label-tertiary hover:text-label-primary shrink-0"
+          className={SIDEBAR_GROUP_TOGGLE_CLASS}
         >
           <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>
         </button>
       </div>
       {expanded && (
-        <div className="ml-3 pl-2 border-l border-black/10 flex flex-col gap-1 mt-1 mb-1">
+        <div className={SIDEBAR_GROUP_DIVIDER_CLASS}>
           {item.children.map((child) => (
             <NavLink key={child.to} to={child.to} end={child.end} className={navLinkClass}>
               {child.label}
@@ -346,6 +356,28 @@ function ImpersonationBanner({
   );
 }
 
+/**
+ * UI Re-skin Phase 2 — flattens `buildNavItems()`'s own tree (a group's
+ * `children` are always one level of plain leaf items, per NavItem's own
+ * doc comment) into the flat list Topbar's quick-jump search filters over.
+ * A child's `group` is its parent's label, so "Jobs" shows "Organization"
+ * as a hint the same way a command palette entry normally would. This
+ * never diverges from the sidebar's own gating — it reads the exact same
+ * `navItems` the `<nav>` below renders, nothing is added or removed.
+ */
+function flattenNavItems(items: NavItem[]): QuickJumpItem[] {
+  const flat: QuickJumpItem[] = [];
+  for (const item of items) {
+    flat.push({ to: item.to, label: item.label });
+    if (item.children) {
+      for (const child of item.children) {
+        flat.push({ to: child.to, label: child.label, group: item.label });
+      }
+    }
+  }
+  return flat;
+}
+
 export function PortalLayout() {
   const { identity, logout, impersonation, endImpersonation } = useAuth();
 
@@ -354,16 +386,17 @@ export function PortalLayout() {
   const roleKeys = identity?.roleKeys ?? [];
   const enabledModules = identity?.enabledModules ?? [];
   const navItems = buildNavItems(roleKeys, enabledModules);
+  const roleLabel = roleKeys.length > 0 ? roleKeys.map((k) => ROLE_LABELS[k] ?? k).join(" · ") : "Member";
 
   return (
     <div className="min-h-screen flex flex-col">
       {impersonation && <ImpersonationBanner impersonation={impersonation} endImpersonation={endImpersonation} />}
 
-      <div className="flex flex-1">
-        <aside className="w-56 shrink-0 border-r border-black/5 bg-card px-3 py-6 flex flex-col">
+      <div className="flex flex-1 min-h-0">
+        <aside className={SIDEBAR_CONTAINER_CLASS}>
           <div className="px-3 mb-8">
             <PortalMark companySlug={identity?.companySlug ?? null} companyName={identity?.companyName ?? null} />
-            <div className="text-xs text-label-tertiary truncate">{identity?.companyName ?? "Your company"}</div>
+            <div className="text-xs text-slate-400 truncate mt-1.5">{identity?.companyName ?? "Your company"}</div>
           </div>
 
           <nav className="flex flex-col gap-1">
@@ -380,21 +413,20 @@ export function PortalLayout() {
               );
             })}
           </nav>
-
-          <div className="mt-auto px-3">
-            <div className="text-xs text-label-tertiary mb-2 truncate">{identity?.fullName}</div>
-            <button
-              onClick={logout}
-              className="text-sm text-label-tertiary hover:text-danger transition-colors"
-            >
-              Log out
-            </button>
-          </div>
         </aside>
 
-        <main className="flex-1 px-8 py-8 max-w-5xl">
-          <Outlet />
-        </main>
+        <div className="flex-1 flex flex-col min-w-0">
+          <Topbar
+            items={flattenNavItems(navItems)}
+            userName={identity?.fullName ?? "Account"}
+            userEmail={identity?.email ?? ""}
+            roleLabel={roleLabel}
+            onLogout={logout}
+          />
+          <main className="flex-1 px-8 py-8 max-w-5xl overflow-y-auto">
+            <Outlet />
+          </main>
+        </div>
       </div>
     </div>
   );

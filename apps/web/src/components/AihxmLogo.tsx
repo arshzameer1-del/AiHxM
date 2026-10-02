@@ -116,9 +116,12 @@ export function AihxmLogo({
       >
         {!withWordmark && <title>AIHXM</title>}
         <defs>
+          {/* UI Re-skin Phase 1 — brand-primary to brand-secondary (AI
+              accent), matching tailwind.config.js's new enterprise
+              palette instead of the old Apple HIG accent blue. */}
           <linearGradient id="aihxm-mark-gradient" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
-            <stop offset="0" stopColor="#007AFF" />
-            <stop offset="1" stopColor="#0A84FF" />
+            <stop offset="0" stopColor="#2563EB" />
+            <stop offset="1" stopColor="#7C3AED" />
           </linearGradient>
         </defs>
         <rect width="32" height="32" rx="8" fill="url(#aihxm-mark-gradient)" />
