@@ -296,6 +296,14 @@ function rowToPayslip(row: any): PayslipView {
     id: row.id,
     companyId: row.company_id,
     payrollRunId: row.payroll_run_id,
+    // UI Re-skin Phase 4 — Part 2 category 5 ("Payslip / Payroll Self-
+    // Service") needs a pay period/date on each payslip; both call sites
+    // of this function (`listPayslips`/`getPayslip`) already JOIN
+    // `payroll_runs` for `run_status`/`run_payroll_area_id`, so this is
+    // two extra, non-sensitive columns off a join that was already
+    // there — not a new permission or a new query.
+    payrollRunPeriodStart: row.run_period_start,
+    payrollRunPeriodEnd: row.run_period_end,
     employeeId: row.employee_id,
     employeeNumber: row.employee_number,
     bankAccountNumber: row.bank_account_number,
@@ -1153,7 +1161,7 @@ export class PayrollService {
     return this.db.withClaims(claims, async (client) => {
       const hasAll = await this.hasAnyPayrollStaffPermission(claims);
       const result = await client.query(
-        `SELECT p.*, e.user_account_id AS employee_user_account_id, pr.status AS run_status, pr.payroll_area_id AS run_payroll_area_id
+        `SELECT p.*, e.user_account_id AS employee_user_account_id, pr.status AS run_status, pr.payroll_area_id AS run_payroll_area_id, pr.period_start AS run_period_start, pr.period_end AS run_period_end
          FROM payslips p
          JOIN employees e ON e.id = p.employee_id
          JOIN payroll_runs pr ON pr.id = p.payroll_run_id
@@ -1187,7 +1195,7 @@ export class PayrollService {
     await this.requireModule(claims);
     return this.db.withClaims(claims, async (client) => {
       const result = await client.query(
-        `SELECT p.*, e.user_account_id AS employee_user_account_id, pr.status AS run_status, pr.payroll_area_id AS run_payroll_area_id
+        `SELECT p.*, e.user_account_id AS employee_user_account_id, pr.status AS run_status, pr.payroll_area_id AS run_payroll_area_id, pr.period_start AS run_period_start, pr.period_end AS run_period_end
          FROM payslips p
          JOIN employees e ON e.id = p.employee_id
          JOIN payroll_runs pr ON pr.id = p.payroll_run_id

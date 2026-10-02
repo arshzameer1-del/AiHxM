@@ -59,12 +59,14 @@ function PayslipDetail({ payslip }: { payslip: PayslipView }) {
 function PayslipRow({ payslip }: { payslip: PayslipView }) {
   const [expanded, setExpanded] = useState(false);
   return (
-    <div className="bg-card rounded-lg px-4 py-3 shadow-sm">
+    <div className="bg-card rounded-lg px-4 py-3 shadow-sm border border-black/5">
       <button className="w-full flex items-center justify-between text-left" onClick={() => setExpanded((e) => !e)}>
-        <span className="text-sm font-medium">{payslip.employeeNumber}</span>
+        <span className="text-sm font-medium">
+          {payslip.payrollRunPeriodStart} – {payslip.payrollRunPeriodEnd}
+        </span>
         <span className="flex items-center gap-4">
-          <span className="text-sm font-mono">{pkr.format(payslip.netPay)}</span>
-          <span className="text-xs text-label-tertiary">{expanded ? "Hide" : "Details"}</span>
+          <span className="text-sm font-mono tabular-nums">{pkr.format(payslip.netPay)}</span>
+          <span className="text-xs font-medium text-accent">{expanded ? "Hide" : "Details"}</span>
         </span>
       </button>
       {expanded && <PayslipDetail payslip={payslip} />}
@@ -736,6 +738,13 @@ function MyPayslipsCard({ refreshKey }: { refreshKey: number }) {
       .catch((err) => setError(describeError(err)));
   }, [refreshKey]);
 
+  // listPayslips() orders newest-first (`ORDER BY p.created_at DESC`), so
+  // the first row is this employee's current/most recent finalized
+  // payslip — Part 2 category 5's "Current net pay KPI with pay period
+  // and pay date" header, same data the historical list below already
+  // has, just surfaced once up top.
+  const current = payslips && payslips.length > 0 ? payslips[0] : null;
+
   return (
     <section className="bg-card rounded-card p-5 shadow-sm mb-6">
       <h2 className="font-semibold text-sm uppercase tracking-wide text-label-tertiary mb-4">My Payslips</h2>
@@ -746,11 +755,22 @@ function MyPayslipsCard({ refreshKey }: { refreshKey: number }) {
       ) : payslips.length === 0 ? (
         <p className="text-sm text-label-tertiary">No finalized payslips yet.</p>
       ) : (
-        <div className="space-y-2">
-          {payslips.map((p) => (
-            <PayslipRow key={p.id} payslip={p} />
-          ))}
-        </div>
+        <>
+          {current && (
+            <div className="bg-surface border border-black/5 rounded-lg px-4 py-3.5 mb-4">
+              <div className="text-xs uppercase tracking-wide text-label-tertiary">Current net pay</div>
+              <div className="text-2xl font-bold tabular-nums">{pkr.format(current.netPay)}</div>
+              <div className="text-xs text-label-tertiary mt-0.5">
+                {current.payrollRunPeriodStart} – {current.payrollRunPeriodEnd}
+              </div>
+            </div>
+          )}
+          <div className="space-y-2">
+            {payslips.map((p) => (
+              <PayslipRow key={p.id} payslip={p} />
+            ))}
+          </div>
+        </>
       )}
     </section>
   );

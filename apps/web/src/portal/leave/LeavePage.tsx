@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { CalendarDays } from "lucide-react";
 import type {
   AttendanceCorrectionRequestView,
   AttendanceRecordView,
@@ -210,12 +211,26 @@ function MyLeaveCard({
       {!balances ? (
         <div className="text-label-tertiary text-sm">Loading…</div>
       ) : (
+        // UI Re-skin Phase 4 — Part 2 category 3 ("Leave Management"):
+        // "Balance cards: annual, sick, casual/other configured leave
+        // types." Same `balances` data as before, just presented as the
+        // bordered icon-badge card pattern the rest of the re-skin uses
+        // (PortalHomePage's KPI row, the module tile grid) instead of a
+        // flat black/5 chip.
         <div className="flex flex-wrap gap-3">
           {balances.map((b) => (
-            <div key={b.leaveType} className="bg-black/5 rounded-lg px-3 py-2">
-              <div className="text-xs uppercase tracking-wide text-label-tertiary">{LEAVE_TYPE_LABELS[b.leaveType]}</div>
-              <div className="font-mono font-semibold text-sm">
-                {b.remainingDays}/{b.entitledDays} days left
+            <div
+              key={b.leaveType}
+              className="flex items-center gap-3 bg-surface border border-black/5 rounded-lg px-3.5 py-2.5 min-w-[160px]"
+            >
+              <div className="w-9 h-9 rounded-lg bg-accent/10 text-accent flex items-center justify-center shrink-0">
+                <CalendarDays size={16} strokeWidth={1.75} />
+              </div>
+              <div>
+                <div className="text-xs uppercase tracking-wide text-label-tertiary">{LEAVE_TYPE_LABELS[b.leaveType]}</div>
+                <div className="font-semibold text-sm tabular-nums">
+                  {b.remainingDays} <span className="text-label-tertiary font-normal">/ {b.entitledDays} days</span>
+                </div>
               </div>
             </div>
           ))}

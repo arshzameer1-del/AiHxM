@@ -3990,6 +3990,12 @@ export type PayslipView = {
   id: string;
   companyId: string;
   payrollRunId: string;
+  /** UI Re-skin Phase 4 — the owning run's period, off the same JOIN
+   * `listPayslips()`/`getPayslip()` already did for run status/scope. Not
+   * sensitive (it's the period this payslip itself belongs to), and not a
+   * new permission — see PayrollService's `rowToPayslip()`. */
+  payrollRunPeriodStart: string;
+  payrollRunPeriodEnd: string;
   employeeId: string;
   /** Denormalized snapshot at calculation time — see 0022_payroll.sql's
    * header comment for why these don't just join to `employees` live. */

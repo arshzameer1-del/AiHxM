@@ -61,8 +61,8 @@ export function ReviewCyclesPanel() {
 
   const getStatusBadge = (status: ReviewCycleView["status"]) => {
     const statusColors = {
-      draft: "bg-gray-100 text-gray-700",
-      active: "bg-blue-100 text-blue-700",
+      draft: "bg-black/5 text-label-primary",
+      active: "bg-accent/10 text-accent-dark",
       calibration: "bg-yellow-100 text-yellow-700",
       closed: "bg-green-100 text-green-700",
     };
@@ -76,7 +76,7 @@ export function ReviewCyclesPanel() {
   };
 
   if (loading) {
-    return <div className="text-gray-500">Loading review cycles...</div>;
+    return <div className="text-label-tertiary">Loading review cycles...</div>;
   }
 
   return (
@@ -86,7 +86,7 @@ export function ReviewCyclesPanel() {
       {canCreateCycle && (
         <button
           onClick={() => setShowCreateModal(true)}
-          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm font-medium"
+          className="px-4 py-2 bg-accent text-white rounded hover:bg-accent-dark text-sm font-medium"
         >
           New Review Cycle
         </button>
@@ -95,12 +95,12 @@ export function ReviewCyclesPanel() {
       {showCreateModal && <CreateCycleModal onClose={() => setShowCreateModal(false)} onSuccess={loadCycles} />}
 
       {cycles.length === 0 ? (
-        <div className="text-gray-500 text-sm">No review cycles yet</div>
+        <div className="text-label-tertiary text-sm">No review cycles yet</div>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-gray-200">
+              <tr className="border-b border-black/10">
                 <th className="text-left py-2 px-4 font-semibold">Name</th>
                 <th className="text-left py-2 px-4 font-semibold">Period</th>
                 <th className="text-left py-2 px-4 font-semibold">Status</th>
@@ -109,7 +109,7 @@ export function ReviewCyclesPanel() {
             </thead>
             <tbody>
               {cycles.map((cycle) => (
-                <tr key={cycle.id} className="border-b border-gray-100 hover:bg-gray-50">
+                <tr key={cycle.id} className="border-b border-black/5 hover:bg-surface">
                   <td className="py-3 px-4">{cycle.name}</td>
                   <td className="py-3 px-4">
                     {new Date(cycle.periodStart).toLocaleDateString()} — {new Date(cycle.periodEnd).toLocaleDateString()}
@@ -120,7 +120,7 @@ export function ReviewCyclesPanel() {
                       {canCreateCycle && cycle.status === "draft" && (
                         <button
                           onClick={() => handleLaunch(cycle.id)}
-                          className="px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600"
+                          className="px-2 py-1 bg-accent text-white text-xs rounded hover:bg-accent"
                         >
                           Launch
                         </button>
@@ -142,7 +142,7 @@ export function ReviewCyclesPanel() {
                         </button>
                       )}
                       {cycle.status === "closed" && (
-                        <span className="text-gray-500 text-xs">Completed</span>
+                        <span className="text-label-tertiary text-xs">Completed</span>
                       )}
                     </div>
                   </td>

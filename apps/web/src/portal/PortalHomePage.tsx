@@ -12,10 +12,21 @@ import {
   Briefcase,
   Target,
   Wallet,
+  Clock,
+  Hourglass,
+  FileText,
 } from "lucide-react";
-import type { ModuleKey, OrganizationCommandCenterSummary, TenantRoleKey } from "@aihxm/shared-types";
+import type {
+  AttendanceRecordView,
+  LeaveBalanceView,
+  LeaveRequestView,
+  ModuleKey,
+  OrganizationCommandCenterSummary,
+  TenantRoleKey,
+} from "@aihxm/shared-types";
 import { useAuth } from "../auth/AuthContext";
 import { api } from "../api/client";
+import { LEAVE_TYPE_LABELS, STATUS_LABELS, STATUS_STYLES } from "./leave/leaveLabels";
 
 const ROLE_LABELS: Record<string, string> = {
   hr_admin: "HR Admin",
@@ -101,6 +112,222 @@ function HomeCardTile({ card }: { card: HomeCard }) {
   );
 }
 
+// UI Re-skin Phase 4 (2026-10) — AiHxM Enterprise UI Design System Master
+// Instruction, Part 2 category 1 ("Employee Dashboard / ESS Home"): "KPI
+// row: leave balance, today's attendance, pending personal requests…
+// Personal employee data only; enforce employee self-scope." This reads
+// the exact same real endpoints LeavePage.tsx's own ESS section already
+// uses (getLeaveBalances/listAttendance/listLeaveRequests, all
+// server-scoped to the caller's own employeeId) — no new backend, no
+// mock data, just a glance-sized summary of what's already real. Shown
+// to anyone with an employeeId (every role is also a person with their
+// own leave/attendance — not employee_self_service-only), never company-
+// wide figures.
+const ATTENDANCE_STATUS_LABELS: Record<string, string> = {
+  on_time: "Present",
+  late: "Late",
+  early_departure: "Left early",
+  no_shift_assigned: "No shift today",
+  rest_day: "Rest day",
+  holiday: "Holiday",
+};
+
+function useMyLeaveAndAttendanceSnapshot(employeeId: string | null) {
+  const [balances, setBalances] = useState<LeaveBalanceView[] | null>(null);
+  const [attendance, setAttendance] = useState<AttendanceRecordView[] | null>(null);
+  const [requests, setRequests] = useState<LeaveRequestView[] | null>(null);
+
+  useEffect(() => {
+    if (!employeeId) return;
+    let cancelled = false;
+    Promise.all([
+      api.getLeaveBalances(employeeId).catch(() => [] as LeaveBalanceView[]),
+      api.listAttendance(employeeId).catch(() => [] as AttendanceRecordView[]),
+      api.listLeaveRequests(employeeId).catch(() => [] as LeaveRequestView[]),
+    ]).then(([b, a, r]) => {
+      if (cancelled) return;
+      setBalances(b);
+      setAttendance(a);
+      setRequests(r);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [employeeId]);
+
+  const pendingLeaveCount = requests ? requests.filter((r) => r.status === "pending").length : null;
+
+  return { balances, attendance, requests, pendingLeaveCount };
+}
+
+function MyDayKpiRow({
+  balances,
+  attendance,
+  pendingLeaveCount,
+}: {
+  balances: LeaveBalanceView[] | null;
+  attendance: AttendanceRecordView[] | null;
+  pendingLeaveCount: number | null;
+}) {
+  const totalRemainingLeave = balances?.reduce((sum, b) => sum + b.remainingDays, 0) ?? null;
+  const today = new Date().toDateString();
+  const todayRecord = attendance?.find((a) => new Date(a.clockInAt).toDateString() === today) ?? null;
+
+  const cards: { label: string; value: string; icon: LucideIcon; tone: "accent" | "success" | "warning" }[] = [
+    {
+      label: "Leave balance",
+      value: totalRemainingLeave === null ? "…" : `${totalRemainingLeave} days`,
+      icon: CalendarDays,
+      tone: "accent",
+    },
+    {
+      label: "Today's attendance",
+      value: !attendance ? "…" : todayRecord ? ATTENDANCE_STATUS_LABELS[todayRecord.status] ?? todayRecord.status : "Not marked",
+      icon: Clock,
+      tone: todayRecord?.status === "late" ? "warning" : "success",
+    },
+    {
+      label: "Pending requests",
+      value: pendingLeaveCount === null ? "…" : String(pendingLeaveCount),
+      icon: Hourglass,
+      tone: pendingLeaveCount && pendingLeaveCount > 0 ? "warning" : "accent",
+    },
+  ];
+
+  const toneClasses: Record<string, string> = {
+    accent: "bg-accent/10 text-accent",
+    success: "bg-success/10 text-success",
+    warning: "bg-warning/10 text-warning",
+  };
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+      {cards.map((card) => {
+        const Icon = card.icon;
+        return (
+          <div key={card.label} className="bg-card rounded-card p-4 shadow-sm border border-black/5 flex items-center gap-3">
+            <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${toneClasses[card.tone]}`}>
+              <Icon size={20} strokeWidth={1.75} />
+            </div>
+            <div className="min-w-0">
+              <div className="text-lg font-bold tabular-nums truncate">{card.value}</div>
+              <div className="text-xs text-label-tertiary truncate">{card.label}</div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Part 2 category 1's "Quick actions: Apply Leave, Attendance
+ * Regularization, View Payslip, Submit Expense, Documents." Expense
+ * Management doesn't exist in AiHxM yet (flagged separately, not
+ * fabricated here); "Documents" routes to the My Profile Documents tab
+ * shipped alongside this. Every action here is a plain route the sidebar
+ * already exposes — this is a shortcut to the same destinations the
+ * module tiles below link to, not a second navigation system or any new
+ * logic of its own.
+ */
+function QuickActionsRow({ enabledModules, roleKeys }: { enabledModules: ModuleKey[]; roleKeys: TenantRoleKey[] }) {
+  const actions: { to: string; label: string; icon: LucideIcon }[] = [
+    { to: "/app/leave", label: "Apply Leave", icon: CalendarDays },
+  ];
+  if (enabledModules.includes("payroll") && roleKeys.includes("employee_self_service")) {
+    actions.push({ to: "/app/payroll", label: "View Payslip", icon: Wallet });
+  }
+  actions.push({ to: "/app/profile", label: "Documents", icon: FileText });
+
+  return (
+    <div className="flex flex-wrap gap-3 mb-6">
+      {actions.map((action) => {
+        const Icon = action.icon;
+        return (
+          <Link
+            key={action.to + action.label}
+            to={action.to}
+            className="flex items-center gap-2 bg-card rounded-lg px-3.5 py-2.5 shadow-sm border border-black/5 hover:border-accent/30 text-sm font-medium transition-colors"
+          >
+            <Icon size={16} strokeWidth={1.75} className="text-accent" />
+            {action.label}
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Part 2 category 1's "Lower sections: upcoming leave/events, recent
+ * requests…" Both read off the same `requests` list `MyDayKpiRow`'s
+ * pending count already derives from — no extra fetch, no new backend.
+ */
+function UpcomingAndRecentLeave({ requests }: { requests: LeaveRequestView[] | null }) {
+  if (!requests) return null;
+
+  const today = new Date().toISOString().slice(0, 10);
+  const upcoming = requests
+    .filter((r) => r.status === "approved" && r.startDate >= today)
+    .sort((a, b) => a.startDate.localeCompare(b.startDate))
+    .slice(0, 3);
+  const recent = [...requests].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 3);
+
+  if (upcoming.length === 0 && recent.length === 0) return null;
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+      <section className="bg-card rounded-card p-5 shadow-sm">
+        <h2 className="font-semibold text-sm uppercase tracking-wide text-label-tertiary mb-3">Upcoming Leave</h2>
+        {upcoming.length === 0 ? (
+          <p className="text-sm text-label-tertiary">No upcoming approved leave.</p>
+        ) : (
+          <div className="space-y-2">
+            {upcoming.map((r) => (
+              <div key={r.id} className="flex items-center justify-between gap-3 text-sm">
+                <span className="text-label-secondary">
+                  {LEAVE_TYPE_LABELS[r.leaveType]} · {r.startDate} – {r.endDate}
+                </span>
+                <span className="font-mono text-xs text-label-tertiary shrink-0">
+                  {r.daysRequested} day{r.daysRequested === 1 ? "" : "s"}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="bg-card rounded-card p-5 shadow-sm">
+        <h2 className="font-semibold text-sm uppercase tracking-wide text-label-tertiary mb-3">Recent Requests</h2>
+        <div className="space-y-2">
+          {recent.map((r) => (
+            <div key={r.id} className="flex items-center justify-between gap-3 text-sm">
+              <span className="text-label-secondary truncate">
+                {LEAVE_TYPE_LABELS[r.leaveType]} · {r.startDate}
+              </span>
+              <span className={`shrink-0 inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${STATUS_STYLES[r.status]}`}>
+                {STATUS_LABELS[r.status]}
+              </span>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function MyDaySection({ employeeId, enabledModules, roleKeys }: { employeeId: string; enabledModules: ModuleKey[]; roleKeys: TenantRoleKey[] }) {
+  const { balances, attendance, requests, pendingLeaveCount } = useMyLeaveAndAttendanceSnapshot(employeeId);
+
+  return (
+    <>
+      <MyDayKpiRow balances={balances} attendance={attendance} pendingLeaveCount={pendingLeaveCount} />
+      <QuickActionsRow enabledModules={enabledModules} roleKeys={roleKeys} />
+      <UpcomingAndRecentLeave requests={requests} />
+    </>
+  );
+}
+
 const REORG_STATUS_LABELS: Record<string, string> = {
   draft: "Draft",
   validated: "Validated",
@@ -142,6 +369,10 @@ export function PortalHomePage() {
     <div>
       <h1 className="text-2xl font-bold tracking-tight mb-1">Good to see you, {fullName}</h1>
       <p className="text-sm text-label-tertiary mb-6">{companyName}</p>
+
+      {identity.employeeId && enabledModules.includes("leave") && (
+        <MyDaySection employeeId={identity.employeeId} enabledModules={enabledModules} roleKeys={roleKeys} />
+      )}
 
       {homeCards.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">

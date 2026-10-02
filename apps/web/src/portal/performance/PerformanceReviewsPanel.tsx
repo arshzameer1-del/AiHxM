@@ -58,8 +58,8 @@ export function PerformanceReviewsPanel() {
 
   const getStatusBadge = (status: PerformanceReviewView["status"]) => {
     const statusColors = {
-      pending: "bg-gray-100 text-gray-700",
-      in_progress: "bg-blue-100 text-blue-700",
+      pending: "bg-black/5 text-label-primary",
+      in_progress: "bg-accent/10 text-accent-dark",
       completed: "bg-green-100 text-green-700",
       calibrated: "bg-yellow-100 text-yellow-700",
       released: "bg-green-200 text-green-800",
@@ -72,7 +72,7 @@ export function PerformanceReviewsPanel() {
   };
 
   if (loading) {
-    return <div className="text-gray-500">Loading reviews...</div>;
+    return <div className="text-label-tertiary">Loading reviews...</div>;
   }
 
   return (
@@ -80,13 +80,13 @@ export function PerformanceReviewsPanel() {
       {error && <div className="text-red-600 text-sm bg-red-50 p-3 rounded">{error}</div>}
 
       {reviews.length === 0 ? (
-        <div className="text-gray-500 text-sm">No reviews yet</div>
+        <div className="text-label-tertiary text-sm">No reviews yet</div>
       ) : (
         <div className="grid gap-4">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-gray-200">
+                <tr className="border-b border-black/10">
                   <th className="text-left py-2 px-4 font-semibold">Employee</th>
                   <th className="text-left py-2 px-4 font-semibold">Status</th>
                   <th className="text-left py-2 px-4 font-semibold">Self Submitted</th>
@@ -96,7 +96,7 @@ export function PerformanceReviewsPanel() {
               </thead>
               <tbody>
                 {reviews.map((review) => (
-                  <tr key={review.id} className="border-b border-gray-100 hover:bg-gray-50">
+                  <tr key={review.id} className="border-b border-black/5 hover:bg-surface">
                     <td className="py-3 px-4">{review.employeeId}</td>
                     <td className="py-3 px-4">{getStatusBadge(review.status)}</td>
                     <td className="py-3 px-4">
@@ -108,7 +108,7 @@ export function PerformanceReviewsPanel() {
                     <td className="py-3 px-4">
                       <button
                         onClick={() => setSelectedReview(review)}
-                        className="text-blue-600 hover:underline text-xs font-medium"
+                        className="text-accent hover:underline text-xs font-medium"
                       >
                         View
                       </button>
@@ -120,23 +120,23 @@ export function PerformanceReviewsPanel() {
           </div>
 
           {selectedReview && (
-            <div className="border border-gray-200 rounded-lg p-6 bg-gray-50">
+            <div className="border border-black/10 rounded-lg p-6 bg-surface">
               <div className="flex justify-between items-start mb-4">
                 <h3 className="font-semibold">Review Details: {selectedReview.employeeId}</h3>
                 <button
                   onClick={() => setSelectedReview(null)}
-                  className="text-gray-500 hover:text-gray-700 text-xl leading-none"
+                  className="text-label-tertiary hover:text-label-primary text-xl leading-none"
                 >
                   ×
                 </button>
               </div>
 
-              <div className="bg-white p-4 rounded border border-gray-200 space-y-6">
+              <div className="bg-white p-4 rounded border border-black/10 space-y-6">
                 {/* Self Assessment */}
                 <div>
                   <h4 className="font-medium mb-2">Self Assessment</h4>
                   {selectedReview.selfAssessmentSubmittedAt ? (
-                    <p className="text-sm text-gray-700">{selectedReview.selfAssessment}</p>
+                    <p className="text-sm text-label-primary">{selectedReview.selfAssessment}</p>
                   ) : roleKeys.includes("employee_self_service") ||
                     roleKeys.includes("hr_admin") ? (
                     <AssessmentForm
@@ -145,7 +145,7 @@ export function PerformanceReviewsPanel() {
                       isManager={false}
                     />
                   ) : (
-                    <p className="text-sm text-gray-500">Not submitted yet</p>
+                    <p className="text-sm text-label-tertiary">Not submitted yet</p>
                   )}
                 </div>
 
@@ -153,10 +153,10 @@ export function PerformanceReviewsPanel() {
                 <div>
                   <h4 className="font-medium mb-2">Manager Assessment</h4>
                   {selectedReview.managerAssessmentSubmittedAt ? (
-                    <div className="text-sm text-gray-700">
+                    <div className="text-sm text-label-primary">
                       <p>{selectedReview.managerAssessment}</p>
                       {selectedReview.managerRating && (
-                        <p className="text-xs text-gray-600 mt-2">Rating: {selectedReview.managerRating}/5</p>
+                        <p className="text-xs text-label-secondary mt-2">Rating: {selectedReview.managerRating}/5</p>
                       )}
                     </div>
                   ) : roleKeys.includes("line_manager") || roleKeys.includes("hr_admin") ? (
@@ -166,7 +166,7 @@ export function PerformanceReviewsPanel() {
                       isManager={true}
                     />
                   ) : (
-                    <p className="text-sm text-gray-500">Not submitted yet</p>
+                    <p className="text-sm text-label-tertiary">Not submitted yet</p>
                   )}
                 </div>
               </div>
@@ -202,20 +202,20 @@ function AssessmentForm({
 
   return (
     <div className="space-y-2">
-      <span className="block text-xs font-medium uppercase tracking-wide text-gray-500">
+      <span className="block text-xs font-medium uppercase tracking-wide text-label-tertiary">
         {isManager ? "Manager assessment" : "Self assessment"}
       </span>
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
         placeholder={placeholder}
-        className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+        className="w-full px-3 py-2 border border-black/20 rounded focus:outline-none focus:ring-2 focus:ring-accent text-sm"
         rows={3}
       />
       <button
         onClick={handleSubmit}
         disabled={loading || !text.trim()}
-        className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50"
+        className="px-3 py-1 bg-accent text-white text-sm rounded hover:bg-accent-dark disabled:opacity-50"
       >
         {loading ? "Submitting..." : "Submit"}
       </button>

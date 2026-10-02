@@ -58,6 +58,7 @@ import type {
   DecideAttendanceCorrectionRequest,
   DecideLeaveRequestRequest,
   DecideOfferResponse,
+  EmployeeDocumentView,
   EmployeeGroupPolicyAssignmentView,
   EmployeeGroupView,
   EmployeeNumberFormat,
@@ -1226,6 +1227,44 @@ export const api = {
     }),
 
   listJobHistory: (id: string) => request<JobHistoryEntryView[]>(`/employees/${id}/job-history`),
+
+  // UI Re-skin Phase 4 — the document vault (`employees.controller.ts`'s
+  // `/employees/:id/documents*` routes, `EmployeesService.addDocument`/
+  // `listDocuments`/`downloadDocument`) has existed since HR
+  // Administration v2 but was never wired to any frontend. `listDocuments`
+  // applies the exact same view-scope check as `getEmployee()` itself, so
+  // an employee_self_service caller sees their own file the same way they
+  // already see their own profile — upload stays HR-only
+  // (`employee.manage.all`), not added here. Same authenticated-blob
+  // pattern as `downloadBackup`/`downloadDisbursementFile` below.
+  listEmployeeDocuments: (employeeId: string) =>
+    request<EmployeeDocumentView[]>(`/employees/${employeeId}/documents`),
+
+  async downloadEmployeeDocument(employeeId: string, documentId: string, fileName: string): Promise<void> {
+    const token = getToken();
+    const res = await fetch(`/api/employees/${employeeId}/documents/${documentId}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = await res.json();
+        message = body.message ?? message;
+      } catch {
+        // not JSON — keep the generic message
+      }
+      throw new ApiError(res.status, message);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  },
 
   // --- Organization Management, Phase 1 (0065_organization_units.sql) ------
   // The canonical Org Unit hierarchy — the Hierarchy Explorer's own data

@@ -63,15 +63,15 @@ export function CalibrationPanel() {
   };
 
   if (!canCalibrate) {
-    return <div className="text-gray-600">Calibration is available to HR administrators only.</div>;
+    return <div className="text-label-secondary">Calibration is available to HR administrators only.</div>;
   }
 
   if (loading) {
-    return <div className="text-gray-500">Loading calibration data...</div>;
+    return <div className="text-label-tertiary">Loading calibration data...</div>;
   }
 
   if (cycles.length === 0) {
-    return <div className="text-gray-600">No cycles in calibration phase</div>;
+    return <div className="text-label-secondary">No cycles in calibration phase</div>;
   }
 
   return (
@@ -79,11 +79,11 @@ export function CalibrationPanel() {
       {error && <div className="text-red-600 text-sm bg-red-50 p-3 rounded">{error}</div>}
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-2">Select Cycle</label>
+        <label className="block text-sm font-medium text-label-primary mb-2">Select Cycle</label>
         <select
           value={selectedCycleId || ""}
           onChange={(e) => setSelectedCycleId(e.target.value)}
-          className="w-full px-3 py-2 border border-gray-300 rounded hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="w-full px-3 py-2 border border-black/20 rounded hover:border-black/20 focus:outline-none focus:ring-2 focus:ring-accent"
         >
           {cycles.map((cycle) => (
             <option key={cycle.id} value={cycle.id}>
@@ -94,10 +94,10 @@ export function CalibrationPanel() {
       </div>
 
       {reviews.length === 0 ? (
-        <div className="text-gray-500 text-sm">No pending reviews to calibrate</div>
+        <div className="text-label-tertiary text-sm">No pending reviews to calibrate</div>
       ) : (
         <div className="space-y-4">
-          <p className="text-sm text-gray-600">
+          <p className="text-sm text-label-secondary">
             {reviews.length} review{reviews.length !== 1 ? "s" : ""} pending calibration
           </p>
           <div className="space-y-3">
@@ -132,22 +132,22 @@ function CalibrationReviewCard({
   };
 
   return (
-    <div className="border border-gray-200 rounded-lg p-4 bg-white">
+    <div className="border border-black/10 rounded-lg p-4 bg-white">
       <div className="flex justify-between items-start mb-3">
         <div>
           <p className="font-medium">{review.employeeId}</p>
-          <p className="text-xs text-gray-600">{review.status}</p>
+          <p className="text-xs text-label-secondary">{review.status}</p>
         </div>
         <div className="text-sm">
           {review.managerRating && (
-            <p className="text-gray-600">Manager rated: <span className="font-semibold">{review.managerRating}/5</span></p>
+            <p className="text-label-secondary">Manager rated: <span className="font-semibold">{review.managerRating}/5</span></p>
           )}
         </div>
       </div>
 
       {review.managerAssessment && (
-        <div className="mb-3 p-3 bg-gray-50 rounded text-sm">
-          <p className="text-gray-700">{review.managerAssessment}</p>
+        <div className="mb-3 p-3 bg-surface rounded text-sm">
+          <p className="text-label-primary">{review.managerAssessment}</p>
         </div>
       )}
 
@@ -158,11 +158,11 @@ function CalibrationReviewCard({
           {isEditing ? (
             <div className="space-y-2">
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Calibrated Rating</label>
+                <label className="block text-xs font-medium text-label-primary mb-1">Calibrated Rating</label>
                 <select
                   value={rating}
                   onChange={(e) => setRating(Number(e.target.value))}
-                  className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                  className="w-full px-2 py-1 border border-black/20 rounded text-sm"
                 >
                   {[1, 2, 3, 4, 5].map((r) => (
                     <option key={r} value={r}>
@@ -172,11 +172,11 @@ function CalibrationReviewCard({
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Comment</label>
+                <label className="block text-xs font-medium text-label-primary mb-1">Comment</label>
                 <textarea
                   value={comment}
                   onChange={(e) => setComment(e.target.value)}
-                  className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                  className="w-full px-2 py-1 border border-black/20 rounded text-sm"
                   rows={2}
                   placeholder="Calibration notes..."
                 />
@@ -190,7 +190,7 @@ function CalibrationReviewCard({
                 </button>
                 <button
                   onClick={() => setIsEditing(false)}
-                  className="px-3 py-1 bg-gray-300 text-gray-700 text-xs rounded hover:bg-gray-400"
+                  className="px-3 py-1 bg-black/10 text-label-primary text-xs rounded hover:bg-black/20"
                 >
                   Cancel
                 </button>
@@ -199,7 +199,7 @@ function CalibrationReviewCard({
           ) : (
             <button
               onClick={() => setIsEditing(true)}
-              className="text-blue-600 hover:underline text-xs font-medium"
+              className="text-accent hover:underline text-xs font-medium"
             >
               Calibrate
             </button>

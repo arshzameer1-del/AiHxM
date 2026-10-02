@@ -12,24 +12,34 @@ import type { EmployeeView } from "@aihxm/shared-types";
  * IS present but genuinely empty (a new hire with no department yet) DOES
  * render, as "—" — those are different facts about the data.
  */
-const FIELD_ROWS: { key: keyof EmployeeView; label: string }[] = [
-  { key: "employeeNumber", label: "Employee #" },
-  { key: "employmentStatus", label: "Status" },
-  { key: "email", label: "Email" },
-  { key: "phone", label: "Phone" },
-  { key: "department", label: "Department" },
-  { key: "designation", label: "Designation" },
-  { key: "location", label: "Location" },
-  { key: "employmentType", label: "Employment type" },
-  { key: "dateOfJoining", label: "Date of joining" },
-  { key: "gender", label: "Gender" },
-  { key: "maritalStatus", label: "Marital status" },
-  { key: "cnic", label: "CNIC" },
-  { key: "dateOfBirth", label: "Date of birth" },
-  { key: "salaryBand", label: "Salary band" },
-  { key: "bankAccountNumber", label: "Bank account" },
-  { key: "terminationDate", label: "Termination date" },
-  { key: "terminationReason", label: "Termination reason" },
+// UI Re-skin Phase 4 — each row now carries a `group`
+// ("personal"/"job"/"contact") so MyProfilePage.tsx can split this exact
+// same RBAC-filtered field list across its Part 2-specified tabs
+// (Personal Information / Job Details / Contact) without duplicating the
+// list or its field-omission logic. `EmployeeDetailPage` (HR Admin/
+// Manager view) doesn't pass `sections`, so it keeps rendering every
+// group together exactly as before this change — nothing about its
+// output moves.
+type FieldGroup = "personal" | "job" | "contact";
+
+const FIELD_ROWS: { key: keyof EmployeeView; label: string; group: FieldGroup }[] = [
+  { key: "employeeNumber", label: "Employee #", group: "job" },
+  { key: "employmentStatus", label: "Status", group: "job" },
+  { key: "email", label: "Email", group: "contact" },
+  { key: "phone", label: "Phone", group: "contact" },
+  { key: "department", label: "Department", group: "job" },
+  { key: "designation", label: "Designation", group: "job" },
+  { key: "location", label: "Location", group: "job" },
+  { key: "employmentType", label: "Employment type", group: "job" },
+  { key: "dateOfJoining", label: "Date of joining", group: "job" },
+  { key: "gender", label: "Gender", group: "personal" },
+  { key: "maritalStatus", label: "Marital status", group: "personal" },
+  { key: "cnic", label: "CNIC", group: "personal" },
+  { key: "dateOfBirth", label: "Date of birth", group: "personal" },
+  { key: "salaryBand", label: "Salary band", group: "job" },
+  { key: "bankAccountNumber", label: "Bank account", group: "contact" },
+  { key: "terminationDate", label: "Termination date", group: "job" },
+  { key: "terminationReason", label: "Termination reason", group: "job" },
 ];
 
 // Enum-shaped fields ("active", "permanent") read better title-cased;
@@ -46,8 +56,8 @@ function displayValue(value: unknown): string {
   return String(value);
 }
 
-export function EmployeeFields({ employee }: { employee: EmployeeView }) {
-  const rows = FIELD_ROWS.filter((row) => row.key in employee);
+export function EmployeeFields({ employee, sections }: { employee: EmployeeView; sections?: FieldGroup[] }) {
+  const rows = FIELD_ROWS.filter((row) => row.key in employee && (!sections || sections.includes(row.group)));
   return (
     <dl className="grid grid-cols-2 gap-x-6 gap-y-3">
       {rows.map((row) => (
