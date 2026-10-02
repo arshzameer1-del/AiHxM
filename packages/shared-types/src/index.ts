@@ -34,6 +34,10 @@ export const MODULE_KEYS = [
   "learning",
   "exit",
   "bi",
+  // UI re-skin ESS build-out (2026-10, Part 2 category 6) — the one
+  // module this list was missing versus what the design spec documents
+  // as a real ESS category. See apps/api/migrations/0115_expense_management.sql.
+  "expense",
   "dummy",
 ] as const;
 
@@ -2824,6 +2828,68 @@ export type SubmitLeaveRequestResponse = {
 };
 
 export type DecideLeaveRequestRequest = {
+  decision: "approved" | "rejected";
+  comment?: string;
+};
+
+// --- Expense Management (Part 2 category 6, UI re-skin build-out 2026-10) ---
+// Same shape discipline as Leave above: a View type per real object, and
+// Request/Response types only for the service methods whose payload is
+// more than "the DTO, verbatim" (submit's response bundles receipts;
+// decide/pay are simple enough the DTO IS the request type, same as
+// leave's DecideLeaveRequestRequest above).
+
+export type ExpenseCategory =
+  | "travel"
+  | "meals"
+  | "accommodation"
+  | "office_supplies"
+  | "communication"
+  | "training"
+  | "other";
+
+export type ExpenseClaimStatus = "draft" | "pending" | "approved" | "rejected" | "paid" | "cancelled";
+
+export type ExpenseReceiptView = {
+  id: string;
+  expenseClaimId: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  createdAt: string;
+};
+
+export type ExpenseClaimView = {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  category: ExpenseCategory;
+  expenseDate: string;
+  amount: number;
+  currency: string;
+  description: string | null;
+  status: ExpenseClaimStatus;
+  submittedByUserAccountId: string | null;
+  /** Same derived-not-stored On-Behalf flag as LeaveRequestView.isOnBehalf. */
+  isOnBehalf: boolean;
+  workflowInstanceId: string | null;
+  paidAt: string | null;
+  paidByUserAccountId: string | null;
+  receipts: ExpenseReceiptView[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SubmitExpenseClaimRequest = {
+  employeeId: string;
+  category: ExpenseCategory;
+  expenseDate: string;
+  amount: number;
+  currency?: string;
+  description?: string;
+};
+
+export type DecideExpenseClaimRequest = {
   decision: "approved" | "rejected";
   comment?: string;
 };

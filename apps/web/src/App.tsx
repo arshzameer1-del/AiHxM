@@ -221,6 +221,12 @@ const HrAdministrationPage = lazy(() =>
 const LeavePage = lazy(() =>
   import("./portal/leave/LeavePage").then((m) => ({ default: m.LeavePage })),
 );
+// ESS build-out (2026-10, Part 2 category 6) — new module, built end to
+// end since no Expense module existed in this app before it (see
+// claude/ui-reskin-design-system-and-migration-plan-2026-10.md §3).
+const ExpensesPage = lazy(() =>
+  import("./portal/expenses/ExpensesPage").then((m) => ({ default: m.ExpensesPage })),
+);
 const RecruitmentPage = lazy(() =>
   import("./portal/recruitment/RecruitmentPage").then((m) => ({
     default: m.RecruitmentPage,
@@ -443,6 +449,13 @@ export default function App() {
                     LeavePage renders one screen for every role, same
                     pattern as Task #48/#49. */}
                   <Route path="leave" element={<LeavePage />} />
+                  {/* ESS build-out (2026-10) — Expense Management.
+                    expense_claim.view.self/.team/.all mirror Leave's own
+                    three-role split exactly (0115_expense_management.sql),
+                    so this follows the identical one-screen-every-role
+                    pattern; who can actually decide/pay/cancel a given
+                    claim is enforced server-side the same way. */}
+                  <Route path="expenses" element={<ExpensesPage />} />
                   {/* Task #51 — Recruitment. recruitment.manage.all is
                     hr_admin-only with no self/team scoping, so unlike
                     Leave/Employee Core there's no per-role rendering

@@ -14,6 +14,7 @@ import {
   Target,
   Wallet,
   BookOpenCheck,
+  Receipt,
 } from "lucide-react";
 import type { ModuleKey, PublicTenantBranding, TenantRoleKey } from "@aihxm/shared-types";
 import { api, publicTenantBrandingAssetUrl } from "../api/client";
@@ -173,6 +174,14 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): 
 
   if (hasModule("leave") && roleKeys.length > 0) {
     items.push({ to: "/app/leave", label: "Leave & Attendance", icon: CalendarDays });
+  }
+
+  // ESS build-out (2026-10, Part 2 category 6) — expense_claim.view.self/
+  // .team/.all mirror leave_request.view.*'s exact three-role seed
+  // (0115_expense_management.sql), so this is gated identically to the
+  // Leave entry just above it.
+  if (hasModule("expense") && roleKeys.length > 0) {
+    items.push({ to: "/app/expenses", label: "Expenses", icon: Receipt });
   }
 
   if (hasRole("hr_admin") && hasModule("recruitment")) {

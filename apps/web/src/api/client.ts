@@ -56,9 +56,12 @@ import type {
   CreateShiftRequest,
   CreateWorkflowTemplateRequest,
   DecideAttendanceCorrectionRequest,
+  DecideExpenseClaimRequest,
   DecideLeaveRequestRequest,
   DecideOfferResponse,
   EmployeeDocumentView,
+  ExpenseClaimView,
+  ExpenseReceiptView,
   EmployeeGroupPolicyAssignmentView,
   EmployeeGroupView,
   EmployeeNumberFormat,
@@ -174,6 +177,7 @@ import type {
   SignupRequest,
   SignupResponse,
   SubmitAttendanceCorrectionRequest,
+  SubmitExpenseClaimRequest,
   SubmitLeaveRequestRequest,
   SubmitLeaveRequestResponse,
   SubmitManagerAssessmentRequest,
@@ -224,6 +228,7 @@ import type {
   UpdateWorkScheduleAssignmentRuleRequest,
   UserSessionView,
   VerticalPosition,
+  WorkflowInstanceView,
   WorkflowTemplate,
   WorkScheduleAssignmentRuleView,
   WorkScheduleDayView,
@@ -2100,6 +2105,84 @@ export const api = {
   listAttendanceCorrections: (employeeId: string) =>
     request<AttendanceCorrectionRequestView[]>(`/employees/${employeeId}/attendance-corrections`),
 
+  // --- Expense Management (UI re-skin ESS build-out, 2026-10, Part 2
+  // category 6) — same "server already RBAC-scopes it" shape as Leave
+  // above: hr_admin (view.all), line_manager (view.team),
+  // employee_self_service (view.self) all call the identical
+  // listExpenseClaims() and render whatever comes back. Who may actually
+  // decide a pending claim is entirely workflow-routing-determined
+  // server-side (ExpenseClaimsService.decide()'s own doc comment), same
+  // as decideLeaveRequest below it.
+  listExpenseClaims: (employeeId?: string) =>
+    request<ExpenseClaimView[]>(`/expense-claims${employeeId ? `?employeeId=${employeeId}` : ""}`),
+
+  getExpenseClaim: (id: string) => request<ExpenseClaimView>(`/expense-claims/${id}`),
+
+  submitExpenseClaim: (input: SubmitExpenseClaimRequest) =>
+    request<ExpenseClaimView>("/expense-claims", { method: "POST", body: JSON.stringify(input) }),
+
+  decideExpenseClaim: (id: string, input: DecideExpenseClaimRequest) =>
+    request<ExpenseClaimView>(`/expense-claims/${id}/decision`, { method: "PATCH", body: JSON.stringify(input) }),
+
+  markExpenseClaimPaid: (id: string) =>
+    request<ExpenseClaimView>(`/expense-claims/${id}/mark-paid`, { method: "POST" }),
+
+  cancelExpenseClaim: (id: string) => request<void>(`/expense-claims/${id}/cancel`, { method: "POST" }),
+
+  // Same multipart shape as uploadBrandingAsset above.
+  async uploadExpenseReceipt(claimId: string, file: File): Promise<ExpenseReceiptView> {
+    const token = getToken();
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch(`/api/expense-claims/${claimId}/receipts`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    });
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = await res.json();
+        message = body.message ?? message;
+      } catch {
+        // not JSON — keep the generic message
+      }
+      throw new ApiError(res.status, message);
+    }
+    // The upload endpoint returns the receipt row, not the whole claim —
+    // callers that need the refreshed claim call getExpenseClaim() again
+    // (same "re-fetch rather than guess the merged shape" approach the
+    // rest of this file uses for every other side-effecting mutation).
+    return res.json();
+  },
+
+  // Same authenticated-blob pattern as downloadEmployeeDocument above.
+  async downloadExpenseReceipt(claimId: string, receiptId: string, fileName: string): Promise<void> {
+    const token = getToken();
+    const res = await fetch(`/api/expense-claims/${claimId}/receipts/${receiptId}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = await res.json();
+        message = body.message ?? message;
+      } catch {
+        // not JSON — keep the generic message
+      }
+      throw new ApiError(res.status, message);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  },
+
   // --- Recruitment (Task #51) -------------------------------------------
   // recruitment.manage.all is a single scope-less permission granted only
   // to hr_admin (0018_recruitment_seed.sql — no .self/.team split exists
@@ -2170,6 +2253,13 @@ export const api = {
   // holds it too, but that's Phase 4 test scaffolding, never assigned to
   // a real company).
   listWorkflowTemplates: () => request<WorkflowTemplate[]>("/workflow/templates"),
+
+  // Backs the workflow timeline on an Expense Management claim's detail
+  // view (Part 2: "Expense detail includes... workflow timeline") — any
+  // real session can call this (WorkflowController's own posture); seeing
+  // the claim itself already required the caller to pass
+  // ExpenseClaimsService's own view-scope check.
+  getWorkflowInstance: (id: string) => request<WorkflowInstanceView>(`/workflow/submissions/${id}`),
 
   createWorkflowTemplate: (input: CreateWorkflowTemplateRequest) =>
     request<WorkflowTemplate>("/workflow/templates", { method: "POST", body: JSON.stringify(input) }),
