@@ -1,0 +1,29 @@
+-- Fix: `configuration_registry` (0032_configuration_center.sql) was
+-- designed as a GLOBAL, non-tenant-owned catalog table -- that migration's
+-- own header comment says explicitly: "no company_id, no RLS, because
+-- this describes the PRODUCT's configurable surface ... not any tenant's
+-- business data," the same pattern `module_catalog` (0006) already uses.
+--
+-- Live investigation on production (2026-10-02) found Row Level Security
+-- had been turned ON for this table anyway (relrowsecurity = true), with
+-- zero policies defined for it -- nothing in this codebase's own
+-- migrations ever enabled RLS on it, so this almost certainly happened
+-- through Supabase's dashboard "Enable RLS" security-advisory prompt,
+-- outside this migration history entirely.
+--
+-- Postgres's actual behavior when RLS is ON with NO policies: every row
+-- is hidden from every role except the table owner (and anything with
+-- BYPASSRLS) -- `app_role` (the role the running API always connects as;
+-- see database.module.ts) got zero rows back no matter what it was
+-- permitted to SELECT. That's why GET /api/configuration-center always
+-- returned `[]`: ConfigurationCenterService.getSummary() reads this
+-- table first to know which domains even exist, and saw none -- the
+-- permission checks on each individual domain (employee_group.manage,
+-- leave_policy.manage, etc.) were never reached, and were all already
+-- correctly granted the whole time.
+--
+-- The fix restores this table to the global-catalog, no-RLS state its
+-- own original migration specifies -- it does not change what rows exist
+-- or what any tenant can see of their OWN data; this table has no
+-- tenant-specific rows to protect in the first place.
+ALTER TABLE configuration_registry DISABLE ROW LEVEL SECURITY;
