@@ -4042,6 +4042,123 @@ export type PayslipView = {
   updatedAt: string;
 };
 
+/**
+ * Payroll Enterprise Gap Analysis Phase P5 (0114_payroll_disbursement_
+ * settings_and_payment_batches.sql) — "Payments & accounting integration."
+ *
+ * `DisbursementFieldKey` — the full set of columns `generateDisbursementFile()`
+ * can emit. `employeeNumber`/`bankAccountNumber`/`netPay` existed before this
+ * phase (the original generic 3-column CSV); everything else is sourced from
+ * `employee_payment_accounts` (Core Employee's Payment/Bank card,
+ * 0086_core_employee_payment_cost_allocation.sql) — the richer, actively-
+ * maintained bank record Payroll never read before this phase (it was still
+ * reading the long-stale flat `employees.bank_account_number` column).
+ * `bankAccountNumber` is kept as a key (not removed) for backward
+ * compatibility with any tenant's existing configuration/integration — it now
+ * resolves to the employee's active primary payment account's `accountNumber`
+ * where one exists, falling back to the legacy flat column only when it
+ * doesn't, so an existing tenant's file keeps working (and gets MORE correct)
+ * without needing to reconfigure anything.
+ */
+export type DisbursementFieldKey =
+  | "employeeNumber"
+  | "employeeName"
+  | "cnic"
+  | "paymentMethod"
+  | "bankName"
+  | "accountTitle"
+  | "accountNumber"
+  | "iban"
+  | "branchCode"
+  | "bankAccountNumber"
+  | "netPay";
+
+export type PayrollDisbursementSettingsView = {
+  companyId: string;
+  columns: DisbursementFieldKey[];
+  updatedAt: string;
+};
+
+export type UpdatePayrollDisbursementSettingsRequest = {
+  columns: DisbursementFieldKey[];
+};
+
+export type PayrollPaymentBatchStatus = "generated" | "voided";
+
+/** One row per `generateDisbursementFile()` call that actually produced a
+ * file — the duplicate-payment-protection ledger. See that method's own doc
+ * comment in `PayrollService` for the confirm-to-regenerate guard this
+ * drives. */
+export type PayrollPaymentBatchView = {
+  id: string;
+  companyId: string;
+  payrollRunId: string;
+  batchReference: string;
+  rowCount: number;
+  /** Employees in this run who were left OUT of the bank file (no active
+   * bank_transfer payment account on file) — surfaced so HR notices and
+   * pays them another way, rather than a silent gap. */
+  excludedCount: number;
+  totalNetPay: number;
+  status: PayrollPaymentBatchStatus;
+  voidedReason: string | null;
+  voidedAt: string | null;
+  voidedByUserAccountId: string | null;
+  generatedByUserAccountId: string;
+  generatedAt: string;
+};
+
+/** `PayrollService.generateDisbursementFile()`'s response — the CSV plus
+ * enough metadata for the caller (frontend) to show what just happened
+ * without a second round-trip, and the batch history for this run so a
+ * second click is an informed choice, not a guess. */
+export type GenerateDisbursementFileResponse = {
+  csv: string;
+  batch: PayrollPaymentBatchView;
+  /** Employees in this run with no usable bank_transfer payment account —
+   * same employeeNumber/name shape as everywhere else this platform
+   * surfaces a per-employee skip reason (`PayrollCalculationError`). */
+  excluded: Array<{ employeeNumber: string; employeeName: string; reason: string }>;
+};
+
+/** Section 20 (Accounting & Costing Administration): "cost-center mapping;
+ * ... organization-based costing; employee allocation; split allocation
+ * where supported" — wired into Payroll via a READ-ONLY report over the
+ * EXISTING `employee_cost_allocations` table (Core Employee Phase 8,
+ * 0086_core_employee_payment_cost_allocation.sql), not a new costing
+ * table or a GL/journal engine (that remains Phase P6). An employee with no
+ * active cost allocation at all falls into the `costCenterId: null`
+ * "Unallocated" bucket; an employee split across several cost centers
+ * contributes a proportional share (by `allocationPercentage`) of their
+ * gross/net pay to each one they're allocated to. */
+export type PayrollCostCenterBreakdownRow = {
+  costCenterId: string | null;
+  costCenterCode: string | null;
+  /** "Unallocated" for the `costCenterId: null` bucket. */
+  costCenterName: string;
+  employeeCount: number;
+  totalGrossPay: number;
+  totalNetPay: number;
+};
+
+export type PayrollCostCenterBreakdownView = {
+  payrollRunId: string;
+  rows: PayrollCostCenterBreakdownRow[];
+};
+
+/** `PayrollService.previewDisbursementFile()`'s response — same
+ * rowCount/excluded/totalNetPay shape `generateDisbursementFile()` would
+ * produce, plus the existing active batch (if any) so the frontend can
+ * show the "already generated" warning and the excluded list BEFORE the
+ * caller commits to a real (batch-writing) download. */
+export type PreviewDisbursementFileResponse = {
+  rowCount: number;
+  excludedCount: number;
+  excluded: Array<{ employeeNumber: string; employeeName: string; reason: string }>;
+  totalNetPay: number;
+  existingBatch: PayrollPaymentBatchView | null;
+};
+
 /** One per-employee failure from `calculateRun()` — collected rather
  * than thrown on the first bad row, the same "real error report, never
  * silent partial failure" discipline `ImportExportService.parseAndValidate()`

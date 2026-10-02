@@ -22,9 +22,14 @@ import type {
   CalculatePayrollRunResponse,
   CreatePayrollRunRequest,
   DecideLeaveRequestRequest,
+  DisbursementFieldKey,
+  GenerateDisbursementFileResponse,
   OffCycleReason,
   PayrollCalculationError,
   PayrollCalculationStep,
+  PayrollCostCenterBreakdownView,
+  PayrollDisbursementSettingsView,
+  PayrollPaymentBatchView,
   PayrollRunType,
   PayrollRunView,
   PayrollSettingsView,
@@ -33,6 +38,7 @@ import type {
   SetTaxSlabsRequest,
   TaxSlabSetView,
   TaxSlabView,
+  UpdatePayrollDisbursementSettingsRequest,
   UpdatePayrollSettingsRequest,
 } from "@aihxm/shared-types";
 
@@ -58,6 +64,26 @@ const FINALIZE_PERMISSION_BASE = "payroll.finalize";
 const DISBURSE_PERMISSION_BASE = "payroll.disburse";
 const RUN_SCOPED_VIEW_BASES = [CALCULATE_PERMISSION_BASE, FINALIZE_PERMISSION_BASE, DISBURSE_PERMISSION_BASE] as const;
 const SELF_VIEW_PERMISSION = "payroll_review.view.self";
+
+// Payroll Enterprise Gap Analysis Phase P5 (0114_payroll_disbursement_
+// settings_and_payment_batches.sql) — every column `generateDisbursementFile()`
+// can emit, and the backward-compatible default (unchanged from before this
+// phase). See `DisbursementFieldKey`'s own doc comment in shared-types for why
+// this is a tenant-configurable column set rather than one hardcoded bank's
+// real file spec.
+const DISBURSEMENT_FIELD_KEYS: DisbursementFieldKey[] = [
+  "employeeNumber",
+  "employeeName",
+  "cnic",
+  "paymentMethod",
+  "bankName",
+  "accountTitle",
+  "accountNumber",
+  "iban",
+  "branchCode",
+  "bankAccountNumber",
+  "netPay",
+];
 
 // Phase P2 — same "own constants per consumer module" pattern
 // RecruitmentService/LeaveRequestsService already use, not shared state.
@@ -172,6 +198,34 @@ function rowToSettings(row: any): PayrollSettingsView {
     effectiveFrom: toIsoDate(row.effective_from),
     effectiveTo: toIsoDateOrNull(row.effective_to),
     updatedAt: toIso(row.updated_at) as string,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function rowToDisbursementSettings(row: any): PayrollDisbursementSettingsView {
+  return {
+    companyId: row.company_id,
+    columns: row.columns as DisbursementFieldKey[],
+    updatedAt: toIso(row.updated_at) as string,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function rowToPaymentBatch(row: any): PayrollPaymentBatchView {
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    payrollRunId: row.payroll_run_id,
+    batchReference: row.batch_reference,
+    rowCount: Number(row.row_count),
+    excludedCount: Number(row.excluded_count),
+    totalNetPay: Number(row.total_net_pay),
+    status: row.status,
+    voidedReason: row.voided_reason ?? null,
+    voidedAt: toIso(row.voided_at),
+    voidedByUserAccountId: row.voided_by_user_account_id ?? null,
+    generatedByUserAccountId: row.generated_by_user_account_id,
+    generatedAt: toIso(row.generated_at) as string,
   };
 }
 
@@ -1157,35 +1211,92 @@ export class PayrollService {
     });
   }
 
-  /** The bank disbursement file — Section 5's own external-interface
-   * rule ("references employee_number, never the internal UUID"),
-   * generated via the same `ImportExportService.toCsv()` utility the
-   * Conversions WRICEF pillar built. Only a finalized run's numbers are
-   * real enough to hand to a bank. */
-  async generateDisbursementFile(claims: RequestClaims, runId: string): Promise<string> {
+  /**
+   * The bank disbursement file — Section 5's own external-interface rule
+   * ("references employee_number, never the internal UUID"), generated via
+   * the same `ImportExportService.toCsv()` utility the Conversions WRICEF
+   * pillar built. Only a finalized run's numbers are real enough to hand to
+   * a bank.
+   *
+   * Payroll Enterprise Gap Analysis Phase P5 — two changes from the original
+   * generic 3-column version:
+   *
+   * 1. **Real bank details, tenant-configurable columns.** Rows are now
+   *    built by `buildDisbursementRows()`, which joins each employee's
+   *    ACTIVE PRIMARY `employee_payment_accounts` row (Core Employee's own
+   *    Payment/Bank card, 0086) rather than reading the long-stale flat
+   *    `employees.bank_account_number` column this endpoint read before
+   *    this phase. Which of the available `DISBURSEMENT_FIELD_KEYS` actually
+   *    get written, and in what order, comes from
+   *    `payroll_disbursement_settings` (tenant-configurable — see that
+   *    table's own migration comment for why this is a swappable adapter,
+   *    not a hardcoded specific bank's real spec) — defaulting to the exact
+   *    3 columns this endpoint always produced, so an existing tenant's file
+   *    is unchanged until they explicitly reconfigure it. An employee with
+   *    no usable bank_transfer account on file is EXCLUDED from the file
+   *    (never silently given a blank account number) and reported back.
+   * 2. **Duplicate-payment protection.** Every row written to the file is
+   *    tracked in `payroll_payment_batches`. If this run already has a
+   *    non-voided batch, generating ANOTHER one requires the caller to pass
+   *    `confirmRegenerate: true` — otherwise this throws, telling HR exactly
+   *    when/by whom/how many rows the existing one covers, so a stray
+   *    second click (or a second person downloading the same file) can
+   *    never silently hand someone a second bank file for money that may
+   *    already have moved. `previewDisbursementFile()` lets the frontend
+   *    show this (and the excluded list) BEFORE committing to a new batch.
+   */
+  async generateDisbursementFile(
+    claims: RequestClaims,
+    runId: string,
+    confirmRegenerate = false
+  ): Promise<GenerateDisbursementFileResponse> {
     const access = await this.requireRunAction(claims, DISBURSE_PERMISSION_BASE, "Not permitted to generate payroll disbursement files");
-    const { csv, event } = await this.db.withClaims(claims, async (client) => {
+    const { csv, batch, excluded, event } = await this.db.withClaims(claims, async (client) => {
       const run = await this.loadRun(client, runId);
       this.assertRunInScope(access, run);
       if (run.status !== "finalized") {
         throw new BadRequestException("Cannot disburse a payroll run that is not finalized yet");
       }
-      const result = await client.query(
-        "SELECT employee_number, bank_account_number, net_pay FROM payslips WHERE payroll_run_id = $1 ORDER BY employee_number",
+
+      const priorCount = await client.query(
+        "SELECT COUNT(*)::int AS n FROM payroll_payment_batches WHERE payroll_run_id = $1",
         [runId]
       );
-      const rows = result.rows.map((r) => ({
-        employeeNumber: r.employee_number,
-        bankAccountNumber: r.bank_account_number ?? "",
-        netPay: Number(r.net_pay).toFixed(2),
-      }));
-      await this.audit.record(client, claims, { companyId: claims.company_id ?? null, action: "payroll_run.disburse", target: runId, metadata: { rowCount: rows.length } });
-      // Summed from the exact rows written into the bank file (each already
-      // rounded to 2dp, as the bank sees them), so the event's total always
-      // reconciles to the file a subscriber would receive.
-      const totalNetPay = Number(rows.reduce((sum, r) => sum + Number(r.netPay), 0).toFixed(2));
+      const existingActive = await client.query(
+        "SELECT * FROM payroll_payment_batches WHERE payroll_run_id = $1 AND status = 'generated' ORDER BY generated_at DESC LIMIT 1",
+        [runId]
+      );
+      if ((existingActive.rowCount ?? 0) > 0 && !confirmRegenerate) {
+        const prev = existingActive.rows[0];
+        throw new BadRequestException(
+          `This run's disbursement file was already generated on ${toIso(prev.generated_at)} (batch ${prev.batch_reference}, ` +
+            `${prev.row_count} payment(s), total ${Number(prev.total_net_pay).toFixed(2)}). ` +
+            `Pass confirmRegenerate to generate another one anyway — only do this if the previous file was never actually sent to the bank, or was rejected.`
+        );
+      }
+
+      const { rows, excluded, totalNetPay } = await this.buildDisbursementRows(client, runId);
+      const settings = await this.loadOrSeedDisbursementSettings(client, claims);
+      const batchReference = `PB-${runId.slice(0, 8).toUpperCase()}-${(priorCount.rows[0].n as number) + 1}`;
+
+      const inserted = await client.query(
+        `INSERT INTO payroll_payment_batches
+           (company_id, payroll_run_id, batch_reference, row_count, excluded_count, total_net_pay, generated_by_user_account_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+        [claims.company_id, runId, batchReference, rows.length, excluded.length, totalNetPay, claims.sub]
+      );
+
+      await this.audit.record(client, claims, {
+        companyId: claims.company_id ?? null,
+        action: "payroll_run.disburse",
+        target: runId,
+        metadata: { batchReference, rowCount: rows.length, excludedCount: excluded.length, confirmRegenerate },
+      });
+
       return {
-        csv: this.importExport.toCsv(["employeeNumber", "bankAccountNumber", "netPay"], rows),
+        csv: this.importExport.toCsv(settings.columns, rows),
+        batch: rowToPaymentBatch(inserted.rows[0]),
+        excluded,
         event: {
           payrollRunId: run.id as string,
           companyId: run.company_id as string,
@@ -1200,11 +1311,11 @@ export class PayrollService {
     // Integration gap audit item 9 — see finalizeRun()'s own comment on
     // the fire-and-forget, enqueue-after-commit pattern. "Disbursed" here
     // means exactly what this endpoint does: the bank disbursement file
-    // was generated (the point money moves, per requirePayrollDisburse()),
-    // so the acting user is part of the payload. Re-generating the file
-    // for the same run emits the event again — every generation is a real,
-    // separately audited action (see the audit record above), and a
-    // subscriber can de-duplicate on `payrollRunId` if it only cares
+    // was generated (the point money moves), so the acting user is part of
+    // the payload. Re-generating the file for the same run emits the event
+    // again — every generation is a real, separately audited action (see
+    // the audit record above, and the new `payroll_payment_batches` row),
+    // and a subscriber can de-duplicate on `payrollRunId` if it only cares
     // about the first.
     this.webhooks
       ?.enqueue(event.companyId, "payroll_run.disbursed", {
@@ -1214,7 +1325,230 @@ export class PayrollService {
       })
       .catch(() => undefined);
 
-    return csv;
+    return { csv, batch, excluded };
+  }
+
+  /** Read-only — builds the exact same rows `generateDisbursementFile()`
+   * would, and reports the existing batch (if any), WITHOUT writing a new
+   * `payroll_payment_batches` row. The frontend calls this first so HR sees
+   * the excluded-employee list and any "already generated" warning and can
+   * make an informed choice before triggering the real (batch-writing)
+   * download. Safe to call any number of times. */
+  async previewDisbursementFile(
+    claims: RequestClaims,
+    runId: string
+  ): Promise<{
+    rowCount: number;
+    excludedCount: number;
+    excluded: Array<{ employeeNumber: string; employeeName: string; reason: string }>;
+    totalNetPay: number;
+    existingBatch: PayrollPaymentBatchView | null;
+  }> {
+    const access = await this.requireRunAction(claims, DISBURSE_PERMISSION_BASE, "Not permitted to preview payroll disbursement files");
+    return this.db.withClaims(claims, async (client) => {
+      const run = await this.loadRun(client, runId);
+      this.assertRunInScope(access, run);
+      if (run.status !== "finalized") {
+        throw new BadRequestException("Cannot disburse a payroll run that is not finalized yet");
+      }
+      const { rows, excluded, totalNetPay } = await this.buildDisbursementRows(client, runId);
+      const existing = await client.query(
+        "SELECT * FROM payroll_payment_batches WHERE payroll_run_id = $1 AND status = 'generated' ORDER BY generated_at DESC LIMIT 1",
+        [runId]
+      );
+      return {
+        rowCount: rows.length,
+        excludedCount: excluded.length,
+        excluded,
+        totalNetPay,
+        existingBatch: (existing.rowCount ?? 0) > 0 ? rowToPaymentBatch(existing.rows[0]) : null,
+      };
+    });
+  }
+
+  /** Full generation history for one run — every `payroll_payment_batches`
+   * row, newest first. Same view access as the run itself (`requireViewRuns`),
+   * since seeing "has this already been paid" is a read, not a disburse
+   * action. */
+  async listPaymentBatches(claims: RequestClaims, runId: string): Promise<PayrollPaymentBatchView[]> {
+    const access = await this.requireViewRuns(claims);
+    return this.db.withClaims(claims, async (client) => {
+      const run = await this.loadRun(client, runId);
+      if (!isPayrollAreaInScope(access, run.payroll_area_id)) throw new NotFoundException("Payroll run not found");
+      const result = await client.query(
+        "SELECT * FROM payroll_payment_batches WHERE payroll_run_id = $1 ORDER BY generated_at DESC",
+        [runId]
+      );
+      return result.rows.map(rowToPaymentBatch);
+    });
+  }
+
+  /** An explicit, reasoned, audited way to mark a batch void (e.g. "bank
+   * rejected the file, reissuing") — Section 19's "rejected-payment
+   * handling; reissue/retry controls". Deliberately never a delete: the
+   * point of this ledger is a history nothing erases. Voiding does NOT
+   * retroactively allow `generateDisbursementFile()` to skip its
+   * confirm-to-regenerate guard — that guard only ever looks at the single
+   * MOST RECENT batch, so if the most recent one is now voided, the next
+   * generation proceeds without needing `confirmRegenerate` (there is no
+   * longer an active, un-voided batch to collide with); if an OLDER batch
+   * is voided while a newer one is still active, the guard is unaffected,
+   * which is correct — the newer one is still the thing that may have
+   * already been sent to the bank. */
+  async voidPaymentBatch(claims: RequestClaims, id: string, reason: string): Promise<PayrollPaymentBatchView> {
+    const access = await this.requireRunAction(claims, DISBURSE_PERMISSION_BASE, "Not permitted to void a payment batch");
+    const trimmed = reason?.trim();
+    if (!trimmed) throw new BadRequestException("A reason is required to void a payment batch");
+    return this.db.withClaims(claims, async (client) => {
+      const existing = await client.query("SELECT * FROM payroll_payment_batches WHERE id = $1", [id]);
+      if (existing.rowCount === 0) throw new NotFoundException("Payment batch not found");
+      const batchRow = existing.rows[0];
+      const run = await this.loadRun(client, batchRow.payroll_run_id);
+      this.assertRunInScope(access, run);
+      if (batchRow.status === "voided") throw new BadRequestException("This batch is already voided");
+      const result = await client.query(
+        `UPDATE payroll_payment_batches
+         SET status = 'voided', voided_reason = $2, voided_at = now(), voided_by_user_account_id = $3
+         WHERE id = $1 RETURNING *`,
+        [id, trimmed, claims.sub]
+      );
+      await this.audit.record(client, claims, {
+        companyId: claims.company_id ?? null,
+        action: "payroll_payment_batch.void",
+        target: id,
+        metadata: { reason: trimmed },
+      });
+      return rowToPaymentBatch(result.rows[0]);
+    });
+  }
+
+  /** The tenant-configurable disbursement column set — see
+   * `payroll_disbursement_settings`'s own migration comment for why this
+   * exists instead of a hardcoded bank format. Company-wide only (no
+   * Payroll Areas scoping — this is a format preference, not a run-level
+   * action), gated by the same `.all` disburse permission as actually
+   * generating the file. */
+  async getDisbursementSettings(claims: RequestClaims): Promise<PayrollDisbursementSettingsView> {
+    await this.requirePayrollDisburseAll(claims);
+    return this.db.withClaims(claims, (client) => this.loadOrSeedDisbursementSettings(client, claims));
+  }
+
+  async updateDisbursementSettings(
+    claims: RequestClaims,
+    patch: UpdatePayrollDisbursementSettingsRequest
+  ): Promise<PayrollDisbursementSettingsView> {
+    await this.requirePayrollDisburseAll(claims);
+    if (!Array.isArray(patch.columns) || patch.columns.length === 0) {
+      throw new BadRequestException("columns must be a non-empty array");
+    }
+    const unknown = patch.columns.filter((c) => !DISBURSEMENT_FIELD_KEYS.includes(c));
+    if (unknown.length > 0) {
+      throw new BadRequestException(`Unknown disbursement column(s): ${unknown.join(", ")}`);
+    }
+    return this.db.withClaims(claims, async (client) => {
+      await this.loadOrSeedDisbursementSettings(client, claims);
+      const result = await client.query(
+        `UPDATE payroll_disbursement_settings SET columns = $2, updated_at = now() WHERE company_id = $1 RETURNING *`,
+        [claims.company_id, JSON.stringify(patch.columns)]
+      );
+      await this.audit.record(client, claims, {
+        companyId: claims.company_id ?? null,
+        action: "payroll_disbursement_settings.update",
+        target: claims.company_id ?? "",
+        metadata: { columns: patch.columns },
+      });
+      return rowToDisbursementSettings(result.rows[0]);
+    });
+  }
+
+  /**
+   * Section 20 (Accounting & Costing Administration): "cost-center
+   * mapping; ... organization-based costing; employee allocation; split
+   * allocation where supported" — wired into Payroll via a READ-ONLY report
+   * over the EXISTING `employee_cost_allocations` table (Core Employee
+   * Phase 8, 0086), not a new costing table or a GL/journal engine (that
+   * stays Phase P6). Uses each employee's CURRENT active allocation(s), not
+   * a historical snapshot pinned to the run's own period — a deliberate
+   * simplification matching this phase's own "doesn't require a full
+   * GL/journal engine to deliver real value" scope; an employee whose cost
+   * allocation changed AFTER this run was finalized will show under their
+   * NEW allocation here, not the one in force when they were actually paid.
+   * An employee with no active allocation at all falls into the
+   * `costCenterId: null` "Unallocated" bucket; one split across several
+   * cost centers contributes a proportional share (by
+   * `allocation_percentage`) of their gross/net pay to each. Same view
+   * access as the run itself.
+   */
+  async getCostCenterBreakdown(claims: RequestClaims, runId: string): Promise<PayrollCostCenterBreakdownView> {
+    const access = await this.requireViewRuns(claims);
+    return this.db.withClaims(claims, async (client) => {
+      const run = await this.loadRun(client, runId);
+      if (!isPayrollAreaInScope(access, run.payroll_area_id)) throw new NotFoundException("Payroll run not found");
+
+      const result = await client.query(
+        `SELECT p.employee_id, p.gross_pay, p.net_pay,
+                ca.cost_center_id, ca.allocation_percentage,
+                cc.code AS cost_center_code, cc.name AS cost_center_name
+         FROM payslips p
+         LEFT JOIN employee_cost_allocations ca ON ca.employee_id = p.employee_id AND ca.status = 'active'
+         LEFT JOIN cost_centers cc ON cc.id = ca.cost_center_id
+         WHERE p.payroll_run_id = $1`,
+        [runId]
+      );
+
+      // Group by employee FIRST so an employee with no active allocation
+      // (the LEFT JOIN produces one row with every ca.*/cc.* column null)
+      // is bucketed as "Unallocated" exactly once, rather than once per
+      // joined row.
+      type EmpAgg = {
+        grossPay: number;
+        netPay: number;
+        allocations: Array<{ costCenterId: string | null; code: string | null; name: string | null; pct: number }>;
+      };
+      const byEmployee = new Map<string, EmpAgg>();
+      for (const row of result.rows) {
+        if (!byEmployee.has(row.employee_id)) {
+          byEmployee.set(row.employee_id, { grossPay: Number(row.gross_pay), netPay: Number(row.net_pay), allocations: [] });
+        }
+        byEmployee.get(row.employee_id)!.allocations.push({
+          costCenterId: row.cost_center_id ?? null,
+          code: row.cost_center_code ?? null,
+          name: row.cost_center_name ?? null,
+          pct: row.cost_center_id ? Number(row.allocation_percentage) : 100,
+        });
+      }
+
+      const buckets = new Map<string, { costCenterId: string | null; costCenterCode: string | null; costCenterName: string; employeeCount: number; totalGrossPay: number; totalNetPay: number }>();
+      for (const emp of byEmployee.values()) {
+        for (const alloc of emp.allocations) {
+          const key = alloc.costCenterId ?? "__unallocated__";
+          if (!buckets.has(key)) {
+            buckets.set(key, {
+              costCenterId: alloc.costCenterId,
+              costCenterCode: alloc.code,
+              costCenterName: alloc.costCenterId ? alloc.name ?? "Unnamed cost center" : "Unallocated",
+              employeeCount: 0,
+              totalGrossPay: 0,
+              totalNetPay: 0,
+            });
+          }
+          const bucket = buckets.get(key)!;
+          const share = alloc.pct / 100;
+          // Counts "how many employees have cost landing in this cost
+          // center" — an employee split across 2 cost centers counts once
+          // in EACH, which is correct for this bucket's own headcount, not
+          // a company-wide headcount total.
+          bucket.employeeCount += 1;
+          bucket.totalGrossPay = Number((bucket.totalGrossPay + emp.grossPay * share).toFixed(2));
+          bucket.totalNetPay = Number((bucket.totalNetPay + emp.netPay * share).toFixed(2));
+        }
+      }
+
+      return {
+        payrollRunId: runId,
+        rows: Array.from(buckets.values()).sort((a, b) => b.totalNetPay - a.totalNetPay),
+      };
+    });
   }
 
   /**
@@ -2323,6 +2657,115 @@ export class PayrollService {
     if (!(await this.rbac.can(claims, APPROVE_PERMISSION))) {
       throw new ForbiddenException("Not permitted to approve payroll runs");
     }
+  }
+
+  /** Phase P5 — company-wide only (no Payroll Areas scoping; this is a
+   * format PREFERENCE, not a run-level action), gated by the same `.all`
+   * tier that can actually generate/disburse the file. */
+  private async requirePayrollDisburseAll(claims: RequestClaims): Promise<void> {
+    await this.requireModule(claims);
+    if (!(await this.rbac.can(claims, DISBURSE_PERMISSION))) {
+      throw new ForbiddenException("Not permitted to configure payroll disbursement settings");
+    }
+  }
+
+  /** Lazily seeds `payroll_disbursement_settings` the first time a tenant
+   * has none — same lazy-seed-with-retry-on-race pattern as
+   * `loadOrSeedSettings()`, just over a plain table instead of the
+   * EffectiveDatingEngine (this isn't a calculation input that needs
+   * pinning to a run's period — see that table's own migration comment). */
+  private async loadOrSeedDisbursementSettings(client: PoolClient, claims: RequestClaims): Promise<PayrollDisbursementSettingsView> {
+    const existing = await client.query("SELECT * FROM payroll_disbursement_settings WHERE company_id = $1", [claims.company_id]);
+    if ((existing.rowCount ?? 0) > 0) return rowToDisbursementSettings(existing.rows[0]);
+    const inserted = await client.query(
+      "INSERT INTO payroll_disbursement_settings (company_id) VALUES ($1) ON CONFLICT (company_id) DO NOTHING RETURNING *",
+      [claims.company_id]
+    );
+    if ((inserted.rowCount ?? 0) > 0) return rowToDisbursementSettings(inserted.rows[0]);
+    const retry = await client.query("SELECT * FROM payroll_disbursement_settings WHERE company_id = $1", [claims.company_id]);
+    return rowToDisbursementSettings(retry.rows[0]);
+  }
+
+  /**
+   * Shared row-builder for `generateDisbursementFile()` AND
+   * `previewDisbursementFile()` — exactly one definition of "who's
+   * payable and what their bank details are" so the two can never drift.
+   * Joins each employee's ACTIVE PRIMARY `employee_payment_accounts` row
+   * (0086); falls back to the legacy flat `employees.bank_account_number`
+   * column ONLY when no payment-account row exists at all, so a tenant who
+   * hasn't touched the newer Payment/Bank card yet keeps getting a file
+   * (with whatever they'd set the old way) rather than suddenly losing
+   * every row. An employee is EXCLUDED (never given a blank/wrong account
+   * number) when: they have no bank details at all; their payment method
+   * is `cash`/`cheque` (not bank_transfer — simply not a bank-file row);
+   * or they're nominally `bank_transfer` but have no account number on
+   * file either way.
+   */
+  private async buildDisbursementRows(
+    client: PoolClient,
+    runId: string
+  ): Promise<{
+    rows: Array<Record<DisbursementFieldKey, string>>;
+    excluded: Array<{ employeeNumber: string; employeeName: string; reason: string }>;
+    totalNetPay: number;
+  }> {
+    const result = await client.query(
+      `SELECT p.employee_number, p.net_pay, p.bank_account_number AS legacy_bank_account_number,
+              e.first_name, e.last_name, e.cnic,
+              pa.payment_method, pa.bank_name, pa.account_title, pa.account_number, pa.iban, pa.branch_code
+       FROM payslips p
+       JOIN employees e ON e.id = p.employee_id
+       LEFT JOIN employee_payment_accounts pa
+         ON pa.employee_id = p.employee_id AND pa.is_primary = true AND pa.status = 'active'
+       WHERE p.payroll_run_id = $1
+       ORDER BY p.employee_number`,
+      [runId]
+    );
+
+    const rows: Array<Record<DisbursementFieldKey, string>> = [];
+    const excluded: Array<{ employeeNumber: string; employeeName: string; reason: string }> = [];
+    let totalNetPay = 0;
+
+    for (const r of result.rows) {
+      const employeeName = `${r.first_name} ${r.last_name}`.trim();
+      const resolvedAccountNumber: string | null = r.account_number ?? r.legacy_bank_account_number ?? null;
+      const effectivePaymentMethod: string | null = r.payment_method ?? (r.legacy_bank_account_number ? "bank_transfer" : null);
+
+      if (!effectivePaymentMethod) {
+        excluded.push({ employeeNumber: r.employee_number, employeeName, reason: "No payment account on file" });
+        continue;
+      }
+      if (effectivePaymentMethod !== "bank_transfer") {
+        excluded.push({
+          employeeNumber: r.employee_number,
+          employeeName,
+          reason: `Paid by ${effectivePaymentMethod}, not bank transfer — not included in the bank file`,
+        });
+        continue;
+      }
+      if (!resolvedAccountNumber) {
+        excluded.push({ employeeNumber: r.employee_number, employeeName, reason: "Bank transfer on file but missing an account number" });
+        continue;
+      }
+
+      const netPay = Number(r.net_pay).toFixed(2);
+      totalNetPay += Number(netPay);
+      rows.push({
+        employeeNumber: r.employee_number,
+        employeeName,
+        cnic: r.cnic ?? "",
+        paymentMethod: effectivePaymentMethod,
+        bankName: r.bank_name ?? "",
+        accountTitle: r.account_title ?? "",
+        accountNumber: resolvedAccountNumber,
+        iban: r.iban ?? "",
+        branchCode: r.branch_code ?? "",
+        bankAccountNumber: resolvedAccountNumber,
+        netPay,
+      });
+    }
+
+    return { rows, excluded, totalNetPay: Number(totalNetPay.toFixed(2)) };
   }
 
   /**

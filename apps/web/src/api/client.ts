@@ -143,9 +143,13 @@ import type {
   PackageTier,
   PasswordResetRequestResult,
   PayrollAreaView,
+  PayrollCostCenterBreakdownView,
+  PayrollDisbursementSettingsView,
+  PayrollPaymentBatchView,
   PayrollRunView,
   PayrollSettingsView,
   PayslipView,
+  PreviewDisbursementFileResponse,
   PerformanceReviewView,
   PlatformAdmin,
   PlatformBranding,
@@ -213,6 +217,7 @@ import type {
   UpdateCompensationComponentRequest,
   UpdateOnboardingItemTemplateRequest,
   UpdatePayrollAreaRequest,
+  UpdatePayrollDisbursementSettingsRequest,
   UpdatePayrollSettingsRequest,
   UpdateShiftRequest,
   UpdateWorkScheduleAssignmentRuleRequest,
@@ -2366,16 +2371,29 @@ export const api = {
       body: JSON.stringify(input),
     }),
 
+  // Phase P5 — read-only preview (row/excluded-employee counts, the
+  // existing batch if any) so the frontend can show the duplicate-payment
+  // warning and the excluded list BEFORE triggering a real, batch-writing
+  // download. Safe to call any number of times.
+  previewDisbursementFile: (runId: string) =>
+    request<PreviewDisbursementFileResponse>(`/payroll/runs/${runId}/disbursement/preview`),
+
   // The one non-JSON endpoint in this client — GET /payroll/runs/:id/disbursement
   // streams a CSV (Content-Disposition: attachment), not a JSON body, so
   // it can't go through the shared `request()` helper. Triggers a real
   // browser download rather than returning the text, since that's the
-  // only thing an HR Admin actually wants to do with a bank file.
-  async downloadDisbursementFile(runId: string): Promise<void> {
+  // only thing an HR Admin actually wants to do with a bank file. Phase
+  // P5 — `confirmRegenerate` is required once `previewDisbursementFile()`
+  // already reported an existing, non-voided batch for this run; the
+  // batch reference / excluded count ride back as response headers
+  // (`X-Payroll-Batch-Reference` / `X-Payroll-Excluded-Count`) since a
+  // file download response can't also carry a JSON body.
+  async downloadDisbursementFile(runId: string, confirmRegenerate = false): Promise<{ batchReference: string; excludedCount: number }> {
     const token = getToken();
-    const res = await fetch(`/api/payroll/runs/${runId}/disbursement`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
+    const res = await fetch(
+      `/api/payroll/runs/${runId}/disbursement${confirmRegenerate ? "?confirmRegenerate=true" : ""}`,
+      { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+    );
     if (!res.ok) {
       let message = `Request failed (${res.status})`;
       try {
@@ -2386,6 +2404,8 @@ export const api = {
       }
       throw new ApiError(res.status, message);
     }
+    const batchReference = res.headers.get("X-Payroll-Batch-Reference") ?? "";
+    const excludedCount = Number(res.headers.get("X-Payroll-Excluded-Count") ?? "0");
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -2395,5 +2415,33 @@ export const api = {
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
+    return { batchReference, excludedCount };
   },
+
+  // Phase P5 — the duplicate-payment-protection ledger: every call to
+  // `downloadDisbursementFile` that actually produced a file. Newest first.
+  listPaymentBatches: (runId: string) => request<PayrollPaymentBatchView[]>(`/payroll/runs/${runId}/payment-batches`),
+
+  voidPaymentBatch: (id: string, reason: string) =>
+    request<PayrollPaymentBatchView>(`/payroll/payment-batches/${id}/void`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    }),
+
+  // Phase P5 — the tenant-configurable bank-file column set (swappable
+  // adapter, not a hardcoded specific bank's format — see
+  // `payroll_disbursement_settings`'s own migration comment).
+  getDisbursementSettings: () => request<PayrollDisbursementSettingsView>("/payroll/disbursement-settings"),
+
+  updateDisbursementSettings: (patch: UpdatePayrollDisbursementSettingsRequest) =>
+    request<PayrollDisbursementSettingsView>("/payroll/disbursement-settings", {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+
+  // Phase P5 — read-only cost-center report over each employee's CURRENT
+  // active `employee_cost_allocations` row(s) (Core Employee Phase 8); see
+  // `PayrollService.getCostCenterBreakdown()`'s own doc comment for why
+  // this deliberately doesn't pin to the run's own period.
+  getCostCenterBreakdown: (runId: string) => request<PayrollCostCenterBreakdownView>(`/payroll/runs/${runId}/cost-breakdown`),
 };

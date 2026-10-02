@@ -12,6 +12,7 @@ import type {
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { CreateRunForm, OFF_CYCLE_REASON_LABELS, OffCyclePaymentsPanel, PayrollSettingsForm, TaxSlabsForm } from "./PayrollAdminForms";
+import { CostCenterBreakdownPanel, DisbursementPanel, DisbursementSettingsForm } from "./PayrollDisbursementPanels";
 import { PayrollAreasSection } from "./PayrollAreasSection";
 import { RUN_STATUS_LABELS, RUN_STATUS_STYLES, pkr } from "./payrollLabels";
 
@@ -221,18 +222,6 @@ function RunCard({
     }
   }
 
-  async function handleDownload() {
-    setBusy(true);
-    setError(null);
-    try {
-      await api.downloadDisbursementFile(run.id);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not download the disbursement file.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function handleReverse() {
     if (!reversalReason.trim()) return;
     if (!window.confirm("Reverse this finalized run? This cannot be undone — the original payslips are kept for the record.")) return;
@@ -331,15 +320,6 @@ function RunCard({
               className="text-xs font-semibold text-success hover:underline disabled:opacity-50"
             >
               Finalize
-            </button>
-          )}
-          {canPrepare && run.status === "finalized" && (
-            <button
-              onClick={handleDownload}
-              disabled={busy}
-              className="text-xs font-semibold text-accent hover:underline disabled:opacity-50"
-            >
-              Download disbursement CSV
             </button>
           )}
           {/* Phase P2 (Correction/Reversal) — hr_admin is the only
@@ -460,6 +440,15 @@ function RunCard({
       {run.runType === "off_cycle" && run.status !== "finalized" && run.status !== "reversed" && (
         <OffCyclePaymentsPanel run={run} canManage={canPrepare} />
       )}
+
+      {/* Phase P5 — disbursement (preview/download/batch history/void) is
+          HR Admin's own prepare-side action, same gate as Reverse above;
+          the cost-center breakdown is a read-only report anyone who can
+          see this card's numbers may as well see broken down. Both only
+          make sense once a run is finalized — before that there's no
+          settled payslip set to disburse or cost out. */}
+      {run.status === "finalized" && canPrepare && <DisbursementPanel runId={run.id} />}
+      {run.status === "finalized" && <CostCenterBreakdownPanel runId={run.id} />}
 
       {expanded && (
         <div className="mt-4 pt-4 border-t border-black/5 space-y-2">
@@ -839,6 +828,20 @@ export function PayrollPage() {
           {isHrAdmin && (
             <CollapsibleSection title="Settings & Tax Slabs" forceOpen={focusSection === "tax-slabs"} sectionId="tax-slabs">
               <SettingsAndSlabsSection />
+            </CollapsibleSection>
+          )}
+
+          {/* Phase P5 — which bank-file columns get written and in what
+              order; tenant-editable so every bank's import template fits
+              without a per-bank code path. Deep-linkable the same way as
+              the sections above, for a future System Admin tile. */}
+          {isHrAdmin && (
+            <CollapsibleSection
+              title="Disbursement Settings"
+              forceOpen={focusSection === "disbursement-settings"}
+              sectionId="disbursement-settings"
+            >
+              <DisbursementSettingsForm />
             </CollapsibleSection>
           )}
         </div>

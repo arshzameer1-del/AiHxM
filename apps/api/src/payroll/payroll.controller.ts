@@ -8,6 +8,8 @@ import { UpdatePayrollSettingsDto } from "./dto/update-payroll-settings.dto";
 import { SetTaxSlabsDto } from "./dto/set-tax-slabs.dto";
 import { CreatePayrollRunDto } from "./dto/create-payroll-run.dto";
 import { ReversePayrollRunDto } from "./dto/reverse-payroll-run.dto";
+import { UpdatePayrollDisbursementSettingsDto } from "./dto/update-payroll-disbursement-settings.dto";
+import { VoidPaymentBatchDto } from "./dto/void-payment-batch.dto";
 import { DecideLeaveRequestDto } from "../leave/dto/decide-leave-request.dto";
 
 /**
@@ -99,12 +101,58 @@ export class PayrollController {
     return this.payroll.decideApproval(claims, id, dto);
   }
 
+  // Phase P5 — read-only preview (row/excluded-employee counts, the
+  // existing batch if any) BEFORE committing to a new
+  // `payroll_payment_batches` row. The frontend calls this first so HR can
+  // see the duplicate-payment warning / excluded list and decide, rather
+  // than finding out only after a file has already downloaded.
+  @Get("payroll/runs/:id/disbursement/preview")
+  previewDisbursementFile(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.payroll.previewDisbursementFile(claims, id);
+  }
+
   @Get("payroll/runs/:id/disbursement")
-  async disbursementFile(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Res() res: Response) {
-    const csv = await this.payroll.generateDisbursementFile(claims, id);
+  async disbursementFile(
+    @CurrentClaims() claims: RequestClaims,
+    @Param("id") id: string,
+    @Query("confirmRegenerate") confirmRegenerate: string | undefined,
+    @Res() res: Response
+  ) {
+    const { csv, batch, excluded } = await this.payroll.generateDisbursementFile(claims, id, confirmRegenerate === "true");
     res.setHeader("Content-Type", "text/csv");
     res.setHeader("Content-Disposition", `attachment; filename="payroll-disbursement-${id}.csv"`);
+    // Phase P5 — the browser-download endpoint can't return a JSON body
+    // alongside the file, so the batch reference / excluded count ride as
+    // headers (the frontend's `previewDisbursementFile()` call already
+    // showed the full excluded list before this request was even made).
+    res.setHeader("X-Payroll-Batch-Reference", batch.batchReference);
+    res.setHeader("X-Payroll-Excluded-Count", String(excluded.length));
     res.send(csv);
+  }
+
+  @Get("payroll/runs/:id/payment-batches")
+  listPaymentBatches(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.payroll.listPaymentBatches(claims, id);
+  }
+
+  @Post("payroll/payment-batches/:id/void")
+  voidPaymentBatch(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: VoidPaymentBatchDto) {
+    return this.payroll.voidPaymentBatch(claims, id, dto.reason);
+  }
+
+  @Get("payroll/disbursement-settings")
+  getDisbursementSettings(@CurrentClaims() claims: RequestClaims) {
+    return this.payroll.getDisbursementSettings(claims);
+  }
+
+  @Patch("payroll/disbursement-settings")
+  updateDisbursementSettings(@CurrentClaims() claims: RequestClaims, @Body() dto: UpdatePayrollDisbursementSettingsDto) {
+    return this.payroll.updateDisbursementSettings(claims, dto);
+  }
+
+  @Get("payroll/runs/:id/cost-breakdown")
+  getCostCenterBreakdown(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.payroll.getCostCenterBreakdown(claims, id);
   }
 
   // Phase P2 — Correction/Reversal. Only a `finalized` run can be
