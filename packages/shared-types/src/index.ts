@@ -2894,6 +2894,68 @@ export type DecideExpenseClaimRequest = {
   comment?: string;
 };
 
+// --- Learning & Development (Part 2 category 7, UI re-skin build-out 2026-10) ---
+// Same View/Request shape discipline as Expense Management above.
+// `CourseEnrollmentStatus` adds "overdue" on top of the three raw values
+// a write actually produces (0116_learning_and_development.sql's own
+// header comment on why that's derived, not stored) — the service maps
+// a raw DB row into this richer view type, never the reverse.
+
+export type CourseCategory = "compliance" | "technical" | "soft_skills" | "leadership" | "other";
+
+export type CourseView = {
+  id: string;
+  companyId: string;
+  title: string;
+  description: string | null;
+  category: CourseCategory;
+  durationMinutes: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateCourseRequest = {
+  title: string;
+  description?: string;
+  category: CourseCategory;
+  durationMinutes: number;
+};
+
+export type CourseEnrollmentRawStatus = "assigned" | "in_progress" | "completed";
+
+export type CourseEnrollmentStatus = CourseEnrollmentRawStatus | "overdue";
+
+export type CourseEnrollmentView = {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  courseId: string;
+  course: CourseView;
+  status: CourseEnrollmentStatus;
+  progressPercent: number;
+  dueDate: string | null;
+  /** Same derived-not-stored On-Behalf flag as LeaveRequestView.isOnBehalf
+   * — true when `assignedByUserAccountId` is set and differs from the
+   * employee's own user account (an HR assignment rather than a genuine
+   * self-enrollment, which leaves this null). */
+  isOnBehalf: boolean;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type EnrollInCourseRequest = {
+  employeeId: string;
+  courseId: string;
+  dueDate?: string;
+};
+
+export type UpdateCourseEnrollmentProgressRequest = {
+  progressPercent: number;
+};
+
 export type AttendanceSource = "biometric" | "gps" | "manual";
 
 // Computed at read time by AttendanceService, joining the employee's

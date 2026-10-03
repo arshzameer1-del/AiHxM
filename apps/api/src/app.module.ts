@@ -26,6 +26,7 @@ import { ShiftsModule } from "./shifts/shifts.module";
 import { HolidaysModule } from "./holidays/holidays.module";
 import { LeaveModule } from "./leave/leave.module";
 import { ExpensesModule } from "./expenses/expenses.module";
+import { LearningModule } from "./learning/learning.module";
 import { RecruitmentModule } from "./recruitment/recruitment.module";
 import { PerformanceModule } from "./performance/performance.module";
 import { SystemAdminModule } from "./system-admin/system-admin.module";
@@ -83,6 +84,7 @@ import { HrAdministrationModule } from "./hr-administration/hr-administration.mo
     HolidaysModule,
     LeaveModule,
     ExpensesModule,
+    LearningModule,
     DataSubjectRequestsModule,
     SsoModule,
     ScimModule,

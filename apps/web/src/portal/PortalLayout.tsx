@@ -15,6 +15,7 @@ import {
   Wallet,
   BookOpenCheck,
   Receipt,
+  GraduationCap,
 } from "lucide-react";
 import type { ModuleKey, PublicTenantBranding, TenantRoleKey } from "@aihxm/shared-types";
 import { api, publicTenantBrandingAssetUrl } from "../api/client";
@@ -182,6 +183,13 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): 
   // Leave entry just above it.
   if (hasModule("expense") && roleKeys.length > 0) {
     items.push({ to: "/app/expenses", label: "Expenses", icon: Receipt });
+  }
+
+  // ESS build-out (2026-10, Part 2 category 7) — course_enrollment.view.self/
+  // .team/.all mirror leave_request.view.*'s same three-role seed
+  // (0116_learning_and_development.sql); gated identically to Leave/Expense.
+  if (hasModule("learning") && roleKeys.length > 0) {
+    items.push({ to: "/app/learning", label: "Learning & Development", icon: GraduationCap });
   }
 
   if (hasRole("hr_admin") && hasModule("recruitment")) {

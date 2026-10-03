@@ -25,9 +25,12 @@ import type {
   CompanyListFilters,
   CompensationComponentView,
   CompensationView,
+  CourseEnrollmentView,
+  CourseView,
   CreateApplicationRequest,
   CreateCandidateRequest,
   CreateCompanyRequest,
+  CreateCourseRequest,
   CancelEmployeeLoanRequest,
   CreateCompensationComponentRequest,
   CreateEmployeeAdditionalPaymentRequest,
@@ -68,6 +71,7 @@ import type {
   EmployeeOffboardingView,
   EmployeeOnboardingView,
   EmployeeView,
+  EnrollInCourseRequest,
   ExtendOfferRequest,
   GoalView,
   HealthCheckResult,
@@ -218,6 +222,7 @@ import type {
   UpdateGoalRequest,
   UpdateHolidayRequest,
   UpdateLeavePolicyRequest,
+  UpdateCourseEnrollmentProgressRequest,
   UpdateOffboardingItemTemplateRequest,
   UpdateCompensationComponentRequest,
   UpdateOnboardingItemTemplateRequest,
@@ -2182,6 +2187,34 @@ export const api = {
     link.remove();
     URL.revokeObjectURL(url);
   },
+
+  // --- Learning & Development (UI re-skin ESS build-out, 2026-10, Part 2
+  // category 7) — deliberately NOT routed through the workflow engine
+  // (CourseEnrollmentsService's own doc comment on why); `course.view.all`
+  // is granted broadly so listCourses() returns the same catalog to every
+  // role, while listCourseEnrollments() is the same "server already
+  // RBAC-scopes it" shape as listLeaveRequests/listExpenseClaims above.
+  listCourses: (includeInactive?: boolean) =>
+    request<CourseView[]>(`/courses${includeInactive ? "?includeInactive=true" : ""}`),
+
+  createCourse: (input: CreateCourseRequest) =>
+    request<CourseView>("/courses", { method: "POST", body: JSON.stringify(input) }),
+
+  setCourseActive: (id: string, isActive: boolean) =>
+    request<CourseView>(`/courses/${id}/active`, { method: "PATCH", body: JSON.stringify({ isActive }) }),
+
+  listCourseEnrollments: (employeeId?: string) =>
+    request<CourseEnrollmentView[]>(`/course-enrollments${employeeId ? `?employeeId=${employeeId}` : ""}`),
+
+  getCourseEnrollment: (id: string) => request<CourseEnrollmentView>(`/course-enrollments/${id}`),
+
+  enrollInCourse: (input: EnrollInCourseRequest) =>
+    request<CourseEnrollmentView>("/course-enrollments", { method: "POST", body: JSON.stringify(input) }),
+
+  updateCourseEnrollmentProgress: (id: string, input: UpdateCourseEnrollmentProgressRequest) =>
+    request<CourseEnrollmentView>(`/course-enrollments/${id}/progress`, { method: "PATCH", body: JSON.stringify(input) }),
+
+  cancelCourseEnrollment: (id: string) => request<void>(`/course-enrollments/${id}/cancel`, { method: "POST" }),
 
   // --- Recruitment (Task #51) -------------------------------------------
   // recruitment.manage.all is a single scope-less permission granted only

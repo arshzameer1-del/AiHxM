@@ -227,6 +227,12 @@ const LeavePage = lazy(() =>
 const ExpensesPage = lazy(() =>
   import("./portal/expenses/ExpensesPage").then((m) => ({ default: m.ExpensesPage })),
 );
+// ESS build-out (2026-10, Part 2 category 7) — Learning & Development,
+// built end to end against a pre-existing `learning` module key that had
+// no UI yet (see claude/ui-reskin-design-system-and-migration-plan-2026-10.md §9).
+const LearningPage = lazy(() =>
+  import("./portal/learning/LearningPage").then((m) => ({ default: m.LearningPage })),
+);
 const RecruitmentPage = lazy(() =>
   import("./portal/recruitment/RecruitmentPage").then((m) => ({
     default: m.RecruitmentPage,
@@ -456,6 +462,13 @@ export default function App() {
                     pattern; who can actually decide/pay/cancel a given
                     claim is enforced server-side the same way. */}
                   <Route path="expenses" element={<ExpensesPage />} />
+                  {/* ESS build-out (2026-10) — Learning & Development.
+                    course_enrollment.view.self/.team/.all mirror Leave's
+                    own three-role split (0116_learning_and_development.sql);
+                    Part 2 scopes this category to the Employee/ESS persona
+                    only, so LearningPage itself (not this route) decides
+                    what HR's extra catalog-management affordance shows. */}
+                  <Route path="learning" element={<LearningPage />} />
                   {/* Task #51 — Recruitment. recruitment.manage.all is
                     hr_admin-only with no self/team scoping, so unlike
                     Leave/Employee Core there's no per-role rendering
