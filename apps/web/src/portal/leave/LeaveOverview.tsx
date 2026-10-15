@@ -1,17 +1,20 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, XCircle } from "lucide-react";
+import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Pencil, XCircle } from "lucide-react";
 import type { HolidayView, LeaveBalanceView, LeaveRequestStatus, LeaveRequestView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import {
   buildMonth,
   formatDisplayDate,
   formatDisplayRange,
+  formatLongRange,
   nextMonth,
   previousMonth,
   weekdayLabels,
   type CalendarCell,
 } from "./leaveCalendar";
 import { STATUS_LABELS, leaveTypeLabel } from "./leaveLabels";
+import { approverStepLabel, approverSummary, groupApprovalSteps } from "./leaveApprovals";
+import { TeamCalendar } from "./TeamCalendar";
 
 /**
  * "My Leave Request" overview, laid out like the SAP Fiori screen the product owner asked us to match:
@@ -100,60 +103,161 @@ export function EntitlementTable({ balances, requests }: { balances: LeaveBalanc
   );
 }
 
-function RequestDetail({ request }: { request: LeaveRequestView }) {
+const APPROVAL_STATUS_TEXT: Record<string, string> = { pending: "Waiting", escalated: "Escalated", approved: "Approved", rejected: "Rejected" };
+const APPROVAL_STATUS_CLASS: Record<string, string> = {
+  pending: "text-amber-700",
+  escalated: "text-amber-700",
+  approved: "text-green-700",
+  rejected: "text-red-700",
+};
+
+/**
+ * The request's own page, laid out like the reference's "Show Request Details": a header (leave type, dates,
+ * absence days, quota used, created on, approver, status), the approval chain, the rest of the fields, and the
+ * Team calendar underneath.
+ */
+function RequestDetail({
+  request,
+  holidays,
+  weekend,
+}: {
+  request: LeaveRequestView;
+  holidays: ReadonlyMap<string, string>;
+  weekend: readonly number[];
+}) {
+  const approver = approverSummary(request.status, request.approvals);
+  const steps = groupApprovalSteps(request.approvals);
+  const absenceDays = request.absenceDays ?? 0;
   return (
-    <dl className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 text-xs bg-black/[0.03] rounded-lg p-3">
-      <div>
-        <dt className="text-label-tertiary">Leave type</dt>
-        <dd className="font-medium">{leaveTypeLabel(request.leaveType)}</dd>
-      </div>
-      <div>
-        <dt className="text-label-tertiary">Days requested</dt>
-        <dd className="font-medium tabular-nums">{request.daysRequested}</dd>
-      </div>
-      <div>
-        <dt className="text-label-tertiary">Return date</dt>
-        <dd className="font-medium tabular-nums">{request.returnDate ? formatDisplayDate(request.returnDate) : "—"}</dd>
-      </div>
-      <div>
-        <dt className="text-label-tertiary">Submitted</dt>
-        <dd className="font-medium tabular-nums">{formatDisplayDate(request.createdAt.slice(0, 10))}</dd>
-      </div>
-      {request.dayPart !== "full" && (
+    <div className="rounded-lg border border-black/10 bg-surface p-4 space-y-4" data-testid="leave-request-detail">
+      <header className="flex items-start gap-4">
+        <div className="w-12 h-12 rounded-full bg-accent/10 text-accent flex items-center justify-center shrink-0" aria-hidden>
+          <CalendarDays size={22} strokeWidth={1.75} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h4 className="text-lg font-bold leading-tight">{request.leaveTypeName ?? leaveTypeLabel(request.leaveType)}</h4>
+          <p className="text-xs text-label-secondary tabular-nums">{formatLongRange(request.startDate, request.endDate)}</p>
+        </div>
+        <dl className="grid grid-cols-[auto_auto] gap-x-3 gap-y-0.5 text-xs">
+          <dt className="text-label-tertiary">Absence Days:</dt>
+          <dd className="tabular-nums">{absenceDays} {absenceDays === 1 ? "Day" : "Days"}</dd>
+          <dt className="text-label-tertiary">Quota Used:</dt>
+          <dd className="tabular-nums">{request.daysRequested} {request.daysRequested === 1 ? "Day" : "Days"}</dd>
+          <dt className="text-label-tertiary">Created on:</dt>
+          <dd className="tabular-nums">{formatDisplayDate(request.createdAt.slice(0, 10))}</dd>
+          {approver && (
+            <>
+              <dt className="text-label-tertiary">Approver:</dt>
+              <dd>{approver}</dd>
+            </>
+          )}
+          <dt className="text-label-tertiary">Status:</dt>
+          <dd className={`font-semibold ${STATUS_TEXT[request.status]}`}>{STATUS_LABELS[request.status]}</dd>
+        </dl>
+      </header>
+
+      <dl className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 text-xs">
+        {request.employeeName && (
+          <div>
+            <dt className="text-label-tertiary">Employee</dt>
+            <dd className="font-medium">
+              {request.employeeName}
+              {request.employeeNumber ? ` (${request.employeeNumber})` : ""}
+            </dd>
+          </div>
+        )}
         <div>
-          <dt className="text-label-tertiary">Duration</dt>
-          <dd className="font-medium">{request.dayPart === "first_half" ? "First half of the day" : "Second half of the day"}</dd>
+          <dt className="text-label-tertiary">Working days</dt>
+          <dd className="font-medium tabular-nums">{request.daysRequested}</dd>
         </div>
-      )}
-      {request.payrollImpact && (
         <div>
-          <dt className="text-label-tertiary">Payroll</dt>
-          <dd className="font-medium">Unpaid, deducted in payroll</dd>
+          <dt className="text-label-tertiary">Return date</dt>
+          <dd className="font-medium tabular-nums">{request.returnDate ? formatDisplayDate(request.returnDate) : "—"}</dd>
         </div>
-      )}
-      {request.reason && (
-        <div className="col-span-2 sm:col-span-4">
-          <dt className="text-label-tertiary">Note</dt>
-          <dd>{request.reason}</dd>
+        <div>
+          <dt className="text-label-tertiary">Relief person</dt>
+          <dd className="font-medium">{request.delegateEmployeeName ?? "—"}</dd>
         </div>
+        {request.dayPart !== "full" && (
+          <div>
+            <dt className="text-label-tertiary">Duration</dt>
+            <dd className="font-medium">{request.dayPart === "first_half" ? "First half of the day" : "Second half of the day"}</dd>
+          </div>
+        )}
+        {request.payrollImpact && (
+          <div>
+            <dt className="text-label-tertiary">Payroll</dt>
+            <dd className="font-medium">Unpaid, deducted in payroll</dd>
+          </div>
+        )}
+        {request.isOnBehalf && (
+          <div>
+            <dt className="text-label-tertiary">Submitted</dt>
+            <dd className="font-medium">On behalf of the employee</dd>
+          </div>
+        )}
+        {request.reason && (
+          <div className="col-span-2 sm:col-span-4">
+            <dt className="text-label-tertiary">Note</dt>
+            <dd>{request.reason}</dd>
+          </div>
+        )}
+        {request.rejectionReason && (
+          <div className="col-span-2 sm:col-span-4">
+            <dt className="text-label-tertiary">Rejection reason</dt>
+            <dd className="text-red-700">{request.rejectionReason}</dd>
+          </div>
+        )}
+        {request.cancellationStatus && (
+          <div className="col-span-2 sm:col-span-4">
+            <dt className="text-label-tertiary">Cancellation</dt>
+            <dd>
+              {request.cancellationStatus === "requested" ? "Requested, waiting for a decision" : request.cancellationStatus === "approved" ? "Approved" : "Declined"}
+              {request.cancellationReason ? `, “${request.cancellationReason}”` : ""}
+            </dd>
+          </div>
+        )}
+      </dl>
+
+      {steps.length > 0 && (
+        <section aria-label="Approval chain" data-testid="leave-approval-chain">
+          <h4 className="text-xs font-semibold text-label-tertiary mb-1">Approval</h4>
+          <ol className="space-y-1">
+            {steps.map((step) => (
+              <li key={step.stepOrder} className="flex flex-wrap items-baseline gap-x-3 text-xs">
+                <span className="text-label-tertiary w-36 shrink-0">{approverStepLabel(step.stepOrder)}</span>
+                <span className="font-medium">{step.names.length > 0 ? step.names.join(", ") : step.stepName}</span>
+                <span className={`font-semibold ${APPROVAL_STATUS_CLASS[step.status]}`}>{APPROVAL_STATUS_TEXT[step.status]}</span>
+              </li>
+            ))}
+          </ol>
+        </section>
       )}
-      {request.rejectionReason && (
-        <div className="col-span-2 sm:col-span-4">
-          <dt className="text-label-tertiary">Rejection reason</dt>
-          <dd className="text-red-700">{request.rejectionReason}</dd>
-        </div>
-      )}
-      {request.cancellationStatus && (
-        <div className="col-span-2 sm:col-span-4">
-          <dt className="text-label-tertiary">Cancellation</dt>
-          <dd>
-            {request.cancellationStatus === "requested" ? "Requested, waiting for a decision" : request.cancellationStatus === "approved" ? "Approved" : "Declined"}
-            {request.cancellationReason ? `, “${request.cancellationReason}”` : ""}
-          </dd>
-        </div>
-      )}
-    </dl>
+
+      <TeamCalendar employeeId={request.employeeId} holidays={holidays} weekend={weekend} initialDate={request.startDate} />
+    </div>
   );
+}
+
+/**
+ * The list rows already carry the approval chain, but the detail re-reads the one request so it shows the
+ * freshest approver state when it is opened; if that read fails the row's own data is shown instead.
+ */
+function DetailLoader({ request, holidays, weekend }: { request: LeaveRequestView; holidays: ReadonlyMap<string, string>; weekend: readonly number[] }) {
+  const [fresh, setFresh] = useState<LeaveRequestView | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getLeaveRequest(request.id)
+      .then((r) => {
+        if (!cancelled) setFresh(r);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [request.id, request.updatedAt]);
+  return <RequestDetail request={fresh ?? request} holidays={holidays} weekend={weekend} />;
 }
 
 function ItemsTable({
@@ -161,11 +265,18 @@ function ItemsTable({
   expandedId,
   onToggle,
   onChanged,
+  onEdit,
+  holidays,
+  weekend,
 }: {
   requests: LeaveRequestView[];
   expandedId: string | null;
   onToggle: (id: string) => void;
   onChanged: () => void;
+  /** Present only when the viewer may edit requests; offered on pending ones. */
+  onEdit?: (request: LeaveRequestView) => void;
+  holidays: ReadonlyMap<string, string>;
+  weekend: readonly number[];
 }) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -211,8 +322,9 @@ function ItemsTable({
             <th className="py-2 pr-3 font-medium">Leave Type</th>
             <th className="py-2 pr-3 font-medium">Validity</th>
             <th className="py-2 pr-3 font-medium">Status</th>
+            <th className="py-2 pr-3 font-medium">Approver</th>
             <th className="py-2 pr-3 font-medium text-right">Quota Used</th>
-            <th className="py-2 w-20" aria-label="Actions" />
+            <th className="py-2 w-24" aria-label="Actions" />
           </tr>
         </thead>
         <tbody>
@@ -223,16 +335,28 @@ function ItemsTable({
             return (
               <Fragment key={r.id}>
                 <tr className={`border-b border-black/5 ${open ? "bg-black/[0.02]" : ""}`}>
-                  <td className="py-2.5 pr-3 font-semibold">{leaveTypeLabel(r.leaveType)}</td>
+                  <td className="py-2.5 pr-3 font-semibold">{r.leaveTypeName ?? leaveTypeLabel(r.leaveType)}</td>
                   <td className="py-2.5 pr-3 text-label-secondary tabular-nums">{formatDisplayRange(r.startDate, r.endDate)}</td>
                   <td className={`py-2.5 pr-3 font-medium ${STATUS_TEXT[r.status]}`}>
                     {STATUS_LABELS[r.status]}
                     {cancellationRequested && <span className="block text-xs font-normal text-label-tertiary">Cancellation requested</span>}
                   </td>
+                  <td className="py-2.5 pr-3 text-label-secondary">{approverSummary(r.status, r.approvals) ?? ""}</td>
                   <td className="py-2.5 pr-3 text-right tabular-nums">
                     <span className="font-semibold">{r.daysRequested}</span> <span className="text-label-tertiary">{r.daysRequested === 1 ? "Day" : "Days"}</span>
                   </td>
                   <td className="py-2.5 text-right whitespace-nowrap">
+                    {onEdit && r.status === "pending" && (
+                      <button
+                        type="button"
+                        onClick={() => onEdit(r)}
+                        title="Edit request"
+                        aria-label="Edit request"
+                        className="inline-flex p-1 text-accent hover:text-accent-dark"
+                      >
+                        <Pencil size={17} strokeWidth={1.75} />
+                      </button>
+                    )}
                     {canWithdraw && (
                       <button
                         type="button"
@@ -259,8 +383,8 @@ function ItemsTable({
                 </tr>
                 {open && (
                   <tr>
-                    <td colSpan={5} className="pb-3">
-                      <RequestDetail request={r} />
+                    <td colSpan={6} className="pb-3">
+                      <DetailLoader request={r} holidays={holidays} weekend={weekend} />
                     </td>
                   </tr>
                 )}
@@ -323,7 +447,7 @@ function MonthGrid({
           if (hits.length > 1) tone = "bg-purple-100 text-purple-900 ring-1 ring-purple-300";
           else if (hits.length === 1) tone = CALENDAR_STATUS_CLASS[hits[0].status];
           if (inSelection) tone = "bg-accent text-white";
-          const label = [formatDisplayDate(cell.date), cell.holidayName, ...hits.map((h) => `${leaveTypeLabel(h.leaveType)}, ${STATUS_LABELS[h.status]}`)].filter(Boolean).join(" - ");
+          const label = [formatDisplayDate(cell.date), cell.holidayName, ...hits.map((h) => `${h.leaveTypeName ?? leaveTypeLabel(h.leaveType)}, ${STATUS_LABELS[h.status]}`)].filter(Boolean).join(" - ");
           return (
             <button
               key={cell.date}
@@ -439,12 +563,15 @@ export function MyLeaveOverview({
   canSubmit,
   onChanged,
   onCreateRange,
+  onEditRequest,
 }: {
   employeeId: string;
   refreshKey: number;
   canSubmit: boolean;
   onChanged: () => void;
   onCreateRange: (start: string, end: string) => void;
+  /** Opens the request form for a pending request; omitted when the viewer cannot edit. */
+  onEditRequest?: (request: LeaveRequestView) => void;
 }) {
   const [balances, setBalances] = useState<LeaveBalanceView[] | null>(null);
   const [requests, setRequests] = useState<LeaveRequestView[] | null>(null);
@@ -452,6 +579,8 @@ export function MyLeaveOverview({
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<"calendar" | "items">("items");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  // "Show From": requests that ended before this date are hidden. Defaults to the start of this year.
+  const [showFrom, setShowFrom] = useState(`${new Date().getUTCFullYear()}-01-01`);
 
   useEffect(() => {
     Promise.all([api.getLeaveBalances(employeeId), api.listLeaveRequests(employeeId)])
@@ -476,7 +605,8 @@ export function MyLeaveOverview({
   if (!balances || !requests) return <p className="text-sm text-label-tertiary">Loading…</p>;
 
   // Newest first, like the reference list.
-  const sorted = [...requests].sort((a, b) => (a.startDate < b.startDate ? 1 : a.startDate > b.startDate ? -1 : 0));
+  const visibleRequests = showFrom ? requests.filter((r) => r.endDate >= showFrom) : requests;
+  const sorted = [...visibleRequests].sort((a, b) => (a.startDate < b.startDate ? 1 : a.startDate > b.startDate ? -1 : 0));
 
   function openRequest(id: string) {
     setTab("items");
@@ -491,11 +621,12 @@ export function MyLeaveOverview({
         <h3 id="leave-overview-heading" className="text-sm font-semibold mb-2">
           Request Overview
         </h3>
-        <div role="tablist" aria-label="Request overview views" className="flex gap-2 mb-3">
+        <div className="flex items-center justify-between gap-3 mb-3">
+        <div role="tablist" aria-label="Request overview views" className="flex gap-2">
           {(
             [
               ["calendar", "Calendar"],
-              ["items", `Items (${requests.length})`],
+              ["items", `Items (${visibleRequests.length})`],
             ] as const
           ).map(([key, label]) => (
             <button
@@ -510,6 +641,17 @@ export function MyLeaveOverview({
             </button>
           ))}
         </div>
+          <label className="flex items-center gap-2 text-xs text-label-secondary">
+            <span className="font-semibold">Show From</span>
+            <input
+              type="date"
+              value={showFrom}
+              onChange={(e) => setShowFrom(e.target.value)}
+              aria-label="Show requests from"
+              className="rounded-lg border border-black/10 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-accent"
+            />
+          </label>
+        </div>
         {tab === "calendar" ? (
           <LeaveCalendar
             holidays={holidays}
@@ -520,7 +662,15 @@ export function MyLeaveOverview({
             weekStart={1}
           />
         ) : (
-          <ItemsTable requests={sorted} expandedId={expandedId} onToggle={(id) => setExpandedId(expandedId === id ? null : id)} onChanged={onChanged} />
+          <ItemsTable
+            requests={sorted}
+            expandedId={expandedId}
+            onToggle={(id) => setExpandedId(expandedId === id ? null : id)}
+            onChanged={onChanged}
+            onEdit={canSubmit ? onEditRequest : undefined}
+            holidays={holidays}
+            weekend={[0, 6]}
+          />
         )}
       </section>
     </div>

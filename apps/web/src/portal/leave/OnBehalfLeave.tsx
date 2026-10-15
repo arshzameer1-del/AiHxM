@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { UserRoundX, Users } from "lucide-react";
-import type { EmployeeView, OverlapWarning } from "@aihxm/shared-types";
+import type { EmployeeView, LeaveRequestView, OverlapWarning } from "@aihxm/shared-types";
 import { api } from "../../api/client";
 import { LeaveRequestForm, OverlapNotice } from "./LeaveRequestForm";
 import { MyLeaveOverview } from "./LeaveOverview";
@@ -16,6 +16,7 @@ export function OnBehalfLeave({ onChanged, onClose }: { onChanged: () => void; o
   const [filter, setFilter] = useState("");
   const [target, setTarget] = useState<EmployeeView | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [editingRequest, setEditingRequest] = useState<LeaveRequestView | null>(null);
   const [range, setRange] = useState<{ start: string; end: string } | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [overlapWarnings, setOverlapWarnings] = useState<OverlapWarning[]>([]);
@@ -89,7 +90,14 @@ export function OnBehalfLeave({ onChanged, onClose }: { onChanged: () => void; o
 
       <div className="flex justify-end mb-2">
         {!showForm && (
-          <button type="button" onClick={() => setShowForm(true)} className="text-sm font-semibold text-accent hover:underline">
+          <button
+            type="button"
+            onClick={() => {
+              setEditingRequest(null);
+              setShowForm(true);
+            }}
+            className="text-sm font-semibold text-accent hover:underline"
+          >
             Create Request
           </button>
         )}
@@ -98,13 +106,19 @@ export function OnBehalfLeave({ onChanged, onClose }: { onChanged: () => void; o
       {showForm && (
         <div className="mb-4">
           <LeaveRequestForm
+            key={editingRequest?.id ?? "new"}
             fixedEmployeeId={target.id}
             initialStart={range?.start}
             initialEnd={range?.end}
-            onCancel={() => setShowForm(false)}
+            editing={editingRequest ?? undefined}
+            onCancel={() => {
+              setShowForm(false);
+              setEditingRequest(null);
+            }}
             onSubmitted={(result) => {
               setShowForm(false);
               setRange(null);
+              setEditingRequest(null);
               setOverlapWarnings(result.overlapWarnings);
               setRefreshKey((k) => k + 1);
               onChanged();
@@ -127,7 +141,13 @@ export function OnBehalfLeave({ onChanged, onClose }: { onChanged: () => void; o
           onChanged();
         }}
         onCreateRange={(start, end) => {
+          setEditingRequest(null);
           setRange({ start, end });
+          setShowForm(true);
+        }}
+        onEditRequest={(request) => {
+          setRange(null);
+          setEditingRequest(request);
           setShowForm(true);
         }}
       />

@@ -361,6 +361,64 @@ describe("Leave & Attendance HTTP surface (e2e)", () => {
     });
   });
 
+  describe("LV-UP: PATCH /leave-requests/:id and GET /leave-requests/team-calendar", () => {
+    it("edits a pending request over HTTP and returns the enriched view", async () => {
+      const submitRes = await request(app.getHttpServer())
+        .post("/leave-requests")
+        .set("Authorization", `Bearer ${staffToken}`)
+        .send({ employeeId: staffEmployeeId, leaveType: "annual", startDate: "2026-06-08", endDate: "2026-06-08" });
+      const requestId = submitRes.body.request.id;
+
+      const patchRes = await request(app.getHttpServer())
+        .patch(`/leave-requests/${requestId}`)
+        .set("Authorization", `Bearer ${staffToken}`)
+        .send({ endDate: "2026-06-09", reason: "Longer trip" });
+      expect(patchRes.status).toBe(200);
+      expect(patchRes.body.request.daysRequested).toBe(2);
+      expect(patchRes.body.request.reason).toBe("Longer trip");
+
+      const getRes = await request(app.getHttpServer()).get(`/leave-requests/${requestId}`).set("Authorization", `Bearer ${staffToken}`);
+      expect(getRes.status).toBe(200);
+      expect(getRes.body.absenceDays).toBe(2);
+      expect(getRes.body.employeeName).toBeTruthy();
+      expect(Array.isArray(getRes.body.approvals)).toBe(true);
+    });
+
+    it("rejects a malformed edit and an edit without a token", async () => {
+      const submitRes = await request(app.getHttpServer())
+        .post("/leave-requests")
+        .set("Authorization", `Bearer ${staffToken}`)
+        .send({ employeeId: staffEmployeeId, leaveType: "annual", startDate: "2026-06-15", endDate: "2026-06-15" });
+      const requestId = submitRes.body.request.id;
+      const bad = await request(app.getHttpServer()).patch(`/leave-requests/${requestId}`).set("Authorization", `Bearer ${staffToken}`).send({ dayPart: "third_half" });
+      expect(bad.status).toBe(400);
+      const noAuth = await request(app.getHttpServer()).patch(`/leave-requests/${requestId}`).send({ reason: "x" });
+      expect(noAuth.status).toBe(401);
+    });
+
+    it("serves team-calendar as its own route (not read as an id) and validates its query", async () => {
+      const ok = await request(app.getHttpServer())
+        .get("/leave-requests/team-calendar")
+        .query({ from: "2026-06-01", to: "2026-06-30" })
+        .set("Authorization", `Bearer ${staffToken}`);
+      expect(ok.status).toBe(200);
+      expect(Array.isArray(ok.body)).toBe(true);
+      expect(ok.body.length).toBeGreaterThan(0);
+      const missing = await request(app.getHttpServer()).get("/leave-requests/team-calendar").set("Authorization", `Bearer ${staffToken}`);
+      expect(missing.status).toBe(400);
+      const noAuth = await request(app.getHttpServer()).get("/leave-requests/team-calendar").query({ from: "2026-06-01", to: "2026-06-30" });
+      expect(noAuth.status).toBe(401);
+    });
+
+    it("serves colleagues as its own route and needs a token", async () => {
+      const ok = await request(app.getHttpServer()).get("/leave-requests/colleagues").set("Authorization", `Bearer ${staffToken}`);
+      expect(ok.status).toBe(200);
+      expect(Array.isArray(ok.body)).toBe(true);
+      const noAuth = await request(app.getHttpServer()).get("/leave-requests/colleagues");
+      expect(noAuth.status).toBe(401);
+    });
+  });
+
   describe("GET /leave-policies", () => {
     it("should list leave policies", async () => {
       const res = await request(app.getHttpServer())

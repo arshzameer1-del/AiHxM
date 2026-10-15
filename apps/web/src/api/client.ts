@@ -200,6 +200,9 @@ import type {
   LeavePolicyVersionView,
   LeavePolicyView,
   LeaveRequestView,
+  TeamLeaveEntryView,
+  LeaveColleagueView,
+  UpdateLeaveRequestRequest,
   LoginResult,
   LogoAlignment,
   MeResponse,
@@ -2316,6 +2319,17 @@ export const api = {
     request<LeaveRequestView>(`/leave-requests/${id}/decision`, { method: "PATCH", body: JSON.stringify(input) }),
 
   cancelLeaveRequest: (id: string) => request<void>(`/leave-requests/${id}/cancel`, { method: "POST" }),
+
+  // LV-UP: edit a pending request, read one request (with its approval chain), and the team calendar.
+  updateLeaveRequest: (id: string, input: UpdateLeaveRequestRequest) =>
+    request<SubmitLeaveRequestResponse>(`/leave-requests/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+  getLeaveRequest: (id: string) => request<LeaveRequestView>(`/leave-requests/${id}`),
+  getLeaveColleagues: (employeeId?: string) =>
+    request<LeaveColleagueView[]>(`/leave-requests/colleagues${employeeId ? `?employeeId=${encodeURIComponent(employeeId)}` : ""}`),
+  getTeamLeaveCalendar: (from: string, to: string, employeeId?: string) =>
+    request<TeamLeaveEntryView[]>(
+      `/leave-requests/team-calendar?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}${employeeId ? `&employeeId=${encodeURIComponent(employeeId)}` : ""}`
+    ),
 
   // --- TLM-01/02/03 -----------------------------------------------------
   listLeaveTypes: (includeInactive = false) =>

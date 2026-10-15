@@ -59,6 +59,7 @@ function MyLeaveCard({
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [formRange, setFormRange] = useState<{ start: string; end: string } | null>(null);
+  const [editingRequest, setEditingRequest] = useState<LeaveRequestView | null>(null);
   const [showCorrectionForm, setShowCorrectionForm] = useState(false);
   const [overlapWarnings, setOverlapWarnings] = useState<OverlapWarning[]>([]);
   const [clockBusy, setClockBusy] = useState(false);
@@ -119,7 +120,13 @@ function MyLeaveCard({
             </button>
           )}
           {canSubmit && !showForm && (
-            <button onClick={() => setShowForm(true)} className="text-sm font-semibold text-accent hover:underline">
+            <button
+              onClick={() => {
+                setEditingRequest(null);
+                setShowForm(true);
+              }}
+              className="text-sm font-semibold text-accent hover:underline"
+            >
               Request Leave
             </button>
           )}
@@ -211,16 +218,20 @@ function MyLeaveCard({
       {showForm && (
         <div className="mt-4">
           <LeaveRequestForm
+            key={editingRequest?.id ?? "new"}
             fixedEmployeeId={employeeId}
             initialStart={formRange?.start}
             initialEnd={formRange?.end}
+            editing={editingRequest ?? undefined}
             onCancel={() => {
               setShowForm(false);
               setFormRange(null);
+              setEditingRequest(null);
             }}
             onSubmitted={(result) => {
               setShowForm(false);
               setFormRange(null);
+              setEditingRequest(null);
               setOverlapWarnings(result.overlapWarnings);
               onChanged();
             }}
@@ -238,7 +249,13 @@ function MyLeaveCard({
         canSubmit={canSubmit}
         onChanged={onChanged}
         onCreateRange={(start, end) => {
+          setEditingRequest(null);
           setFormRange({ start, end });
+          setShowForm(true);
+        }}
+        onEditRequest={(request) => {
+          setFormRange(null);
+          setEditingRequest(request);
           setShowForm(true);
         }}
       />

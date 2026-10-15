@@ -98,3 +98,39 @@ test("month navigation wraps the year", () => {
   assert.deepEqual(previousMonth(2026, 1), { year: 2025, month: 12 });
   assert.deepEqual(nextMonth(2026, 10), { year: 2026, month: 11 });
 });
+
+test("long date formats", async () => {
+  const { formatLongDate, formatLongRange } = await import("./leaveCalendar");
+  assert.equal(formatLongDate("2026-08-30"), "August 30, 2026");
+  assert.equal(formatLongRange("2026-08-30", "2026-08-31"), "August 30, 2026 – August 31, 2026");
+  assert.equal(formatLongRange("2026-08-30", "2026-08-30"), "August 30, 2026");
+});
+
+test("eachDate is inclusive, empty for an inverted range and capped", async () => {
+  const { eachDate } = await import("./leaveCalendar");
+  assert.deepEqual(eachDate("2026-10-30", "2026-11-02"), ["2026-10-30", "2026-10-31", "2026-11-01", "2026-11-02"]);
+  assert.deepEqual(eachDate("2026-11-02", "2026-10-30"), []);
+  assert.equal(eachDate("2020-01-01", "2030-01-01").length, 400);
+});
+
+test("week and month windows", async () => {
+  const { weekWindow, monthWindow } = await import("./leaveCalendar");
+  // Wed 2026-10-14 in a Monday-first week.
+  assert.deepEqual(weekWindow("2026-10-14", 1), { from: "2026-10-12", to: "2026-10-18" });
+  // Same day in a Saturday-first week (SAP).
+  assert.deepEqual(weekWindow("2026-10-14", 6), { from: "2026-10-10", to: "2026-10-16" });
+  // A Monday is the first day of its own Monday-first week.
+  assert.deepEqual(weekWindow("2026-10-12", 1), { from: "2026-10-12", to: "2026-10-18" });
+  assert.deepEqual(monthWindow("2026-02-10"), { from: "2026-02-01", to: "2026-02-28" });
+  assert.deepEqual(monthWindow("2028-02-10"), { from: "2028-02-01", to: "2028-02-29" });
+});
+
+test("shiftWindow moves a week or a calendar month and wraps the year", async () => {
+  const { shiftWindow, covers } = await import("./leaveCalendar");
+  assert.equal(shiftWindow("2026-10-14", "week", 1), "2026-10-21");
+  assert.equal(shiftWindow("2026-10-14", "week", -1), "2026-10-07");
+  assert.equal(shiftWindow("2026-12-20", "month", 1), "2027-01-01");
+  assert.equal(shiftWindow("2026-01-20", "month", -1), "2025-12-01");
+  assert.equal(covers("2026-10-19", "2026-10-20", "2026-10-20"), true);
+  assert.equal(covers("2026-10-19", "2026-10-20", "2026-10-21"), false);
+});

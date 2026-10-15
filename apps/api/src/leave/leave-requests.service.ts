@@ -14,13 +14,17 @@ import { resolveEntitlement } from "./leave-entitlements.repo";
 import type {
   AccrualMethod,
   DecideLeaveCancellationRequest,
+  LeaveApprovalLineView,
   LeaveBalanceView,
+  LeaveColleagueView,
   LeaveRequestView,
   LeaveType,
   LeaveTypeView,
   OverlapWarning,
   SubmitLeaveRequestRequest,
   SubmitLeaveRequestResponse,
+  TeamLeaveEntryView,
+  UpdateLeaveRequestRequest,
 } from "@aihxm/shared-types";
 
 const LEAVE_MODULE_KEY = "leave" as const;
@@ -76,14 +80,17 @@ function rowToBalance(row: any): LeaveBalanceView {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function rowToLeaveRequest(row: any, employeeUserAccountId: string | null): LeaveRequestView {
+function rowToLeaveRequest(row: any, employeeUserAccountId: string | null, approvals?: LeaveApprovalLineView[]): LeaveRequestView {
+  const startDate = toIsoDate(row.start_date);
+  const endDate = toIsoDate(row.end_date);
+  const delegateName = row.delegate_first_name ? `${row.delegate_first_name} ${row.delegate_last_name ?? ""}`.trim() : null;
   return {
     id: row.id,
     companyId: row.company_id,
     employeeId: row.employee_id,
     leaveType: row.leave_type,
-    startDate: toIsoDate(row.start_date),
-    endDate: toIsoDate(row.end_date),
+    startDate,
+    endDate,
     daysRequested: Number(row.days_requested),
     reason: row.reason,
     status: row.status,
@@ -101,6 +108,13 @@ function rowToLeaveRequest(row: any, employeeUserAccountId: string | null): Leav
     payrollImpact: row.payroll_impact ?? false,
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
+    // LV-UP display fields. They come from joins the list/get queries add, so a view built from a bare
+    // `leave_requests` row (submit, decide, cancel) simply leaves them out.
+    ...(row.first_name !== undefined ? { employeeName: `${row.first_name} ${row.last_name ?? ""}`.trim(), employeeNumber: row.employee_number } : {}),
+    ...(row.first_name !== undefined ? { delegateEmployeeName: delegateName } : {}),
+    ...(row.leave_type_name ? { leaveTypeName: row.leave_type_name } : {}),
+    absenceDays: inclusiveDayCount(startDate, endDate),
+    ...(approvals ? { approvals } : {}),
   };
 }
 
@@ -281,54 +295,13 @@ export class LeaveRequestsService {
     const year = new Date(input.startDate).getUTCFullYear();
 
     const result = await this.db.withClaims(claims, async (client) => {
-      // Needs a `client` to read the company's holiday calendar / weekly pattern.
-      const daysRequested =
-        dayPart === "full"
-          ? await countLeaveDays(client, this.workSchedule, employee.id, input.startDate, input.endDate)
-          : (await this.workSchedule.isWorkingDay(client, employee.id, input.startDate))
-            ? 0.5
-            : 0;
-      if (daysRequested <= 0) {
-        throw new BadRequestException(
-          "A leave request must span at least one day that isn't a company holiday"
-        );
-      }
-      if (leaveType.maxConsecutiveDays !== null && daysRequested > leaveType.maxConsecutiveDays) {
-        throw new BadRequestException(`${leaveType.name} is limited to ${leaveType.maxConsecutiveDays} consecutive day(s) per request`);
-      }
-
-      // TLM-03: supporting document, delegate.
-      if (leaveType.documentRequired && daysRequested > leaveType.documentRequiredAfterDays && !input.attachmentDocumentId) {
-        throw new BadRequestException(`${leaveType.name} of ${daysRequested} day(s) needs a supporting document`);
-      }
-      if (input.attachmentDocumentId) {
-        const doc = await client.query("SELECT 1 FROM employee_documents WHERE id = $1 AND employee_id = $2", [input.attachmentDocumentId, employee.id]);
-        if (doc.rowCount === 0) throw new BadRequestException("The attached document does not belong to this employee");
-      }
-      if (input.delegateEmployeeId) {
-        if (input.delegateEmployeeId === employee.id) throw new BadRequestException("An employee cannot delegate to themselves");
-        const delegate = await client.query("SELECT 1 FROM employees WHERE id = $1 AND company_id = $2", [input.delegateEmployeeId, employee.company_id]);
-        if (delegate.rowCount === 0) throw new BadRequestException("Delegate employee not found");
-      }
-
-      if (leaveType.tracksBalance) {
-        // Reads the CURRENT version's entitlement (effective_to IS NULL) - live
-        // decision paths deliberately keep reading "current" only.
-        const entitlement = await resolveEntitlement(client, resolved!.policyId!, leaveType.code);
-        if (!entitlement) throw new NotFoundException("Resolved leave policy no longer exists");
-        const method: AccrualMethod = entitlement.accrualMethod ?? leaveType.accrualMethod;
-        const balance = await this.ledger.ensureBalance(client, employee.company_id, employee.id, leaveType.code, year, { days: entitlement.days, method });
-        const remaining = Number(balance.entitled_days) - Number(balance.used_days);
-        if (daysRequested > remaining) {
-          throw new BadRequestException(
-            `Insufficient ${leaveType.code} leave balance: requested ${daysRequested} day(s), ${remaining} remaining for ${year}`
-          );
-        }
-      }
-
-      await this.assertNoOverlap(client, employee.id, input.startDate, input.endDate, dayPart);
-      const overlapWarnings = await this.findOverlapWarnings(client, employee, input.startDate, input.endDate);
-      const returnDate = await this.computeReturnDate(client, employee.id, input.endDate, dayPart, input.startDate);
+      const { daysRequested, returnDate, overlapWarnings } = await this.priceAndValidate(client, employee, leaveType, resolved?.policyId ?? null, year, {
+        startDate: input.startDate,
+        endDate: input.endDate,
+        dayPart,
+        attachmentDocumentId: input.attachmentDocumentId ?? null,
+        delegateEmployeeId: input.delegateEmployeeId ?? null,
+      });
 
       let insertResult;
       try {
@@ -590,10 +563,14 @@ export class LeaveRequestsService {
     await this.requireLeaveModule(claims);
     return this.db.withClaims(claims, async (client) => {
       const result = await client.query(
-        `SELECT lr.*, e.user_account_id AS employee_user_account_id, mgr.user_account_id AS manager_user_account_id
+        `SELECT lr.*, e.user_account_id AS employee_user_account_id, mgr.user_account_id AS manager_user_account_id,
+                e.first_name, e.last_name, e.employee_number, d.first_name AS delegate_first_name, d.last_name AS delegate_last_name,
+                lt.name AS leave_type_name
          FROM leave_requests lr
          JOIN employees e ON e.id = lr.employee_id
          LEFT JOIN employees mgr ON mgr.id = e.manager_id
+         LEFT JOIN employees d ON d.id = lr.delegate_employee_id
+         LEFT JOIN leave_types lt ON lt.company_id = lr.company_id AND lt.code = lr.leave_type
          WHERE lr.id = $1`,
         [id]
       );
@@ -601,7 +578,8 @@ export class LeaveRequestsService {
       const row = result.rows[0];
       const visible = await this.isVisible(claims, row.employee_user_account_id, row.manager_user_account_id);
       if (!visible) throw new NotFoundException("Leave request not found");
-      return rowToLeaveRequest(row, row.employee_user_account_id);
+      const approvals = await this.loadApprovals(client, row.workflow_instance_id ? [row.workflow_instance_id] : []);
+      return rowToLeaveRequest(row, row.employee_user_account_id, approvals.get(row.workflow_instance_id) ?? []);
     });
   }
 
@@ -610,21 +588,26 @@ export class LeaveRequestsService {
     return this.db.withClaims(claims, async (client) => {
       const scope = await this.rbac.resolveViewScope(claims, "leave_request.view");
       const result = await client.query(
-        `SELECT lr.*, e.user_account_id AS employee_user_account_id, mgr.user_account_id AS manager_user_account_id
+        `SELECT lr.*, e.user_account_id AS employee_user_account_id, mgr.user_account_id AS manager_user_account_id,
+                e.first_name, e.last_name, e.employee_number, d.first_name AS delegate_first_name, d.last_name AS delegate_last_name,
+                lt.name AS leave_type_name
          FROM leave_requests lr
          JOIN employees e ON e.id = lr.employee_id
          LEFT JOIN employees mgr ON mgr.id = e.manager_id
+         LEFT JOIN employees d ON d.id = lr.delegate_employee_id
+         LEFT JOIN leave_types lt ON lt.company_id = lr.company_id AND lt.code = lr.leave_type
          WHERE ($1::uuid IS NULL OR lr.employee_id = $1)
          ORDER BY lr.created_at DESC`,
         [filter?.employeeId ?? null]
       );
-      return result.rows
-        .filter((row) =>
+      const visibleRows = result.rows.filter(
+        (row) =>
           scope.hasAll ||
           (scope.hasSelf && row.employee_user_account_id === claims.sub) ||
           (scope.hasTeam && row.manager_user_account_id === claims.sub)
-        )
-        .map((row) => rowToLeaveRequest(row, row.employee_user_account_id));
+      );
+      const approvals = await this.loadApprovals(client, [...new Set(visibleRows.map((r) => r.workflow_instance_id).filter(Boolean))] as string[]);
+      return visibleRows.map((row) => rowToLeaveRequest(row, row.employee_user_account_id, approvals.get(row.workflow_instance_id) ?? []));
     });
   }
 
@@ -714,6 +697,279 @@ export class LeaveRequestsService {
     return { totalDays: segments.reduce((sum, s) => sum + s.days, 0), segments };
   }
 
+  /**
+   * LV-UP: edit a request that is still pending (SAP's pencil icon). Everything `submit` checks is checked again
+   * against the new values, the days are recounted, and the request keeps its workflow instance. Refused once any
+   * approver has already acted, because that decision was made on the old dates.
+   */
+  async update(claims: RequestClaims, leaveRequestId: string, dto: UpdateLeaveRequestRequest): Promise<SubmitLeaveRequestResponse> {
+    await this.requireLeaveModule(claims);
+
+    const loaded = await this.db.withClaims(claims, async (client) => {
+      const found = await client.query(`SELECT * FROM leave_requests WHERE id = $1`, [leaveRequestId]);
+      if (found.rowCount === 0) return null;
+      const row = found.rows[0];
+      return { row, employee: await this.loadEmployee(client, row.employee_id) };
+    });
+    if (!loaded || !loaded.employee) throw new NotFoundException("Leave request not found");
+    const { row, employee } = loaded;
+
+    if (!(await this.isVisible(claims, employee.user_account_id, employee.manager_user_account_id))) {
+      throw new NotFoundException("Leave request not found");
+    }
+    const isOwner = Boolean(employee.user_account_id) && employee.user_account_id === claims.sub;
+    const canEdit = isOwner
+      ? await this.rbac.can(claims, "leave_request.create.self", { ownerId: employee.user_account_id })
+      : await this.rbac.can(claims, "leave_request.manage.all");
+    if (!canEdit && !(await this.rbac.can(claims, "leave_request.manage.all"))) {
+      throw new ForbiddenException("Not permitted to edit this leave request");
+    }
+    if (row.status !== "pending") throw new BadRequestException(`Only a pending leave request can be edited; this one is ${row.status}`);
+
+    if (row.workflow_instance_id) {
+      const acted = await this.db.withClaims(claims, (client) =>
+        client.query(
+          `SELECT 1 FROM workflow_step_approvals a JOIN workflow_step_instances s ON s.id = a.step_instance_id
+            WHERE s.workflow_instance_id = $1 AND a.status IN ('approved', 'rejected') LIMIT 1`,
+          [row.workflow_instance_id]
+        )
+      );
+      if ((acted.rowCount ?? 0) > 0) throw new ConflictException("An approver has already acted on this request, so it can no longer be edited - cancel it and submit a new one");
+    }
+
+    const startDate = dto.startDate ?? toIsoDate(row.start_date);
+    const endDate = dto.endDate ?? toIsoDate(row.end_date);
+    if (new Date(endDate) < new Date(startDate)) throw new BadRequestException("endDate cannot be before startDate");
+    const dayPart = dto.dayPart ?? row.day_part ?? "full";
+    const typeCode = dto.leaveType ?? row.leave_type;
+    const delegateEmployeeId = dto.delegateEmployeeId === undefined ? (row.delegate_employee_id ?? null) : dto.delegateEmployeeId;
+
+    const leaveType = await this.db.withClaims(claims, (client) => this.leaveTypes.getByCode(client, employee.company_id, typeCode));
+    if (!leaveType || !leaveType.isActive) throw new BadRequestException(`Leave type "${typeCode}" is not available - ask HR to enable it`);
+    this.assertTypeEligibility(leaveType, employee, startDate);
+    if (dayPart !== "full") {
+      if (!leaveType.halfDayAllowed) throw new BadRequestException(`${leaveType.name} cannot be taken as a half day`);
+      if (startDate !== endDate) throw new BadRequestException("A half-day leave request must start and end on the same date");
+    }
+    const resolved = leaveType.tracksBalance ? await this.employeeGroups.resolvePolicyInternal(claims, employee.id, "leave") : null;
+    if (leaveType.tracksBalance && !resolved?.policyId) {
+      throw new BadRequestException("No leave policy is configured for this employee — assign a tenant-wide default leave policy or an employee group policy first");
+    }
+    const year = new Date(startDate).getUTCFullYear();
+
+    const result = await this.db.withClaims(claims, async (client) => {
+      const { daysRequested, returnDate, overlapWarnings } = await this.priceAndValidate(
+        client,
+        employee,
+        leaveType,
+        resolved?.policyId ?? null,
+        year,
+        { startDate, endDate, dayPart, attachmentDocumentId: row.attachment_document_id ?? null, delegateEmployeeId },
+        leaveRequestId
+      );
+      let updated;
+      try {
+        updated = await client.query(
+          `UPDATE leave_requests
+              SET leave_type = $2, start_date = $3, end_date = $4, days_requested = $5, reason = $6, day_part = $7,
+                  delegate_employee_id = $8, return_date = $9, payroll_impact = $10, updated_at = now()
+            WHERE id = $1 RETURNING *`,
+          [
+            leaveRequestId,
+            leaveType.code,
+            startDate,
+            endDate,
+            daysRequested,
+            dto.reason === undefined ? row.reason : dto.reason,
+            dayPart,
+            delegateEmployeeId,
+            returnDate,
+            !leaveType.isPaid,
+          ]
+        );
+      } catch (err) {
+        if ((err as { code?: string }).code === "23P01") {
+          throw new ConflictException("This employee already has pending or approved leave overlapping these dates");
+        }
+        throw err;
+      }
+      await this.audit.record(client, claims, {
+        companyId: employee.company_id,
+        action: "leave_request.update",
+        target: leaveRequestId,
+        metadata: {
+          before: { leaveType: row.leave_type, startDate: toIsoDate(row.start_date), endDate: toIsoDate(row.end_date), dayPart: row.day_part, daysRequested: Number(row.days_requested) },
+          after: { leaveType: leaveType.code, startDate, endDate, dayPart, daysRequested },
+        },
+      });
+      return { updatedRow: updated.rows[0], overlapWarnings };
+    });
+
+    return { request: rowToLeaveRequest(result.updatedRow, employee.user_account_id), overlapWarnings: result.overlapWarnings };
+  }
+
+  /**
+   * LV-UP: "Team" calendar on the request detail page. The colleagues are the employees who share the viewed
+   * employee's direct manager (the same definition the overlap notices use); a person with no manager sees only
+   * themselves. Only pending and approved leave is shown, and only dates plus status, never type or reason.
+   * The caller must be allowed to see the viewed employee's own leave in the first place.
+   */
+  async teamCalendar(claims: RequestClaims, query: { from: string; to: string; employeeId?: string }): Promise<TeamLeaveEntryView[]> {
+    await this.requireLeaveModule(claims);
+    if (query.to < query.from) throw new BadRequestException("`to` cannot be before `from`");
+    if (inclusiveDayCount(query.from, query.to) > 93) throw new BadRequestException("The team calendar shows at most about three months at a time");
+
+    return this.db.withClaims(claims, async (client) => {
+      const subject = await this.resolveTeamSubject(client, claims, query.employeeId);
+      const result = await client.query(
+        `SELECT lr.id, lr.start_date, lr.end_date, lr.day_part, lr.status, e.id AS employee_id, e.first_name, e.last_name, e.employee_number
+           FROM leave_requests lr
+           JOIN employees e ON e.id = lr.employee_id
+          WHERE lr.status IN ('pending', 'approved')
+            AND lr.start_date <= $3 AND lr.end_date >= $2
+            AND ( e.id = $1 OR ($4::uuid IS NOT NULL AND e.manager_id = $4) )
+          ORDER BY e.first_name, e.last_name, lr.start_date`,
+        [subject.id, query.from, query.to, subject.manager_id ?? null]
+      );
+      return result.rows.map((r) => ({
+        leaveRequestId: r.id,
+        employeeId: r.employee_id,
+        employeeName: `${r.first_name} ${r.last_name}`.trim(),
+        employeeNumber: r.employee_number,
+        startDate: toIsoDate(r.start_date),
+        endDate: toIsoDate(r.end_date),
+        dayPart: r.day_part ?? "full",
+        status: r.status,
+      }));
+    });
+  }
+
+  /**
+   * LV-UP: the people who can be named as relief person for `employeeId` (default: the caller): the colleagues
+   * under the same manager, excluding the employee. Needed because an ordinary employee cannot list other
+   * employees, but must still be able to pick a relief person from their own team.
+   */
+  async listColleagues(claims: RequestClaims, employeeId?: string): Promise<LeaveColleagueView[]> {
+    await this.requireLeaveModule(claims);
+    return this.db.withClaims(claims, async (client) => {
+      const subject = await this.resolveTeamSubject(client, claims, employeeId);
+      if (!subject.manager_id) return [];
+      const result = await client.query(
+        `SELECT id, first_name, last_name, employee_number FROM employees
+          WHERE manager_id = $1 AND id <> $2
+          ORDER BY first_name, last_name`,
+        [subject.manager_id, subject.id]
+      );
+      return result.rows.map((r) => ({ employeeId: r.id, employeeName: `${r.first_name} ${r.last_name}`.trim(), employeeNumber: r.employee_number }));
+    });
+  }
+
+  /** The employee whose team is being shown, after checking the caller may see that employee at all (404 otherwise). */
+  private async resolveTeamSubject(client: PoolClient, claims: RequestClaims, employeeId?: string) {
+    const base = `SELECT e.*, mgr.user_account_id AS manager_user_account_id FROM employees e LEFT JOIN employees mgr ON mgr.id = e.manager_id`;
+    const found = employeeId
+      ? await client.query(`${base} WHERE e.id = $1`, [employeeId])
+      : await client.query(`${base} WHERE e.user_account_id = $1`, [claims.sub]);
+    const subject = found.rows[0];
+    if (!subject) throw new NotFoundException("Employee not found");
+    if (!(await this.isVisible(claims, subject.user_account_id, subject.manager_user_account_id))) {
+      throw new NotFoundException("Employee not found");
+    }
+    return subject;
+  }
+
+  /** LV-UP: the approval chain for a set of workflow instances, one entry per approver line. */
+  private async loadApprovals(client: PoolClient, instanceIds: string[]): Promise<Map<string, LeaveApprovalLineView[]>> {
+    const byInstance = new Map<string, LeaveApprovalLineView[]>();
+    if (instanceIds.length === 0) return byInstance;
+    const result = await client.query(
+      `SELECT s.workflow_instance_id, s.step_order, s.name AS step_name, a.status, a.decided_at,
+              COALESCE(NULLIF(trim(concat_ws(' ', ee.first_name, ee.last_name)), ''), r.name) AS approver_name
+         FROM workflow_step_instances s
+         JOIN workflow_step_approvals a ON a.step_instance_id = s.id
+         LEFT JOIN employees ee ON ee.user_account_id = COALESCE(a.delegated_to_user_account_id, a.user_account_id)
+         LEFT JOIN roles r ON r.id = a.role_id
+        WHERE s.workflow_instance_id = ANY($1::uuid[])
+        ORDER BY s.workflow_instance_id, s.step_order, a.created_at`,
+      [instanceIds]
+    );
+    for (const r of result.rows) {
+      const list = byInstance.get(r.workflow_instance_id) ?? [];
+      list.push({
+        stepOrder: r.step_order,
+        stepName: r.step_name,
+        approverName: r.approver_name ?? null,
+        status: r.status,
+        decidedAt: r.decided_at ? toIso(r.decided_at) : null,
+      });
+      byInstance.set(r.workflow_instance_id, list);
+    }
+    return byInstance;
+  }
+
+  /**
+   * The checks and arithmetic every new or edited request goes through: working days, the per-type limits,
+   * supporting document, relief person, balance, overlap, return date. `excludeRequestId` lets an edit ignore
+   * its own row when looking for overlapping leave.
+   */
+  private async priceAndValidate(
+    client: PoolClient,
+    employee: EmployeeRow,
+    leaveType: LeaveTypeView,
+    policyId: string | null,
+    year: number,
+    input: { startDate: string; endDate: string; dayPart: string; attachmentDocumentId: string | null; delegateEmployeeId: string | null },
+    excludeRequestId?: string
+  ): Promise<{ daysRequested: number; returnDate: string; overlapWarnings: OverlapWarning[] }> {
+    // Needs a `client` to read the company's holiday calendar / weekly pattern.
+    const daysRequested =
+      input.dayPart === "full"
+        ? await countLeaveDays(client, this.workSchedule, employee.id, input.startDate, input.endDate)
+        : (await this.workSchedule.isWorkingDay(client, employee.id, input.startDate))
+          ? 0.5
+          : 0;
+    if (daysRequested <= 0) {
+      throw new BadRequestException("A leave request must span at least one day that isn't a company holiday");
+    }
+    if (leaveType.maxConsecutiveDays !== null && daysRequested > leaveType.maxConsecutiveDays) {
+      throw new BadRequestException(`${leaveType.name} is limited to ${leaveType.maxConsecutiveDays} consecutive day(s) per request`);
+    }
+
+    // TLM-03: supporting document, delegate.
+    if (leaveType.documentRequired && daysRequested > leaveType.documentRequiredAfterDays && !input.attachmentDocumentId) {
+      throw new BadRequestException(`${leaveType.name} of ${daysRequested} day(s) needs a supporting document`);
+    }
+    if (input.attachmentDocumentId) {
+      const doc = await client.query("SELECT 1 FROM employee_documents WHERE id = $1 AND employee_id = $2", [input.attachmentDocumentId, employee.id]);
+      if (doc.rowCount === 0) throw new BadRequestException("The attached document does not belong to this employee");
+    }
+    if (input.delegateEmployeeId) {
+      if (input.delegateEmployeeId === employee.id) throw new BadRequestException("An employee cannot delegate to themselves");
+      const delegate = await client.query("SELECT 1 FROM employees WHERE id = $1 AND company_id = $2", [input.delegateEmployeeId, employee.company_id]);
+      if (delegate.rowCount === 0) throw new BadRequestException("Delegate employee not found");
+    }
+
+    if (leaveType.tracksBalance) {
+      // Reads the CURRENT version's entitlement (effective_to IS NULL) - live
+      // decision paths deliberately keep reading "current" only.
+      const entitlement = await resolveEntitlement(client, policyId!, leaveType.code);
+      if (!entitlement) throw new NotFoundException("Resolved leave policy no longer exists");
+      const method: AccrualMethod = entitlement.accrualMethod ?? leaveType.accrualMethod;
+      const balance = await this.ledger.ensureBalance(client, employee.company_id, employee.id, leaveType.code, year, { days: entitlement.days, method });
+      const remaining = Number(balance.entitled_days) - Number(balance.used_days);
+      if (daysRequested > remaining) {
+        throw new BadRequestException(
+          `Insufficient ${leaveType.code} leave balance: requested ${daysRequested} day(s), ${remaining} remaining for ${year}`
+        );
+      }
+    }
+
+    await this.assertNoOverlap(client, employee.id, input.startDate, input.endDate, input.dayPart, excludeRequestId);
+    const overlapWarnings = await this.findOverlapWarnings(client, employee, input.startDate, input.endDate);
+    const returnDate = await this.computeReturnDate(client, employee.id, input.endDate, input.dayPart, input.startDate);
+    return { daysRequested, returnDate, overlapWarnings };
+  }
+
   // -----------------------------------------------------------------
   // Internals
   // -----------------------------------------------------------------
@@ -768,14 +1024,15 @@ export class LeaveRequestsService {
   }
 
   /** TLM-03 overlap protection: opposite halves of one day may coexist; everything else may not. */
-  private async assertNoOverlap(client: PoolClient, employeeId: string, startDate: string, endDate: string, dayPart: string): Promise<void> {
+  private async assertNoOverlap(client: PoolClient, employeeId: string, startDate: string, endDate: string, dayPart: string, excludeRequestId?: string): Promise<void> {
     const clash = await client.query(
       `SELECT id FROM leave_requests
         WHERE employee_id = $1 AND status IN ('pending', 'approved')
           AND start_date <= $3 AND end_date >= $2
           AND (day_part = 'full' OR $4 = 'full' OR day_part = $4)
+          AND ($5::uuid IS NULL OR id <> $5)
         LIMIT 1`,
-      [employeeId, startDate, endDate, dayPart]
+      [employeeId, startDate, endDate, dayPart, excludeRequestId ?? null]
     );
     if ((clash.rowCount ?? 0) > 0) {
       throw new ConflictException("This employee already has pending or approved leave overlapping these dates");

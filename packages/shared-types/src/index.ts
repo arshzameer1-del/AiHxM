@@ -3547,6 +3547,54 @@ export type LeaveRequestView = {
   payrollImpact: boolean;
   createdAt: string;
   updatedAt: string;
+  /** LV-UP: display fields so the screen never has to look employees up itself. */
+  employeeName?: string;
+  employeeNumber?: string;
+  /** The tenant's own name for the leave type (`leaveType` is only its code). */
+  leaveTypeName?: string;
+  delegateEmployeeName?: string | null;
+  /** Calendar days from start to end, both included (SAP "Absence days"); `daysRequested` is the working days charged. */
+  absenceDays?: number;
+  /** LV-UP: the approval chain, one entry per approver line, in step order. */
+  approvals?: LeaveApprovalLineView[];
+};
+
+export type LeaveApprovalLineView = {
+  stepOrder: number;
+  stepName: string;
+  /** A person's name, or the role's name when the line is "anyone holding this role". */
+  approverName: string | null;
+  status: "pending" | "escalated" | "approved" | "rejected";
+  decidedAt: string | null;
+};
+
+/** LV-UP: edit a request that is still pending. Omitted fields are left as they are; `delegateEmployeeId: null` clears the relief person. */
+export type UpdateLeaveRequestRequest = {
+  leaveType?: LeaveType;
+  startDate?: string;
+  endDate?: string;
+  reason?: string | null;
+  dayPart?: LeaveDayPart;
+  delegateEmployeeId?: string | null;
+};
+
+/** LV-UP: a colleague's leave on the team calendar. Dates and status only; never the type or the reason. */
+export type TeamLeaveEntryView = {
+  leaveRequestId: string;
+  employeeId: string;
+  employeeName: string;
+  employeeNumber: string;
+  startDate: string;
+  endDate: string;
+  dayPart: LeaveDayPart;
+  status: "pending" | "approved";
+};
+
+/** LV-UP: who can be named as the relief person - the colleagues under the same manager. */
+export type LeaveColleagueView = {
+  employeeId: string;
+  employeeName: string;
+  employeeNumber: string;
 };
 
 export type SubmitLeaveRequestRequest = {

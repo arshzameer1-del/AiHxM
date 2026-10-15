@@ -115,3 +115,48 @@ export function weekdayLabels(weekStart = 1): string[] {
   const names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   return Array.from({ length: 7 }, (_, i) => names[(weekStart + i) % 7]);
 }
+
+/** `2026-08-30` -> `August 30, 2026` (the long form SAP's request header uses). */
+export function formatLongDate(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return `${MONTH_NAMES[m - 1]} ${d}, ${y}`;
+}
+
+export function formatLongRange(start: string, end: string): string {
+  return start === end ? formatLongDate(start) : `${formatLongDate(start)} – ${formatLongDate(end)}`;
+}
+
+/** Every date from `start` to `end`, both included. Empty when `end < start`; capped so a bad range cannot hang the page. */
+export function eachDate(start: string, end: string, cap = 400): string[] {
+  const out: string[] = [];
+  for (let d = start; d <= end && out.length < cap; d = addDays(d, 1)) out.push(d);
+  return out;
+}
+
+/** The 7-day window that contains `iso`, starting on `weekStart` (0 = Sunday ... 6 = Saturday). */
+export function weekWindow(iso: string, weekStart = 1): { from: string; to: string } {
+  const lead = (parseIsoDate(iso).getUTCDay() - weekStart + 7) % 7;
+  const from = addDays(iso, -lead);
+  return { from, to: addDays(from, 6) };
+}
+
+/** The calendar month that contains `iso`. */
+export function monthWindow(iso: string): { from: string; to: string } {
+  const [y, m] = iso.split("-").map(Number);
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const mm = String(m).padStart(2, "0");
+  return { from: `${y}-${mm}-01`, to: `${y}-${mm}-${String(last).padStart(2, "0")}` };
+}
+
+/** Moves a window one step back (-1) or forward (+1): a week by 7 days, a month by one calendar month. */
+export function shiftWindow(anchor: string, mode: "week" | "month", direction: -1 | 1): string {
+  if (mode === "week") return addDays(anchor, 7 * direction);
+  const [y, m] = anchor.split("-").map(Number);
+  const target = new Date(Date.UTC(y, m - 1 + direction, 1));
+  return toIsoDate(target);
+}
+
+/** Does leave `[start, end]` cover `date`? */
+export function covers(start: string, end: string, date: string): boolean {
+  return start <= date && date <= end;
+}

@@ -373,11 +373,10 @@ test.describe("Leave & Attendance Accessibility", () => {
     const leaveTypeInput = page.locator('label:has-text("Leave type") + select');
 
     // Verify input has associated label or ARIA label
+    // The label is now paired by htmlFor/id (LV-UP), so accept any label whose `for` equals the select's id.
+    const selectId = await leaveTypeInput.getAttribute("id");
     const hasLabel =
-      (await page
-        .locator('label[for="leaveType"]')
-        .or(page.locator('label[for="type"]'))
-        .count()) > 0 ||
+      (selectId !== null && (await page.locator(`label[for="${selectId}"]`).count()) > 0) ||
       (await leaveTypeInput.evaluate((el) => el.hasAttribute("aria-label"))) ||
       (await leaveTypeInput.evaluate((el) => el.closest("label"))) !== null;
 

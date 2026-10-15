@@ -11,6 +11,8 @@ import { AttendanceCorrectionsService } from "./attendance-corrections.service";
 import { OvertimeService } from "./overtime.service";
 import { OnDutyService } from "./on-duty.service";
 import { SubmitLeaveRequestDto } from "./dto/submit-leave-request.dto";
+import { UpdateLeaveRequestDto } from "./dto/update-leave-request.dto";
+import { TeamCalendarQueryDto } from "./dto/team-calendar-query.dto";
 import { DecideLeaveRequestDto } from "./dto/decide-leave-request.dto";
 import { ClockInDto } from "./dto/clock-in.dto";
 import { ClockOutDto } from "./dto/clock-out.dto";
@@ -97,9 +99,27 @@ export class LeaveController {
     return this.leaveRequests.listRequests(claims, { employeeId });
   }
 
+  /** LV-UP. Declared before `leave-requests/:id` so "team-calendar" is not read as an id. */
+  @Get("leave-requests/team-calendar")
+  teamCalendar(@CurrentClaims() claims: RequestClaims, @Query() query: TeamCalendarQueryDto) {
+    return this.leaveRequests.teamCalendar(claims, query);
+  }
+
+  /** LV-UP: relief-person candidates (colleagues under the same manager). Also before `:id`. */
+  @Get("leave-requests/colleagues")
+  colleagues(@CurrentClaims() claims: RequestClaims, @Query("employeeId") employeeId?: string) {
+    return this.leaveRequests.listColleagues(claims, employeeId);
+  }
+
   @Get("leave-requests/:id")
   get(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
     return this.leaveRequests.getRequest(claims, id);
+  }
+
+  /** LV-UP: edit a request that is still pending. */
+  @Patch("leave-requests/:id")
+  update(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: UpdateLeaveRequestDto) {
+    return this.leaveRequests.update(claims, id, dto);
   }
 
   @Patch("leave-requests/:id/decision")

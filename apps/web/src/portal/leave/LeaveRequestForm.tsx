@@ -1,8 +1,9 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import type { EmployeeView, LeaveBalanceView, LeaveDayPart, LeaveType, LeaveTypeView, OverlapWarning, SubmitLeaveRequestResponse } from "@aihxm/shared-types";
+import type { EmployeeView, LeaveBalanceView, LeaveColleagueView, LeaveDayPart, LeaveRequestView, LeaveType, LeaveTypeView, OverlapWarning, SubmitLeaveRequestResponse } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { LEAVE_TYPES, leaveTypeLabel } from "./leaveLabels";
 import { countCalendarDays, countWorkingDays, formatDisplayDate, returnDateAfter } from "./leaveCalendar";
+import { approverStepLabel, groupApprovalSteps } from "./leaveApprovals";
 
 /**
  * Shared by both submit paths: an employee_self_service holder submitting their own request
@@ -19,37 +20,44 @@ export function LeaveRequestForm({
   onSubmitted,
   initialStart,
   initialEnd,
+  editing,
 }: {
   fixedEmployeeId?: string;
   onCancel: () => void;
   onSubmitted: (result: SubmitLeaveRequestResponse) => void;
   initialStart?: string;
   initialEnd?: string;
+  /** LV-UP: a pending request to edit. The form opens filled in and saves with PATCH instead of creating a new one. */
+  editing?: LeaveRequestView;
 }) {
   const [employees, setEmployees] = useState<EmployeeView[]>([]);
-  const [employeeId, setEmployeeId] = useState(fixedEmployeeId ?? "");
-  const [leaveType, setLeaveType] = useState<LeaveType>("annual");
+  const [colleagues, setColleagues] = useState<LeaveColleagueView[]>([]);
+  const [employeeId, setEmployeeId] = useState(editing?.employeeId ?? fixedEmployeeId ?? "");
+  const [leaveType, setLeaveType] = useState<LeaveType>(editing?.leaveType ?? "annual");
   const [leaveTypes, setLeaveTypes] = useState<LeaveTypeView[]>([]);
   const [balances, setBalances] = useState<LeaveBalanceView[]>([]);
   const [holidayDates, setHolidayDates] = useState<Map<string, string>>(new Map());
-  const [multiDay, setMultiDay] = useState(!initialStart || !initialEnd || initialStart !== initialEnd);
-  const [dayPart, setDayPart] = useState<LeaveDayPart>("full");
-  const [startDate, setStartDate] = useState(initialStart ?? "");
-  const [endDate, setEndDate] = useState(initialEnd ?? "");
-  const [delegateEmployeeId, setDelegateEmployeeId] = useState("");
-  const [reason, setReason] = useState("");
+  const seedStart = editing?.startDate ?? initialStart;
+  const seedEnd = editing?.endDate ?? initialEnd;
+  const [multiDay, setMultiDay] = useState(!seedStart || !seedEnd || seedStart !== seedEnd);
+  const [dayPart, setDayPart] = useState<LeaveDayPart>(editing?.dayPart ?? "full");
+  const [startDate, setStartDate] = useState(seedStart ?? "");
+  const [endDate, setEndDate] = useState(seedEnd ?? "");
+  const [delegateEmployeeId, setDelegateEmployeeId] = useState(editing?.delegateEmployeeId ?? "");
+  const [reason, setReason] = useState(editing?.reason ?? "");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   // A new range picked on the calendar while the form is open replaces the dates.
   useEffect(() => {
+    if (editing) return;
     if (initialStart) setStartDate(initialStart);
     if (initialEnd) setEndDate(initialEnd);
     if (initialStart && initialEnd) {
       setMultiDay(initialStart !== initialEnd);
       if (initialStart !== initialEnd) setDayPart("full");
     }
-  }, [initialStart, initialEnd]);
+  }, [initialStart, initialEnd, editing]);
 
   useEffect(() => {
     // TLM-01: the tenant's active leave types; the built-ins are the fallback if this fails.
@@ -73,11 +81,22 @@ export function LeaveRequestForm({
   }, [employeeId]);
 
   useEffect(() => {
-    // Relief person candidates (and, on the On-Behalf path, the employee picker): the same scoped GET /employees.
+    // The employee picker (only when no employee is fixed): the same scoped GET /employees.
+    if (fixedEmployeeId || editing) return;
     api.listEmployees().then(setEmployees).catch(() => {
       // A failed employee-list fetch shouldn't block the rest of the form.
     });
-  }, []);
+  }, [fixedEmployeeId, editing]);
+
+  useEffect(() => {
+    // Relief person candidates: the colleagues under the same manager. An ordinary employee cannot list
+    // other employees, so this has its own endpoint.
+    if (!employeeId) {
+      setColleagues([]);
+      return;
+    }
+    api.getLeaveColleagues(employeeId).then(setColleagues).catch(() => setColleagues([]));
+  }, [employeeId]);
 
   const selectedType = leaveTypes.find((t) => t.code === leaveType);
   const halfDayAllowed = selectedType ? selectedType.halfDayAllowed : true;
@@ -95,7 +114,7 @@ export function LeaveRequestForm({
   const returnDate = startDate && effectiveEnd && effectiveEnd >= startDate ? (!multiDay && dayPart === "first_half" ? startDate : returnDateAfter(effectiveEnd, holidayDates)) : null;
   const overBalance = tracksBalance && balance !== undefined && consumed !== null && consumed > balance.remainingDays;
 
-  const reliefCandidates = employees.filter((e) => e.id !== employeeId);
+  const reliefCandidates = colleagues;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -120,18 +139,27 @@ export function LeaveRequestForm({
     }
     setSubmitting(true);
     try {
-      const result = await api.submitLeaveRequest({
-        employeeId,
-        leaveType,
-        startDate,
-        endDate: effectiveEnd,
-        reason: reason || undefined,
-        dayPart: dayPart === "full" ? undefined : dayPart,
-        delegateEmployeeId: delegateEmployeeId || undefined,
-      });
+      const result = editing
+        ? await api.updateLeaveRequest(editing.id, {
+            leaveType,
+            startDate,
+            endDate: effectiveEnd,
+            reason: reason || null,
+            dayPart,
+            delegateEmployeeId: delegateEmployeeId || null,
+          })
+        : await api.submitLeaveRequest({
+            employeeId,
+            leaveType,
+            startDate,
+            endDate: effectiveEnd,
+            reason: reason || undefined,
+            dayPart: dayPart === "full" ? undefined : dayPart,
+            delegateEmployeeId: delegateEmployeeId || undefined,
+          });
       onSubmitted(result);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not submit this leave request.");
+      setError(err instanceof ApiError ? err.message : editing ? "Could not save these changes." : "Could not submit this leave request.");
     } finally {
       setSubmitting(false);
     }
@@ -140,8 +168,8 @@ export function LeaveRequestForm({
   const fieldClass = "w-full rounded-lg border border-black/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent";
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4 bg-black/5 rounded-lg p-4" aria-label="Create leave request">
-      {!fixedEmployeeId && (
+    <form onSubmit={handleSubmit} className="space-y-4 bg-black/5 rounded-lg p-4" aria-label={editing ? "Edit leave request" : "Create leave request"}>
+      {!fixedEmployeeId && !editing && (
         <div>
           <label className="block text-sm font-medium mb-1" htmlFor="leave-employee">Employee</label>
           <select id="leave-employee" required value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} className={fieldClass}>
@@ -258,17 +286,43 @@ export function LeaveRequestForm({
         </div>
       )}
 
+      <div className="grid grid-cols-3 gap-4" data-testid="leave-form-computed">
+        {(
+          [
+            ["Working days", consumed === null ? "" : String(consumed)],
+            ["Absence days", startDate && effectiveEnd >= startDate ? String(calendarDays) : ""],
+            ["Return date", returnDate ? formatDisplayDate(returnDate) : ""],
+          ] as const
+        ).map(([label, value]) => (
+          <div key={label}>
+            <label className="block text-xs font-medium mb-1 text-label-secondary">{label}</label>
+            <input readOnly tabIndex={-1} value={value} aria-label={label} className={`${fieldClass} bg-black/[0.04] text-label-secondary tabular-nums`} />
+          </div>
+        ))}
+      </div>
+
       {reliefCandidates.length > 0 && (
         <div>
           <label className="block text-sm font-medium mb-1" htmlFor="leave-relief">Relief person (optional)</label>
           <select id="leave-relief" value={delegateEmployeeId} onChange={(e) => setDelegateEmployeeId(e.target.value)} className={fieldClass}>
             <option value="">No relief person</option>
             {reliefCandidates.map((emp) => (
-              <option key={emp.id} value={emp.id}>
-                {emp.firstName} {emp.lastName} ({emp.employeeNumber})
+              <option key={emp.employeeId} value={emp.employeeId}>
+                {emp.employeeName} ({emp.employeeNumber})
               </option>
             ))}
           </select>
+        </div>
+      )}
+
+      {editing && editing.approvals && editing.approvals.length > 0 && (
+        <div className="grid grid-cols-2 gap-4" data-testid="leave-form-approvers">
+          {groupApprovalSteps(editing.approvals).map((step) => (
+            <div key={step.stepOrder}>
+              <label className="block text-xs font-medium mb-1 text-label-secondary">{approverStepLabel(step.stepOrder)}</label>
+              <input readOnly tabIndex={-1} value={step.names.length > 0 ? step.names.join(", ") : step.stepName} className={`${fieldClass} bg-black/[0.04] text-label-secondary`} />
+            </div>
+          ))}
         </div>
       )}
 
@@ -281,7 +335,7 @@ export function LeaveRequestForm({
 
       <div className="flex gap-3">
         <button type="submit" disabled={submitting} className="bg-accent text-white rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-50">
-          {submitting ? "Submitting…" : "Submit request"}
+          {submitting ? (editing ? "Saving…" : "Submitting…") : editing ? "Save changes" : "Submit request"}
         </button>
         <button type="button" onClick={onCancel} className="text-sm font-medium text-label-secondary">
           Cancel
