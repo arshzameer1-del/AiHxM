@@ -107,6 +107,14 @@ export const BUSINESS_POLICY_REGISTRY: BusinessPolicyTypeDefinition[] = [
       "PayrollService.submitForApproval() - when requireValidationBeforeApproval is true a run must pass validation (POST payroll/runs/:id/validate) before it can be submitted. PayrollService.createRun() - when requirePeriodForRun is true a regular run must be created from an open payroll period (PAY-03). Default (no policy): neither is required.",
   },
   {
+    policyType: "approval_controls",
+    label: "Approval Controls",
+    description: "Segregation of duties for approvals: whether a person may approve a request they submitted or that is about them.",
+    rulesShape: "blockSelfApproval (boolean)",
+    wiredInto:
+      "WorkflowService.decideInTx() - when blockSelfApproval is true, the submitter (or the person the request is about) cannot approve it; another approver must. Rejecting or sending back their own request is still allowed. Applies to every workflow-routed request (leave, requisitions, expenses, ...). Default (no policy, or false): self-approval is allowed, as before.",
+  },
+  {
     policyType: "required_info",
     label: "Required Information Policy",
     description: "The personal/employment fields that must be filled in before a hire can be completed.",

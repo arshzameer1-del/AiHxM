@@ -699,6 +699,15 @@ export class WorkflowService {
     }
     if (!acted) throw new ForbiddenException("You are not an approver on this step");
 
+    // LIVE-03/14: segregation of duties. The tenant's "Approval Controls" policy can forbid approving one's own request.
+    if (dto.decision === "approved" && (claims.sub === instance.submitted_by_user_account_id || claims.sub === instance.subject_user_account_id)) {
+      if (await this.blocksSelfApproval(client, instance.company_id)) {
+        throw new ForbiddenException(
+          "You cannot approve your own request. Your company's approval controls require another approver; ask HR to route it to someone else."
+        );
+      }
+    }
+
     const lineStatus = dto.decision === "send_back" ? "returned" : dto.decision;
     await client.query(
       `UPDATE workflow_step_approvals
@@ -766,6 +775,18 @@ export class WorkflowService {
     const done = await client.query<{ status: string }>("SELECT status FROM workflow_instances WHERE id = $1", [instance.id]);
     if (done.rows[0].status === "approved") await this.fireOutcome(client, claims, instance.id, "approved", dto.comment ?? null);
     return (await this.loadInstance(client, instance.id))!;
+  }
+
+  private async blocksSelfApproval(client: PoolClient, companyId: string): Promise<boolean> {
+    const r = await client.query<{ rules: Record<string, unknown> | null }>(
+      `SELECT rules FROM hr_business_policies
+        WHERE company_id = $1 AND policy_type = 'approval_controls' AND is_default = true AND is_active = true
+          AND (effective_from IS NULL OR effective_from <= CURRENT_DATE)
+          AND (effective_to IS NULL OR effective_to >= CURRENT_DATE)
+        LIMIT 1`,
+      [companyId]
+    );
+    return r.rows[0]?.rules?.blockSelfApproval === true;
   }
 
   /** Marks the open steps of a stage terminated: the deciding step gets `finalStatus`, siblings are skipped. */

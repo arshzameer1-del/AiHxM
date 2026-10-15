@@ -77,4 +77,11 @@ export const DEFAULT_BUSINESS_POLICY_SEED: {
     description: "The personal/employment fields that must be filled in before a hire can be completed.",
     rules: { requiredFieldKeys: ["cnic", "dateOfBirth", "emergencyContact"] },
   },
+  {
+    policyType: "approval_controls",
+    code: "default",
+    name: "Standard Approval Controls",
+    description: "Segregation of duties for approvals: whether a person may approve a request they submitted or that is about them.",
+    rules: { blockSelfApproval: false },
+  },
 ];
