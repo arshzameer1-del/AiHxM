@@ -158,7 +158,7 @@ function OfferControls({
 }: {
   offer: OfferView | undefined;
   onOfferChanged: (offer: OfferView) => void;
-  onHired: (employeeNumber: string) => void;
+  onHired: (employeeNumber: string, followUps?: string[]) => void;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -174,7 +174,7 @@ function OfferControls({
     try {
       const result = await api.decideOffer(offer!.id, decision);
       onOfferChanged(result.offer);
-      if (result.employee) onHired(result.employee.employeeNumber);
+      if (result.employee) onHired(result.employee.employeeNumber, result.followUps);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not record the candidate's decision.");
     } finally {
@@ -246,7 +246,7 @@ function ApplicationCard({
   hiredNote: string | undefined;
   onMoved: (application: ApplicationView) => void;
   onOfferChanged: (offer: OfferView) => void;
-  onHired: (employeeNumber: string) => void;
+  onHired: (employeeNumber: string, followUps?: string[]) => void;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -488,8 +488,8 @@ export function PipelinePanel() {
                         // needed here.
                         setOffersByApplication((m) => ({ ...m, [a.id]: offer }));
                       }}
-                      onHired={(num) => {
-                        setHiredNotes((m) => ({ ...m, [a.id]: `Hired as Employee #${num}` }));
+                      onHired={(num, followUps) => {
+                        setHiredNotes((m) => ({ ...m, [a.id]: `Hired as Employee #${num}${followUps && followUps.length > 0 ? `. Still to do: ${followUps.join("; ")}` : ""}` }));
                         // decideOffer's response doesn't carry the updated
                         // ApplicationView (only {offer, employee} — see
                         // DecideOfferResponse), but "accepted" is the only

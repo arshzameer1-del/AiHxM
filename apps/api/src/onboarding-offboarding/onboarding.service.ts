@@ -314,6 +314,17 @@ export class OnboardingService {
         throw new ConflictException("This employee already has an onboarding in progress");
       }
 
+      // LIVE-16: without a checklist template the process would be an empty "In Progress" shell. Ask for a template first.
+      const activeTemplates = await client.query<{ n: string }>(
+        "SELECT count(*)::text AS n FROM onboarding_item_templates WHERE company_id = $1 AND is_active",
+        [claims.company_id]
+      );
+      if (Number(activeTemplates.rows[0]?.n ?? 0) === 0) {
+        throw new BadRequestException(
+          "No onboarding checklist template is set up for this company yet. Add at least one checklist item in the onboarding settings, then start onboarding."
+        );
+      }
+
       const onboarding = await client.query(
         `INSERT INTO employee_onboarding (company_id, employee_id, initiated_by_user_account_id)
          VALUES ($1, $2, $3) RETURNING *`,
@@ -380,6 +391,23 @@ export class OnboardingService {
 
       return this.loadView(client, onboardingId);
     });
+  }
+
+  /**
+   * LIVE-15: used by the hire-from-offer flow. Starts onboarding only when the tenant actually has an active checklist
+   * template, so a company without one does not get an empty "In Progress" process (LIVE-16). Never throws for a
+   * normal "nothing to do" case; returns null instead.
+   */
+  async initiateIfTemplatesExist(claims: RequestClaims, employeeId: string): Promise<EmployeeOnboardingView | null> {
+    const count = await this.db.withClaims(claims, async (client) => {
+      const r = await client.query<{ n: string }>(
+        "SELECT count(*)::text AS n FROM onboarding_item_templates WHERE company_id = $1 AND is_active",
+        [claims.company_id]
+      );
+      return Number(r.rows[0]?.n ?? 0);
+    });
+    if (count === 0) return null;
+    return this.initiateOnboarding(claims, employeeId);
   }
 
   async getForEmployee(claims: RequestClaims, employeeId: string): Promise<EmployeeOnboardingView | null> {

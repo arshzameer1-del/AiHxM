@@ -195,11 +195,19 @@ export class OffboardingService {
   ): Promise<EmployeeOffboardingView> {
     await this.requireManage(claims);
     return this.db.withClaims(claims, async (client) => {
-      const employee = await client.query<{ id: string; employment_status: string }>(
-        "SELECT id, employment_status FROM employees WHERE id = $1",
+      const employee = await client.query<{ id: string; employment_status: string; date_of_joining: Date | string | null }>(
+        "SELECT id, employment_status, date_of_joining FROM employees WHERE id = $1",
         [employeeId]
       );
       if (employee.rowCount === 0) throw new NotFoundException("Employee not found");
+      // LIVE-17: a last working day before the person even joined makes no sense.
+      const joining = employee.rows[0].date_of_joining;
+      if (joining) {
+        const joiningDay = joining instanceof Date ? joining.toISOString().slice(0, 10) : String(joining).slice(0, 10);
+        if (input.lastWorkingDay < joiningDay) {
+          throw new BadRequestException(`The last working day cannot be before the date of joining (${joiningDay})`);
+        }
+      }
       if (employee.rows[0].employment_status === "terminated") {
         throw new BadRequestException("This employee is already terminated");
       }

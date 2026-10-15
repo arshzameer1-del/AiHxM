@@ -247,7 +247,7 @@ describe("OffboardingService", () => {
 
     it("lists the current in-progress offboardings for hr_admin only", async () => {
       const fresh = await employees.create(hrAdminClaims, { firstName: "Currently", lastName: "Exiting" });
-      await offboarding.initiateOffboarding(hrAdminClaims, fresh.id, { reason: "retirement", lastWorkingDay: "2026-10-01" });
+      await offboarding.initiateOffboarding(hrAdminClaims, fresh.id, { reason: "retirement", lastWorkingDay: "2099-10-01" });
 
       const inProgress = await offboarding.listInProgress(hrAdminClaims);
       expect(inProgress.some((o) => o.employeeId === fresh.id)).toBe(true);
@@ -255,6 +255,31 @@ describe("OffboardingService", () => {
       expect(inProgress.some((o) => o.employeeId === employeeId)).toBe(false);
 
       await expect(offboarding.listInProgress(staffClaims)).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe("last working day against the joining date (LIVE-17)", () => {
+    let hrAdminClaims: RequestClaims;
+    let employeeId: string;
+
+    beforeAll(async () => {
+      const companyId = await createFixtureCompany("Offboarding Joining Co");
+      const hrUserId = await createUser(`off-join-hr-${Date.now()}@example.com`);
+      await assignRole(hrUserId, companyId, "hr_admin");
+      hrAdminClaims = { is_platform_admin: false, company_id: companyId, sub: hrUserId };
+      employeeId = (await employees.create(hrAdminClaims, { firstName: "Future", lastName: "Joiner", dateOfJoining: "2027-03-15" })).id;
+    });
+
+    it("rejects a last working day before the date of joining and creates nothing", async () => {
+      await expect(
+        offboarding.initiateOffboarding(hrAdminClaims, employeeId, { reason: "resignation", lastWorkingDay: "2027-03-14" })
+      ).rejects.toThrow(/before the date of joining \(2027-03-15\)/);
+      expect(await offboarding.getForEmployee(hrAdminClaims, employeeId)).toBeNull();
+    });
+
+    it("accepts the joining date itself as the last working day", async () => {
+      const view = await offboarding.initiateOffboarding(hrAdminClaims, employeeId, { reason: "resignation", lastWorkingDay: "2027-03-15" });
+      expect(view.lastWorkingDay).toBe("2027-03-15");
     });
   });
 });

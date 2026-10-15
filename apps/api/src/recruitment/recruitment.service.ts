@@ -9,6 +9,7 @@ import { EmployeesService } from "../employees/employees.service";
 import { HrBusinessPolicyService } from "../hr-administration/hr-business-policy.service";
 import { OrgOccupancyService } from "../organization/occupancy/org-occupancy.service";
 import { EmployeeCompensationService } from "../employees/employee-compensation.service";
+import { OnboardingService } from "../onboarding-offboarding/onboarding.service";
 import { assertValidCnic } from "../crypto/identifier-validation";
 import { sensitive } from "../crypto/sensitive-fields";
 import { submitToEngineIfConfigured } from "../workflow/engine-routing";
@@ -101,7 +102,9 @@ export class RecruitmentService {
     private readonly businessPolicy?: HrBusinessPolicyService,
     private readonly occupancy?: OrgOccupancyService,
     // TAL-03: optional so positional spec constructions keep working.
-    private readonly compensation?: EmployeeCompensationService
+    private readonly compensation?: EmployeeCompensationService,
+    // LIVE-15: optional so positional spec constructions keep working.
+    private readonly onboarding?: OnboardingService
   ) {
     this.workflow?.adapters?.register({
       objectKey: WORKFLOW_OBJECT_KEY,
@@ -1077,7 +1080,30 @@ export class RecruitmentService {
       }
     }
 
-    return { offer: updatedView, employee };
+    // LIVE-15/16: start the tenant's onboarding checklist for the new hire when one is configured (best-effort: the
+    // hire already exists), and tell HR what is still missing instead of leaving it to be discovered later.
+    let onboardingStarted = false;
+    if (this.onboarding) {
+      try {
+        onboardingStarted = (await this.onboarding.initiateIfTemplatesExist(claims, employee.id)) !== null;
+      } catch (err) {
+        await this.db.withClaims(claims, (client) =>
+          this.audit.record(client, claims, {
+            companyId: claims.company_id ?? null,
+            action: "offer.onboarding_start_failed",
+            target: id,
+            metadata: { employeeId: employee.id, error: err instanceof Error ? err.message : String(err) },
+          })
+        );
+      }
+    }
+    const followUps: string[] = [];
+    if (!requisition.department && !requisition.org_unit_id) followUps.push("Set the department or organisation unit");
+    followUps.push("Create the employee's login so leave and self-service work");
+    followUps.push("Add a payment account before the first payroll");
+    if (!onboardingStarted) followUps.push("Start onboarding (no checklist template was applied)");
+
+    return { offer: updatedView, employee, onboardingStarted, followUps };
   }
 
   // -----------------------------------------------------------------

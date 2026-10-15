@@ -22,6 +22,7 @@ export function OffersPanel() {
   const [declining, setDeclining] = useState<OfferView | null>(null);
   const [letters, setLetters] = useState<{ offer: OfferView; items: OfferLetterView[] } | null>(null);
   const [hiredNote, setHiredNote] = useState<string | null>(null);
+  const [hiredFollowUps, setHiredFollowUps] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     try {
@@ -79,7 +80,10 @@ export function OffersPanel() {
 
   async function decide(o: OfferView, decision: "accepted" | "declined", reason?: string) {
     const result = await api.decideOffer(o.id, decision, reason);
-    if (result.employee) setHiredNote(`${nameOf(o.applicationId)} was hired as employee ${result.employee.employeeNumber}.`);
+    if (result.employee) {
+      setHiredNote(`${nameOf(o.applicationId)} was hired as employee ${result.employee.employeeNumber}${result.onboardingStarted ? " and onboarding has started" : ""}.`);
+      setHiredFollowUps(result.followUps ?? []);
+    }
     await load();
   }
 
@@ -106,7 +110,17 @@ export function OffersPanel() {
   return (
     <div className="space-y-4">
       {error && <div role="alert" className="text-red-600 text-sm bg-red-50 p-3 rounded">{error}</div>}
-      {hiredNote && <div className="text-sm bg-green-50 text-green-800 p-3 rounded">{hiredNote}</div>}
+      {hiredNote && (
+        <div className="text-sm bg-green-50 text-green-800 p-3 rounded" data-testid="hired-note">
+          {hiredNote}
+          {hiredFollowUps.length > 0 && (
+            <>
+              <p className="mt-1 font-medium">Still to do for this employee:</p>
+              <ul className="list-disc pl-5">{hiredFollowUps.map((f) => <li key={f}>{f}</li>)}</ul>
+            </>
+          )}
+        </div>
+      )}
 
       {!creating ? (
         <button onClick={() => setCreating(true)} className={primaryBtn}>New offer</button>

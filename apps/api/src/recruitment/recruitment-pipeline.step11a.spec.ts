@@ -11,6 +11,7 @@ import { EmployeeCompensationService } from "../employees/employee-compensation.
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
 import { LocalFileStorageService } from "../file-storage/local-file-storage.service";
 import { RecruitmentService } from "./recruitment.service";
+import { OnboardingService } from "../onboarding-offboarding/onboarding.service";
 import { RecruitmentPipelineService } from "./recruitment-pipeline.service";
 import { RecruitmentScheduler } from "./recruitment.scheduler";
 
@@ -28,6 +29,7 @@ describe("Recruitment Step 11A", () => {
   let workflow: WorkflowService;
   let employees: EmployeesService;
   let recruitment: RecruitmentService;
+  let onboarding: OnboardingService;
   let pipeline: RecruitmentPipelineService;
   const storage = new LocalFileStorageService();
   const companyIds: string[] = [];
@@ -110,7 +112,8 @@ describe("Recruitment Step 11A", () => {
     workflow = new WorkflowService(db, rbac, audit);
     employees = new EmployeesService(db, rbac, entitlements, audit, storage);
     const compensation = new EmployeeCompensationService(db, rbac, entitlements, audit, new EffectiveDatingEngine());
-    recruitment = new RecruitmentService(db, rbac, entitlements, audit, workflow, employees, undefined, undefined, compensation);
+    onboarding = new OnboardingService(db, rbac, entitlements, audit);
+    recruitment = new RecruitmentService(db, rbac, entitlements, audit, workflow, employees, undefined, undefined, compensation, onboarding);
     pipeline = new RecruitmentPipelineService(db, rbac, entitlements, audit, storage);
     t = await makeTenant("a");
     other = await makeTenant("b");
@@ -365,6 +368,27 @@ describe("Recruitment Step 11A", () => {
       const decided = await recruitment.decideOffer(t.hr, offer.id, "accepted");
       expect(decided.offer.status).toBe("accepted");
       expect(decided.employee).not.toBeNull();
+    });
+
+    it("tells HR what is still missing after a hire and starts onboarding only when the company has a checklist template (LIVE-15/16)", async () => {
+      const first = await applicationOn(t, "Followup");
+      const offer1 = await recruitment.extendOffer(t.hr, { applicationId: first.application.id, salary: 150000, startDate: "2027-06-01" });
+      const noTemplate = await recruitment.decideOffer(t.hr, offer1.id, "accepted");
+      expect(noTemplate.onboardingStarted).toBe(false);
+      expect(noTemplate.followUps).toEqual(expect.arrayContaining([expect.stringMatching(/login/i), expect.stringMatching(/payment account/i), expect.stringMatching(/Start onboarding/i)]));
+      expect(await onboarding.getForEmployee(t.hr, noTemplate.employee!.id)).toBeNull();
+
+      await onboarding.createItemTemplate(t.hr, { title: "Read handbook", category: "hr", responsibleRole: "all" });
+      const second = await applicationOn(t, "Followup2");
+      const offer2 = await recruitment.extendOffer(t.hr, { applicationId: second.application.id, salary: 150000, startDate: "2027-06-01" });
+      const withTemplate = await recruitment.decideOffer(t.hr, offer2.id, "accepted");
+      expect(withTemplate.onboardingStarted).toBe(true);
+      expect(withTemplate.followUps).not.toEqual(expect.arrayContaining([expect.stringMatching(/Start onboarding/i)]));
+      const view = await onboarding.getForEmployee(t.hr, withTemplate.employee!.id);
+      expect(view?.status).toBe("in_progress");
+      expect(view?.items).toHaveLength(1);
+      // The other tenant's hires are untouched: it has no template of its own.
+      expect(await onboarding.getForEmployee(other.hr, withTemplate.employee!.id).catch(() => null)).toBeNull();
     });
 
     it("applies the offer's components to the new employee and links the candidate to the person", async () => {

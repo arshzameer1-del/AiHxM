@@ -269,4 +269,41 @@ describe("OnboardingService", () => {
       await expect(onboarding.initiateOnboarding(hrAdminClaims, terminated.id)).rejects.toThrow(BadRequestException);
     });
   });
+
+  describe("no checklist template configured (LIVE-16) and the hire-from-offer helper (LIVE-15)", () => {
+    let hrAdminClaims: RequestClaims;
+    let otherHrClaims: RequestClaims;
+    let employeeId: string;
+
+    beforeAll(async () => {
+      const companyId = await createFixtureCompany("Onboarding Empty Co");
+      const otherCompanyId = await createFixtureCompany("Onboarding Other Co");
+      const hrUserId = await createUser(`onb-empty-hr-${Date.now()}@example.com`);
+      const otherHrUserId = await createUser(`onb-empty-other-${Date.now()}@example.com`);
+      await assignRole(hrUserId, companyId, "hr_admin");
+      await assignRole(otherHrUserId, otherCompanyId, "hr_admin");
+      hrAdminClaims = { is_platform_admin: false, company_id: companyId, sub: hrUserId };
+      otherHrClaims = { is_platform_admin: false, company_id: otherCompanyId, sub: otherHrUserId };
+      employeeId = (await employees.create(hrAdminClaims, { firstName: "No", lastName: "Template" })).id;
+      // The other company HAS a template; it must not count for this company.
+      await onboarding.createItemTemplate(otherHrClaims, { title: "Other company item", category: "hr", responsibleRole: "all" });
+    });
+
+    it("refuses to start onboarding with an explanation when the company has no active template", async () => {
+      await expect(onboarding.initiateOnboarding(hrAdminClaims, employeeId)).rejects.toThrow(/No onboarding checklist template/);
+      expect(await onboarding.getForEmployee(hrAdminClaims, employeeId)).toBeNull();
+    });
+
+    it("the offer helper starts nothing and returns null without a template (another company's template does not count)", async () => {
+      expect(await onboarding.initiateIfTemplatesExist(hrAdminClaims, employeeId)).toBeNull();
+      expect(await onboarding.getForEmployee(hrAdminClaims, employeeId)).toBeNull();
+    });
+
+    it("the offer helper starts onboarding with the checklist once a template exists, and only HR may use it", async () => {
+      await onboarding.createItemTemplate(hrAdminClaims, { title: "Read handbook", category: "hr", responsibleRole: "all" });
+      const view = await onboarding.initiateIfTemplatesExist(hrAdminClaims, employeeId);
+      expect(view?.items).toHaveLength(1);
+      expect(view?.status).toBe("in_progress");
+    });
+  });
 });
