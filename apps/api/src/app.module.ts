@@ -1,6 +1,7 @@
 import { MiddlewareConsumer, Module, NestModule } from "@nestjs/common";
 import { RequestContextMiddleware } from "./common/request-context";
-import { APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
+import { DatabaseInputErrorFilter } from "./common/database-input-error.filter";
 import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { ScheduleModule } from "@nestjs/schedule";
 import { AppController } from "./app.controller";
@@ -111,6 +112,7 @@ import { HrAdministrationModule } from "./hr-administration/hr-administration.mo
     AppService,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_INTERCEPTOR, useClass: UsageTrackingInterceptor },
+    { provide: APP_FILTER, useClass: DatabaseInputErrorFilter },
   ],
 })
 export class AppModule implements NestModule {
