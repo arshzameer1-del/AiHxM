@@ -3591,6 +3591,14 @@ export type TeamLeaveEntryView = {
 };
 
 /** LV-UP: who can be named as the relief person - the colleagues under the same manager. */
+/** LV-UP: who is expected to approve a new request, shown on the create form before anything is submitted. */
+export type LeaveApproverPreviewView = {
+  stepOrder: number;
+  stepName: string;
+  /** Person's name, or the role name when the step is approved by anyone holding a role. */
+  approverName: string | null;
+};
+
 export type LeaveColleagueView = {
   employeeId: string;
   employeeName: string;
@@ -4645,6 +4653,10 @@ export type DecideOfferResponse = {
   offer: OfferView;
   /** Present only when `decision: "accepted"`. */
   employee: EmployeeView | null;
+  /** LIVE-15: set when the accepted hire already got an onboarding checklist from the tenant's template. */
+  onboardingStarted?: boolean;
+  /** LIVE-15: what HR still has to do for the new hire (login, department, payment account, onboarding template). */
+  followUps?: string[];
 };
 
 export type OfferLetterView = {

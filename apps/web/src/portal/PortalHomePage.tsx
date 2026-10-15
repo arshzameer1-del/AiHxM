@@ -76,7 +76,8 @@ function buildHomeCards(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]):
   }
 
   if (hasModule("leave") && roleKeys.length > 0) {
-    cards.push({ to: "/app/leave", label: "Leave & Attendance", description: "Requests, balances & calendar", icon: CalendarDays });
+    cards.push({ to: "/app/leave", label: "Leave Management", description: "Requests, balances & calendar", icon: CalendarDays });
+    cards.push({ to: "/app/attendance", label: "Time & Attendance", description: "Clock, timesheet & corrections", icon: Clock });
   }
 
   if (hasRole("hr_admin") && hasModule("recruitment")) {

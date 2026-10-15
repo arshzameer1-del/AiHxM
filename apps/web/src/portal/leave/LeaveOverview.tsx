@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Pencil, XCircle } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { CalendarDays, ChevronLeft, ChevronRight, Pencil, XCircle } from "lucide-react";
 import type { HolidayView, LeaveBalanceView, LeaveRequestStatus, LeaveRequestView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import {
@@ -15,6 +16,7 @@ import {
 import { STATUS_LABELS, leaveTypeLabel } from "./leaveLabels";
 import { approverStepLabel, approverSummary, groupApprovalSteps } from "./leaveApprovals";
 import { TeamCalendar } from "./TeamCalendar";
+import { SapSection } from "./SapPage";
 
 /**
  * "My Leave Request" overview, laid out like the SAP Fiori screen the product owner asked us to match:
@@ -52,10 +54,7 @@ function isLive(r: LeaveRequestView): boolean {
 
 export function EntitlementTable({ balances, requests }: { balances: LeaveBalanceView[]; requests: LeaveRequestView[] }) {
   return (
-    <section className="mb-5" aria-labelledby="leave-entitlement-heading" data-testid="leave-balance-card">
-      <h3 id="leave-entitlement-heading" className="text-sm font-semibold mb-2">
-        Entitlement <span className="text-label-tertiary font-normal">({balances.length})</span>
-      </h3>
+    <div data-testid="leave-balance-card">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -99,7 +98,7 @@ export function EntitlementTable({ balances, requests }: { balances: LeaveBalanc
           </tbody>
         </table>
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -116,7 +115,7 @@ const APPROVAL_STATUS_CLASS: Record<string, string> = {
  * absence days, quota used, created on, approver, status), the approval chain, the rest of the fields, and the
  * Team calendar underneath.
  */
-function RequestDetail({
+export function RequestDetail({
   request,
   holidays,
   weekend,
@@ -243,7 +242,7 @@ function RequestDetail({
  * The list rows already carry the approval chain, but the detail re-reads the one request so it shows the
  * freshest approver state when it is opened; if that read fails the row's own data is shown instead.
  */
-function DetailLoader({ request, holidays, weekend }: { request: LeaveRequestView; holidays: ReadonlyMap<string, string>; weekend: readonly number[] }) {
+export function DetailLoader({ request, holidays, weekend }: { request: LeaveRequestView; holidays: ReadonlyMap<string, string>; weekend: readonly number[] }) {
   const [fresh, setFresh] = useState<LeaveRequestView | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -262,21 +261,16 @@ function DetailLoader({ request, holidays, weekend }: { request: LeaveRequestVie
 
 function ItemsTable({
   requests,
-  expandedId,
-  onToggle,
+  onOpen,
   onChanged,
   onEdit,
-  holidays,
-  weekend,
 }: {
   requests: LeaveRequestView[];
-  expandedId: string | null;
-  onToggle: (id: string) => void;
+  /** Opens the request's own page. */
+  onOpen: (request: LeaveRequestView) => void;
   onChanged: () => void;
   /** Present only when the viewer may edit requests; offered on pending ones. */
   onEdit?: (request: LeaveRequestView) => void;
-  holidays: ReadonlyMap<string, string>;
-  weekend: readonly number[];
 }) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -310,7 +304,7 @@ function ItemsTable({
   }
 
   if (requests.length === 0) {
-    return <p className="text-sm text-label-tertiary py-3">No leave requests yet. Pick dates on the calendar or use Request Leave.</p>;
+    return <p className="text-sm text-label-tertiary py-3">No leave requests yet. Pick dates on the calendar or use Create Request.</p>;
   }
 
   return (
@@ -329,12 +323,10 @@ function ItemsTable({
         </thead>
         <tbody>
           {requests.map((r) => {
-            const open = expandedId === r.id;
             const cancellationRequested = r.status === "approved" && r.cancellationStatus === "requested";
             const canWithdraw = (r.status === "pending" || r.status === "approved") && !cancellationRequested;
             return (
-              <Fragment key={r.id}>
-                <tr className={`border-b border-black/5 ${open ? "bg-black/[0.02]" : ""}`}>
+              <tr key={r.id} className="border-b border-black/5 hover:bg-black/[0.02]">
                   <td className="py-2.5 pr-3 font-semibold">{r.leaveTypeName ?? leaveTypeLabel(r.leaveType)}</td>
                   <td className="py-2.5 pr-3 text-label-secondary tabular-nums">{formatDisplayRange(r.startDate, r.endDate)}</td>
                   <td className={`py-2.5 pr-3 font-medium ${STATUS_TEXT[r.status]}`}>
@@ -371,24 +363,15 @@ function ItemsTable({
                     )}
                     <button
                       type="button"
-                      onClick={() => onToggle(r.id)}
-                      aria-expanded={open}
-                      aria-label={open ? "Hide details" : "Show details"}
-                      title={open ? "Hide details" : "Show details"}
+                      onClick={() => onOpen(r)}
+                      aria-label="Show details"
+                      title="Show details"
                       className="inline-flex p-1 text-label-tertiary hover:text-accent"
                     >
-                      {open ? <ChevronUp size={18} strokeWidth={1.75} /> : <ChevronDown size={18} strokeWidth={1.75} />}
+                      <ChevronRight size={18} strokeWidth={1.75} />
                     </button>
                   </td>
-                </tr>
-                {open && (
-                  <tr>
-                    <td colSpan={6} className="pb-3">
-                      <DetailLoader request={r} holidays={holidays} weekend={weekend} />
-                    </td>
-                  </tr>
-                )}
-              </Fragment>
+              </tr>
             );
           })}
         </tbody>
@@ -429,37 +412,48 @@ function MonthGrid({
   return (
     <div className="min-w-[250px]">
       <div className="text-center text-sm font-semibold text-accent mb-2">{grid.label}</div>
-      <div className="grid grid-cols-7 gap-1 text-center text-xs text-label-tertiary mb-1">
+      <div className="grid grid-cols-[24px_repeat(7,minmax(0,1fr))] gap-x-1 gap-y-1 text-center text-xs">
+        <div aria-hidden />
         {weekdayLabels(weekStart).map((d) => (
-          <div key={d}>{d}</div>
+          <div key={d} className="text-label-tertiary">
+            {d}
+          </div>
         ))}
-      </div>
-      <div className="grid grid-cols-7 gap-1">
-        {grid.weeks.flat().map((cell, i) => {
-          if (!cell) return <div key={`pad-${i}`} />;
-          const hits = cellRequests(cell.date);
-          const inSelection =
-            selectedStart !== null &&
-            (selectedEnd === null ? cell.date === selectedStart : selectedStart <= cell.date && cell.date <= selectedEnd);
-          let tone = "bg-surface hover:bg-accent/10";
-          if (cell.kind === "non_working") tone = "bg-black/[0.06] text-label-secondary";
-          if (cell.kind === "holiday") tone = "bg-slate-200 text-slate-800";
-          if (hits.length > 1) tone = "bg-purple-100 text-purple-900 ring-1 ring-purple-300";
-          else if (hits.length === 1) tone = CALENDAR_STATUS_CLASS[hits[0].status];
-          if (inSelection) tone = "bg-accent text-white";
-          const label = [formatDisplayDate(cell.date), cell.holidayName, ...hits.map((h) => `${h.leaveTypeName ?? leaveTypeLabel(h.leaveType)}, ${STATUS_LABELS[h.status]}`)].filter(Boolean).join(" - ");
+        {grid.weeks.map((week, wi) => {
+          const firstCell = week.find((c) => c !== null);
           return (
-            <button
-              key={cell.date}
-              type="button"
-              onClick={() => onPick(cell)}
-              title={label}
-              aria-label={label}
-              aria-pressed={inSelection}
-              className={`h-8 rounded text-xs tabular-nums ${tone} ${cell.date === today ? "outline outline-2 outline-purple-600 -outline-offset-2" : ""}`}
-            >
-              {cell.dayOfMonth}
-            </button>
+            <Fragment key={`w-${wi}`}>
+              <div className="text-[10px] text-label-tertiary self-center tabular-nums" aria-label={firstCell ? `Week ${isoWeekNumber(firstCell.date)}` : undefined}>
+                {firstCell ? isoWeekNumber(firstCell.date) : ""}
+              </div>
+              {week.map((cell, i) => {
+                if (!cell) return <div key={`pad-${wi}-${i}`} />;
+                const hits = cellRequests(cell.date);
+                const inSelection =
+                  selectedStart !== null &&
+                  (selectedEnd === null ? cell.date === selectedStart : selectedStart <= cell.date && cell.date <= selectedEnd);
+                let tone = "hover:bg-accent/10";
+                if (cell.kind === "non_working") tone = "bg-black/[0.07] text-label-secondary";
+                if (cell.kind === "holiday") tone = "bg-slate-200 text-slate-800";
+                if (hits.length > 1) tone = "bg-purple-100 text-purple-900 ring-1 ring-purple-300";
+                else if (hits.length === 1) tone = CALENDAR_STATUS_CLASS[hits[0].status];
+                if (inSelection) tone = "bg-accent text-white";
+                const label = [formatDisplayDate(cell.date), cell.holidayName, ...hits.map((h) => `${h.leaveTypeName ?? leaveTypeLabel(h.leaveType)}, ${STATUS_LABELS[h.status]}`)].filter(Boolean).join(" - ");
+                return (
+                  <button
+                    key={cell.date}
+                    type="button"
+                    onClick={() => onPick(cell)}
+                    title={label}
+                    aria-label={label}
+                    aria-pressed={inSelection}
+                    className={`h-7 rounded-sm text-xs tabular-nums ${tone} ${cell.date === today ? "outline outline-1 outline-purple-600 outline-offset-[-2px] rounded-md" : ""}`}
+                  >
+                    {cell.dayOfMonth}
+                  </button>
+                );
+              })}
+            </Fragment>
           );
         })}
       </div>
@@ -467,16 +461,26 @@ function MonthGrid({
   );
 }
 
+/** ISO week number of a yyyy-mm-dd date, for the calendar's week column. */
+function isoWeekNumber(iso: string): number {
+  const [y, m, d] = iso.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  const day = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - day);
+  const yearStart = Date.UTC(date.getUTCFullYear(), 0, 1);
+  return Math.ceil(((date.getTime() - yearStart) / 86400000 + 1) / 7);
+}
+
 const LEGEND: { label: string; swatch: string }[] = [
   { label: "Today", swatch: "border-2 border-purple-600 bg-white" },
   { label: "Selected", swatch: "bg-accent" },
   { label: "Working Day", swatch: "bg-surface border border-black/10" },
   { label: "Non-Working Day", swatch: "bg-black/[0.06]" },
-  { label: "Approved", swatch: "bg-green-300" },
-  { label: "Pending", swatch: "bg-amber-300" },
-  { label: "Rejected", swatch: "bg-pink-300" },
-  { label: "Public Holiday", swatch: "bg-slate-300" },
-  { label: "Multiple Entries", swatch: "bg-purple-300" },
+  { label: "Approved / Informed", swatch: "bg-green-600" },
+  { label: "Pending", swatch: "bg-amber-500" },
+  { label: "Rejected", swatch: "bg-pink-600" },
+  { label: "Public Holiday", swatch: "bg-slate-500" },
+  { label: "Multiple Entries", swatch: "bg-purple-700" },
 ];
 
 export function LeaveCalendar({
@@ -553,34 +557,33 @@ export function LeaveCalendar({
 }
 
 /**
- * The whole overview: Entitlement table, then Request Overview with its Calendar / Items tabs.
- * `onCreateRange` is called when two calendar days are picked so the parent can open the request form
- * pre-filled with those dates, the way the reference screen does.
+ * The overview page body: Entitlement table, then Request Overview with its Calendar / Items tabs. Every
+ * action goes to its own page: picking two calendar days opens the Create Request page with those dates, the
+ * pencil opens the edit page, and the chevron (or a request on the calendar) opens the request's page.
+ * `onBehalf` keeps the acting-on-behalf employee in the links so the banner follows.
  */
 export function MyLeaveOverview({
   employeeId,
   refreshKey,
   canSubmit,
   onChanged,
-  onCreateRange,
-  onEditRequest,
+  onBehalf = false,
 }: {
   employeeId: string;
   refreshKey: number;
   canSubmit: boolean;
   onChanged: () => void;
-  onCreateRange: (start: string, end: string) => void;
-  /** Opens the request form for a pending request; omitted when the viewer cannot edit. */
-  onEditRequest?: (request: LeaveRequestView) => void;
+  onBehalf?: boolean;
 }) {
+  const navigate = useNavigate();
   const [balances, setBalances] = useState<LeaveBalanceView[] | null>(null);
   const [requests, setRequests] = useState<LeaveRequestView[] | null>(null);
   const [holidayList, setHolidayList] = useState<HolidayView[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<"calendar" | "items">("items");
-  const [expandedId, setExpandedId] = useState<string | null>(null);
   // "Show From": requests that ended before this date are hidden. Defaults to the start of this year.
   const [showFrom, setShowFrom] = useState(`${new Date().getUTCFullYear()}-01-01`);
+  const suffix = onBehalf ? `employee=${employeeId}` : "";
 
   useEffect(() => {
     Promise.all([api.getLeaveBalances(employeeId), api.listLeaveRequests(employeeId)])
@@ -607,40 +610,35 @@ export function MyLeaveOverview({
   // Newest first, like the reference list.
   const visibleRequests = showFrom ? requests.filter((r) => r.endDate >= showFrom) : requests;
   const sorted = [...visibleRequests].sort((a, b) => (a.startDate < b.startDate ? 1 : a.startDate > b.startDate ? -1 : 0));
-
-  function openRequest(id: string) {
-    setTab("items");
-    setExpandedId(id);
-  }
+  const openRequest = (id: string) => navigate(`/app/leave/${id}${suffix ? `?${suffix}` : ""}`);
 
   return (
     <div>
-      <EntitlementTable balances={balances} requests={requests} />
+      <SapSection title="Entitlement" count={balances.length}>
+        <EntitlementTable balances={balances} requests={requests} />
+      </SapSection>
 
-      <section aria-labelledby="leave-overview-heading">
-        <h3 id="leave-overview-heading" className="text-sm font-semibold mb-2">
-          Request Overview
-        </h3>
-        <div className="flex items-center justify-between gap-3 mb-3">
-        <div role="tablist" aria-label="Request overview views" className="flex gap-2">
-          {(
-            [
-              ["calendar", "Calendar"],
-              ["items", `Items (${visibleRequests.length})`],
-            ] as const
-          ).map(([key, label]) => (
-            <button
-              key={key}
-              role="tab"
-              type="button"
-              aria-selected={tab === key}
-              onClick={() => setTab(key)}
-              className={`text-sm font-semibold rounded-full px-3 py-1 border ${tab === key ? "border-accent bg-accent/10 text-accent" : "border-black/10 text-label-secondary"}`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+      <SapSection title="Request Overview">
+        <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+          <div role="tablist" aria-label="Request overview views" className="flex gap-2">
+            {(
+              [
+                ["calendar", "Calendar"],
+                ["items", `Items (${visibleRequests.length})`],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                role="tab"
+                type="button"
+                aria-selected={tab === key}
+                onClick={() => setTab(key)}
+                className={`text-xs font-semibold rounded-md px-3 py-1 border ${tab === key ? "border-accent bg-accent/10 text-accent" : "border-accent/50 text-accent bg-white"}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <label className="flex items-center gap-2 text-xs text-label-secondary">
             <span className="font-semibold">Show From</span>
             <input
@@ -648,7 +646,7 @@ export function MyLeaveOverview({
               value={showFrom}
               onChange={(e) => setShowFrom(e.target.value)}
               aria-label="Show requests from"
-              className="rounded-lg border border-black/10 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-accent"
+              className="rounded border border-black/25 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-accent"
             />
           </label>
         </div>
@@ -656,7 +654,7 @@ export function MyLeaveOverview({
           <LeaveCalendar
             holidays={holidays}
             requests={requests}
-            onRangeSelected={(s, e) => canSubmit && onCreateRange(s, e)}
+            onRangeSelected={(s, e) => canSubmit && navigate(`/app/leave/new?start=${s}&end=${e}${suffix ? `&${suffix}` : ""}`)}
             onOpenRequest={openRequest}
             weekend={[0, 6]}
             weekStart={1}
@@ -664,15 +662,12 @@ export function MyLeaveOverview({
         ) : (
           <ItemsTable
             requests={sorted}
-            expandedId={expandedId}
-            onToggle={(id) => setExpandedId(expandedId === id ? null : id)}
+            onOpen={(r) => openRequest(r.id)}
             onChanged={onChanged}
-            onEdit={canSubmit ? onEditRequest : undefined}
-            holidays={holidays}
-            weekend={[0, 6]}
+            onEdit={canSubmit ? (r) => navigate(`/app/leave/${r.id}/edit${suffix ? `?${suffix}` : ""}`) : undefined}
           />
         )}
-      </section>
+      </SapSection>
     </div>
   );
 }

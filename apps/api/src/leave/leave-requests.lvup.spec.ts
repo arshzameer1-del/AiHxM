@@ -404,4 +404,43 @@ describe("LeaveRequestsService LV-UP: edit, approvals, team calendar", () => {
       await expect(leaveRequests.listColleagues(outsiderClaims)).rejects.toThrow();
     });
   });
+
+  describe("approverPreview()", () => {
+    it("shows the submitter's own manager for a manager_of_submitter step, and stays inside the tenant", async () => {
+      expect(await leaveRequests.approverPreview(staffClaims)).toEqual([{ stepOrder: 1, stepName: "Manager approves", approverName: "Maya Manager" }]);
+      // Another tenant's template names nobody from this one.
+      const theirs = await leaveRequests.approverPreview(otherStaffClaims);
+      expect(theirs).toEqual([{ stepOrder: 1, stepName: "HR approves", approverName: null }]);
+      expect(JSON.stringify(theirs)).not.toContain("Maya");
+    });
+
+    it("respects who may see whom", async () => {
+      const asHr = await leaveRequests.approverPreview(hrAdminClaims, staffEmployeeId);
+      expect(asHr[0].approverName).toBe("Maya Manager");
+      await expect(leaveRequests.approverPreview(teammateClaims, staffEmployeeId)).rejects.toBeInstanceOf(NotFoundException);
+      await expect(leaveRequests.approverPreview(otherHrClaims, staffEmployeeId)).rejects.toBeInstanceOf(NotFoundException);
+      await expect(leaveRequests.approverPreview(outsiderClaims)).rejects.toThrow();
+    });
+
+    it("follows an edited template (new version), and is empty while the template is switched off", async () => {
+      await workflow.updateTemplate(hrAdminClaims, "leave_request", {
+        name: "Leave Approval",
+        steps: [
+          { stepOrder: 1, name: "Manager approves", approvers: [{ approverType: "manager_of_submitter" }] },
+          { stepOrder: 2, name: "HR signs off", approvers: [{ approverType: "specific_user", userAccountId: (hrAdminClaims.sub as string) }] },
+        ],
+      });
+      // The HR login has no employee record in this fixture, so its line has no person name yet.
+      expect((await leaveRequests.approverPreview(staffClaims)).map((r) => r.stepName)).toEqual(["Manager approves", "HR signs off"]);
+
+      await workflow.setTemplateActive(hrAdminClaims, "leave_request", false);
+      expect(await leaveRequests.approverPreview(staffClaims)).toEqual([]);
+      await workflow.setTemplateActive(hrAdminClaims, "leave_request", true);
+      await workflow.updateTemplate(hrAdminClaims, "leave_request", {
+        name: "Leave Approval",
+        steps: [{ stepOrder: 1, name: "Manager approves", approvers: [{ approverType: "manager_of_submitter" }] }],
+      });
+      expect(await leaveRequests.approverPreview(staffClaims)).toHaveLength(1);
+    });
+  });
 });

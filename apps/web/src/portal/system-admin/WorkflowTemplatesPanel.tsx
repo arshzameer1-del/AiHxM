@@ -13,13 +13,28 @@ type ApproverDraft = {
   approverType: ApproverType;
   roleId: string;
   userAccountId: string;
+  /** The approver as stored, when editing. Kinds this screen cannot edit (position, group, ...) are kept as they are. */
+  base?: WorkflowApproverConfig;
 };
 
 type StepDraft = {
   name: string;
   slaHours: string;
   approvers: ApproverDraft[];
+  /** The step as stored, when editing, so settings this screen does not show (conditions, quorum...) survive a save. */
+  base?: WorkflowStepConfig;
 };
+
+const EDITABLE_APPROVER_TYPES: ApproverType[] = ["role", "specific_user", "manager_of_submitter"];
+
+function draftFromTemplate(t: WorkflowTemplate): StepDraft[] {
+  return t.steps.map((s) => ({
+    name: s.name,
+    slaHours: s.slaHours ? String(s.slaHours) : "",
+    base: s,
+    approvers: s.approvers.map((a) => ({ approverType: a.approverType, roleId: a.roleId ?? "", userAccountId: a.userAccountId ?? "", base: a })),
+  }));
+}
 
 function emptyApprover(defaultRoleId: string): ApproverDraft {
   return { approverType: "role", roleId: defaultRoleId, userAccountId: "" };
@@ -38,20 +53,23 @@ function emptyStep(defaultRoleId: string): StepDraft {
  */
 function TemplateForm({
   workflow,
+  existing,
   roles,
   assignableUsers,
   onCancel,
   onSaved,
 }: {
   workflow: (typeof KNOWN_WORKFLOWS)[number];
+  /** Present when editing the configured template; absent when creating it. */
+  existing?: WorkflowTemplate;
   roles: Role[];
   assignableUsers: { userAccountId: string | null; fullName: string }[];
   onCancel: () => void;
   onSaved: (template: WorkflowTemplate) => void;
 }) {
   const defaultRoleId = roles.find((r) => r.key === "hr_admin")?.id ?? roles[0]?.id ?? "";
-  const [name, setName] = useState<string>(workflow.label);
-  const [steps, setSteps] = useState<StepDraft[]>([emptyStep(defaultRoleId)]);
+  const [name, setName] = useState<string>(existing?.name ?? workflow.label);
+  const [steps, setSteps] = useState<StepDraft[]>(existing ? draftFromTemplate(existing) : [emptyStep(defaultRoleId)]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const loginHolders = assignableUsers.filter((u): u is { userAccountId: string; fullName: string } => Boolean(u.userAccountId));
@@ -91,6 +109,10 @@ function TemplateForm({
       return;
     }
     for (const step of steps) {
+      if (step.approvers.length === 0) {
+        setError("Every step needs at least one approver.");
+        return;
+      }
       for (const approver of step.approvers) {
         if (approver.approverType === "role" && !approver.roleId) {
           setError(`Every "Anyone holding a role" approver needs a role selected.`);
@@ -105,21 +127,30 @@ function TemplateForm({
     setSubmitting(true);
     try {
       const payloadSteps: WorkflowStepConfig[] = steps.map((step, i) => ({
+        // Settings the form does not show (condition, quorum, parallel group...) are carried over when editing.
+        ...(step.base ?? {}),
         stepOrder: i + 1,
         name: step.name || `Step ${i + 1}`,
         slaHours: step.slaHours ? Number(step.slaHours) : undefined,
         approvers: step.approvers.map((a): WorkflowApproverConfig => {
-          if (a.approverType === "role") return { approverType: "role", roleId: a.roleId };
-          if (a.approverType === "specific_user") return { approverType: "specific_user", userAccountId: a.userAccountId };
-          return { approverType: "manager_of_submitter" };
+          if (a.base && !EDITABLE_APPROVER_TYPES.includes(a.base.approverType)) return a.base;
+          const escalation = a.base
+            ? { escalationApproverType: a.base.escalationApproverType, escalationRoleId: a.base.escalationRoleId, escalationUserAccountId: a.base.escalationUserAccountId }
+            : {};
+          if (a.approverType === "role") return { ...escalation, approverType: "role", roleId: a.roleId };
+          if (a.approverType === "specific_user") return { ...escalation, approverType: "specific_user", userAccountId: a.userAccountId };
+          return { ...escalation, approverType: "manager_of_submitter" };
         }),
       }));
-      const saved = await api.createWorkflowTemplate({
-        key: workflow.key,
-        name,
-        objectKey: workflow.objectKey,
-        steps: payloadSteps,
-      });
+      const saved = existing
+        ? await api.updateWorkflowTemplate(existing.key, {
+            name,
+            description: existing.description ?? undefined,
+            triggerEvent: existing.triggerEvent ?? undefined,
+            startCondition: existing.startCondition ?? undefined,
+            steps: payloadSteps,
+          })
+        : await api.createWorkflowTemplate({ key: workflow.key, name, objectKey: workflow.objectKey, steps: payloadSteps });
       onSaved(saved);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not save this workflow.");
@@ -180,7 +211,11 @@ function TemplateForm({
               </div>
               {step.approvers.map((approver, approverIdx) => (
                 <div key={approverIdx} className="flex gap-2 items-center flex-wrap">
+                  {approver.base && !EDITABLE_APPROVER_TYPES.includes(approver.base.approverType) ? (
+                    <span className="text-xs text-label-secondary">Kept as configured: {approverTypeText(approver.base.approverType)}</span>
+                  ) : (<>
                   <select
+                    aria-label="Approver type"
                     value={approver.approverType}
                     onChange={(e) => updateApprover(stepIdx, approverIdx, { approverType: e.target.value as ApproverTypeOption })}
                     className="rounded-lg border border-black/10 px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-accent"
@@ -220,6 +255,7 @@ function TemplateForm({
                       ))}
                     </select>
                   )}
+                  </>)}
 
                   {step.approvers.length > 1 && (
                     <button
@@ -249,7 +285,7 @@ function TemplateForm({
           disabled={submitting}
           className="bg-accent text-white rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-50"
         >
-          {submitting ? "Saving…" : "Save workflow"}
+          {submitting ? "Saving…" : existing ? "Save changes" : "Save workflow"}
         </button>
         <button type="button" onClick={onCancel} className="text-sm font-medium text-label-secondary">
           Cancel
@@ -259,13 +295,25 @@ function TemplateForm({
   );
 }
 
-function stepSummary(step: WorkflowStepConfig, roles: Role[]): string {
+function approverTypeText(t: ApproverType): string {
+  switch (t) {
+    case "position": return "whoever holds a position";
+    case "group": return "a member of an employee group";
+    case "org_unit_head": return "the head of the org unit";
+    case "dotted_line_manager": return "the dotted-line manager";
+    case "specific_user": return "a specific person";
+    case "manager_of_submitter": return "the submitter's manager";
+    default: return "a role";
+  }
+}
+
+function stepSummary(step: WorkflowStepConfig, roles: Role[], people: { userAccountId: string | null; fullName: string }[]): string {
   const roleName = (id?: string) => roles.find((r) => r.id === id)?.name ?? "an unknown role";
   const approverText = step.approvers
     .map((a) => {
       if (a.approverType === "role") return roleName(a.roleId);
-      if (a.approverType === "manager_of_submitter") return "the submitter's manager";
-      return "a specific person";
+      if (a.approverType === "specific_user") return people.find((p) => p.userAccountId === a.userAccountId)?.fullName ?? "a specific person";
+      return approverTypeText(a.approverType);
     })
     .join(" AND ");
   return `${step.name} — ${approverText}${step.slaHours ? ` (SLA ${step.slaHours}h)` : ""}`;
@@ -277,13 +325,27 @@ export function WorkflowTemplatesPanel() {
   const [assignableUsers, setAssignableUsers] = useState<{ userAccountId: string | null; fullName: string }[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [configuring, setConfiguring] = useState<string | null>(null);
+  const [peopleFailed, setPeopleFailed] = useState(false);
+  const [toggleError, setToggleError] = useState<string | null>(null);
+
+  async function toggleActive(key: string, isActive: boolean) {
+    setToggleError(null);
+    try {
+      await api.setWorkflowTemplateActive(key, isActive);
+      load();
+    } catch (err) {
+      setToggleError(err instanceof ApiError ? err.message : "Could not change this workflow.");
+    }
+  }
 
   function load() {
-    Promise.all([api.listWorkflowTemplates(), api.listAssignableRoles(), api.listAssignableUsers()])
+    // The list of people only feeds the "A specific person" picker, so its failure must not take the whole screen down.
+    Promise.all([api.listWorkflowTemplates(), api.listAssignableRoles(), api.listAssignableUsers().catch(() => null)])
       .then(([t, r, u]) => {
         setTemplates(t);
         setRoles(r);
-        setAssignableUsers(u);
+        setAssignableUsers(u ?? []);
+        setPeopleFailed(u === null);
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : "Could not load workflow templates."));
   }
@@ -301,6 +363,11 @@ export function WorkflowTemplatesPanel() {
         workflow template."
       </p>
 
+      {peopleFailed && (
+        <p className="text-xs text-warning">The list of people could not be loaded, so "A specific person" is unavailable for now. Role and manager approvers still work.</p>
+      )}
+      {toggleError && <p className="text-xs text-danger">{toggleError}</p>}
+
       {KNOWN_WORKFLOWS.map((workflow) => {
         const existing = templates.find((t) => t.key === workflow.key);
         return (
@@ -311,8 +378,8 @@ export function WorkflowTemplatesPanel() {
                 <p className="text-sm text-label-tertiary mt-0.5">{workflow.description}</p>
               </div>
               {existing ? (
-                <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold bg-success/15 text-green-700 shrink-0">
-                  Configured
+                <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold shrink-0 ${existing.isActive ? "bg-success/15 text-green-700" : "bg-warning/15 text-warning"}`}>
+                  {existing.isActive ? "Configured" : "Switched off"}
                 </span>
               ) : (
                 <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold bg-black/5 text-label-secondary shrink-0">
@@ -325,7 +392,7 @@ export function WorkflowTemplatesPanel() {
               <ol className="mt-3 space-y-1 list-decimal list-inside">
                 {existing.steps.map((step) => (
                   <li key={step.stepOrder} className="text-sm text-label-secondary">
-                    {stepSummary(step, roles)}
+                    {stepSummary(step, roles, assignableUsers)}
                   </li>
                 ))}
               </ol>
@@ -335,6 +402,7 @@ export function WorkflowTemplatesPanel() {
               <div className="mt-3">
                 <TemplateForm
                   workflow={workflow}
+                  existing={existing}
                   roles={roles}
                   assignableUsers={assignableUsers}
                   onCancel={() => setConfiguring(null)}
@@ -345,14 +413,21 @@ export function WorkflowTemplatesPanel() {
                 />
               </div>
             ) : (
-              !existing && (
+              <div className="mt-3 flex items-center gap-4 flex-wrap">
                 <button
+                  type="button"
                   onClick={() => setConfiguring(workflow.key)}
-                  className="mt-3 bg-accent text-white rounded-lg px-4 py-2 text-sm font-semibold"
+                  className={existing ? "border border-accent text-accent rounded-lg px-4 py-2 text-sm font-semibold" : "bg-accent text-white rounded-lg px-4 py-2 text-sm font-semibold"}
                 >
-                  Configure
+                  {existing ? "Edit approvers" : "Configure"}
                 </button>
-              )
+                {existing && (
+                  <button type="button" onClick={() => toggleActive(existing.key, !existing.isActive)} className="text-sm font-medium text-label-secondary hover:text-accent">
+                    {existing.isActive ? "Switch off" : "Switch on"}
+                  </button>
+                )}
+                {existing && existing.currentVersionNo && <span className="text-xs text-label-tertiary">Version {existing.currentVersionNo}. Requests already sent keep the version they started with.</span>}
+              </div>
             )}
           </div>
         );

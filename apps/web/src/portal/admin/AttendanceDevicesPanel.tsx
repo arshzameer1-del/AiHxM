@@ -4,7 +4,7 @@ import { api, ApiError } from "../../api/client";
 
 function describeError(err: unknown): string {
   if (err instanceof ApiError) {
-    if (err.status === 404) return "The Leave & Attendance module isn't enabled for this company.";
+    if (err.status === 404) return "The Leave module isn't enabled for this company.";
     if (err.status === 403) return "You don't have permission to manage attendance devices.";
     return err.message;
   }

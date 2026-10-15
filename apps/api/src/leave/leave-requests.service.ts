@@ -17,6 +17,7 @@ import type {
   LeaveApprovalLineView,
   LeaveBalanceView,
   LeaveColleagueView,
+  LeaveApproverPreviewView,
   LeaveRequestView,
   LeaveType,
   LeaveTypeView,
@@ -861,6 +862,48 @@ export class LeaveRequestsService {
         [subject.manager_id, subject.id]
       );
       return result.rows.map((r) => ({ employeeId: r.id, employeeName: `${r.first_name} ${r.last_name}`.trim(), employeeNumber: r.employee_number }));
+    });
+  }
+
+  /**
+   * LV-UP: the approvers a new request for `employeeId` (default: the caller) is expected to go to, read from the
+   * company's active leave workflow template, so the create form can show "1st Level Approver" before submitting.
+   * Display only: the real routing is decided when the request is submitted.
+   */
+  async approverPreview(claims: RequestClaims, employeeId?: string): Promise<LeaveApproverPreviewView[]> {
+    await this.requireLeaveModule(claims);
+    return this.db.withClaims(claims, async (client) => {
+      const subject = await this.resolveTeamSubject(client, claims, employeeId);
+      const template = await client.query(
+        `SELECT id FROM workflow_templates WHERE company_id = $1 AND object_key = 'leave_request' AND is_active ORDER BY created_at LIMIT 1`,
+        [claims.company_id]
+      );
+      if (template.rowCount === 0) return [];
+      const rows = await client.query(
+        `SELECT s.step_order, s.name AS step_name, a.approver_type, a.user_account_id, r.name AS role_name
+           FROM workflow_template_steps s
+           JOIN workflow_template_step_approvers a ON a.step_id = s.id
+           LEFT JOIN roles r ON r.id = a.role_id
+          WHERE s.template_id = $1
+          ORDER BY s.step_order, a.created_at`,
+        [template.rows[0].id]
+      );
+      const names = async (userAccountId: string | null): Promise<string | null> => {
+        if (!userAccountId) return null;
+        const e = await client.query(`SELECT first_name, last_name FROM employees WHERE user_account_id = $1`, [userAccountId]);
+        return e.rows[0] ? `${e.rows[0].first_name} ${e.rows[0].last_name}`.trim() : null;
+      };
+      const byStep = new Map<number, { stepName: string; names: string[] }>();
+      for (const row of rows.rows) {
+        let name: string | null = null;
+        if (row.approver_type === "manager_of_submitter") name = await names(subject.manager_user_account_id ?? null);
+        else if (row.approver_type === "specific_user") name = await names(row.user_account_id);
+        else name = row.role_name ?? null;
+        const entry: { stepName: string; names: string[] } = byStep.get(row.step_order) ?? { stepName: row.step_name as string, names: [] };
+        if (name) entry.names.push(name);
+        byStep.set(row.step_order, entry);
+      }
+      return [...byStep.entries()].map(([stepOrder, v]) => ({ stepOrder, stepName: v.stepName, approverName: v.names.length > 0 ? v.names.join(", ") : null }));
     });
   }
 

@@ -108,7 +108,7 @@ test.beforeAll(async () => {
 
 test("entitlement, items with approver, and the request detail with approval chain and team calendar", async ({ page }) => {
   await loginToApp(page, staffToken);
-  await page.goto("/app/leave");
+  await page.goto("/app/leave/my-requests");
 
   const entitlement = page.locator("[data-testid='leave-balance-card']");
   await expect(entitlement.getByText("Annual leave").first()).toBeVisible();
@@ -147,7 +147,7 @@ test("entitlement, items with approver, and the request detail with approval cha
 
 test("edit a pending request with the pencil icon", async ({ page }) => {
   await loginToApp(page, staffToken);
-  await page.goto("/app/leave");
+  await page.goto("/app/leave/my-requests");
   const items = page.locator("[data-testid='leave-requests']");
   await items.locator("tbody tr").first().getByRole("button", { name: "Edit request" }).click();
 
@@ -167,7 +167,7 @@ test("edit a pending request with the pencil icon", async ({ page }) => {
   await expect(form.getByLabel("Working days")).toHaveValue("3");
   await expect(form.getByLabel("Absence days")).toHaveValue("3");
   await shot(page, "03-edit-form");
-  await form.getByRole("button", { name: "Save changes" }).click();
+  await form.getByRole("button", { name: "Save", exact: true }).click();
 
   await expect(page.getByRole("form", { name: "Edit leave request" })).toHaveCount(0);
   const row = page.locator("[data-testid='leave-requests'] tbody tr").first();
@@ -184,7 +184,7 @@ test("edit a pending request with the pencil icon", async ({ page }) => {
 test("a pending request can no longer be edited once the manager has approved it", async ({ page }) => {
   await api(`/leave-requests/${seededRequestId}/decision`, "PATCH", { decision: "approved" }, managerToken);
   await loginToApp(page, staffToken);
-  await page.goto("/app/leave");
+  await page.goto("/app/leave/my-requests");
   const row = page.locator("[data-testid='leave-requests'] tbody tr").first();
   await expect(row).toContainText("Approved");
   await expect(row.getByRole("button", { name: "Edit request" })).toHaveCount(0);
@@ -193,7 +193,7 @@ test("a pending request can no longer be edited once the manager has approved it
 
 test("Show From hides requests that ended before the chosen date", async ({ page }) => {
   await loginToApp(page, staffToken);
-  await page.goto("/app/leave");
+  await page.goto("/app/leave/my-requests");
   await expect(page.getByRole("tab", { name: /Items \(1\)/ })).toBeVisible();
   await page.getByLabel("Show requests from").fill(plus(wednesday, 30));
   await expect(page.getByRole("tab", { name: /Items \(0\)/ })).toBeVisible();
@@ -203,7 +203,7 @@ test("Show From hides requests that ended before the chosen date", async ({ page
 
 test("calendar: pick two days to open the create form filled in, then submit", async ({ page }) => {
   await loginToApp(page, staffToken);
-  await page.goto("/app/leave");
+  await page.goto("/app/leave/my-requests");
   await page.getByRole("tab", { name: "Calendar" }).click();
 
   const nextMonday = plus(wednesday, 5);
@@ -222,9 +222,10 @@ test("calendar: pick two days to open the create form filled in, then submit", a
   await expect(form.locator("[data-testid='leave-available-days']")).toContainText("Days available");
   await expect(form.locator("[data-testid='leave-consumed-preview']")).toContainText("2 Days will be consumed");
   await shot(page, "04-create-from-calendar");
-  await form.getByRole("button", { name: "Submit request" }).click();
-  await expect(page.getByRole("form", { name: "Create leave request" })).toHaveCount(0);
-  // The calendar stays open and now marks the new request; the Items tab lists it too.
+  await form.getByRole("button", { name: "Save", exact: true }).click();
+  // Saving returns to My Leave Request; its calendar marks the new request and the Items tab lists it too.
+  await expect(page).toHaveURL(/\/app\/leave\/my-requests/);
+  await page.getByRole("tab", { name: "Calendar" }).click();
   await expect(page.getByRole("button", { name: new RegExp(`^${nextMonday.split("-").reverse().join("\\.")}.*Pending`) }).first()).toBeVisible();
   await page.getByRole("tab", { name: /Items/ }).click();
   await expect(page.locator("[data-testid='leave-requests'] tbody tr")).toHaveCount(2);
@@ -233,8 +234,8 @@ test("calendar: pick two days to open the create form filled in, then submit", a
 test("HR submits on behalf: Select Employee, banner, then the same screen for that employee", async ({ page }) => {
   await loginToApp(page, hrToken);
   await page.goto("/app/leave");
-  await page.getByRole("button", { name: "Submit on behalf" }).click();
-  const dialog = page.getByRole("dialog", { name: "Select Employee" });
+  await page.getByTestId("tile-on-behalf").click();
+  const dialog = page.getByTestId("select-employee-page");
   await expect(dialog).toBeVisible();
   await dialog.getByLabel("Search employees").fill("tina");
   await expect(dialog.getByRole("button", { name: /Tina Teammate/ })).toBeVisible();
@@ -244,7 +245,7 @@ test("HR submits on behalf: Select Employee, banner, then the same screen for th
   await expect(page.getByText(/You are acting on behalf of employee/)).toContainText("Tina Teammate");
   await expect(page.locator("[data-testid='on-behalf-leave']").getByText("Annual leave").first()).toBeVisible();
   await shot(page, "05-on-behalf");
-  await page.getByRole("button", { name: "Stop acting on behalf" }).click();
+  await page.getByRole("link", { name: "Stop acting on behalf" }).click();
   await expect(page.getByText(/You are acting on behalf of employee/)).toHaveCount(0);
   expect(teammateEmployeeId).toBeTruthy();
   expect(staffEmployeeId).toBeTruthy();

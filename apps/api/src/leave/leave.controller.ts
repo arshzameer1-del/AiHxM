@@ -105,7 +105,13 @@ export class LeaveController {
     return this.leaveRequests.teamCalendar(claims, query);
   }
 
-  /** LV-UP: relief-person candidates (colleagues under the same manager). Also before `:id`. */
+  /** LV-UP: expected approvers for the create form. Also before `:id`. */
+  @Get("leave-requests/approver-preview")
+  approverPreview(@CurrentClaims() claims: RequestClaims, @Query("employeeId") employeeId?: string) {
+    return this.leaveRequests.approverPreview(claims, employeeId);
+  }
+
+  /** LV-UP: relief-person candidates (colleagues under the same manager). */
   @Get("leave-requests/colleagues")
   colleagues(@CurrentClaims() claims: RequestClaims, @Query("employeeId") employeeId?: string) {
     return this.leaveRequests.listColleagues(claims, employeeId);

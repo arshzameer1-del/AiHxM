@@ -10,6 +10,7 @@ import {
   ShieldCheck,
   Terminal,
   CalendarDays,
+  Clock,
   Briefcase,
   Target,
   Wallet,
@@ -174,7 +175,8 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): 
   }
 
   if (hasModule("leave") && roleKeys.length > 0) {
-    items.push({ to: "/app/leave", label: "Leave & Attendance", icon: CalendarDays });
+    items.push({ to: "/app/leave", label: "Leave Management", icon: CalendarDays });
+    items.push({ to: "/app/attendance", label: "Time & Attendance", icon: Clock });
   }
 
   // ESS build-out (2026-10, Part 2 category 6) — expense_claim.view.self/

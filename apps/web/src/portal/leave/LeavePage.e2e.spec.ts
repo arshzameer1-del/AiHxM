@@ -46,45 +46,40 @@ test.describe("Leave & Attendance Portal (Task #50)", () => {
     // In a real scenario, this would set up API fixtures
   });
 
-  test("Employee can view leave balance and request summary", async ({
-    page,
-  }) => {
+  test("Employee sees Leave Management tiles and opens My Leave Request from a tile", async ({ page }) => {
     await loginAsEmployee(page);
-    // Navigate to leave page
     await page.goto("/app/leave");
 
-    // Expect leave page to load with balance summary. `.first()` — a real
-    // loaded page has an h1 ("Leave & Attendance") plus section h2s ("My
-    // Leave", "Leave Requests") that all match /leave/i, tripping the
-    // same strict-mode "resolved to N elements" this whole suite had once
-    // real content started actually rendering.
-    await expect(page.locator("h1, h2").filter({ hasText: /leave/i }).first()).toBeVisible();
+    // Launchpad: tiles for leave only. Attendance is a separate module with its own tiles.
+    await expect(page.getByRole("heading", { name: "Leave Management" })).toBeVisible();
+    await expect(page.getByTestId("tile-my-leave")).toBeVisible();
+    await expect(page.getByTestId("tile-create-leave")).toBeVisible();
+    await expect(page.getByTestId("tile-clock")).toHaveCount(0);
 
-    // Verify leave balance card is visible
-    const balanceCard = page.locator("[data-testid='leave-balance-card']").or(
-      page.locator("text=Annual Leave").or(page.locator("text=Leave Balance"))
-    );
-    if (await balanceCard.isVisible()) {
-      // Check for balance information
-      await expect(balanceCard.locator("text=/\\d+/")).toBeVisible();
-    }
+    await page.getByTestId("tile-my-leave").click();
+    await expect(page).toHaveURL(/\/app\/leave\/my-requests/);
+    await expect(page.getByRole("heading", { name: "My Leave Request" })).toBeVisible();
+  });
 
-    // Verify leave request section exists
-    const leaveSection = page.locator("[data-testid='leave-requests']").or(
-      page.locator("text=Leave Requests").or(page.locator("text=My Requests"))
-    );
-    await expect(leaveSection).toBeVisible();
+  test("Leave Management and Time & Attendance are separate: neither shows the other's tiles", async ({ page }) => {
+    await loginAsEmployee(page);
+    await page.goto("/app/attendance");
+    await expect(page.getByRole("heading", { name: "Time & Attendance" })).toBeVisible();
+    await expect(page.getByTestId("tile-clock")).toBeVisible();
+    await expect(page.getByTestId("tile-timesheet")).toBeVisible();
+    await expect(page.getByTestId("tile-my-leave")).toHaveCount(0);
+    await expect(page.getByTestId("tile-create-leave")).toHaveCount(0);
   });
 
   test("Employee can submit a new leave request", async ({ page }) => {
     await loginAsEmployee(page);
     // Navigate to leave request form
-    await page.goto("/app/leave");
+    await page.goto("/app/leave/my-requests");
 
     // Look for "New Request" or "Request Leave" button
     const newRequestButton = page
       .locator("button:has-text('New Request')")
-      .or(page.locator("button:has-text('Request Leave')"))
+      .or(page.locator("button:has-text('Create Request')"))
       .or(page.locator("button:has-text('Submit Request')"));
 
     if (await newRequestButton.isVisible()) {
@@ -150,8 +145,8 @@ test.describe("Leave & Attendance Portal (Task #50)", () => {
     page,
   }) => {
     await loginAsManager(page);
-    // Navigate to leave page as manager
-    await page.goto("/app/leave");
+    // Navigate to leave approvals as manager
+    await page.goto("/app/leave/approvals");
 
     // Expect to see team requests section
     const teamRequestsSection = page
@@ -195,7 +190,7 @@ test.describe("Leave & Attendance Portal (Task #50)", () => {
 
   test("Manager can reject a leave request with comment", async ({ page }) => {
     await loginAsManager(page);
-    await page.goto("/app/leave");
+    await page.goto("/app/leave/approvals");
 
     // Find a pending request with reject button
     const pendingRequest = page
@@ -242,7 +237,7 @@ test.describe("Leave & Attendance Portal (Task #50)", () => {
     page,
   }) => {
     await loginAsHrAdmin(page);
-    await page.goto("/app/leave");
+    await page.goto("/app/leave/approvals");
 
     // Verify page shows all leave records (not just employee's own).
     // `.first()` — see the identical note on the employee-balance test
@@ -269,16 +264,11 @@ test.describe("Leave & Attendance Portal (Task #50)", () => {
 
   test("Employee can view attendance records", async ({ page }) => {
     await loginAsEmployee(page);
-    await page.goto("/app/leave");
+    await page.goto("/app/attendance");
+    await page.getByTestId("tile-clock").click();
+    await expect(page).toHaveURL(/\/app\/attendance\/clock/);
 
-    // LeavePage.tsx (the `canClock` branch) folds attendance straight
-    // into this same page as a Clock in/out widget — there's no separate
-    // "/attendance" nav link or tab to navigate to, and no literal
-    // "Attendance" text on the page (a bare `text=Attendance` locator
-    // instead matched the "Leave & Attendance" nav link AND h1 AND the
-    // page's own subtitle paragraph — a 3-way strict-mode violation). The
-    // Clock in/out button is the real, stable signal that this widget
-    // rendered.
+    // The Clock in/out button is the stable signal that the clock page rendered.
     const clockButton = page
       .locator("button")
       .filter({ hasText: /clock in|clock out/i });
@@ -287,7 +277,7 @@ test.describe("Leave & Attendance Portal (Task #50)", () => {
 
   test("Employee can view daily attendance summary", async ({ page }) => {
     await loginAsEmployee(page);
-    await page.goto("/app/leave");
+    await page.goto("/app/attendance/days");
 
     // Look for attendance summary card
     const summaryCard = page
@@ -311,19 +301,21 @@ test.describe("Leave & Attendance Portal (Task #50)", () => {
     }
   });
 
-  test("Portal navigation includes Leave & Attendance menu item", async ({
+  test("Portal navigation has separate Leave Management and Time & Attendance entries", async ({
     page,
   }) => {
     await loginAsHrAdmin(page);
     await page.goto("/app");
 
-    const leaveNavLink = page.locator("nav a").filter({
-      hasText: /leave|attendance/i,
-    });
+    const leaveNavLink = page.locator("nav a").filter({ hasText: /^\s*Leave Management\s*$/ });
+    const attendanceNavLink = page.locator("nav a").filter({ hasText: /^\s*Time & Attendance\s*$/ });
     await expect(leaveNavLink).toBeVisible();
+    await expect(attendanceNavLink).toBeVisible();
 
     await leaveNavLink.click();
-    await expect(page).toHaveURL(/\/app\/leave/);
+    await expect(page).toHaveURL(/\/app\/leave$/);
+    await attendanceNavLink.click();
+    await expect(page).toHaveURL(/\/app\/attendance$/);
   });
 });
 
@@ -331,7 +323,7 @@ test.describe("Leave & Attendance Responsiveness", () => {
   test("Leave request form is responsive on mobile", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 });
     await loginAsEmployee(page);
-    await page.goto("/app/leave");
+    await page.goto("/app/leave/new");
 
     // Form or leave request section should be visible
     const form = page.locator("form").or(page.locator("[data-testid='leave-form']"));
@@ -356,30 +348,15 @@ test.describe("Leave & Attendance Accessibility", () => {
     page,
   }) => {
     await loginAsEmployee(page);
+    // The form is its own page (Create Leave Request tile).
     await page.goto("/app/leave");
-    // LeaveRequestForm.tsx only mounts after clicking "Request Leave"
-    // (LeavePage.tsx's `showForm` state) — it isn't present on page load.
-    await page.locator("button", { hasText: "Request Leave" }).click();
+    await page.getByTestId("tile-create-leave").click();
+    await expect(page).toHaveURL(/\/app\/leave\/new/);
 
-    // Real finding (2026-10-01, same pattern as
-    // EmployeeListPage.e2e.spec.ts's "Form labels are properly associated
-    // with inputs" note): LeaveRequestForm.tsx's "Leave type" <select>
-    // has a bare <label> with no `htmlFor`/`id` pairing and no `name` or
-    // `aria-label` on the <select> itself — `select[name="leaveType"]`
-    // matches nothing and hangs rather than reporting absence. Located by
-    // the label's adjacent sibling instead so the assertion below can
-    // actually run (and correctly fail, since there genuinely is no
-    // programmatic label association here).
-    const leaveTypeInput = page.locator('label:has-text("Leave type") + select');
-
-    // Verify input has associated label or ARIA label
-    // The label is now paired by htmlFor/id (LV-UP), so accept any label whose `for` equals the select's id.
-    const selectId = await leaveTypeInput.getAttribute("id");
-    const hasLabel =
-      (selectId !== null && (await page.locator(`label[for="${selectId}"]`).count()) > 0) ||
-      (await leaveTypeInput.evaluate((el) => el.hasAttribute("aria-label"))) ||
-      (await leaveTypeInput.evaluate((el) => el.closest("label"))) !== null;
-
+    // The SAP-style form pairs each label with its field by htmlFor/id, so the field must be found by its label.
+    const leaveTypeInput = page.locator("select#leave-type");
+    await expect(leaveTypeInput).toBeVisible();
+    const hasLabel = (await page.locator('label[for="leave-type"]').count()) > 0;
     expect(hasLabel).toBe(true);
   });
 
@@ -387,7 +364,7 @@ test.describe("Leave & Attendance Accessibility", () => {
     page,
   }) => {
     await loginAsHrAdmin(page);
-    await page.goto("/app/leave");
+    await page.goto("/app/leave/my-requests");
 
     // Verify table structure
     const table = page.locator("table");

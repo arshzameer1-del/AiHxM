@@ -1,25 +1,13 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import type {
   AttendanceCorrectionRequestView,
-  AttendanceRecordView,
   EmployeeView,
   HolidayView,
   LeaveRequestView,
-  OverlapWarning,
 } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
-import { useAuth } from "../../auth/AuthContext";
-import { AttendanceCorrectionForm } from "./AttendanceCorrectionForm";
-import { MyAttendanceDays } from "./MyAttendanceDays";
-import { MyTimesheet } from "./MyTimesheet";
-import { LeaveRequestForm, OverlapNotice } from "./LeaveRequestForm";
-import { MyLeaveOverview } from "./LeaveOverview";
-import { OnBehalfLeave } from "./OnBehalfLeave";
 import {
-  ATTENDANCE_STATUS_LABELS,
-  ATTENDANCE_STATUS_STYLES,
-  CORRECTION_STATUS_LABELS,
-  CORRECTION_STATUS_STYLES,
   leaveTypeLabel,
   STATUS_LABELS,
   STATUS_STYLES,
@@ -32,237 +20,6 @@ function describeError(err: unknown): string {
     return err.message;
   }
   return "Something went wrong loading this.";
-}
-
-/**
- * `attendance.record.self`/`leave_request.create.self` are both granted
- * only to `employee_self_service` (0016_leave_attendance_seed.sql) — one
- * role flag correctly gates both the clock-in widget and the self-submit
- * form here, they're not independent checks.
- */
-function MyLeaveCard({
-  employeeId,
-  canSubmit,
-  canClock,
-  refreshKey,
-  onChanged,
-}: {
-  employeeId: string;
-  canSubmit: boolean;
-  canClock: boolean;
-  refreshKey: number;
-  onChanged: () => void;
-}) {
-  const [employee, setEmployee] = useState<EmployeeView | null>(null);
-  const [attendance, setAttendance] = useState<AttendanceRecordView[] | null>(null);
-  const [corrections, setCorrections] = useState<AttendanceCorrectionRequestView[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [showForm, setShowForm] = useState(false);
-  const [formRange, setFormRange] = useState<{ start: string; end: string } | null>(null);
-  const [editingRequest, setEditingRequest] = useState<LeaveRequestView | null>(null);
-  const [showCorrectionForm, setShowCorrectionForm] = useState(false);
-  const [overlapWarnings, setOverlapWarnings] = useState<OverlapWarning[]>([]);
-  const [clockBusy, setClockBusy] = useState(false);
-  const [clockError, setClockError] = useState<string | null>(null);
-
-  useEffect(() => {
-    Promise.all([
-      api.getEmployee(employeeId),
-      canClock ? api.listAttendance(employeeId) : Promise.resolve(null),
-      canClock ? api.listAttendanceCorrections(employeeId) : Promise.resolve(null),
-    ])
-      .then(([emp, att, corr]) => {
-        setEmployee(emp);
-        if (att) setAttendance(att);
-        if (corr) setCorrections(corr);
-      })
-      .catch((err) => setError(describeError(err)));
-  }, [employeeId, refreshKey, canClock]);
-
-  const clockedIn = Boolean(attendance && attendance.length > 0 && attendance[0].clockOutAt === null);
-
-  async function handleClock() {
-    if (!employee) return;
-    setClockBusy(true);
-    setClockError(null);
-    try {
-      if (clockedIn) {
-        await api.clockOut({ employeeNumber: employee.employeeNumber });
-      } else {
-        await api.clockIn({ employeeNumber: employee.employeeNumber, source: "manual" });
-      }
-      onChanged();
-    } catch (err) {
-      setClockError(err instanceof ApiError ? err.message : "Could not record attendance.");
-    } finally {
-      setClockBusy(false);
-    }
-  }
-
-  if (error) {
-    return <div className="bg-card rounded-card p-5 shadow-sm text-sm text-label-secondary mb-6">{error}</div>;
-  }
-
-  return (
-    <section className="bg-card rounded-card p-5 shadow-sm mb-6">
-      <div className="flex items-start justify-between mb-4 gap-4 flex-wrap">
-        <h2 className="font-semibold text-sm uppercase tracking-wide text-label-tertiary">My Leave</h2>
-        <div className="flex gap-4 items-center">
-          {canClock && employee && (
-            <button
-              onClick={handleClock}
-              disabled={clockBusy}
-              className={`text-sm font-semibold rounded-lg px-3 py-1.5 disabled:opacity-50 ${
-                clockedIn ? "bg-danger/10 text-danger" : "bg-accent text-white"
-              }`}
-            >
-              {clockBusy ? "…" : clockedIn ? "Clock out" : "Clock in"}
-            </button>
-          )}
-          {canSubmit && !showForm && (
-            <button
-              onClick={() => {
-                setEditingRequest(null);
-                setShowForm(true);
-              }}
-              className="text-sm font-semibold text-accent hover:underline"
-            >
-              Request Leave
-            </button>
-          )}
-          {canClock && !showCorrectionForm && (
-            <button
-              onClick={() => setShowCorrectionForm(true)}
-              className="text-sm font-semibold text-accent hover:underline"
-            >
-              Request correction
-            </button>
-          )}
-        </div>
-      </div>
-
-      {clockError && <p className="text-xs text-danger mb-3">{clockError}</p>}
-      {clockedIn && attendance && (
-        <div className="flex items-center gap-2 mb-3 flex-wrap">
-          <p className="text-xs text-label-tertiary">
-            Clocked in since {new Date(attendance[0].clockInAt).toLocaleString()}
-            {attendance[0].shiftName && ` · ${attendance[0].shiftName} shift`}
-          </p>
-          <span
-            className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${
-              ATTENDANCE_STATUS_STYLES[attendance[0].status]
-            }`}
-          >
-            {ATTENDANCE_STATUS_LABELS[attendance[0].status]}
-          </span>
-        </div>
-      )}
-
-      {canClock && attendance && attendance.length > 0 && (
-        <div className="mb-4">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-label-tertiary mb-2">Recent attendance</h3>
-          <div className="space-y-1.5">
-            {attendance.slice(0, 5).map((rec) => (
-              <div key={rec.id} className="flex items-center justify-between gap-3 text-xs">
-                <span className="text-label-secondary">
-                  {new Date(rec.clockInAt).toLocaleDateString()}
-                  {rec.shiftName && <span className="text-label-tertiary"> · {rec.shiftName}</span>}
-                </span>
-                <span
-                  className={`inline-block px-2 py-0.5 rounded-full font-semibold ${ATTENDANCE_STATUS_STYLES[rec.status]}`}
-                >
-                  {ATTENDANCE_STATUS_LABELS[rec.status]}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {showCorrectionForm && (
-        <div className="mb-4">
-          <AttendanceCorrectionForm
-            employeeId={employeeId}
-            onCancel={() => setShowCorrectionForm(false)}
-            onSubmitted={() => {
-              setShowCorrectionForm(false);
-              onChanged();
-            }}
-          />
-        </div>
-      )}
-
-      {canClock && corrections && corrections.length > 0 && (
-        <div className="mb-4">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-label-tertiary mb-2">
-            Correction requests
-          </h3>
-          <div className="space-y-1.5">
-            {corrections.slice(0, 5).map((c) => (
-              <div key={c.id} className="flex items-center justify-between gap-3 text-xs">
-                <span className="text-label-secondary">
-                  {c.requestedDate}
-                  {c.reason && <span className="text-label-tertiary"> · &ldquo;{c.reason}&rdquo;</span>}
-                </span>
-                <span
-                  className={`shrink-0 inline-block px-2 py-0.5 rounded-full font-semibold ${CORRECTION_STATUS_STYLES[c.status]}`}
-                >
-                  {CORRECTION_STATUS_LABELS[c.status]}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {showForm && (
-        <div className="mt-4">
-          <LeaveRequestForm
-            key={editingRequest?.id ?? "new"}
-            fixedEmployeeId={employeeId}
-            initialStart={formRange?.start}
-            initialEnd={formRange?.end}
-            editing={editingRequest ?? undefined}
-            onCancel={() => {
-              setShowForm(false);
-              setFormRange(null);
-              setEditingRequest(null);
-            }}
-            onSubmitted={(result) => {
-              setShowForm(false);
-              setFormRange(null);
-              setEditingRequest(null);
-              setOverlapWarnings(result.overlapWarnings);
-              onChanged();
-            }}
-          />
-        </div>
-      )}
-      {overlapWarnings.length > 0 && (
-        <div className="mt-3">
-          <OverlapNotice warnings={overlapWarnings} />
-        </div>
-      )}
-      <MyLeaveOverview
-        employeeId={employeeId}
-        refreshKey={refreshKey}
-        canSubmit={canSubmit}
-        onChanged={onChanged}
-        onCreateRange={(start, end) => {
-          setEditingRequest(null);
-          setFormRange({ start, end });
-          setShowForm(true);
-        }}
-        onEditRequest={(request) => {
-          setFormRange(null);
-          setEditingRequest(request);
-          setShowForm(true);
-        }}
-      />
-      {canClock && <MyAttendanceDays employeeId={employeeId} refreshKey={refreshKey} />}
-      {canClock && <MyTimesheet employeeId={employeeId} />}
-    </section>
-  );
 }
 
 function RequestRow({
@@ -457,7 +214,7 @@ function RequestRow({
   );
 }
 
-function RequestsSection({
+export function RequestsSection({
   canSubmitOnBehalf,
   canDecide,
   canCancel,
@@ -473,7 +230,6 @@ function RequestsSection({
   const [requests, setRequests] = useState<LeaveRequestView[] | null>(null);
   const [employees, setEmployees] = useState<EmployeeView[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [showOnBehalfForm, setShowOnBehalfForm] = useState(false);
   useEffect(() => {
     Promise.all([api.listLeaveRequests(), api.listEmployees()])
       .then(([reqs, emps]) => {
@@ -491,17 +247,12 @@ function RequestsSection({
     <section>
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold">Leave Requests</h2>
-        {canSubmitOnBehalf && !showOnBehalfForm && (
-          <button
-            onClick={() => setShowOnBehalfForm(true)}
-            className="text-sm font-semibold text-accent hover:underline"
-          >
+        {canSubmitOnBehalf && (
+          <Link to="/app/leave/on-behalf" className="text-sm font-semibold text-accent hover:underline">
             Submit on behalf
-          </button>
+          </Link>
         )}
       </div>
-
-      {showOnBehalfForm && <OnBehalfLeave onChanged={onChanged} onClose={() => setShowOnBehalfForm(false)} />}
 
       {!requests ? (
         <div className="text-label-tertiary text-sm">Loading…</div>
@@ -615,7 +366,7 @@ function CorrectionRow({ request, onChanged }: { request: AttendanceCorrectionRe
  * company for hr_admin — AttendanceCorrectionsService.listPendingForDecider's
  * own scoping), so there's no client-side filtering to get wrong here.
  */
-function PendingCorrectionsSection({ refreshKey, onChanged }: { refreshKey: number; onChanged: () => void }) {
+export function PendingCorrectionsSection({ refreshKey, onChanged, standalone = false }: { refreshKey: number; onChanged: () => void; standalone?: boolean }) {
   const [pending, setPending] = useState<AttendanceCorrectionRequestView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -626,12 +377,15 @@ function PendingCorrectionsSection({ refreshKey, onChanged }: { refreshKey: numb
       .catch((err) => setError(describeError(err)));
   }, [refreshKey]);
 
-  if (error || (pending && pending.length === 0)) return null;
+  if (standalone && error) return <div className="bg-white rounded-md p-5 shadow-sm text-sm text-label-secondary">{error}</div>;
+  if (!standalone && (error || (pending && pending.length === 0))) return null;
 
   return (
-    <section className="mt-8">
-      <h2 className="text-lg font-semibold mb-4">Pending Attendance Corrections</h2>
-      {!pending ? (
+    <section className={standalone ? "" : "mt-8"}>
+      {!standalone && <h2 className="text-lg font-semibold mb-4">Pending Attendance Corrections</h2>}
+      {pending && pending.length === 0 ? (
+        <div className="bg-white rounded-md p-5 shadow-sm text-sm text-label-tertiary">No attendance corrections are waiting for you.</div>
+      ) : !pending ? (
         <div className="text-label-tertiary text-sm">Loading…</div>
       ) : (
         <div className="space-y-3">
@@ -654,7 +408,7 @@ function PendingCorrectionsSection({ refreshKey, onChanged }: { refreshKey: numb
  * "upcoming" concept, only an optional ?year= — fine at the scale a
  * single company's calendar actually reaches.
  */
-function UpcomingHolidaysCard() {
+export function UpcomingHolidaysCard() {
   const [holidays, setHolidays] = useState<HolidayView[] | null>(null);
 
   useEffect(() => {
@@ -687,71 +441,4 @@ function UpcomingHolidaysCard() {
   );
 }
 
-/**
- * Task #50 — Leave & Attendance. Same "server already RBAC-scopes it, the
- * client just renders whatever comes back" design as Employee Core
- * (Decision #15) and Admin Center (Decision #17): `GET /leave-requests`
- * returns hr_admin's whole company, a line_manager's team, or an
- * employee_self_service holder's own requests, from the identical call.
- * The only role-aware branching here is which ACTIONS render — Request
- * Leave / clock in-out (employee_self_service only, since those are the
- * only two roles `0016_leave_attendance_seed.sql` grants
- * `leave_request.create.self`/`attendance.record.self` to), Submit on
- * behalf (hr_admin, via `leave_request.manage.all`), and Approve/Reject
- * (offered to hr_admin/line_manager cosmetically — who can ACTUALLY
- * decide a given request is entirely workflow-routing-determined
- * server-side, so a wrong guess here just means a real 403, not a
- * security gap).
- */
-export function LeavePage() {
-  const { identity } = useAuth();
-  const [refreshKey, setRefreshKey] = useState(0);
-  const bump = () => setRefreshKey((k) => k + 1);
-
-  const roleKeys = identity?.roleKeys ?? [];
-  const canSubmitSelf = roleKeys.includes("employee_self_service");
-  const canSubmitOnBehalf = roleKeys.includes("hr_admin");
-  const canDecide = roleKeys.includes("hr_admin") || roleKeys.includes("line_manager");
-  const canCancel = roleKeys.includes("hr_admin");
-  // employee.view.self/.all are what actually let GET /employees/:id (and
-  // the leave-balances endpoint keyed off the same id) resolve the
-  // CALLER'S OWN record — 0011_employee_seed.sql grants those only to
-  // hr_admin (.all) and employee_self_service (.self). line_manager gets
-  // only employee.view.team (their reports, never themselves), so a
-  // line_manager-only session has no employee record this page can fetch
-  // for them — confirmed via a live 404 on both endpoints during Task #50
-  // verification, not assumed. Gating "My Leave" on the same roles that
-  // hold self-view avoids surfacing that as a broken card.
-  const canViewOwnEmployeeRecord = roleKeys.includes("hr_admin") || roleKeys.includes("employee_self_service");
-
-  return (
-    <div>
-      <h1 className="text-2xl font-bold tracking-tight mb-1">Leave & Attendance</h1>
-      <p className="text-label-tertiary text-sm mb-6">
-        Request, approve, and track leave — plus clock in/out for your own attendance.
-      </p>
-
-      <UpcomingHolidaysCard />
-
-      {identity?.employeeId && canViewOwnEmployeeRecord && (
-        <MyLeaveCard
-          employeeId={identity.employeeId}
-          canSubmit={canSubmitSelf}
-          canClock={canSubmitSelf}
-          refreshKey={refreshKey}
-          onChanged={bump}
-        />
-      )}
-
-      <RequestsSection
-        canSubmitOnBehalf={canSubmitOnBehalf}
-        canDecide={canDecide}
-        canCancel={canCancel}
-        refreshKey={refreshKey}
-        onChanged={bump}
-      />
-
-      {canDecide && <PendingCorrectionsSection refreshKey={refreshKey} onChanged={bump} />}
-    </div>
-  );
-}
+export { describeError };

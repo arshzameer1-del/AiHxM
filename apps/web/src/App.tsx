@@ -219,7 +219,11 @@ const HrAdministrationPage = lazy(() =>
   })),
 );
 const LeavePage = lazy(() =>
-  import("./portal/leave/LeavePage").then((m) => ({ default: m.LeavePage })),
+  import("./portal/leave/LeaveRoutes").then((m) => ({ default: m.LeaveRoutes })),
+);
+// Time & Attendance is its own module (own sidebar entry and tiles), separate from Leave Management.
+const AttendancePage = lazy(() =>
+  import("./portal/leave/LeaveRoutes").then((m) => ({ default: m.AttendanceRoutes })),
 );
 // ESS build-out (2026-10, Part 2 category 6) — new module, built end to
 // end since no Expense module existed in this app before it (see
@@ -454,7 +458,8 @@ export default function App() {
                     routing decides who can submit/decide/cancel what;
                     LeavePage renders one screen for every role, same
                     pattern as Task #48/#49. */}
-                  <Route path="leave" element={<LeavePage />} />
+                  <Route path="leave/*" element={<LeavePage />} />
+                  <Route path="attendance/*" element={<AttendancePage />} />
                   {/* ESS build-out (2026-10) — Expense Management.
                     expense_claim.view.self/.team/.all mirror Leave's own
                     three-role split exactly (0115_expense_management.sql),

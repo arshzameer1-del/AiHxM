@@ -202,6 +202,7 @@ import type {
   LeaveRequestView,
   TeamLeaveEntryView,
   LeaveColleagueView,
+  LeaveApproverPreviewView,
   UpdateLeaveRequestRequest,
   LoginResult,
   LogoAlignment,
@@ -2324,6 +2325,8 @@ export const api = {
   updateLeaveRequest: (id: string, input: UpdateLeaveRequestRequest) =>
     request<SubmitLeaveRequestResponse>(`/leave-requests/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
   getLeaveRequest: (id: string) => request<LeaveRequestView>(`/leave-requests/${id}`),
+  getLeaveApproverPreview: (employeeId?: string) =>
+    request<LeaveApproverPreviewView[]>(`/leave-requests/approver-preview${employeeId ? `?employeeId=${encodeURIComponent(employeeId)}` : ""}`),
   getLeaveColleagues: (employeeId?: string) =>
     request<LeaveColleagueView[]>(`/leave-requests/colleagues${employeeId ? `?employeeId=${encodeURIComponent(employeeId)}` : ""}`),
   getTeamLeaveCalendar: (from: string, to: string, employeeId?: string) =>
@@ -2690,6 +2693,13 @@ export const api = {
 
   createWorkflowTemplate: (input: CreateWorkflowTemplateRequest) =>
     request<WorkflowTemplate>("/workflow/templates", { method: "POST", body: JSON.stringify(input) }),
+
+  // Editing a template publishes a NEW version (WFL-02); requests already in flight keep the version they started under.
+  updateWorkflowTemplate: (key: string, input: Omit<CreateWorkflowTemplateRequest, "key" | "objectKey"> & { isActive?: boolean }) =>
+    request<WorkflowTemplate>(`/workflow/templates/${encodeURIComponent(key)}`, { method: "PUT", body: JSON.stringify(input) }),
+
+  setWorkflowTemplateActive: (key: string, isActive: boolean) =>
+    request<WorkflowTemplate>(`/workflow/templates/${encodeURIComponent(key)}/active`, { method: "POST", body: JSON.stringify({ isActive }) }),
 
   // The real tenant role catalog (4 roles), for resolving a roleId for a
   // "role" approver step — see SystemAdminService.listAssignableRoles()'s

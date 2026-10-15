@@ -87,6 +87,34 @@ test.describe("System Admin Portal (Task #52)", () => {
     await expect(card.locator("li")).toContainText("HR Admin");
   });
 
+  test("System Admin can edit the approvers of a configured workflow (new version) and switch it off and on", async ({ page }) => {
+    await loginAsSystemAdmin(page);
+    await page.goto("/app/system-admin");
+
+    const card = page.locator("main .bg-card", { hasText: "Payroll run approval" });
+    // Wait for the templates to load: the card shows either "Configure" or "Edit approvers".
+    await expect(card.locator("button", { hasText: /^(Configure|Edit approvers)$/ })).toBeVisible();
+    const configure = card.getByRole("button", { name: "Configure", exact: true });
+    if (await configure.isVisible()) {
+      await configure.click();
+      await card.locator("form button[type=submit]").first().click();
+      await expect(card.locator("text=Configured")).toBeVisible({ timeout: 5000 });
+    }
+
+    // A configured workflow is no longer a dead end: its approvers can be changed.
+    await card.getByRole("button", { name: "Edit approvers" }).click();
+    const form = card.locator("form");
+    await expect(form.getByLabel("Approver type").first()).toBeVisible();
+    await form.getByPlaceholder("SLA hours (optional)").first().fill("72");
+    await form.getByRole("button", { name: "Save changes" }).click();
+    await expect(card.locator("li").first()).toContainText("SLA 72h", { timeout: 5000 });
+
+    await card.getByRole("button", { name: "Switch off" }).click();
+    await expect(card.getByText("Switched off")).toBeVisible();
+    await card.getByRole("button", { name: "Switch on" }).click();
+    await expect(card.getByText("Configured", { exact: true })).toBeVisible();
+  });
+
   test("Roles & Access lists this company's employees with their granted roles", async ({ page }) => {
     await loginAsSystemAdmin(page);
     await page.goto("/app/system-admin");

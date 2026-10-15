@@ -1,9 +1,11 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import type { EmployeeView, LeaveBalanceView, LeaveColleagueView, LeaveDayPart, LeaveRequestView, LeaveType, LeaveTypeView, OverlapWarning, SubmitLeaveRequestResponse } from "@aihxm/shared-types";
+import type { EmployeeView, LeaveApproverPreviewView, LeaveBalanceView, LeaveColleagueView, LeaveDayPart, LeaveRequestView, LeaveType, LeaveTypeView, OverlapWarning, SubmitLeaveRequestResponse } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { LEAVE_TYPES, leaveTypeLabel } from "./leaveLabels";
 import { countCalendarDays, countWorkingDays, formatDisplayDate, returnDateAfter } from "./leaveCalendar";
 import { approverStepLabel, groupApprovalSteps } from "./leaveApprovals";
+import { TeamCalendar } from "./TeamCalendar";
+import { SapConfirm, SapField, SapFooter, SapSection } from "./SapPage";
 
 /**
  * Shared by both submit paths: an employee_self_service holder submitting their own request
@@ -47,6 +49,8 @@ export function LeaveRequestForm({
   const [reason, setReason] = useState(editing?.reason ?? "");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [approverPreview, setApproverPreview] = useState<LeaveApproverPreviewView[]>([]);
 
   // A new range picked on the calendar while the form is open replaces the dates.
   useEffect(() => {
@@ -97,6 +101,15 @@ export function LeaveRequestForm({
     }
     api.getLeaveColleagues(employeeId).then(setColleagues).catch(() => setColleagues([]));
   }, [employeeId]);
+
+  useEffect(() => {
+    // Expected approvers, shown before anything is submitted (display only).
+    if (!employeeId || editing) {
+      setApproverPreview([]);
+      return;
+    }
+    api.getLeaveApproverPreview(employeeId).then(setApproverPreview).catch(() => setApproverPreview([]));
+  }, [employeeId, editing]);
 
   const selectedType = leaveTypes.find((t) => t.code === leaveType);
   const halfDayAllowed = selectedType ? selectedType.halfDayAllowed : true;
@@ -165,77 +178,89 @@ export function LeaveRequestForm({
     }
   }
 
-  const fieldClass = "w-full rounded-lg border border-black/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent";
+  const fieldClass = "w-full rounded border border-black/25 bg-white px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent";
+  const readOnlyClass = "w-full rounded border border-black/10 bg-black/[0.05] px-2 py-1.5 text-sm text-label-secondary tabular-nums";
+  const approverRows: { stepOrder: number; label: string; value: string }[] = editing && editing.approvals && editing.approvals.length > 0
+    ? groupApprovalSteps(editing.approvals).map((step) => ({ stepOrder: step.stepOrder, label: approverStepLabel(step.stepOrder), value: step.names.length > 0 ? step.names.join(", ") : step.stepName }))
+    : approverPreview.map((a) => ({ stepOrder: a.stepOrder, label: approverStepLabel(a.stepOrder), value: a.approverName ?? a.stepName }));
+  const noDeduction = consumed === 0 && startDate && effectiveEnd >= startDate;
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4 bg-black/5 rounded-lg p-4" aria-label={editing ? "Edit leave request" : "Create leave request"}>
-      {!fixedEmployeeId && !editing && (
-        <div>
-          <label className="block text-sm font-medium mb-1" htmlFor="leave-employee">Employee</label>
-          <select id="leave-employee" required value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} className={fieldClass}>
-            <option value="">Select an employee…</option>
-            {employees.map((emp) => (
-              <option key={emp.id} value={emp.id}>
-                {emp.firstName} {emp.lastName} ({emp.employeeNumber})
-                {emp.department ? ` — ${emp.department}` : ""}
+    <form onSubmit={handleSubmit} className="pb-2" aria-label={editing ? "Edit leave request" : "Create leave request"}>
+      <div className="grid lg:grid-cols-2 gap-x-3 items-start">
+      <div className="min-w-0">
+      <SapSection title="Leave Type Selection" collapsible={false}>
+        {!fixedEmployeeId && !editing && (
+          <SapField label="Employee" htmlFor="leave-employee" required>
+            <select id="leave-employee" required value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} className={fieldClass}>
+              <option value="">Select an employee…</option>
+              {employees.map((emp) => (
+                <option key={emp.id} value={emp.id}>
+                  {emp.firstName} {emp.lastName} ({emp.employeeNumber})
+                  {emp.department ? ` — ${emp.department}` : ""}
+                </option>
+              ))}
+            </select>
+          </SapField>
+        )}
+        <SapField
+          label="Leave Type"
+          htmlFor="leave-type"
+          hint={
+            <>
+              {employeeId && tracksBalance && (
+                <span className={balance && balance.remainingDays <= 0 ? "text-danger" : ""} data-testid="leave-available-days">
+                  {balance ? `${balance.remainingDays} ${balance.remainingDays === 1 ? "Day" : "Days"} available` : "No balance has been set up for this leave type"}
+                </span>
+              )}
+              {!tracksBalance && <span>This leave type has no balance; it is deducted in payroll instead.</span>}
+            </>
+          }
+        >
+          <select
+            id="leave-type"
+            value={leaveType}
+            onChange={(e) => {
+              setLeaveType(e.target.value as LeaveType);
+              setDayPart("full");
+            }}
+            className={fieldClass}
+          >
+            {(leaveTypes.length > 0 ? leaveTypes.map((t) => ({ code: t.code, name: t.name })) : LEAVE_TYPES.map((t) => ({ code: t, name: leaveTypeLabel(t) }))).map((t) => (
+              <option key={t.code} value={t.code}>
+                {t.name}
               </option>
             ))}
           </select>
-        </div>
-      )}
+        </SapField>
+      </SapSection>
 
-      <div>
-        <label className="block text-sm font-medium mb-1" htmlFor="leave-type">Leave type</label>
-        <select
-          id="leave-type"
-          value={leaveType}
-          onChange={(e) => {
-            setLeaveType(e.target.value as LeaveType);
-            setDayPart("full");
-          }}
-          className={fieldClass}
-        >
-          {(leaveTypes.length > 0 ? leaveTypes.map((t) => ({ code: t.code, name: t.name })) : LEAVE_TYPES.map((t) => ({ code: t, name: leaveTypeLabel(t) }))).map((t) => (
-            <option key={t.code} value={t.code}>
-              {t.name}
-            </option>
+      <SapSection title="General Data" collapsible={false}>
+        <div role="radiogroup" aria-label="Request length" className="flex flex-wrap gap-x-6 gap-y-1 sm:pl-[182px] pb-1 text-sm">
+          {(
+            [
+              [true, "More than 1 day"],
+              [false, "One day or less"],
+            ] as const
+          ).map(([value, label]) => (
+            <label key={label} className="inline-flex items-center gap-1.5 cursor-pointer">
+              <input
+                type="radio"
+                name="leave-length"
+                checked={multiDay === value}
+                onChange={() => {
+                  setMultiDay(value);
+                  if (value) setDayPart("full");
+                  else if (startDate) setEndDate(startDate);
+                }}
+                className="accent-[var(--accent,#2563eb)]"
+              />
+              {label}
+            </label>
           ))}
-        </select>
-        {employeeId && tracksBalance && (
-          <p className={`mt-1 text-xs ${balance && balance.remainingDays <= 0 ? "text-danger" : "text-label-secondary"}`} data-testid="leave-available-days">
-            {balance ? `${balance.remainingDays} ${balance.remainingDays === 1 ? "Day" : "Days"} available` : "No balance has been set up for this leave type"}
-          </p>
-        )}
-        {!tracksBalance && <p className="mt-1 text-xs text-label-secondary">This leave type has no balance; it is deducted in payroll instead.</p>}
-      </div>
+        </div>
 
-      <div role="radiogroup" aria-label="Request length" className="inline-flex rounded-lg border border-black/10 overflow-hidden text-sm">
-        {(
-          [
-            [true, "More than 1 day"],
-            [false, "One day or less"],
-          ] as const
-        ).map(([value, label]) => (
-          <button
-            key={label}
-            type="button"
-            role="radio"
-            aria-checked={multiDay === value}
-            onClick={() => {
-              setMultiDay(value);
-              if (value) setDayPart("full");
-              else if (startDate) setEndDate(startDate);
-            }}
-            className={`px-3 py-1.5 font-medium ${multiDay === value ? "bg-accent text-white" : "bg-surface text-label-secondary"}`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      <div className={`grid gap-4 ${multiDay ? "grid-cols-2" : "grid-cols-1"}`}>
-        <div>
-          <label className="block text-sm font-medium mb-1" htmlFor="leave-start">{multiDay ? "Start date" : "Date"}</label>
+        <SapField label={multiDay ? "Start date" : "Date"} htmlFor="leave-start" required>
           <input
             id="leave-start"
             type="date"
@@ -247,100 +272,106 @@ export function LeaveRequestForm({
             }}
             className={fieldClass}
           />
-        </div>
+        </SapField>
         {multiDay && (
-          <div>
-            <label className="block text-sm font-medium mb-1" htmlFor="leave-end">End date</label>
+          <SapField label="End date" htmlFor="leave-end" required>
             <input id="leave-end" type="date" required value={endDate} min={startDate || undefined} onChange={(e) => setEndDate(e.target.value)} className={fieldClass} />
+          </SapField>
+        )}
+
+        {!multiDay && halfDayAllowed && (
+          <SapField label="Duration" htmlFor="leave-day-part">
+            <select id="leave-day-part" value={dayPart} onChange={(e) => setDayPart(e.target.value as LeaveDayPart)} className={fieldClass}>
+              <option value="full">Full day</option>
+              <option value="first_half">First half of the day</option>
+              <option value="second_half">Second half of the day</option>
+            </select>
+          </SapField>
+        )}
+
+        {consumed !== null && startDate && effectiveEnd >= startDate && (
+          <div className="sm:pl-[182px] text-xs pb-1" data-testid="leave-consumed-preview" aria-live="polite">
+            {noDeduction ? (
+              <span className="text-label-secondary">No deduction possible</span>
+            ) : (
+              <span className="font-semibold tabular-nums">
+                {consumed} {consumed === 1 ? "Day" : "Days"} will be consumed
+              </span>
+            )}
+            <span className="block text-label-secondary tabular-nums">
+              {calendarDays} calendar {calendarDays === 1 ? "day" : "days"} selected; weekends and public holidays are not counted.
+              {returnDate && <> Return date: {formatDisplayDate(returnDate)}.</>}
+            </span>
+            {overBalance && <span className="block text-danger mt-1">This is more than the {balance?.remainingDays} day(s) available. The server may reject it or treat the rest as unpaid, depending on the leave type.</span>}
           </div>
         )}
-      </div>
 
-      {!multiDay && halfDayAllowed && (
-        <div>
-          <label className="block text-sm font-medium mb-1" htmlFor="leave-day-part">Duration</label>
-          <select id="leave-day-part" value={dayPart} onChange={(e) => setDayPart(e.target.value as LeaveDayPart)} className={fieldClass}>
-            <option value="full">Full day</option>
-            <option value="first_half">First half of the day</option>
-            <option value="second_half">Second half of the day</option>
-          </select>
-        </div>
-      )}
-
-      {consumed !== null && startDate && effectiveEnd >= startDate && (
-        <div className="rounded-lg bg-sky-50 border border-sky-200 px-3 py-2 text-sm text-sky-900" data-testid="leave-consumed-preview" aria-live="polite">
-          <div className="font-semibold tabular-nums">
-            {consumed} {consumed === 1 ? "Day" : "Days"} will be consumed
+        {selectedType?.documentRequired && (
+          <div className="sm:pl-[182px] text-xs text-label-secondary pb-1">
+            {selectedType.name} {selectedType.documentRequiredAfterDays > 0 ? `over ${selectedType.documentRequiredAfterDays} day(s) ` : ""}needs a supporting document - upload it under the employee&apos;s Documents first.
           </div>
-          <div className="text-xs tabular-nums">
-            {calendarDays} calendar {calendarDays === 1 ? "day" : "days"} selected; weekends and public holidays are not counted.
-            {returnDate && <> Return date: {formatDisplayDate(returnDate)}.</>}
-          </div>
-          {overBalance && <div className="text-xs text-danger mt-1">This is more than the {balance?.remainingDays} day(s) available. The server may reject it or treat the rest as unpaid, depending on the leave type.</div>}
-        </div>
-      )}
+        )}
 
-      {selectedType?.documentRequired && (
-        <div className="text-xs text-label-secondary">
-          {selectedType.name} {selectedType.documentRequiredAfterDays > 0 ? `over ${selectedType.documentRequiredAfterDays} day(s) ` : ""}needs a supporting document - upload it under the employee&apos;s Documents first.
-        </div>
-      )}
-
-      <div className="grid grid-cols-3 gap-4" data-testid="leave-form-computed">
-        {(
-          [
-            ["Working days", consumed === null ? "" : String(consumed)],
-            ["Absence days", startDate && effectiveEnd >= startDate ? String(calendarDays) : ""],
-            ["Return date", returnDate ? formatDisplayDate(returnDate) : ""],
-          ] as const
-        ).map(([label, value]) => (
-          <div key={label}>
-            <label className="block text-xs font-medium mb-1 text-label-secondary">{label}</label>
-            <input readOnly tabIndex={-1} value={value} aria-label={label} className={`${fieldClass} bg-black/[0.04] text-label-secondary tabular-nums`} />
-          </div>
-        ))}
-      </div>
-
-      {reliefCandidates.length > 0 && (
-        <div>
-          <label className="block text-sm font-medium mb-1" htmlFor="leave-relief">Relief person (optional)</label>
-          <select id="leave-relief" value={delegateEmployeeId} onChange={(e) => setDelegateEmployeeId(e.target.value)} className={fieldClass}>
-            <option value="">No relief person</option>
-            {reliefCandidates.map((emp) => (
-              <option key={emp.employeeId} value={emp.employeeId}>
-                {emp.employeeName} ({emp.employeeNumber})
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-
-      {editing && editing.approvals && editing.approvals.length > 0 && (
-        <div className="grid grid-cols-2 gap-4" data-testid="leave-form-approvers">
-          {groupApprovalSteps(editing.approvals).map((step) => (
-            <div key={step.stepOrder}>
-              <label className="block text-xs font-medium mb-1 text-label-secondary">{approverStepLabel(step.stepOrder)}</label>
-              <input readOnly tabIndex={-1} value={step.names.length > 0 ? step.names.join(", ") : step.stepName} className={`${fieldClass} bg-black/[0.04] text-label-secondary`} />
-            </div>
+        <div data-testid="leave-form-approvers">
+          {approverRows.map((a) => (
+            <SapField key={a.stepOrder} label={a.label}>
+              <input readOnly tabIndex={-1} value={a.value} aria-label={a.label} className={readOnlyClass} />
+            </SapField>
           ))}
         </div>
-      )}
 
-      <div>
-        <label className="block text-sm font-medium mb-1" htmlFor="leave-reason">Note (optional)</label>
-        <textarea id="leave-reason" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} className={fieldClass} />
+        <SapField label="New Note" htmlFor="leave-reason">
+          <textarea id="leave-reason" rows={4} value={reason} onChange={(e) => setReason(e.target.value)} className={fieldClass} />
+        </SapField>
+      </SapSection>
+
+      </div>
+      <div className="min-w-0">
+      <SapSection title="Additional Data" collapsible={false}>
+        {reliefCandidates.length > 0 && (
+          <SapField label="Relief person" htmlFor="leave-relief">
+            <select id="leave-relief" value={delegateEmployeeId} onChange={(e) => setDelegateEmployeeId(e.target.value)} className={fieldClass} aria-label="Relief person (optional)">
+              <option value="">No relief person</option>
+              {reliefCandidates.map((emp) => (
+                <option key={emp.employeeId} value={emp.employeeId}>
+                  {emp.employeeName} ({emp.employeeNumber})
+                </option>
+              ))}
+            </select>
+          </SapField>
+        )}
+        <div data-testid="leave-form-computed">
+          <SapField label="Working days">
+            <input readOnly tabIndex={-1} value={consumed === null ? "" : String(consumed)} aria-label="Working days" className={`${readOnlyClass} text-right`} />
+          </SapField>
+          <SapField label="Absence days">
+            <input readOnly tabIndex={-1} value={startDate && effectiveEnd >= startDate ? String(calendarDays) : ""} aria-label="Absence days" className={`${readOnlyClass} text-right`} />
+          </SapField>
+          <SapField label="Return date">
+            <input readOnly tabIndex={-1} value={returnDate ? formatDisplayDate(returnDate) : ""} aria-label="Return date" className={readOnlyClass} />
+          </SapField>
+        </div>
+      </SapSection>
+
+      {employeeId && startDate && (
+        <SapSection title="Team" collapsible>
+          <TeamCalendar employeeId={employeeId} holidays={holidayDates} weekend={[0, 6]} initialDate={startDate} />
+        </SapSection>
+      )}
+      </div>
       </div>
 
-      {error && <div className="text-danger text-sm">{error}</div>}
+      {error && <div className="text-danger text-sm px-1 mb-2" role="alert">{error}</div>}
 
-      <div className="flex gap-3">
-        <button type="submit" disabled={submitting} className="bg-accent text-white rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-50">
-          {submitting ? (editing ? "Saving…" : "Submitting…") : editing ? "Save changes" : "Submit request"}
+      <SapFooter>
+        <button type="submit" disabled={submitting} className="bg-accent text-white rounded px-4 py-1.5 text-sm font-semibold disabled:opacity-50">
+          {submitting ? "Saving…" : "Save"}
         </button>
-        <button type="button" onClick={onCancel} className="text-sm font-medium text-label-secondary">
+        <button type="button" onClick={() => setConfirmCancel(true)} className="border border-accent text-accent rounded px-4 py-1.5 text-sm font-semibold">
           Cancel
         </button>
-      </div>
+      </SapFooter>
+      {confirmCancel && <SapConfirm message="Cancel and discard all changes?" onConfirm={onCancel} onCancel={() => setConfirmCancel(false)} />}
     </form>
   );
 }
