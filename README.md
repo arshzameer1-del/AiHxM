@@ -10,9 +10,9 @@ full architecture and phase plan live in the `AIHXM` Claude Project
 writing — rename it in claude.ai when convenient and this reference can
 be updated to match) as `claude/development-plan.md`; the reasoning
 behind every irreversible
-technical call lives in [`DECISIONS.md`](./DECISIONS.md); operational
+technical call lives in [`docs/DECISIONS.md`](./docs/DECISIONS.md); operational
 concerns — security hardening, dependency vulnerabilities, deferred
-performance work — are tracked in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
+performance work — are tracked in [`docs/KNOWN_ISSUES.md`](./docs/KNOWN_ISSUES.md).
 
 **Current phase: Phase 11 — Performance & Goals (complete).** Exit
 criterion: a review cycle can be created and launched against a real
@@ -40,7 +40,7 @@ the mechanism generalizes beyond the one case that motivated it. See
 Decision #11 for the full writeup, including the honestly-tracked scope
 limits (a review that never reached "completed" is silently skipped when
 its cycle closes, a launched cycle's participant population is frozen at
-launch time, no tenant-configurable rating scale) in `KNOWN_ISSUES.md`.
+launch time, no tenant-configurable rating scale) in `docs/KNOWN_ISSUES.md`.
 
 Before Phase 11, Phase 10 built Recruitment & Onboarding — a job
 requisition routed through the Phase 6 workflow engine completely
@@ -101,7 +101,7 @@ object by this phase's own list-endpoint design (Decision #7). Full
 writeup for all of it — including dependency vulnerabilities deliberately
 deferred with reasoning and revisit triggers, and the one deliberately
 fixed this phase (multer's DoS advisories, once a real upload endpoint
-existed to trigger that fix) — in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
+existed to trigger that fix) — in [`docs/KNOWN_ISSUES.md`](./docs/KNOWN_ISSUES.md).
 
 ## Stack
 
@@ -115,7 +115,7 @@ existed to trigger that fix) — in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
 | Frontend | React + Vite + Tailwind + React Router, Apple HIG design tokens |
 | Monorepo | Turborepo (npm workspaces) |
 
-See `DECISIONS.md` Decision #1 for why the backend splits between Supabase
+See `docs/DECISIONS.md` Decision #1 for why the backend splits between Supabase
 infrastructure and a NestJS business-logic layer with RLS as
 defense-in-depth, Decision #2 for why the database layer is raw SQL
 migrations + `pg` rather than an ORM, Decision #3 for why Phase 3 builds
@@ -160,35 +160,34 @@ cross-module permission coupling between `recruitment.manage.all` and
 
 ```
 apps/
-  api/
-    migrations/       Hand-written SQL migrations (tables + RLS policies together)
+  api/                NestJS API (one folder per feature module under src/)
+    migrations/       Hand-written SQL migrations (tables + RLS policies together), applied by `npm run migrate`
+    scripts/          One-off ops tools, never deployed: diagnostics/ (read-only DB checks), local/ (git-ignored personal helpers)
     src/
-      auth/           Real auth: password + mandatory TOTP MFA, lockout, password reset (Decision #3)
-      database/       pg Pool, per-request tenant-context (RLS claims), migration runner, bootstrap seed script
-      companies/      Platform Admin API: create/list/config/admins/impersonate/admin-login-creation
-      platform-admins/ Our own ops team's accounts: list/create/lock
-      audit/          Append-only audit log service + endpoint
-      rbac/           can()/resolveFieldAccess()/filterRecordFields() engine, roles + role-assignment API (Decision #4)
-      entitlements/   isModuleEnabled() licensing gate, checked before RBAC everywhere (Decision #5)
-      workflow/       Generic tenant-configurable approval-routing engine + SLA escalation (Decision #6)
-      custom-fields/  Tenant-defined custom fields on any object (WRICEF Enhancements)
-      notifications/  Notification dispatch log — logged/stubbed, no real provider wired yet (WRICEF Interfaces)
-      document-templates/ {{field}}-substitution document generation (WRICEF Forms)
-      import-export/  Generic CSV parse/validate/generate utility (WRICEF Conversions)
-      file-storage/   Swappable FileStorageService interface + local-filesystem implementation (Decision #7)
-      employees/      Employee Core: org chart, master data, document vault, job history, Employee Number assignment (Decision #7, plan doc Section 5)
-      employee-groups/ Employee Groups & Leave Policy Config: attribute-based groups, leave policies, most-specific-match-wins resolution (Decision #8)
-      leave/          Leave & Attendance: leave requests (policy resolution, balances, overlap notices, On-Behalf, `manager_of_submitter` routing) and biometric/GPS/manual attendance clock-in/out (Decision #9, plan doc Section 7's "real go/no-go checkpoint")
-      recruitment/    Recruitment & Onboarding: requisition approval (reusing the workflow engine as-is), candidates, a forward-only Kanban pipeline, and offer extension/acceptance — the second real caller of Employee Number assignment (Decision #10)
-      performance/    Performance & Goals: review cycles launched against an employee-group population, cascading goals, self/manager assessments, HR calibration, and a status-gated release reusing the field-permission engine's conditional rules — no workflow engine involvement (Decision #11)
-      dummy/          Proof-of-concept object the RBAC/licensing/workflow/import-export engines were originally proven against, before Employee Core existed
+      database/       pg Pool, per-request tenant context (RLS claims), migration runner, seed and grant-role tools
+      auth/ rbac/ entitlements/ audit/ crypto/ sso/ scim/   Identity, permissions, module licensing, audit, encryption
+      companies/ platform-admins/ tenant-management/        Platform Admin API (our own ops team)
+      employees/ organization/ employee-groups/ hr-administration/   Employee Core, org structure, groups, reference data
+      leave/ shifts/ holidays/                              Leave Management and Time & Attendance (one API module, two UI modules)
+      payroll/ expenses/ learning/ recruitment/ performance/ onboarding-offboarding/   Business modules
+      workflow/ notifications/ document-templates/ custom-fields/ import-export/ webhooks/   Shared engines
+      tsconfig.build.json (in apps/api) compiles src/ only, without specs
   web/
     src/
-      pages/          Login (multi-step: password/MFA/reset), Dashboard, Create Company, Company Config, Audit Log, Platform Admins
-      auth/           Token storage + auth context
+      auth/           Token storage, auth context, Login / Signup / SSO pages
+      platform-admin/ Our own ops console: companies, audit log, platform admins, branding
+      portal/         The tenant app. One folder per module:
+        shared/         Tiles, page header, form sections, module context, error text (used by several modules)
+        leave/          Leave Management (tiles launchpad, My Leave Request, create/edit, approvals, on-behalf, holidays)
+        attendance/     Time & Attendance (tiles launchpad, clock, days, timesheet, corrections, correction approvals)
+        employees/ organization/ admin/ system-admin/ payroll/ recruitment/ performance/ expenses/ learning/ ...
+      components/     Generic building blocks (modals, status pill, topbar and sidebar theme)
       api/            Typed fetch client against the API
+      e2e-support/    Real-session helpers for the Playwright specs
 packages/
-  shared-types/       TypeScript types shared between api and web
+  shared-types/       TypeScript types shared between api and web (built to dist/, rebuild after editing)
+docs/                 DECISIONS.md, KNOWN_ISSUES.md, parked items and live-test findings (see docs/README.md)
+render.yaml, netlify.toml   Deploy configs (Render API, Netlify web); they must stay in the repo root
 ```
 
 ## Getting started
@@ -233,7 +232,7 @@ from the Platform Admins page. Create a second company and you'll see the
 Dashboard list both — the isolation between them is enforced two rows down
 in Postgres via Row Level Security, not just by the screen: see
 `apps/api/migrations/0001_platform_admin_core.sql` and
-`0002_auth_identity.sql`'s policies, and `DECISIONS.md` Decision #1 for why
+`0002_auth_identity.sql`'s policies, and `docs/DECISIONS.md` Decision #1 for why
 that matters.
 
 Forgot your password? Use "Forgot your password?" on the login screen.
@@ -340,7 +339,7 @@ company through a screen. That audit's own instructions are explicit:
 using AI HXM through the real UI for the core HR workflows.**
 Phase 12's migrations/code remain written and uncommitted, not rolled
 back (per this project's "no destructive operations without confirmation"
-rule) — see `KNOWN_ISSUES.md`'s Phase 12 entries and `DECISIONS.md`'s
+rule) — see `docs/KNOWN_ISSUES.md`'s Phase 12 entries and `docs/DECISIONS.md`'s
 Decision #14 references for where that work left off.
 
 Current priority, per the audit's Priority Plan:

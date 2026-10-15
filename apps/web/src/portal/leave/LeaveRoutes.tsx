@@ -4,22 +4,21 @@ import type { HolidayView, OverlapWarning } from "@aihxm/shared-types";
 import { OverlapNotice } from "./LeaveRequestForm";
 import { Users } from "lucide-react";
 import { api } from "../../api/client";
-import { LeaveContext, useBuildLeaveContext, useLeaveContext } from "./LeaveContext";
-import { BackLink, PageHeader } from "./LeaveChrome";
-import { describeError, PendingCorrectionsSection, RequestsSection, UpcomingHolidaysCard } from "./LeavePage";
-import { ClockPanel, CorrectionsPanel } from "./AttendancePanels";
-import { MyAttendanceDays } from "./MyAttendanceDays";
-import { MyTimesheet } from "./MyTimesheet";
+import { ModuleContext, useBuildModuleContext, useModuleContext } from "../shared/ModuleContext";
+import { BackLink, PageHeader } from "../shared/PageChrome";
+import { describeError } from "../shared/describeError";
+import { RequestsSection } from "./LeaveApprovalsList";
+import { UpcomingHolidaysCard } from "./UpcomingHolidaysCard";
 import { MyLeaveOverview } from "./LeaveOverview";
 import { LeaveFormPage } from "./LeaveFormPage";
 import { LeaveDetailPage } from "./LeaveDetailPage";
 import { OnBehalfOverviewPage, OnBehalfSelectPage } from "./OnBehalfPages";
-import { AttendanceLaunchpad, LeaveLaunchpad } from "./Launchpads";
-import { SapSection } from "./SapPage";
+import { LeaveLaunchpad } from "./LeaveLaunchpad";
+import { SapSection } from "../shared/FormSections";
 
 /**
- * Leave Management and Time & Attendance are two separate modules. Each opens on a launchpad of tiles and every
- * tile opens its own page (nothing is stacked on one long screen):
+ * Leave Management opens on a launchpad of tiles and every tile opens its own page (nothing is stacked on one
+ * long screen). Time & Attendance is a separate module (see ../attendance/AttendanceRoutes.tsx):
  *
  *   /app/leave                       Leave Management tiles
  *   /app/leave/my-requests           My Leave Request (entitlement, calendar, items)
@@ -30,17 +29,10 @@ import { SapSection } from "./SapPage";
  *   /app/leave/on-behalf             Select Employee, then /on-behalf/:employeeId
  *   /app/leave/holidays              holiday calendar
  *
- *   /app/attendance                  Time & Attendance tiles
- *   /app/attendance/clock            Clock In / Out and recent attendance
- *   /app/attendance/days             the last 14 days
- *   /app/attendance/timesheet        weekly timesheet
- *   /app/attendance/corrections      request and follow attendance corrections
- *   /app/attendance/approvals        attendance corrections waiting for the signed-in approver
- *
  * Which actions exist is still decided by the roles plus the server; the client only chooses what to show.
  */
 export function LeaveRoutes() {
-  const ctx: LeaveContext = useBuildLeaveContext();
+  const ctx: ModuleContext = useBuildModuleContext();
   return (
     <Routes>
       <Route element={<Outlet context={ctx} />}>
@@ -58,24 +50,8 @@ export function LeaveRoutes() {
   );
 }
 
-export function AttendanceRoutes() {
-  const ctx: LeaveContext = useBuildLeaveContext();
-  return (
-    <Routes>
-      <Route element={<Outlet context={ctx} />}>
-        <Route index element={<AttendanceLaunchpad />} />
-        <Route path="clock" element={<ClockPage />} />
-        <Route path="days" element={<DaysPage />} />
-        <Route path="timesheet" element={<TimesheetPage />} />
-        <Route path="corrections" element={<CorrectionsPage />} />
-        <Route path="approvals" element={<CorrectionApprovalsPage />} />
-      </Route>
-    </Routes>
-  );
-}
-
 function MyLeavePage() {
-  const ctx = useLeaveContext();
+  const ctx = useModuleContext();
   const navigate = useNavigate();
   const { employeeId, canSubmitSelf, refreshKey, bump } = ctx;
   const warnings = (useLocation().state as { overlapWarnings?: OverlapWarning[] } | null)?.overlapWarnings ?? [];
@@ -111,7 +87,7 @@ function MyLeavePage() {
 }
 
 function LeaveApprovalsPage() {
-  const { canSubmitOnBehalf, canDecide, canCancel, refreshKey, bump } = useLeaveContext();
+  const { canSubmitOnBehalf, canDecide, canCancel, refreshKey, bump } = useModuleContext();
   return (
     <div>
       <BackLink to="/app/leave">Back to Leave Management</BackLink>
@@ -166,77 +142,6 @@ function HolidaysPage() {
           </ul>
         )}
       </SapSection>
-    </div>
-  );
-}
-
-function NoRecord() {
-  return <p className="text-sm text-label-secondary">No employee record for this login.</p>;
-}
-
-function ClockPage() {
-  const { employeeId, refreshKey, bump } = useLeaveContext();
-  return (
-    <div>
-      <BackLink to="/app/attendance">Back to Time & Attendance</BackLink>
-      <PageHeader title="Clock In / Out" subtitle="Record when you start and finish work." />
-      {employeeId ? <ClockPanel employeeId={employeeId} refreshKey={refreshKey} onChanged={bump} /> : <NoRecord />}
-    </div>
-  );
-}
-
-function DaysPage() {
-  const { employeeId, refreshKey } = useLeaveContext();
-  return (
-    <div>
-      <BackLink to="/app/attendance">Back to Time & Attendance</BackLink>
-      <PageHeader title="My Attendance" subtitle="Your last 14 days." />
-      {employeeId ? (
-        <section className="bg-white rounded-md shadow-sm p-4" aria-label="My attendance">
-          <MyAttendanceDays employeeId={employeeId} refreshKey={refreshKey} />
-        </section>
-      ) : (
-        <NoRecord />
-      )}
-    </div>
-  );
-}
-
-function TimesheetPage() {
-  const { employeeId } = useLeaveContext();
-  return (
-    <div>
-      <BackLink to="/app/attendance">Back to Time & Attendance</BackLink>
-      <PageHeader title="Timesheet" subtitle="Type your hours per day, then send the week for approval." />
-      {employeeId ? (
-        <section className="bg-white rounded-md shadow-sm p-4" aria-label="Timesheet">
-          <MyTimesheet employeeId={employeeId} />
-        </section>
-      ) : (
-        <NoRecord />
-      )}
-    </div>
-  );
-}
-
-function CorrectionsPage() {
-  const { employeeId, refreshKey, bump } = useLeaveContext();
-  return (
-    <div>
-      <BackLink to="/app/attendance">Back to Time & Attendance</BackLink>
-      <PageHeader title="Attendance Corrections" subtitle="Ask for a missed or wrong punch to be fixed." />
-      {employeeId ? <CorrectionsPanel employeeId={employeeId} refreshKey={refreshKey} onChanged={bump} /> : <NoRecord />}
-    </div>
-  );
-}
-
-function CorrectionApprovalsPage() {
-  const { refreshKey, bump } = useLeaveContext();
-  return (
-    <div>
-      <BackLink to="/app/attendance">Back to Time & Attendance</BackLink>
-      <PageHeader title="Correction Approvals" subtitle="Attendance corrections you can decide." />
-      <PendingCorrectionsSection refreshKey={refreshKey} onChanged={bump} standalone />
     </div>
   );
 }

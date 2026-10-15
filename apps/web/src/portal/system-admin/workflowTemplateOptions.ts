@@ -13,8 +13,8 @@ export const KNOWN_WORKFLOWS = [
   {
     key: "leave_request",
     objectKey: "leave_request",
-    label: "Leave & Attendance approval",
-    description: "Routes every leave request submitted through the Leave & Attendance module.",
+    label: "Leave request approval",
+    description: "Routes every leave request submitted through Leave Management.",
   },
   {
     key: "job_requisition",

@@ -5,7 +5,7 @@ import { LEAVE_TYPES, leaveTypeLabel } from "./leaveLabels";
 import { countCalendarDays, countWorkingDays, formatDisplayDate, returnDateAfter } from "./leaveCalendar";
 import { approverStepLabel, groupApprovalSteps } from "./leaveApprovals";
 import { TeamCalendar } from "./TeamCalendar";
-import { SapConfirm, SapField, SapFooter, SapSection } from "./SapPage";
+import { SapConfirm, SapField, SapFooter, SapSection } from "../shared/FormSections";
 
 /**
  * Shared by both submit paths: an employee_self_service holder submitting their own request

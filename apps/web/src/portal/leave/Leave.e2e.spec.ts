@@ -2,7 +2,7 @@ import { test, expect, Page } from "@playwright/test";
 import { getSharedSession, loginToApp } from "../../e2e-support/real-session";
 
 /**
- * Leave & Attendance E2E Tests (Task #50)
+ * Leave Management E2E Tests (Task #50). Time & Attendance specs: ../attendance/Attendance.e2e.spec.ts
  *
  * Tests complete leave management workflows:
  * - Employee leave request submission (with date selection, comment, policy selection)
@@ -40,12 +40,7 @@ async function loginAsHrAdmin(page: Page) {
   await loginToApp(page, getSharedSession("hr_admin"));
 }
 
-test.describe("Leave & Attendance Portal (Task #50)", () => {
-  test.beforeEach(async ({ page }) => {
-    // Set up test context for each test
-    // In a real scenario, this would set up API fixtures
-  });
-
+test.describe("Leave Management Portal", () => {
   test("Employee sees Leave Management tiles and opens My Leave Request from a tile", async ({ page }) => {
     await loginAsEmployee(page);
     await page.goto("/app/leave");
@@ -59,16 +54,6 @@ test.describe("Leave & Attendance Portal (Task #50)", () => {
     await page.getByTestId("tile-my-leave").click();
     await expect(page).toHaveURL(/\/app\/leave\/my-requests/);
     await expect(page.getByRole("heading", { name: "My Leave Request" })).toBeVisible();
-  });
-
-  test("Leave Management and Time & Attendance are separate: neither shows the other's tiles", async ({ page }) => {
-    await loginAsEmployee(page);
-    await page.goto("/app/attendance");
-    await expect(page.getByRole("heading", { name: "Time & Attendance" })).toBeVisible();
-    await expect(page.getByTestId("tile-clock")).toBeVisible();
-    await expect(page.getByTestId("tile-timesheet")).toBeVisible();
-    await expect(page.getByTestId("tile-my-leave")).toHaveCount(0);
-    await expect(page.getByTestId("tile-create-leave")).toHaveCount(0);
   });
 
   test("Employee can submit a new leave request", async ({ page }) => {
@@ -262,45 +247,6 @@ test.describe("Leave & Attendance Portal (Task #50)", () => {
     }
   });
 
-  test("Employee can view attendance records", async ({ page }) => {
-    await loginAsEmployee(page);
-    await page.goto("/app/attendance");
-    await page.getByTestId("tile-clock").click();
-    await expect(page).toHaveURL(/\/app\/attendance\/clock/);
-
-    // The Clock in/out button is the stable signal that the clock page rendered.
-    const clockButton = page
-      .locator("button")
-      .filter({ hasText: /clock in|clock out/i });
-    await expect(clockButton).toBeVisible();
-  });
-
-  test("Employee can view daily attendance summary", async ({ page }) => {
-    await loginAsEmployee(page);
-    await page.goto("/app/attendance/days");
-
-    // Look for attendance summary card
-    const summaryCard = page
-      .locator("[data-testid='daily-attendance']")
-      .or(page.locator("text=Today").or(page.locator("text=Check-in")));
-
-    if (await summaryCard.isVisible()) {
-      // Verify check-in status and time
-      const checkInTime = summaryCard.locator("text=/\\d{1,2}:\\d{2}/");
-      if (await checkInTime.isVisible()) {
-        await expect(checkInTime).toBeVisible();
-      }
-
-      // Verify working hours calculation
-      const workingHours = summaryCard.locator("text=/\\d+\\.\\d+ hours/").or(
-        summaryCard.locator("text=Working Hours")
-      );
-      if (await workingHours.isVisible()) {
-        await expect(workingHours).toBeVisible();
-      }
-    }
-  });
-
   test("Portal navigation has separate Leave Management and Time & Attendance entries", async ({
     page,
   }) => {
@@ -319,7 +265,7 @@ test.describe("Leave & Attendance Portal (Task #50)", () => {
   });
 });
 
-test.describe("Leave & Attendance Responsiveness", () => {
+test.describe("Leave Management Responsiveness", () => {
   test("Leave request form is responsive on mobile", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 });
     await loginAsEmployee(page);
@@ -343,7 +289,7 @@ test.describe("Leave & Attendance Responsiveness", () => {
   });
 });
 
-test.describe("Leave & Attendance Accessibility", () => {
+test.describe("Leave Management Accessibility", () => {
   test("Leave request form has proper labels and associations", async ({
     page,
   }) => {

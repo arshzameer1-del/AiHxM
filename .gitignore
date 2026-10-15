@@ -27,3 +27,18 @@ apps/api/storage-data
 # real edit to vite.config.ts silently do nothing (Vite prefers a
 # same-directory .js config over .ts).
 apps/web/.tsbuild-node
+
+# Redis snapshot files (redis-server drops dump.rdb in whatever folder it was started from)
+*.rdb
+
+# Personal, local-only helper scripts. They hold personal emails and TOTP/credential lookups, so they stay
+# on the developer machine. New ones go in apps/api/scripts/local/.
+apps/api/scripts/local/
+apps/api/src/database/get-totp-*.ts
+apps/api/src/database/seed-kumail-test.ts
+apps/api/src/database/check-e2e-test-data.ts
+
+# Playwright output and temporary configs
+apps/web/test-results/
+apps/web/playwright-report/
+apps/web/pw.*.tmp.config.ts

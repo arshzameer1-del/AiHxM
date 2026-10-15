@@ -9,8 +9,8 @@
  */
 import { join } from "path";
 import { Client } from "pg";
-import { loadEnvFile } from "../load-env";
-import { resolveSslConfig } from "./db-connection.util";
+import { loadEnvFile } from "../../src/load-env";
+import { resolveSslConfig } from "../../src/database/db-connection.util";
 
 async function main() {
   loadEnvFile(join(__dirname, "..", "..", ".env"));

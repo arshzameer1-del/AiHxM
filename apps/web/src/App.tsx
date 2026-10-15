@@ -6,9 +6,9 @@ import {
   RequirePlatformAdmin,
   RequireTenant,
 } from "./components/ProtectedRoute";
-import { Layout } from "./components/Layout";
-import { LoginPage } from "./pages/LoginPage";
-import { SignupPage } from "./pages/SignupPage";
+import { Layout } from "./platform-admin/Layout";
+import { LoginPage } from "./auth/LoginPage";
+import { SignupPage } from "./auth/SignupPage";
 import { PortalLayout } from "./portal/PortalLayout";
 import { PortalHomePage } from "./portal/PortalHomePage";
 
@@ -31,28 +31,28 @@ import { PortalHomePage } from "./portal/PortalHomePage";
  * the same fraction of sessions that reach PortalLayout at all.
  */
 const DashboardPage = lazy(() =>
-  import("./pages/DashboardPage").then((m) => ({ default: m.DashboardPage })),
+  import("./platform-admin/DashboardPage").then((m) => ({ default: m.DashboardPage })),
 );
 const CreateCompanyPage = lazy(() =>
-  import("./pages/CreateCompanyPage").then((m) => ({
+  import("./platform-admin/CreateCompanyPage").then((m) => ({
     default: m.CreateCompanyPage,
   })),
 );
 const CompanyDetailPage = lazy(() =>
-  import("./pages/CompanyDetailPage").then((m) => ({
+  import("./platform-admin/CompanyDetailPage").then((m) => ({
     default: m.CompanyDetailPage,
   })),
 );
 const AuditLogPage = lazy(() =>
-  import("./pages/AuditLogPage").then((m) => ({ default: m.AuditLogPage })),
+  import("./platform-admin/AuditLogPage").then((m) => ({ default: m.AuditLogPage })),
 );
 const PlatformAdminsPage = lazy(() =>
-  import("./pages/PlatformAdminsPage").then((m) => ({
+  import("./platform-admin/PlatformAdminsPage").then((m) => ({
     default: m.PlatformAdminsPage,
   })),
 );
 const PlatformBrandingPage = lazy(() =>
-  import("./pages/PlatformBrandingPage").then((m) => ({
+  import("./platform-admin/PlatformBrandingPage").then((m) => ({
     default: m.PlatformBrandingPage,
   })),
 );
@@ -223,7 +223,7 @@ const LeavePage = lazy(() =>
 );
 // Time & Attendance is its own module (own sidebar entry and tiles), separate from Leave Management.
 const AttendancePage = lazy(() =>
-  import("./portal/leave/LeaveRoutes").then((m) => ({ default: m.AttendanceRoutes })),
+  import("./portal/attendance/AttendanceRoutes").then((m) => ({ default: m.AttendanceRoutes })),
 );
 // ESS build-out (2026-10, Part 2 category 6) — new module, built end to
 // end since no Expense module existed in this app before it (see
@@ -261,7 +261,7 @@ const PayrollPage = lazy(() =>
 // this one follows the same lazy-chunk pattern as every other post-login
 // route above.
 const SsoCompletePage = lazy(() =>
-  import("./pages/SsoCompletePage").then((m) => ({ default: m.SsoCompletePage })),
+  import("./auth/SsoCompletePage").then((m) => ({ default: m.SsoCompletePage })),
 );
 
 /** A route chunk is typically <50KB over a fast connection — a blank

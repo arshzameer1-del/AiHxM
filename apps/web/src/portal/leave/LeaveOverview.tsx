@@ -16,7 +16,7 @@ import {
 import { STATUS_LABELS, leaveTypeLabel } from "./leaveLabels";
 import { approverStepLabel, approverSummary, groupApprovalSteps } from "./leaveApprovals";
 import { TeamCalendar } from "./TeamCalendar";
-import { SapSection } from "./SapPage";
+import { SapSection } from "../shared/FormSections";
 
 /**
  * "My Leave Request" overview, laid out like the SAP Fiori screen the product owner asked us to match:

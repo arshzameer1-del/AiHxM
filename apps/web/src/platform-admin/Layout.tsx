@@ -1,9 +1,9 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { LayoutDashboard, ScrollText, ShieldCheck, Palette } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
-import { AihxmLogo } from "./AihxmLogo";
-import { Topbar, type QuickJumpItem } from "./shell/Topbar";
-import { SIDEBAR_CONTAINER_CLASS, sidebarNavLinkClass as navLinkClass } from "./shell/sidebarTheme";
+import { AihxmLogo } from "../components/AihxmLogo";
+import { Topbar, type QuickJumpItem } from "../components/shell/Topbar";
+import { SIDEBAR_CONTAINER_CLASS, sidebarNavLinkClass as navLinkClass } from "../components/shell/sidebarTheme";
 
 const QUICK_JUMP_ITEMS: QuickJumpItem[] = [
   { to: "/", label: "Dashboard" },

@@ -2,8 +2,8 @@ import { useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 
-/** What every leave page needs to know about the signed-in user, handed down by the layout route. */
-export type LeaveContext = {
+/** What every Leave Management and Time & Attendance page needs to know about the signed-in user, handed down by the layout route. */
+export type ModuleContext = {
   /** The signed-in user's own employee record, when they have one. */
   employeeId: string | undefined;
   canSubmitSelf: boolean;
@@ -14,12 +14,12 @@ export type LeaveContext = {
   bump: () => void;
 };
 
-export function useLeaveContext(): LeaveContext {
-  return useOutletContext<LeaveContext>();
+export function useModuleContext(): ModuleContext {
+  return useOutletContext<ModuleContext>();
 }
 
 /** Builds the context both modules (Leave Management and Time & Attendance) hand to their pages. */
-export function useBuildLeaveContext(): LeaveContext {
+export function useBuildModuleContext(): ModuleContext {
   const { identity } = useAuth();
   const [refreshKey, setRefreshKey] = useState(0);
   const roleKeys = identity?.roleKeys ?? [];

@@ -53,7 +53,7 @@ test.describe("System Admin Portal (Task #52)", () => {
     // Workflow Templates is the default tab — all three known workflow
     // object keys always render a card, configured or not.
     for (const label of [
-      "Leave & Attendance approval",
+      "Leave request approval",
       "Recruitment requisition approval",
       "Payroll run approval",
     ]) {

@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import QRCode from "qrcode";
 import type { PublicTenantBranding } from "@aihxm/shared-types";
-import { useAuth } from "../auth/AuthContext";
+import { useAuth } from "./AuthContext";
 import { api, ApiError, consumeSessionExpiredNotice, publicTenantBrandingAssetUrl, ssoLoginUrl } from "../api/client";
 import { AihxmLogo } from "../components/AihxmLogo";
 

@@ -2,9 +2,9 @@ import { useEffect, useState } from "react";
 import type { AttendanceCorrectionRequestView, AttendanceRecordView, EmployeeView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { AttendanceCorrectionForm } from "./AttendanceCorrectionForm";
-import { SapSection } from "./SapPage";
-import { describeError } from "./LeavePage";
-import { ATTENDANCE_STATUS_LABELS, ATTENDANCE_STATUS_STYLES, CORRECTION_STATUS_LABELS, CORRECTION_STATUS_STYLES } from "./leaveLabels";
+import { SapSection } from "../shared/FormSections";
+import { describeError } from "../shared/describeError";
+import { ATTENDANCE_STATUS_LABELS, ATTENDANCE_STATUS_STYLES, CORRECTION_STATUS_LABELS, CORRECTION_STATUS_STYLES } from "./attendanceLabels";
 
 /**
  * Pages of the Time & Attendance module. Each is one task on its own page (the launchpad tiles link here):

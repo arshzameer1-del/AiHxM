@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import type { EmployeeView, LeaveRequestView } from "@aihxm/shared-types";
 import { api } from "../../api/client";
-import { useLeaveContext } from "./LeaveContext";
-import { BackLink, OnBehalfBanner, PageHeader } from "./LeaveChrome";
+import { useModuleContext } from "../shared/ModuleContext";
+import { BackLink, PageHeader } from "../shared/PageChrome";
+import { OnBehalfBanner } from "./OnBehalfBanner";
 import { LeaveRequestForm } from "./LeaveRequestForm";
 
 /**
@@ -15,7 +16,7 @@ export function LeaveFormPage() {
   const { id } = useParams();
   const [params] = useSearchParams();
   const navigate = useNavigate();
-  const { employeeId: ownEmployeeId } = useLeaveContext();
+  const { employeeId: ownEmployeeId } = useModuleContext();
   const [request, setRequest] = useState<LeaveRequestView | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [target, setTarget] = useState<EmployeeView | null>(null);

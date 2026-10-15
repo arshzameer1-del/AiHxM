@@ -21,8 +21,8 @@
  */
 import { join } from "path";
 import { Client } from "pg";
-import { loadEnvFile } from "../load-env";
-import { resolveSslConfig } from "./db-connection.util";
+import { loadEnvFile } from "../../src/load-env";
+import { resolveSslConfig } from "../../src/database/db-connection.util";
 
 // Every permission key referenced by ConfigurationCenterService.countFor()
 // plus the two hr_business_policy permissions from migration 0107.

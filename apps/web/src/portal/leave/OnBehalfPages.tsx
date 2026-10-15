@@ -5,8 +5,9 @@ import { OverlapNotice } from "./LeaveRequestForm";
 import { Users } from "lucide-react";
 import type { EmployeeView } from "@aihxm/shared-types";
 import { api } from "../../api/client";
-import { useLeaveContext } from "./LeaveContext";
-import { BackLink, OnBehalfBanner, PageHeader } from "./LeaveChrome";
+import { useModuleContext } from "../shared/ModuleContext";
+import { BackLink, PageHeader } from "../shared/PageChrome";
+import { OnBehalfBanner } from "./OnBehalfBanner";
 import { MyLeaveOverview } from "./LeaveOverview";
 
 /**
@@ -15,7 +16,7 @@ import { MyLeaveOverview } from "./LeaveOverview";
  * (`leave_request.manage.all`).
  */
 export function OnBehalfSelectPage() {
-  const { canSubmitOnBehalf } = useLeaveContext();
+  const { canSubmitOnBehalf } = useModuleContext();
   const navigate = useNavigate();
   const [employees, setEmployees] = useState<EmployeeView[] | null>(null);
   const [filter, setFilter] = useState("");
@@ -74,7 +75,7 @@ export function OnBehalfSelectPage() {
 /** The chosen employee's own overview page, under the on-behalf banner. */
 export function OnBehalfOverviewPage() {
   const { employeeId } = useParams();
-  const { canSubmitOnBehalf, refreshKey, bump } = useLeaveContext();
+  const { canSubmitOnBehalf, refreshKey, bump } = useModuleContext();
   const [target, setTarget] = useState<EmployeeView | null>(null);
   const [failed, setFailed] = useState(false);
   const warnings = (useLocation().state as { overlapWarnings?: OverlapWarning[] } | null)?.overlapWarnings ?? [];

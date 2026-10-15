@@ -358,7 +358,7 @@ export function WorkflowTemplatesPanel() {
   return (
     <div className="space-y-4">
       <p className="text-sm text-label-tertiary">
-        Every module that routes a submission for approval — Leave & Attendance, Recruitment — needs one of these
+        Every module that routes a submission for approval — Leave Management, Recruitment — needs one of these
         configured before anyone can submit anything through it. Until then, submission fails with "No active
         workflow template."
       </p>

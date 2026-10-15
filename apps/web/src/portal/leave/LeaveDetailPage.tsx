@@ -3,8 +3,8 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Pencil, XCircle } from "lucide-react";
 import type { HolidayView, LeaveRequestView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
-import { useLeaveContext } from "./LeaveContext";
-import { BackLink, PageHeader } from "./LeaveChrome";
+import { useModuleContext } from "../shared/ModuleContext";
+import { BackLink, PageHeader } from "../shared/PageChrome";
 import { RequestDetail } from "./LeaveOverview";
 
 /** One request on its own page: header, fields, approval chain and the Team calendar, with Edit and Cancel. */
@@ -12,7 +12,7 @@ export function LeaveDetailPage() {
   const { id } = useParams();
   const [params] = useSearchParams();
   const navigate = useNavigate();
-  const { employeeId: ownEmployeeId, canSubmitSelf, canSubmitOnBehalf, bump } = useLeaveContext();
+  const { employeeId: ownEmployeeId, canSubmitSelf, canSubmitOnBehalf, bump } = useModuleContext();
   const [request, setRequest] = useState<LeaveRequestView | null>(null);
   const [holidayList, setHolidayList] = useState<HolidayView[]>([]);
   const [error, setError] = useState<string | null>(null);
