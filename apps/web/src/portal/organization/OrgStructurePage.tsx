@@ -1,9 +1,10 @@
 import { KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Armchair, ChevronsDownUp, ChevronsUpDown, ExternalLink, ListTree, RefreshCw, Search, UserRound } from "lucide-react";
+import { ChevronsDownUp, ChevronsUpDown, ExternalLink, ListTree, RefreshCw, Search } from "lucide-react";
 import type { OrgStructureNode, OrgStructureView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
+import { HolderIcon, PositionIcon, UnitIcon } from "./OrgIcons";
 import {
   countStructure,
   detailPath,
@@ -37,21 +38,9 @@ function describeError(err: unknown): string {
 
 function NodeIcon({ node }: { node: OrgStructureNode }) {
   const label = KIND_LABEL[node.kind];
-  if (node.kind === "unit") {
-    return <span title={label} aria-hidden="true" className="inline-block w-3.5 h-3.5 shrink-0 rounded-[3px] border border-slate-400 bg-white" />;
-  }
-  if (node.kind === "position") {
-    return (
-      <span title={node.isChief ? "Position (chief)" : label} aria-hidden="true" className={`inline-flex shrink-0 ${node.isChief ? "text-orange-500" : "text-red-800"}`}>
-        <Armchair size={16} strokeWidth={2} />
-      </span>
-    );
-  }
-  return (
-    <span title={label} aria-hidden="true" className="inline-flex shrink-0 text-sky-700">
-      <UserRound size={16} strokeWidth={2} />
-    </span>
-  );
+  if (node.kind === "unit") return <UnitIcon title={label} />;
+  if (node.kind === "position") return <PositionIcon title={node.isChief ? "Position (chief)" : label} chief={node.isChief} />;
+  return <HolderIcon title={label} />;
 }
 
 function Toggle({ row, onToggle }: { row: StructureRow; onToggle: () => void }) {

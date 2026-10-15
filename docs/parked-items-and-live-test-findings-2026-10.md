@@ -197,3 +197,6 @@ Request: use the SAP "Staff assignments (structure)" layout for the organization
 - **Tests:** `org-structure.service.spec.ts` 5 (nesting and order, chief, validity, ESS sees units and positions but no holders, tenant isolation); `orgStructure.test.ts` 7; Playwright `OrgStructure.e2e.spec.ts` 2 (columns, chief, expand/collapse, find, selection, Edit structure link, double-click). Api and web `tsc` clean, web lint 0 errors.
 - **VERIFY on live:** Organization opens the tree-table; the root unit shows Unlimited; the unit with a head position shows the holder under Chief; "Edit structure" opens the old page; an employee login sees units and positions without people.
 - **Open:** key-date filter hides rows by validity only; reorganisation-dated future versions are shown by their own valid-from date.
+
+### v8a — Structure icons redrawn after the SAP originals
+`OrgIcons.tsx`: unit = pale rounded box, position = seated figure (orange with a cap for the chief position, dark red otherwise), holder = two people (blue and green). Replaces the generic armchair and user icons. Patch `org-structure-icons.patch` (applies after `org-structure-sap-layout.patch`). VERIFY: Organization tree shows the three icon types; hovering shows "Organizational unit", "Position (chief)", "Position" or "Holder".
