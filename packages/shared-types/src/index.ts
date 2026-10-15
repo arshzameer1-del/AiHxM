@@ -8772,3 +8772,49 @@ export type PayrollInputRowView = {
 };
 export type DryRunPayrollInputRequest = { importType: PayrollInputImportType; csv: string; fileName?: string; allowPartial?: boolean };
 export type PayrollInputTemplateView = { importType: PayrollInputImportType; columns: Array<{ name: string; required: boolean; description: string }>; example: string };
+
+
+/**
+ * `GET /organization/structure` — the "Staff assignments (structure)" tree-table: org units, their positions and
+ * the people holding them, one nested tree with the same columns as an enterprise HR structure view
+ * (name, code, object id, relationship text, chief, valid from, valid to). Built server-side from the same
+ * data-scoped lists the other organization screens use, so a caller only ever sees what they may see.
+ */
+export type OrgStructureNodeKind = "unit" | "position" | "holder";
+
+export type OrgStructureNode = {
+  /** Unique within the response ("unit:<id>", "position:<id>", "holder:<positionId>:<employeeId>"). */
+  key: string;
+  kind: OrgStructureNodeKind;
+  /** The entity's own id (org unit, position or employee). */
+  id: string;
+  /** Short object id with a type letter, e.g. "O 3A9F01C2" (unit), "S ..." (position), "P ..." (person). */
+  objectId: string;
+  /** Unit code, position code or employee number. */
+  code: string | null;
+  /** Unit name, position title or the holder's name. */
+  name: string;
+  /** "Is line supervisor of" (unit under unit), "Incorporates" (position in unit), "Holder" (person in position); empty for a root unit. */
+  relationshipText: string;
+  /** Units only: whoever holds the unit's head position. */
+  chiefName: string | null;
+  /** ISO date (YYYY-MM-DD). */
+  validFrom: string | null;
+  /** ISO date, or null for "Unlimited". */
+  validTo: string | null;
+  /** unit: active/archived; position: vacant/filled/frozen/abolished; holder: null. */
+  status: string | null;
+  /** Positions only: this position is the head ("chief") position of its unit. */
+  isChief: boolean;
+  /** Holders only. */
+  fte: number | null;
+  children: OrgStructureNode[];
+};
+
+export type OrgStructureView = {
+  /** Server date the response was built on. */
+  asOf: string;
+  roots: OrgStructureNode[];
+  /** false when the caller may not see employee records, so holders are left out. */
+  peopleVisible: boolean;
+};

@@ -245,6 +245,7 @@ import type {
   UpdateOrgRelationshipRequest,
   OrgRelationshipVersionView,
   OrgRelationshipView,
+  OrgStructureView,
   CreateLocationRequest,
   UpdateLocationRequest,
   MoveLocationRequest,
@@ -1604,6 +1605,9 @@ export const api = {
 
   getEmployeeOrgAssignmentHistory: (id: string) =>
     request<EmployeeOrgAssignmentVersionView[]>(`/organization/employee-assignments/${id}/history`),
+
+  // The "Staff assignments (structure)" tree-table: units, positions and holders with validity dates and chiefs.
+  getOrgStructure: () => request<OrgStructureView>("/organization/structure"),
 
   listOrgRelationships: (filters?: {
     employeeId?: string;

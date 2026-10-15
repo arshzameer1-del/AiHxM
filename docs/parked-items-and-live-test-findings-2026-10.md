@@ -185,3 +185,15 @@ Patch `repo-cleanup-align-layout.patch` (applies after release 2). Verified: api
 - Workflow template card renamed "Leave request approval" (it routes leave requests only).
 
 Deliberately not moved: the flat `apps/api/src/<feature>/` modules (standard Nest layout, moving them would touch hundreds of imports with no gain), SQL migrations (already ordered and applied in production), `README.md` at the root.
+
+---
+
+## v8 — Organization hierarchy as "Staff assignments (structure)" tree-table (2026-10-15)
+
+Request: use the SAP "Staff assignments (structure)" layout for the organization hierarchy UI. Patch `org-structure-sap-layout.patch` (applies after release 2 and the cleanup patch). No migration.
+
+- **API:** `GET /organization/structure` (new `OrgStructureService` + controller, registered in `OrganizationModule`). One nested read model: unit > chief position first > other positions > holders. Per node: code, SAP-style object id (`O|S|P` + 8 hex), relationship text (unit "Is line supervisor of", position "Incorporates", holder "Holder"), chief (holder of the unit's head position), valid from / valid to (`null` = Unlimited). Scope is the same as the existing org-unit and position lists (data-scope, tenant isolation); people and chief are hidden for users who cannot list employees. Rollback: remove the controller and service registration; nothing else depends on it.
+- **Web:** `/app/organization` is now the tree-table: columns Name | Code | ID | Relationship text | Chief | Valid from | Valid to; unit rows blue-tinted, chief position orange / other positions dark red, person icon for holders; selected row amber with red outline; expand/collapse triangles; toolbar (expand all, collapse all, open every unit, refresh, open, find, key date, Positions / People / Show ended). Keyboard: arrows, Home/End, Enter; double-click opens the unit, position or employee. The previous editing page (drag and drop, move, head position) is kept at `/app/organization/manage` and linked as "Edit structure" for HR.
+- **Tests:** `org-structure.service.spec.ts` 5 (nesting and order, chief, validity, ESS sees units and positions but no holders, tenant isolation); `orgStructure.test.ts` 7; Playwright `OrgStructure.e2e.spec.ts` 2 (columns, chief, expand/collapse, find, selection, Edit structure link, double-click). Api and web `tsc` clean, web lint 0 errors.
+- **VERIFY on live:** Organization opens the tree-table; the root unit shows Unlimited; the unit with a head position shows the holder under Chief; "Edit structure" opens the old page; an employee login sees units and positions without people.
+- **Open:** key-date filter hides rows by validity only; reorganisation-dated future versions are shown by their own valid-from date.

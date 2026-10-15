@@ -19,6 +19,8 @@ import { ProfitCentersController } from "./profit-centers.controller";
 import { ProfitCentersService } from "./profit-centers.service";
 import { OrgChangesController } from "./org-changes.controller";
 import { OrgChangesService } from "./org-changes.service";
+import { OrgStructureController } from "./org-structure.controller";
+import { OrgStructureService } from "./org-structure.service";
 import { OrganizationCommandCenterController } from "./organization-command-center.controller";
 import { OrganizationCommandCenterService } from "./organization-command-center.service";
 import { LegacyReconciliationController } from "./legacy-reconciliation.controller";
@@ -155,6 +157,7 @@ class OrgChangeExecutionScheduler {
     OrgChangesController,
     OrganizationCommandCenterController,
     LegacyReconciliationController,
+    OrgStructureController,
   ],
   providers: [
     OrgUnitsService,
@@ -168,6 +171,7 @@ class OrgChangeExecutionScheduler {
     ProfitCentersService,
     OrgChangesService,
     OrgChangeExecutionScheduler,
+    OrgStructureService,
     OrganizationCommandCenterService,
     LegacyReconciliationService,
     OrgReconciliationService,
