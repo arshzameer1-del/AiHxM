@@ -114,6 +114,8 @@ export class OrgStructureService {
           status: null,
           isChief: false,
           fte: row.fte === null || row.fte === undefined ? null : Number(row.fte),
+          orgUnitId: position.orgUnitId,
+          positionId: position.id,
           children: [],
         });
       }
@@ -152,6 +154,8 @@ export class OrgStructureService {
             status: position.status,
             isChief: position.id === unit.headPositionId,
             fte: null,
+            orgUnitId: position.orgUnitId,
+            costCenterId: position.costCenterId ?? null,
             children: holderNodes(position),
           };
         });
@@ -170,6 +174,9 @@ export class OrgStructureService {
         status: unit.status,
         isChief: false,
         fte: null,
+        unitType: unit.unitType,
+        parentId: unit.parentId ?? null,
+        vacantCount: (positionsByUnit.get(unit.id) ?? []).filter((p) => p.status === "vacant").length,
         children: [...own, ...subUnits],
       };
     };

@@ -123,6 +123,16 @@ describe("OrgStructureService", () => {
     expect(new Set(nodes.map((n) => n.key)).size).toBe(nodes.length);
   });
 
+  it("carries what the editing actions need: unit type, parent, owning unit, vacancy count, holder's position", async () => {
+    const nodes = walk((await structure.getStructure(hrClaims)).roots);
+    const root = nodes.find((n) => n.id === rootId)!;
+    const office = nodes.find((n) => n.id === presidentOfficeId)!;
+    expect(root).toMatchObject({ unitType: "business_unit", parentId: null, vacantCount: 0 });
+    expect(office).toMatchObject({ unitType: "division", parentId: rootId, vacantCount: 1 });
+    expect(nodes.find((n) => n.id === advisorPositionId)).toMatchObject({ orgUnitId: presidentOfficeId, costCenterId: null });
+    expect(nodes.find((n) => n.kind === "holder")).toMatchObject({ orgUnitId: presidentOfficeId, positionId: presidentPositionId });
+  });
+
   it("shows an archived unit as ended", async () => {
     await orgUnits.archive(hrClaims, sharedServicesId);
     const nodes = walk((await structure.getStructure(hrClaims)).roots);

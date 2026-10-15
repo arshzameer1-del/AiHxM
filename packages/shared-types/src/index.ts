@@ -8808,6 +8808,18 @@ export type OrgStructureNode = {
   isChief: boolean;
   /** Holders only. */
   fte: number | null;
+  /** Units only: department / division / business_unit / function. */
+  unitType?: OrgUnitType;
+  /** Units only: the parent unit, or null for a root. */
+  parentId?: string | null;
+  /** Positions only: the unit that owns the position. Holders: the unit of the position they hold. */
+  orgUnitId?: string;
+  /** Positions only: the position the holder sits in is `id` of the parent row; this is its cost center link. */
+  costCenterId?: string | null;
+  /** Units only: vacant positions directly in this unit. */
+  vacantCount?: number;
+  /** Holders only: the position they hold (the parent row's `id`). */
+  positionId?: string;
   children: OrgStructureNode[];
 };
 

@@ -102,3 +102,65 @@ export function detailPath(node: OrgStructureNode): string {
   if (node.kind === "position") return `/app/organization/positions/${node.id}`;
   return `/app/employees/${node.id}`;
 }
+
+/** Every unit in the tree, flattened with its depth: the choices of a "Move to" list. */
+export function unitChoices(roots: OrgStructureNode[]): Array<{ id: string; name: string; depth: number }> {
+  const out: Array<{ id: string; name: string; depth: number }> = [];
+  const visit = (n: OrgStructureNode, depth: number) => {
+    if (n.kind !== "unit") return;
+    out.push({ id: n.id, name: n.name, depth });
+    n.children.forEach((c) => visit(c, depth + 1));
+  };
+  roots.forEach((r) => visit(r, 0));
+  return out;
+}
+
+/** The ids of a unit and every unit below it: none of them can become that unit's new parent. */
+export function unitSubtreeIds(roots: OrgStructureNode[], unitId: string): Set<string> {
+  const ids = new Set<string>();
+  const collect = (n: OrgStructureNode) => {
+    if (n.kind === "unit") ids.add(n.id);
+    n.children.forEach(collect);
+  };
+  const find = (n: OrgStructureNode): boolean => {
+    if (n.kind === "unit" && n.id === unitId) {
+      collect(n);
+      return true;
+    }
+    return n.children.some(find);
+  };
+  roots.some(find);
+  return ids;
+}
+
+export type StructureAction = "create-unit" | "create-position" | "edit" | "move" | "archive" | "activate" | "set-chief" | "assign" | "unassign";
+
+/**
+ * What the toolbar offers for the selected row. Mirrors what the server allows (`org_unit.manage.all`, position and
+ * assignment management are HR's); the server still decides.
+ */
+export function availableActions(node: OrgStructureNode | null, canManage: boolean): StructureAction[] {
+  if (!canManage) return [];
+  if (!node) return ["create-unit"];
+  if (node.kind === "unit") {
+    return ["create-unit", "create-position", "edit", "move", node.status === "archived" ? "activate" : "archive"];
+  }
+  if (node.kind === "position") {
+    const actions: StructureAction[] = ["move"];
+    if (!node.isChief) actions.push("set-chief");
+    if (node.status === "vacant") actions.push("assign");
+    return actions;
+  }
+  return ["unassign"];
+}
+
+/** Whether dropping `dragged` on the unit `target` is a real move (not onto itself, its own parent, or its own subtree). */
+export function canDropOn(roots: OrgStructureNode[], dragged: OrgStructureNode, target: OrgStructureNode): boolean {
+  if (target.kind !== "unit") return false;
+  if (dragged.kind === "unit") {
+    if (dragged.id === target.id || dragged.parentId === target.id) return false;
+    return !unitSubtreeIds(roots, dragged.id).has(target.id);
+  }
+  if (dragged.kind === "position") return dragged.orgUnitId !== target.id;
+  return false;
+}

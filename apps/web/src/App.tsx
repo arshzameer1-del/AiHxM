@@ -123,15 +123,11 @@ const AdminCenterPage = lazy(() =>
 // product's first real tree/hierarchy UI. See
 // claude/organization-management-4000-gap-analysis-and-roadmap.md and
 // 0065_organization_units.sql.
-// Organization opens on the Staff assignments (structure) tree-table; the editing screen (move, rename, head
-// positions, drag and drop) is kept at organization/manage as "Edit structure".
+// Organization is one screen: the Staff assignments (structure) tree-table with the SAP-style detail pane. It also
+// carries everything the old hierarchy editor did (new/rename/move/archive units, drag and drop, chief position,
+// assign/remove holders); the old organization/manage address now redirects here.
 const OrgStructurePage = lazy(() =>
   import("./portal/organization/OrgStructurePage").then((m) => ({ default: m.OrgStructurePage })),
-);
-const OrgHierarchyPage = lazy(() =>
-  import("./portal/organization/OrgHierarchyPage").then((m) => ({
-    default: m.OrgHierarchyPage,
-  })),
 );
 // Organization Management Phase 9 (Unified Integration & Synchronization
 // Requirements, Section 2 — the unified Organization workspace) — one
@@ -381,7 +377,7 @@ export default function App() {
                     side; PortalLayout's nav gates it the same courtesy way
                     as every other route here. */}
                   <Route path="organization" element={<OrgStructurePage />} />
-                  <Route path="organization/manage" element={<OrgHierarchyPage />} />
+                  <Route path="organization/manage" element={<Navigate to="/app/organization" replace />} />
                   {/* Organization Management Phase 9 — the unified workspace's
                     Org Unit detail page. Same courtesy-nav gate; view-only,
                     so no `manage` permission is even relevant here. */}

@@ -94,3 +94,52 @@ test("each row opens its own page", () => {
   assert.equal(detailPath(tree[0].children[0].children[0]), "/app/organization/positions/p1");
   assert.equal(detailPath(tree[0].children[0].children[0].children[0]), "/app/employees/e1");
 });
+
+import { availableActions, canDropOn, unitChoices, unitSubtreeIds } from "./orgStructure";
+
+const n = (over: Partial<OrgStructureNode> & Pick<OrgStructureNode, "key" | "kind" | "id">): OrgStructureNode => ({
+  objectId: "O 00000000", code: null, name: over.id, relationshipText: "", chiefName: null, validFrom: null, validTo: null, status: null, isChief: false, fte: null, children: [], ...over,
+});
+const actionTree = (): OrgStructureNode[] => [
+  n({ key: "unit:a", kind: "unit", id: "a", parentId: null, status: "active", children: [
+    n({ key: "position:p1", kind: "position", id: "p1", orgUnitId: "a", status: "vacant" }),
+    n({ key: "unit:b", kind: "unit", id: "b", parentId: "a", status: "active", children: [n({ key: "unit:c", kind: "unit", id: "c", parentId: "b", status: "active" })] }),
+  ] }),
+  n({ key: "unit:d", kind: "unit", id: "d", parentId: null, status: "archived" }),
+];
+
+test("unitChoices lists units only, with depth", () => {
+  assert.deepEqual(unitChoices(actionTree()).map((u) => `${u.depth}:${u.id}`), ["0:a", "1:b", "2:c", "0:d"]);
+});
+
+test("unitSubtreeIds is the unit and everything below it", () => {
+  assert.deepEqual([...unitSubtreeIds(actionTree(), "b")].sort(), ["b", "c"]);
+  assert.deepEqual([...unitSubtreeIds(actionTree(), "zzz")], []);
+});
+
+test("availableActions follows the selected row and the role", () => {
+  const t = actionTree();
+  const a = t[0], p1 = a.children[0], d = t[1];
+  assert.deepEqual(availableActions(null, false), []);
+  assert.deepEqual(availableActions(a, false), []);
+  assert.deepEqual(availableActions(null, true), ["create-unit"]);
+  assert.deepEqual(availableActions(a, true), ["create-unit", "create-position", "edit", "move", "archive"]);
+  assert.deepEqual(availableActions(d, true), ["create-unit", "create-position", "edit", "move", "activate"]);
+  assert.deepEqual(availableActions(p1, true), ["move", "set-chief", "assign"]);
+  assert.deepEqual(availableActions({ ...p1, isChief: true, status: "filled" }, true), ["move"]);
+  assert.deepEqual(availableActions(n({ key: "holder:p1:e", kind: "holder", id: "e" }), true), ["unassign"]);
+});
+
+test("canDropOn refuses itself, its own parent, its own subtree and non-units", () => {
+  const t = actionTree();
+  const [a] = t;
+  const b = a.children[1], c = b.children[0], p1 = a.children[0], d = t[1];
+  assert.equal(canDropOn(t, b, b), false);
+  assert.equal(canDropOn(t, b, a), false); // already its parent
+  assert.equal(canDropOn(t, a, c), false); // into its own subtree
+  assert.equal(canDropOn(t, b, d), true);
+  assert.equal(canDropOn(t, c, a), true);
+  assert.equal(canDropOn(t, p1, a), false); // already there
+  assert.equal(canDropOn(t, p1, b), true);
+  assert.equal(canDropOn(t, p1, p1), false);
+});
