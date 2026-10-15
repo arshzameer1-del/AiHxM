@@ -38,6 +38,21 @@ export const HR_CATALOG_REGISTRY: HrCatalogTypeDefinition[] = [
     wiredInto: "Employee record (create/edit) and the Hiring Wizard's Organization Assignment card.",
   },
 
+  {
+    catalogType: "employment_status",
+    groupLabel: "Employment & Workforce Setup",
+    label: "Employment Statuses",
+    description: "The states an employment can be in. Active, On leave and Terminated are system states the product relies on; other states (suspended, serving notice, ...) are yours to add.",
+    wiredInto: "Employee record status (validated by the database) and employment history.",
+  },
+  {
+    catalogType: "employment_status_reason",
+    groupLabel: "Employment & Workforce Setup",
+    label: "Employment Status Reasons",
+    description: "Why an employment moved to its current status.",
+    wiredInto: "Employee record status reason (employment_status_reason).",
+  },
+
   // --- 6.2 Lifecycle Reason Catalogs ------------------------------------
   {
     catalogType: "lifecycle_reason:hire",
@@ -278,6 +293,50 @@ export const HR_CATALOG_REGISTRY: HrCatalogTypeDefinition[] = [
     label: "ID Document Types",
     description: "The government identity document types a person's primary identifier can be (CNIC, NICOP, Passport, B-Form).",
     wiredInto: "Not yet consumed by any field — seeded and editable, ready for future wiring onto the Person record.",
+  },
+  {
+    catalogType: "gender",
+    groupLabel: "Employment & Workforce Setup",
+    label: "Gender",
+    description: "The gender values available on an employee's personal record.",
+    wiredInto: "Linked to the employee record by gender_catalog_item_id (filled automatically from the gender text).",
+  },
+  {
+    catalogType: "worker_type",
+    groupLabel: "Employment & Workforce Setup",
+    label: "Worker Types",
+    description: "How a person works for the company (employee, contractor, consultant), separate from employment type.",
+    wiredInto: "Column employees.worker_type_catalog_item_id exists; not yet shown in the UI.",
+  },
+  {
+    catalogType: "salary_band",
+    groupLabel: "Employment & Workforce Setup",
+    label: "Salary Bands",
+    description: "The salary band labels this company uses. Define your own; none are seeded. Grades and pay scales come with Compensation.",
+    wiredInto: "Linked to the employee record by salary_band_catalog_item_id once a band with a matching code or label exists.",
+  },
+  {
+    catalogType: "asset_type",
+    groupLabel: "Personal & Reference Catalogs",
+    label: "Asset Types",
+    description: "The kinds of company asset that can be assigned to an employee (laptop, phone, vehicle, etc.).",
+    wiredInto: "Linked to employee asset assignments by asset_type_catalog_item_id.",
+  },
+
+  // --- Payroll (Step 9E, PAY-07 / PAY-12) --------------------------------
+  {
+    catalogType: "component_category",
+    groupLabel: "Payroll",
+    label: "Pay Component Categories",
+    description: "How this company groups its pay components for reporting (basic pay, allowances, incentives, benefits, ...).",
+    wiredInto: "Compensation component definitions (category_catalog_item_id).",
+  },
+  {
+    catalogType: "payroll_adjustment_reason",
+    groupLabel: "Payroll",
+    label: "Payroll Adjustment Reasons",
+    description: "Why a one-time payment or deduction is being made outside the regular salary (correction, award, recovery, ...).",
+    wiredInto: "One-time and off-cycle payments (reason_catalog_item_id).",
   },
 ];
 

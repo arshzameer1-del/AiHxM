@@ -4,6 +4,7 @@ import {
   IsArray,
   IsDateString,
   IsIn,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -11,7 +12,30 @@ import {
   ValidateNested,
 } from "class-validator";
 
-const ITEM_ACTIONS = ["move", "rename", "retype", "archive", "activate"] as const;
+const ITEM_ACTIONS = [
+  "move",
+  "rename",
+  "retype",
+  "archive",
+  "activate",
+  "position_freeze",
+  "position_unfreeze",
+  "position_abolish",
+  "position_reactivate",
+  "position_rename",
+  "position_move",
+  "location_rename",
+  "location_archive",
+  "location_activate",
+  "cost_center_rename",
+  "cost_center_archive",
+  "cost_center_activate",
+  "profit_center_rename",
+  "profit_center_archive",
+  "profit_center_activate",
+  "assignment_transfer",
+] as const;
+const ENTITY_TYPES = ["org_unit", "position", "location", "cost_center", "profit_center", "assignment"] as const;
 const CASCADE_ACTIONS = ["require_vacant", "auto_unassign"] as const;
 
 /**
@@ -26,8 +50,22 @@ const CASCADE_ACTIONS = ["require_vacant", "auto_unassign"] as const;
  * three-way set/clear/leave-alone fields already established.
  */
 export class OrgChangeItemDto {
+  /** Required for org-unit items; the service enforces which of orgUnitId / entityId an item needs. */
+  @IsOptional()
   @IsUUID()
-  orgUnitId!: string;
+  orgUnitId?: string;
+
+  @IsOptional()
+  @IsIn(ENTITY_TYPES)
+  entityType?: (typeof ENTITY_TYPES)[number];
+
+  @IsOptional()
+  @IsUUID()
+  entityId?: string;
+
+  @IsOptional()
+  @IsObject()
+  payload?: Record<string, unknown>;
 
   @IsIn(ITEM_ACTIONS)
   action!: (typeof ITEM_ACTIONS)[number];

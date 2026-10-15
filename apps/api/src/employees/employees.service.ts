@@ -1,3 +1,5 @@
+import { assertValidCnic } from "../crypto/identifier-validation";
+import { sensitive } from "../crypto/sensitive-fields";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { DatabaseService } from "../database/database.service";
@@ -11,7 +13,9 @@ import { FILE_STORAGE, type FileStorageService } from "../file-storage/file-stor
 import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
 import { ImportExportService } from "../import-export/import-export.service";
 import { PersonsService } from "./persons.service";
-import { formatEmployeeNumber, parseEmployeeNumberSequence } from "./employee-number.util";
+import { EmployeePaymentAccountsService } from "./employee-payment-accounts.service";
+import { EmployeeNumberingService } from "./employee-numbering.service";
+import { assertRehireAllowed } from "./rehire-eligibility";
 import {
   classifiedFieldKeys,
   listFieldSensitivity,
@@ -129,10 +133,11 @@ function rowToEmployee(row: any): Record<string, unknown> {
     terminationDate: toIsoDate(row.termination_date),
     createdAt: row.created_at?.toISOString ? row.created_at.toISOString() : row.created_at,
     updatedAt: row.updated_at?.toISOString ? row.updated_at.toISOString() : row.updated_at,
-    cnic: row.cnic,
-    dateOfBirth: toIsoDate(row.date_of_birth),
+    // SEC-02: stored encrypted; decrypted here (legacy plaintext passes through).
+    cnic: sensitive.decrypt(row.company_id, row.cnic),
+    dateOfBirth: sensitive.readDob(row.company_id, row.date_of_birth_enc, row.date_of_birth),
     salaryBand: row.salary_band,
-    bankAccountNumber: row.bank_account_number,
+    bankAccountNumber: sensitive.decrypt(row.company_id, row.bank_account_number),
     terminationReason: row.termination_reason,
   };
 }
@@ -284,7 +289,12 @@ export class EmployeesService {
     // convention EmployeeLifecycleService/HiringProcessService use, so every
     // spec file that hand-constructs this service positionally keeps
     // working; Nest's DI supplies the real OrgOccupancyModule instance.
-    private readonly occupancy: OrgOccupancyService = new OrgOccupancyService(audit, new EffectiveDatingEngine(), webhooks)
+    private readonly occupancy: OrgOccupancyService = new OrgOccupancyService(audit, new EffectiveDatingEngine(), webhooks),
+    // EMP-07: employee_payment_accounts is the only writer of bank details;
+    // the legacy flat `bankAccountNumber` input is routed through it.
+    private readonly paymentAccounts: EmployeePaymentAccountsService = new EmployeePaymentAccountsService(db, rbac, entitlements, audit),
+    // CFG-13: the only producer of employee numbers (default-instantiable like the services above).
+    private readonly numbering: EmployeeNumberingService = new EmployeeNumberingService(db, rbac, entitlements, audit)
   ) {}
 
   /** `employment_type` used to be a hardcoded 4-value `CHECK` constraint
@@ -351,7 +361,10 @@ export class EmployeesService {
     // employee, never for the hire that is still being created.
     orgContext: { locationId?: string | null; orgUnitId?: string | null } = {}
   ): Promise<void> {
-    if (!cnic || !personId || !this.businessPolicy) return;
+    // Step 4 (EMP-02): an explicit personId links a rehire without a CNIC, so
+    // the cooldown must not depend on one - it keys off the person's prior
+    // terminated employment either way.
+    if (!personId || !this.businessPolicy) return;
     const rules = await this.businessPolicy.resolveEffectivePolicy(client, claims.company_id!, "rehire", orgContext);
     const cooldownDays = typeof rules?.cooldownDays === "number" ? rules.cooldownDays : 0;
     if (cooldownDays <= 0) return;
@@ -415,6 +428,49 @@ export class EmployeesService {
     );
   }
 
+  /**
+   * Step 4 (LIF-06). A person with an earlier TERMINATED employment is a
+   * rehire. Two rules apply before a new employment is created:
+   *  - eligibility: the last completed exit marked them 'not_eligible' ->
+   *    blocked unless HR supplies rehireOverrideReason (audited);
+   *    'conditional' is allowed but audited so the condition is not lost;
+   *  - number reuse: when the Rehire Policy says preserveEmployeeNumber, the
+   *    old employee number is kept by REACTIVATING that record (a new
+   *    employment period on the same row), not by creating a second one.
+   */
+  private async enforceRehireEligibility(
+    client: PoolClient,
+    claims: RequestClaims,
+    personId: string,
+    overrideReason: string | undefined,
+    orgContext: { locationId?: string | null; orgUnitId?: string | null }
+  ): Promise<void> {
+    const prior = await client.query<{ id: string; employee_number: string }>(
+      `SELECT id, employee_number FROM employees WHERE company_id = $1 AND person_id = $2 AND employment_status = 'terminated'
+        ORDER BY termination_date DESC NULLS LAST LIMIT 1`,
+      [claims.company_id, personId]
+    );
+    if (prior.rowCount === 0) return;
+    const block = await assertRehireAllowed(client, claims.company_id!, personId, overrideReason);
+    if (block) {
+      await this.audit.record(client, claims, {
+        companyId: claims.company_id ?? null,
+        action: block.eligibility === "not_eligible" ? "employee.rehire.eligibility_overridden" : "employee.rehire.conditional",
+        target: prior.rows[0].id,
+        reason: overrideReason ?? null,
+        metadata: { eligibility: block.eligibility, note: block.note, offboardingId: block.offboardingId },
+      });
+    }
+    if (this.businessPolicy) {
+      const rules = await this.businessPolicy.resolveEffectivePolicy(client, claims.company_id!, "rehire", orgContext);
+      if (rules?.preserveEmployeeNumber === true) {
+        throw new BadRequestException(
+          `This company's Rehire Policy keeps the previous employee number (${prior.rows[0].employee_number}). Reactivate that employee record instead of creating a new one.`
+        );
+      }
+    }
+  }
+
   async create(claims: RequestClaims, input: CreateEmployeeRequest): Promise<EmployeeView> {
     await this.requireModuleAndManagePermission(claims);
     if (!claims.company_id) throw new ForbiddenException();
@@ -451,6 +507,16 @@ export class EmployeesService {
         });
       }
 
+      // ORG-03 (Step 7): an employee created with an org unit gets its primary assignment now.
+      if (employee.orgUnitId) {
+        await this.occupancy.syncPrimaryAssignmentWithinTransaction(client, claims, employee.id, {
+          orgUnitId: employee.orgUnitId,
+          locationId: employee.locationId ?? null,
+          effectiveFrom: input.dateOfJoining ?? undefined,
+          source: "employee_create",
+        });
+      }
+
       return employee;
     });
   }
@@ -476,19 +542,27 @@ export class EmployeesService {
   async createWithinTransaction(client: PoolClient, claims: RequestClaims, input: CreateEmployeeRequest): Promise<EmployeeView> {
       await this.validateEmploymentType(client, claims.company_id!, input.employmentType);
       await this.validateMaritalStatus(client, claims.company_id!, input.maritalStatus);
-      const employeeNumber = await this.assignEmployeeNumber(client, claims.company_id!, input.employeeNumber);
+      const employeeNumber = await this.assignEmployeeNumber(client, claims, claims.company_id!, input.employeeNumber);
       const department = await this.resolveDepartment(client, claims.company_id!, input.orgUnitId, input.department);
       const location = await this.resolveLocation(client, claims.company_id!, input.locationId, input.location);
       // Core Employee Enterprise Phase 1 (0081_person_identity.sql) — every
       // hire resolves to a person, deterministically matched by CNIC
       // (findOrCreateForHire()'s own doc comment covers why: a confirmed
       // CNIC match is a rehire of the same person, not a new one).
+      assertValidCnic(input.cnic);
       const personId = await this.persons.findOrCreateForHire(client, claims.company_id!, {
         firstName: input.firstName,
         lastName: input.lastName,
         cnic: input.cnic,
         dateOfBirth: input.dateOfBirth,
         gender: input.gender,
+        maritalStatus: input.maritalStatus,
+        personId: input.personId,
+        confirmNotDuplicate: input.confirmNotDuplicate,
+      });
+      await this.enforceRehireEligibility(client, claims, personId, input.rehireOverrideReason, {
+        locationId: input.locationId,
+        orgUnitId: input.orgUnitId,
       });
       await this.enforceRehireCooldown(client, claims, personId, input.cnic, {
         locationId: input.locationId,
@@ -499,9 +573,10 @@ export class EmployeesService {
         `INSERT INTO employees
            (company_id, user_account_id, employee_number, person_id, first_name, last_name, email, phone, cnic,
             date_of_birth, gender, marital_status, department, org_unit_id, designation, location, location_id,
-            employment_type, manager_id, date_of_joining, salary_band, bank_account_number)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
-                 COALESCE($18, 'permanent'), $19, COALESCE($20, CURRENT_DATE), $21, $22)
+            employment_type, manager_id, date_of_joining, salary_band, bank_account_number,
+            date_of_birth_enc, cnic_bidx)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::date, $11, $12, $13, $14, $15, $16, $17,
+                 COALESCE($18, 'permanent'), $19, COALESCE($20, CURRENT_DATE), $21, $22, $23, $24)
          RETURNING *`,
         [
           claims.company_id,
@@ -512,8 +587,8 @@ export class EmployeesService {
           input.lastName,
           input.email ?? null,
           input.phone ?? null,
-          input.cnic ?? null,
-          input.dateOfBirth ?? null,
+          sensitive.encrypt(claims.company_id!, input.cnic),
+          null, // date_of_birth plaintext is no longer written (SEC-02); see date_of_birth_enc
           input.gender ?? null,
           input.maritalStatus ?? null,
           department,
@@ -525,10 +600,16 @@ export class EmployeesService {
           input.managerId ?? null,
           input.dateOfJoining ?? null,
           input.salaryBand ?? null,
-          input.bankAccountNumber ?? null,
+          null, // EMP-07: written via employee_payment_accounts (mirrored back by trigger)
+          sensitive.encryptDob(claims.company_id!, input.dateOfBirth),
+          sensitive.cnicIndex(claims.company_id!, input.cnic),
         ]
       );
       const row = result.rows[0];
+      if (input.bankAccountNumber) {
+        await this.paymentAccounts.applyFlatBankAccountNumber(client, claims, row.id, input.bankAccountNumber, { bootstrap: true });
+        row.bank_account_number = (await client.query("SELECT bank_account_number FROM employees WHERE id = $1", [row.id])).rows[0].bank_account_number;
+      }
 
       // Every employee's history starts with a 'hire' event — auto-logged,
       // not left to the caller to remember to record separately.
@@ -876,14 +957,19 @@ export class EmployeesService {
       // already established.
       const nextFirstName = patch.firstName ?? before.first_name;
       const nextLastName = patch.lastName ?? before.last_name;
-      const nextCnic = patch.cnic ?? before.cnic;
-      const nextDateOfBirth = patch.dateOfBirth ?? before.date_of_birth;
+      const companyIdForCrypto = claims.company_id!;
+      const beforeCnic = sensitive.decrypt(companyIdForCrypto, before.cnic);
+      const beforeDateOfBirth = sensitive.readDob(companyIdForCrypto, before.date_of_birth_enc, before.date_of_birth);
+      const beforeBankAccount = sensitive.decrypt(companyIdForCrypto, before.bank_account_number);
+      assertValidCnic(patch.cnic);
+      const nextCnic = patch.cnic ?? beforeCnic;
+      const nextDateOfBirth = patch.dateOfBirth ?? beforeDateOfBirth;
       const nextGender = patch.gender ?? before.gender;
       const identityChanged =
         nextFirstName !== before.first_name ||
         nextLastName !== before.last_name ||
-        nextCnic !== before.cnic ||
-        nextDateOfBirth !== before.date_of_birth ||
+        nextCnic !== beforeCnic ||
+        nextDateOfBirth !== beforeDateOfBirth ||
         nextGender !== before.gender;
       if (identityChanged && before.person_id) {
         await this.persons.syncFromEmployee(client, claims.company_id!, before.person_id, {
@@ -916,7 +1002,7 @@ export class EmployeesService {
         termination_date: patch.terminationDate ?? before.termination_date,
         termination_reason: patch.terminationReason ?? before.termination_reason,
         salary_band: patch.salaryBand ?? before.salary_band,
-        bank_account_number: patch.bankAccountNumber ?? before.bank_account_number,
+        bank_account_number: beforeBankAccount, // EMP-07: changed only via employee_payment_accounts below
       };
       // A scoped caller may not move an employee's org unit/location to
       // one outside their own data scope, even though they were allowed
@@ -925,10 +1011,11 @@ export class EmployeesService {
 
       const result = await client.query(
         `UPDATE employees SET
-           first_name = $2, last_name = $3, email = $4, phone = $5, cnic = $6, date_of_birth = $7,
+           first_name = $2, last_name = $3, email = $4, phone = $5, cnic = $6, date_of_birth = $7::date,
            gender = $8, marital_status = $9, department = $10, org_unit_id = $11, designation = $12, location = $13,
            location_id = $14, employment_type = $15, manager_id = $16, employment_status = $17, date_of_joining = $18,
            termination_date = $19, termination_reason = $20, salary_band = $21, bank_account_number = $22,
+           date_of_birth_enc = $23, cnic_bidx = $24,
            updated_at = now()
          WHERE id = $1
          RETURNING *`,
@@ -938,8 +1025,8 @@ export class EmployeesService {
           next.last_name,
           next.email,
           next.phone,
-          next.cnic,
-          next.date_of_birth,
+          sensitive.encrypt(companyIdForCrypto, next.cnic),
+          null, // plaintext DOB column stays NULL (SEC-02)
           next.gender,
           next.marital_status,
           next.department,
@@ -954,10 +1041,18 @@ export class EmployeesService {
           next.termination_date,
           next.termination_reason,
           next.salary_band,
-          next.bank_account_number,
+          sensitive.encrypt(companyIdForCrypto, next.bank_account_number), // value unchanged (EMP-07); re-encrypting keeps legacy plaintext rows healed on write
+          sensitive.encryptDob(companyIdForCrypto, next.date_of_birth),
+          sensitive.cnicIndex(companyIdForCrypto, next.cnic),
         ]
       );
       const after = result.rows[0];
+      if (patch.bankAccountNumber !== undefined && patch.bankAccountNumber !== beforeBankAccount) {
+        // EMP-07/08: routed through the payment-account workflow; a change to an existing
+        // approved primary account is held as a pending replacement for a second approver.
+        await this.paymentAccounts.applyFlatBankAccountNumber(client, claims, id, patch.bankAccountNumber);
+        after.bank_account_number = (await client.query("SELECT bank_account_number FROM employees WHERE id = $1", [id])).rows[0].bank_account_number;
+      }
 
       // Cross-module integration follow-up (2026-10-01): a manager change
       // through this generic PATCH used to patch only the column, leaving
@@ -974,6 +1069,32 @@ export class EmployeesService {
         await this.occupancy.syncDirectManagerFromEmployeeWithinTransaction(client, claims, {
           employeeId: id,
           managerEmployeeId: after.manager_id ?? null,
+          source: "employee_update",
+        });
+      }
+
+      // ORG-03 (Step 7): the primary org assignment is the canonical record of where an
+      // employee sits; employees.org_unit_id / location_id are its projection. A change to
+      // either column through this generic PATCH now moves the primary assignment in the same
+      // transaction instead of leaving the two to drift. An employee who holds a seat in a
+      // different unit than the one requested must be moved with a Transfer / the Position
+      // Workbench (the seat belongs to exactly one unit) - it is refused rather than silently
+      // producing an assignment that names a seat outside its own unit.
+      if (
+        after.org_unit_id &&
+        ((after.org_unit_id ?? null) !== (before.org_unit_id ?? null) || (after.location_id ?? null) !== (before.location_id ?? null))
+      ) {
+        if (after.position_id) {
+          const seat = await client.query<{ org_unit_id: string }>("SELECT org_unit_id FROM positions WHERE id = $1", [after.position_id]);
+          if (seat.rows[0] && seat.rows[0].org_unit_id !== after.org_unit_id) {
+            throw new BadRequestException(
+              "This employee occupies a position in another organization unit - use Transfer or the Position Workbench to move them"
+            );
+          }
+        }
+        await this.occupancy.syncPrimaryAssignmentWithinTransaction(client, claims, id, {
+          orgUnitId: after.org_unit_id,
+          locationId: after.location_id ?? null,
           source: "employee_update",
         });
       }
@@ -1505,44 +1626,9 @@ export class EmployeesService {
    * through this path, rather than requiring CompaniesService to know
    * this table exists.
    */
-  private async assignEmployeeNumber(client: PoolClient, companyId: string, explicitNumber?: string): Promise<string> {
-    const configResult = await client.query<{ employee_number_format: EmployeeNumberFormat }>(
-      "SELECT employee_number_format FROM company_config WHERE company_id = $1",
-      [companyId]
-    );
-    if (configResult.rowCount === 0) throw new NotFoundException("Company config not found");
-    const format = configResult.rows[0].employee_number_format;
-
-    await client.query(
-      "INSERT INTO employee_number_sequences (company_id, next_sequence) VALUES ($1, $2) ON CONFLICT (company_id) DO NOTHING",
-      [companyId, Math.max(1, format.startingSequence ?? 1)]
-    );
-    const sequenceResult = await client.query<{ next_sequence: number }>(
-      "SELECT next_sequence FROM employee_number_sequences WHERE company_id = $1 FOR UPDATE",
-      [companyId]
-    );
-    const currentSequence = sequenceResult.rows[0].next_sequence;
-
-    if (explicitNumber) {
-      // Preserve-imported-numbers path — see employee-number.util.ts's
-      // doc comment. Advance the counter past this number only if it's
-      // both in this tenant's own format AND ahead of where the counter
-      // already is (never move it backwards).
-      const parsedSequence = parseEmployeeNumberSequence(explicitNumber, format);
-      if (parsedSequence !== null && parsedSequence >= currentSequence) {
-        await client.query("UPDATE employee_number_sequences SET next_sequence = $2 WHERE company_id = $1", [
-          companyId,
-          parsedSequence + 1,
-        ]);
-      }
-      return explicitNumber;
-    }
-
-    await client.query("UPDATE employee_number_sequences SET next_sequence = $2 WHERE company_id = $1", [
-      companyId,
-      currentSequence + 1,
-    ]);
-    return formatEmployeeNumber(format, currentSequence);
+  private async assignEmployeeNumber(client: PoolClient, claims: RequestClaims, companyId: string, explicitNumber?: string): Promise<string> {
+    // CFG-13: generation, the manual-number rules and the issued-number ledger live in EmployeeNumberingService.
+    return this.numbering.allocate(client, claims, companyId, { explicitNumber });
   }
 
   /**

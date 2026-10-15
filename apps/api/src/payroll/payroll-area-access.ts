@@ -71,12 +71,14 @@ export async function resolveScopedPayrollAreaIds(
   claims: RequestClaims
 ): Promise<string[]> {
   if (!claims.company_id) return [];
-  const [orgUnitIds, locationIds, costCenterIds] = await Promise.all([
+  const [orgUnitIds, locationIds, costCenterIds, directAreaIds] = await Promise.all([
     rbac.resolveDataScopeEntityIds(claims, "org_unit"),
     rbac.resolveDataScopeEntityIds(claims, "location"),
     rbac.resolveDataScopeEntityIds(claims, "cost_center"),
+    // ACC-04: a user can also be assigned a payroll area directly.
+    rbac.resolveDataScopeEntityIds(claims, "payroll_area"),
   ]);
-  if (orgUnitIds.length === 0 && locationIds.length === 0 && costCenterIds.length === 0) return [];
+  if (orgUnitIds.length === 0 && locationIds.length === 0 && costCenterIds.length === 0 && directAreaIds.length === 0) return [];
   return db.withClaims(claims, async (client) => {
     const result = await client.query<{ payroll_area_id: string }>(
       `WITH RECURSIVE scoped_org_units AS (
@@ -96,8 +98,10 @@ export async function resolveScopedPayrollAreaIds(
            (link.scope_type = 'org_unit' AND link.scope_entity_id IN (SELECT id FROM scoped_org_units))
            OR (link.scope_type = 'location' AND link.scope_entity_id IN (SELECT id FROM scoped_locations))
            OR (link.scope_type = 'cost_center' AND link.scope_entity_id = ANY($4::uuid[]))
-         )`,
-      [claims.company_id, orgUnitIds, locationIds, costCenterIds]
+         )
+       UNION
+       SELECT id FROM payroll_areas WHERE company_id = $1 AND id = ANY($5::uuid[])`,
+      [claims.company_id, orgUnitIds, locationIds, costCenterIds, directAreaIds]
     );
     return result.rows.map((row) => row.payroll_area_id);
   });

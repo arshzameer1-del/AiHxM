@@ -1,8 +1,11 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Put, Query, UseGuards } from "@nestjs/common";
 import { SessionGuard } from "../auth/session.guard";
 import { CurrentClaims } from "../auth/current-claims.decorator";
 import type { RequestClaims } from "../database/tenant-context";
 import { LeaveRequestsService } from "./leave-requests.service";
+import { LeaveTypesService } from "./leave-types.service";
+import { LeaveLedgerService } from "./leave-ledger.service";
+import { AdjustLeaveBalanceDto, CreateLeaveTypeDto, DecideLeaveCancellationDto, RequestLeaveCancellationDto, UpdateLeaveTypeDto } from "./dto/leave-type.dto";
 import { AttendanceService } from "./attendance.service";
 import { AttendanceCorrectionsService } from "./attendance-corrections.service";
 import { OvertimeService } from "./overtime.service";
@@ -13,8 +16,10 @@ import { ClockInDto } from "./dto/clock-in.dto";
 import { ClockOutDto } from "./dto/clock-out.dto";
 import { SubmitAttendanceCorrectionDto } from "./dto/submit-attendance-correction.dto";
 import { DecideAttendanceCorrectionDto } from "./dto/decide-attendance-correction.dto";
-import { SetOvertimePolicyDto } from "./dto/set-overtime-policy.dto";
-import { SubmitOvertimeClaimDto } from "./dto/submit-overtime-claim.dto";
+import { SetOvertimePolicyDto, SetScopedOvertimePolicyDto } from "./dto/set-overtime-policy.dto";
+import { SetCompanyWorkTimeDefaultDto, SetWorkProfileDto } from "./dto/work-profile.dto";
+import { WorkProfileService } from "./work-profile.service";
+import { CreateOvertimeAuthorizationDto, SubmitOvertimeClaimDto } from "./dto/submit-overtime-claim.dto";
 import { DecideOvertimeClaimDto } from "./dto/decide-overtime-claim.dto";
 import { SubmitOnDutyRequestDto } from "./dto/submit-on-duty-request.dto";
 import { DecideOnDutyRequestDto } from "./dto/decide-on-duty-request.dto";
@@ -33,8 +38,54 @@ export class LeaveController {
     private readonly attendance: AttendanceService,
     private readonly attendanceCorrections: AttendanceCorrectionsService,
     private readonly overtime: OvertimeService,
-    private readonly onDuty: OnDutyService
+    private readonly workProfiles: WorkProfileService,
+    private readonly onDuty: OnDutyService,
+    private readonly leaveTypes: LeaveTypesService,
+    private readonly ledger: LeaveLedgerService
   ) {}
+
+  // --- TLM-01: leave type catalogue --------------------------------------
+  @Get("leave-types")
+  listLeaveTypes(@CurrentClaims() claims: RequestClaims, @Query("includeInactive") includeInactive?: string) {
+    return this.leaveTypes.list(claims, { includeInactive: includeInactive === "true" });
+  }
+
+  @Post("leave-types")
+  createLeaveType(@CurrentClaims() claims: RequestClaims, @Body() dto: CreateLeaveTypeDto) {
+    return this.leaveTypes.create(claims, dto);
+  }
+
+  @Patch("leave-types/:id")
+  updateLeaveType(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: UpdateLeaveTypeDto) {
+    return this.leaveTypes.update(claims, id, dto);
+  }
+
+  // --- TLM-02: ledger ----------------------------------------------------
+  @Get("employees/:employeeId/leave-ledger")
+  leaveLedger(
+    @CurrentClaims() claims: RequestClaims,
+    @Param("employeeId") employeeId: string,
+    @Query("leaveType") leaveType?: string,
+    @Query("year") year?: string
+  ) {
+    return this.ledger.history(claims, employeeId, { leaveType, year: year ? Number(year) : undefined });
+  }
+
+  @Post("leave-balances/adjustments")
+  adjustLeaveBalance(@CurrentClaims() claims: RequestClaims, @Body() dto: AdjustLeaveBalanceDto) {
+    return this.ledger.adjust(claims, dto);
+  }
+
+  // --- TLM-03: cancellation of approved leave ----------------------------
+  @Post("leave-requests/:id/cancellation-request")
+  requestLeaveCancellation(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: RequestLeaveCancellationDto) {
+    return this.leaveRequests.requestCancellation(claims, id, dto.reason);
+  }
+
+  @Patch("leave-requests/:id/cancellation-decision")
+  decideLeaveCancellation(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: DecideLeaveCancellationDto) {
+    return this.leaveRequests.decideCancellation(claims, id, dto);
+  }
 
   @Post("leave-requests")
   submit(@CurrentClaims() claims: RequestClaims, @Body() dto: SubmitLeaveRequestDto) {
@@ -113,6 +164,63 @@ export class LeaveController {
   @Patch("overtime-policy")
   setOvertimePolicy(@CurrentClaims() claims: RequestClaims, @Body() dto: SetOvertimePolicyDto) {
     return this.overtime.setPolicy(claims, dto);
+  }
+
+  @Get("overtime-policies")
+  listOvertimePolicies(@CurrentClaims() claims: RequestClaims) {
+    return this.overtime.listPolicies(claims);
+  }
+
+  @Put("overtime-policies/scoped")
+  setScopedOvertimePolicy(@CurrentClaims() claims: RequestClaims, @Body() dto: SetScopedOvertimePolicyDto) {
+    return this.overtime.setScopedPolicy(claims, dto);
+  }
+
+  @Delete("overtime-policies/:id")
+  @HttpCode(204)
+  endScopedOvertimePolicy(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.overtime.endScopedPolicy(claims, id);
+  }
+
+  @Post("overtime-authorizations")
+  authorizeOvertime(@CurrentClaims() claims: RequestClaims, @Body() dto: CreateOvertimeAuthorizationDto) {
+    return this.overtime.authorize(claims, dto);
+  }
+
+  @Delete("overtime-authorizations/:id")
+  @HttpCode(204)
+  revokeOvertimeAuthorization(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.overtime.revokeAuthorization(claims, id);
+  }
+
+  @Get("employees/:employeeId/overtime-authorizations")
+  listOvertimeAuthorizations(@CurrentClaims() claims: RequestClaims, @Param("employeeId") employeeId: string) {
+    return this.overtime.listAuthorizations(claims, employeeId);
+  }
+
+  @Get("company/work-time-default")
+  getCompanyWorkTimeDefault(@CurrentClaims() claims: RequestClaims, @Query("asOf") asOf?: string) {
+    return this.workProfiles.companyDefault(claims, asOf);
+  }
+
+  @Put("company/work-time-default")
+  setCompanyWorkTimeDefault(@CurrentClaims() claims: RequestClaims, @Body() dto: SetCompanyWorkTimeDefaultDto) {
+    return this.workProfiles.setCompanyDefault(claims, dto);
+  }
+
+  @Get("employees/:employeeId/work-profile")
+  getWorkProfile(@CurrentClaims() claims: RequestClaims, @Param("employeeId") employeeId: string, @Query("asOf") asOf?: string) {
+    return this.workProfiles.current(claims, employeeId, asOf);
+  }
+
+  @Get("employees/:employeeId/work-profile/history")
+  workProfileHistory(@CurrentClaims() claims: RequestClaims, @Param("employeeId") employeeId: string) {
+    return this.workProfiles.history(claims, employeeId);
+  }
+
+  @Put("employees/:employeeId/work-profile")
+  setWorkProfile(@CurrentClaims() claims: RequestClaims, @Param("employeeId") employeeId: string, @Body() dto: SetWorkProfileDto) {
+    return this.workProfiles.set(claims, employeeId, dto);
   }
 
   @Post("overtime-claims")

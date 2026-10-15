@@ -43,7 +43,7 @@ export class UsageService {
       );
 
       const storageRow = await client.query(
-        "SELECT COALESCE(SUM(size_bytes), 0)::bigint AS bytes FROM employee_documents WHERE company_id = $1",
+        "SELECT COALESCE(SUM(size_bytes), 0)::bigint AS bytes FROM (SELECT size_bytes FROM employee_documents WHERE company_id = $1 UNION ALL SELECT size_bytes FROM candidate_documents WHERE company_id = $1) docs",
         [companyId]
       );
       const storageUsedMb = Number(storageRow.rows[0].bytes) / (1024 * 1024);
@@ -88,7 +88,7 @@ export class UsageService {
         throw new NotFoundException("Company not found");
       }
       const storageRow = await client.query(
-        "SELECT COALESCE(SUM(size_bytes), 0)::bigint AS bytes FROM employee_documents WHERE company_id = $1",
+        "SELECT COALESCE(SUM(size_bytes), 0)::bigint AS bytes FROM (SELECT size_bytes FROM employee_documents WHERE company_id = $1 UNION ALL SELECT size_bytes FROM candidate_documents WHERE company_id = $1) docs",
         [companyId]
       );
       const usedMb = Number(storageRow.rows[0].bytes) / (1024 * 1024);

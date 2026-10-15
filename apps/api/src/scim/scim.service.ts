@@ -405,7 +405,7 @@ export class ScimService {
         );
         userAccountId = created.rows[0].id;
         await client.query(
-          "INSERT INTO user_role_assignments (user_account_id, company_id, role_id) VALUES ($1, $2, $3)",
+          "INSERT INTO user_role_assignments (user_account_id, company_id, role_id, source) VALUES ($1, $2, $3, 'scim')",
           [userAccountId, companyId, role.rows[0].id]
         );
       }

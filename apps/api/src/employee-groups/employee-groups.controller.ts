@@ -9,6 +9,7 @@ import { UpdateEmployeeGroupDto } from "./dto/update-employee-group.dto";
 import { CreateLeavePolicyDto } from "./dto/create-leave-policy.dto";
 import { UpdateLeavePolicyDto } from "./dto/update-leave-policy.dto";
 import { AssignGroupPolicyDto } from "./dto/assign-group-policy.dto";
+import { CreateEmployeeSubgroupDto, UpdateEmployeeSubgroupDto } from "./dto/employee-subgroup.dto";
 
 /**
  * Any real session can call these (SessionGuard) — EmployeeGroupsService's
@@ -60,6 +61,40 @@ export class EmployeeGroupsController {
     @Param("policyType") policyType: PolicyType
   ) {
     return this.employeeGroups.unassignPolicy(claims, id, policyType);
+  }
+
+  @Get("employee-groups/:id/subgroups")
+  listSubgroups(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.employeeGroups.listSubgroups(claims, id);
+  }
+
+  @Post("employee-groups/:id/subgroups")
+  createSubgroup(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: CreateEmployeeSubgroupDto) {
+    return this.employeeGroups.createSubgroup(claims, id, dto);
+  }
+
+  @Patch("employee-subgroups/:id")
+  updateSubgroup(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: UpdateEmployeeSubgroupDto) {
+    return this.employeeGroups.updateSubgroup(claims, id, dto);
+  }
+
+  @Patch("employees/:employeeId/subgroup")
+  assignSubgroup(
+    @CurrentClaims() claims: RequestClaims,
+    @Param("employeeId") employeeId: string,
+    @Body() body: { subgroupId: string | null }
+  ) {
+    return this.employeeGroups.assignEmployeeSubgroup(claims, employeeId, body.subgroupId ?? null);
+  }
+
+  @Post("employee-groups/:id/memberships/refresh")
+  refreshMemberships(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.employeeGroups.refreshMemberships(claims, id);
+  }
+
+  @Get("employee-groups/:id/memberships")
+  listMemberships(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Query("asOf") asOf?: string) {
+    return this.employeeGroups.listMemberships(claims, id, asOf);
   }
 
   @Post("leave-policies")

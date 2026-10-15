@@ -5,7 +5,12 @@ import type { RequestClaims } from "../database/tenant-context";
 import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
+import { WorkflowService } from "../workflow/workflow.service";
+import { submitToEngineIfConfigured } from "../workflow/engine-routing";
+import { applyAdjustmentOutcome, assertAdjustmentReason, resolveAdjustmentComponent } from "./payroll-adjustment-support";
 import type { CreateEmployeeOffCyclePaymentRequest, EmployeeOffCyclePaymentView } from "@aihxm/shared-types";
+
+const WORKFLOW_OBJECT_KEY = "off_cycle_payment";
 
 const MODULE_KEY = "employee" as const;
 const MANAGE_PERMISSION = "employee.manage.all";
@@ -30,6 +35,13 @@ function rowToView(row: any): EmployeeOffCyclePaymentView {
     status: row.status,
     createdByUserAccountId: row.created_by_user_account_id,
     createdAt: toIso(row.created_at),
+    componentId: row.component_id ?? null,
+    reasonCatalogItemId: row.reason_catalog_item_id ?? null,
+    reasonNote: row.reason_note ?? null,
+    approvalStatus: row.approval_status ?? "not_required",
+    workflowInstanceId: row.workflow_instance_id ?? null,
+    approvedBy: row.approved_by ?? null,
+    approvedAt: row.approved_at ? toIso(row.approved_at) : null,
   };
 }
 
@@ -58,8 +70,37 @@ export class EmployeeOffCyclePaymentsService {
     private readonly db: DatabaseService,
     private readonly rbac: RbacService,
     private readonly entitlements: EntitlementsService,
-    private readonly audit: AuditService
-  ) {}
+    private readonly audit: AuditService,
+    // PAY-12: optional + appended so positional spec constructions keep working.
+    private readonly workflow?: WorkflowService
+  ) {
+    this.workflow?.adapters?.register({
+      objectKey: WORKFLOW_OBJECT_KEY,
+      label: "Off-cycle payment",
+      canSendBack: true,
+      describe: async (client, recordId) => {
+        const r = await client.query(
+          `SELECT p.label, p.amount, p.payment_type, e.first_name, e.last_name
+             FROM employee_offcycle_payments p JOIN employees e ON e.id = p.employee_id WHERE p.id = $1`,
+          [recordId]
+        );
+        if (!r.rowCount) return null;
+        const x = r.rows[0];
+        return { title: `Off-cycle ${x.payment_type}: ${x.first_name} ${x.last_name}`, summary: `${x.label} - ${Number(x.amount).toFixed(2)}` };
+      },
+      onOutcome: async (ctx) => {
+        const res = await applyAdjustmentOutcome("employee_offcycle_payments", ctx);
+        if (res) {
+          await this.audit.record(ctx.client, ctx.claims, {
+            companyId: ctx.claims.company_id ?? null,
+            action: `employee_offcycle_payment.${ctx.event}`,
+            target: ctx.recordId,
+            metadata: { approval: res.approval, viaWorkflow: ctx.instanceId },
+          });
+        }
+      },
+    });
+  }
 
   /** Every off-cycle payment entered against one run — the admin surface
    * for reviewing/building up a bonus/arrears/final-settlement run
@@ -78,11 +119,13 @@ export class EmployeeOffCyclePaymentsService {
   async create(claims: RequestClaims, input: CreateEmployeeOffCyclePaymentRequest): Promise<EmployeeOffCyclePaymentView> {
     await this.requireManage(claims);
     if (input.amount <= 0) throw new BadRequestException("amount must be greater than zero");
-    const label = input.label.trim();
-    if (!label) throw new BadRequestException("A label is required");
-    const isTaxable = input.paymentType === "deduction" ? false : input.isTaxable ?? true;
     return this.db.withClaims(claims, async (client) => {
       await this.mustExistEmployee(client, claims.company_id!, input.employeeId);
+      const component = input.componentId ? await resolveAdjustmentComponent(client, claims.company_id!, input.componentId, input.paymentType) : null;
+      if (input.reasonCatalogItemId) await assertAdjustmentReason(client, claims.company_id!, input.reasonCatalogItemId);
+      const label = (input.label?.trim() || component?.label || "").trim();
+      if (!label) throw new BadRequestException("A label or a pay component is required");
+      const isTaxable = input.paymentType === "deduction" ? false : input.isTaxable ?? component?.isTaxable ?? true;
       // Cross-module read, straight to SQL (the established "reads for
       // calculation-correctness go through an injected service, reads
       // for a plain existence/state check go straight to SQL" rule —
@@ -98,16 +141,30 @@ export class EmployeeOffCyclePaymentsService {
       if (runRow.run_type !== "off_cycle") {
         throw new BadRequestException("Additional Off-Cycle Payments can only be added to an off-cycle payroll run");
       }
-      if (runRow.status === "finalized" || runRow.status === "reversed") {
+      if (["finalized", "accounting", "payment_released", "reconciled", "closed", "reopened", "reversed", "cancelled"].includes(runRow.status)) {
         throw new BadRequestException(`Cannot add a payment to a run that is already ${runRow.status}`);
       }
-      const result = await client.query(
+      let result = await client.query(
         `INSERT INTO employee_offcycle_payments
-           (company_id, employee_id, payroll_run_id, payment_type, label, amount, is_taxable, created_by_user_account_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           (company_id, employee_id, payroll_run_id, payment_type, label, amount, is_taxable, created_by_user_account_id,
+            component_id, reason_catalog_item_id, reason_note)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          RETURNING *`,
-        [claims.company_id, input.employeeId, input.payrollRunId, input.paymentType, label, input.amount, isTaxable, claims.sub]
+        [
+          claims.company_id, input.employeeId, input.payrollRunId, input.paymentType, label, input.amount, isTaxable, claims.sub,
+          component?.id ?? null, input.reasonCatalogItemId ?? null, input.reasonNote?.trim() || null,
+        ]
       );
+      const instanceId = await submitToEngineIfConfigured(this.workflow, client, claims, {
+        objectKey: WORKFLOW_OBJECT_KEY,
+        table: "employee_offcycle_payments",
+        recordId: result.rows[0].id,
+        record: { employeeId: input.employeeId, paymentType: input.paymentType, amount: input.amount, componentId: component?.id ?? null },
+        title: `Off-cycle ${input.paymentType}: ${label}`,
+      });
+      if (instanceId) {
+        result = await client.query("UPDATE employee_offcycle_payments SET approval_status = 'pending' WHERE id = $1 RETURNING *", [result.rows[0].id]);
+      }
       const view = rowToView(result.rows[0]);
       await this.audit.record(client, claims, {
         companyId: claims.company_id ?? null,
@@ -145,7 +202,7 @@ export class EmployeeOffCyclePaymentsService {
     employeeId: string
   ): Promise<EmployeeOffCyclePaymentView[]> {
     const result = await client.query(
-      "SELECT * FROM employee_offcycle_payments WHERE payroll_run_id = $1 AND employee_id = $2 AND status = 'pending' ORDER BY created_at ASC",
+      "SELECT * FROM employee_offcycle_payments WHERE payroll_run_id = $1 AND employee_id = $2 AND status = 'pending' AND approval_status IN ('not_required', 'approved') ORDER BY created_at ASC",
       [payrollRunId, employeeId]
     );
     return result.rows.map(rowToView);

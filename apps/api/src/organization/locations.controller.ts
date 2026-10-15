@@ -6,6 +6,7 @@ import { LocationsService } from "./locations.service";
 import { CreateLocationDto } from "./dto/create-location.dto";
 import { UpdateLocationDto } from "./dto/update-location.dto";
 import { MoveLocationDto } from "./dto/move-location.dto";
+import { SetStatutoryJurisdictionDto } from "./dto/set-statutory-jurisdiction.dto";
 
 /**
  * Any real session (SessionGuard) can call these — LocationsService's own
@@ -43,6 +44,11 @@ export class LocationsController {
   @Get(":id/history")
   getHistory(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
     return this.locations.getHistory(claims, id);
+  }
+
+  @Patch(":id/statutory-jurisdiction")
+  setStatutoryJurisdiction(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: SetStatutoryJurisdictionDto) {
+    return this.locations.setStatutoryJurisdiction(claims, id, dto.statutoryJurisdiction ?? null);
   }
 
   @Patch(":id")

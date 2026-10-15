@@ -1,3 +1,4 @@
+import { scrubStaleHireDrafts } from "./draft-sensitive-data";
 import { Pool } from "pg";
 import { BadRequestException, ConflictException } from "@nestjs/common";
 import { DatabaseService } from "../../database/database.service";
@@ -130,7 +131,7 @@ describe("HiringProcessService", () => {
     expect(requiredCards).toEqual(["personal_identity", "employment", "organization_assignment", "review_completion"]);
 
     const cardPayloads: Record<string, Record<string, unknown>> = {
-      personal_identity: { firstName: "Bilal", lastName: "Ahmed", cnic: `${Date.now()}-HIRE` },
+      personal_identity: { firstName: "Bilal", lastName: "Ahmed", cnic: `${Date.now()}` },
       employment: { employmentType: "permanent", dateOfJoining: "2026-01-01" },
       organization_assignment: { note: "HQ" },
       review_completion: { reviewed: true },
@@ -445,7 +446,8 @@ describe("HiringProcessService", () => {
         return { employeeCount: emp.rowCount, proc: proc.rows[0] };
       });
       expect(after.employeeCount).toBe(0);
-      expect(after.proc).toEqual({ status: "ready_for_completion", employee_id: null });
+      // CFG-08: the rolled-back completion is recorded as a retryable "failed" state
+      expect(after.proc).toEqual({ status: "failed", employee_id: null });
     });
 
     it("concurrent completions of the same process create exactly one employee and both callers see 'hired'", async () => {
@@ -533,7 +535,7 @@ describe("HiringProcessService", () => {
       await hiring.saveCard(hrAdminClaims, process.id, "organization_assignment", { data: { orgUnitId: orgUnit } });
       await hiring.saveCard(hrAdminClaims, process.id, "compensation", { data: { monthlySalary: 150000 } });
       await hiring.saveCard(hrAdminClaims, process.id, "payment_bank", {
-        data: { paymentMethod: "bank_transfer", bankName: "HBL", accountNumber: "1234567890", iban: "PK00HABB0000123456789" },
+        data: { paymentMethod: "bank_transfer", bankName: "HBL", accountNumber: "1234567890", iban: "PK22HABB0000123456789012" },
       });
       await hiring.saveCard(hrAdminClaims, process.id, "cost_allocation", {
         data: {
@@ -781,6 +783,84 @@ describe("HiringProcessService", () => {
 
       const completed = await hiringWithCustomFields.complete(hrAdminClaims, process.id);
       expect(completed.status).toBe("hired");
+    });
+  });
+
+  describe("sensitive draft answers (SEC-04)", () => {
+    const rawCardData = (processId: string, cardKey: string) =>
+      db.withClaims(FIXTURE_CLAIMS, async (client) =>
+        (await client.query("SELECT data FROM hire_process_card_data WHERE hire_process_id = $1 AND card_key = $2", [processId, cardKey])).rows[0]?.data
+      );
+
+    it("stores CNIC / DOB / bank / salary encrypted in the card jsonb, returns them decrypted, leaves other fields readable", async () => {
+      const process = await hiring.start(hrAdminClaims);
+      await hiring.saveCard(hrAdminClaims, process.id, "personal_identity", {
+        data: { firstName: "Sana", lastName: "Mir", cnic: "35202-5555555-5", dateOfBirth: "1992-03-04" },
+      });
+      await hiring.saveCard(hrAdminClaims, process.id, "compensation", { data: { monthlySalary: 123456, currency: "PKR" } });
+      await hiring.saveCard(hrAdminClaims, process.id, "payment_bank", { data: { bankName: "HBL", accountNumber: "9988776655", iban: "PK93HABB0000000000000001" } });
+
+      for (const [card, secret] of [
+        ["personal_identity", "35202-5555555-5"],
+        ["personal_identity", "1992-03-04"],
+        ["compensation", "123456"],
+        ["payment_bank", "9988776655"],
+        ["payment_bank", "PK93HABB0000000000000001"],
+      ] as const) {
+        const raw = await rawCardData(process.id, card);
+        expect(JSON.stringify(raw)).not.toContain(secret);
+      }
+      const rawIdentity = await rawCardData(process.id, "personal_identity");
+      expect(rawIdentity.firstName).toBe("Sana"); // non-sensitive stays plain
+      expect(String(rawIdentity.cnic)).toMatch(/^enc:v1:/);
+
+      const viaApi = await hiring.getCardData(hrAdminClaims, process.id, "personal_identity");
+      expect(viaApi?.data).toMatchObject({ cnic: "35202-5555555-5", dateOfBirth: "1992-03-04" });
+      const comp = await hiring.getCardData(hrAdminClaims, process.id, "compensation");
+      expect(comp?.data.monthlySalary).toBe(123456); // number type survives the round trip
+    });
+
+    it("scrubs the sensitive draft values when the hire is cancelled", async () => {
+      const process = await hiring.start(hrAdminClaims);
+      await hiring.saveCard(hrAdminClaims, process.id, "personal_identity", { data: { firstName: "Gone", lastName: "Soon", cnic: "35202-6666666-6" } });
+      await hiring.cancel(hrAdminClaims, process.id, (await hiring.get(hrAdminClaims, process.id)).revision);
+      const raw = await rawCardData(process.id, "personal_identity");
+      expect(raw.cnic).toBeUndefined();
+      expect(raw.firstName).toBe("Gone");
+    });
+
+    it("scrubs the sensitive draft values on completion, after copying them (encrypted) onto the employee", async () => {
+      let process = await hiring.start(hrAdminClaims);
+      const payloads: Record<string, Record<string, unknown>> = {
+        personal_identity: { firstName: "Done", lastName: "Deal", cnic: `35202-${String(Date.now() % 10000000).padStart(7, "0")}-7` },
+        employment: { employmentType: "permanent", dateOfJoining: "2026-01-01" },
+        organization_assignment: { note: "HQ" },
+        review_completion: { reviewed: true },
+      };
+      for (let i = 0; i < process.cards.length; i++) {
+        const card = process.cards[i];
+        if (payloads[card.cardKey]) await hiring.saveCard(hrAdminClaims, process.id, card.cardKey, { data: payloads[card.cardKey] });
+        process = await hiring.get(hrAdminClaims, process.id);
+        if (i < process.cards.length - 1) process = await hiring.next(hrAdminClaims, process.id, process.revision);
+      }
+      process = await hiring.next(hrAdminClaims, process.id, process.revision);
+      const completed = await hiring.complete(hrAdminClaims, process.id);
+      expect((await rawCardData(process.id, "personal_identity")).cnic).toBeUndefined();
+      const emp = await db.withClaims(FIXTURE_CLAIMS, async (c) => (await c.query("SELECT cnic FROM employees WHERE id = $1", [completed.employeeId])).rows[0]);
+      expect(String(emp.cnic)).toMatch(/^enc:v1:/);
+    });
+
+    it("the stale-draft sweep scrubs old untouched drafts and leaves fresh ones alone", async () => {
+      const stale = await hiring.start(hrAdminClaims);
+      const fresh = await hiring.start(hrAdminClaims);
+      for (const p of [stale, fresh]) {
+        await hiring.saveCard(hrAdminClaims, p.id, "personal_identity", { data: { firstName: "S", lastName: "W", cnic: "35202-7777777-7" } });
+      }
+      await db.withClaims(FIXTURE_CLAIMS, (c) => c.query("UPDATE hire_processes SET updated_at = now() - interval '45 days' WHERE id = $1", [stale.id]));
+      const scrubbed = await db.withClaims({ is_platform_admin: false, is_service: true, company_id: null, sub: "sweep" }, (c) => scrubStaleHireDrafts(c, 30));
+      expect(scrubbed).toBeGreaterThanOrEqual(1);
+      expect((await rawCardData(stale.id, "personal_identity")).cnic).toBeUndefined();
+      expect(String((await rawCardData(fresh.id, "personal_identity")).cnic)).toMatch(/^enc:v1:/);
     });
   });
 });

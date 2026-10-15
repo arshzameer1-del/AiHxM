@@ -12,13 +12,15 @@ import type {
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { AttendanceCorrectionForm } from "./AttendanceCorrectionForm";
+import { MyAttendanceDays } from "./MyAttendanceDays";
+import { MyTimesheet } from "./MyTimesheet";
 import { LeaveRequestForm, OverlapNotice } from "./LeaveRequestForm";
 import {
   ATTENDANCE_STATUS_LABELS,
   ATTENDANCE_STATUS_STYLES,
   CORRECTION_STATUS_LABELS,
   CORRECTION_STATUS_STYLES,
-  LEAVE_TYPE_LABELS,
+  leaveTypeLabel,
   STATUS_LABELS,
   STATUS_STYLES,
 } from "./leaveLabels";
@@ -227,7 +229,7 @@ function MyLeaveCard({
                 <CalendarDays size={16} strokeWidth={1.75} />
               </div>
               <div>
-                <div className="text-xs uppercase tracking-wide text-label-tertiary">{LEAVE_TYPE_LABELS[b.leaveType]}</div>
+                <div className="text-xs uppercase tracking-wide text-label-tertiary">{(b.leaveTypeName ?? leaveTypeLabel(b.leaveType))}</div>
                 <div className="font-semibold text-sm tabular-nums">
                   {b.remainingDays} <span className="text-label-tertiary font-normal">/ {b.entitledDays} days</span>
                 </div>
@@ -255,6 +257,8 @@ function MyLeaveCard({
           <OverlapNotice warnings={overlapWarnings} />
         </div>
       )}
+      {canClock && <MyAttendanceDays employeeId={employeeId} refreshKey={refreshKey} />}
+      {canClock && <MyTimesheet employeeId={employeeId} />}
     </section>
   );
 }
@@ -310,7 +314,36 @@ function RequestRow({
     }
   }
 
+  async function requestCancellation() {
+    const reason = window.prompt("Why does this approved leave need to be cancelled?");
+    if (!reason || reason.trim().length < 3) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.requestLeaveCancellation(request.id, { reason: reason.trim() });
+      onChanged();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not request the cancellation.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function decideCancellation(decision: "approved" | "declined") {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.decideLeaveCancellation(request.id, { decision });
+      onChanged();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not record this decision.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const canActOnThis = request.status === "pending" && (canDecide || canCancel);
+  const cancellationPending = request.status === "approved" && request.cancellationStatus === "requested";
 
   return (
     <div className="bg-card rounded-card p-4 shadow-sm">
@@ -321,10 +354,20 @@ function RequestRow({
             {request.isOnBehalf && <span className="text-xs text-label-tertiary ml-1.5">(on behalf)</span>}
           </div>
           <div className="text-sm text-label-secondary mt-0.5">
-            {LEAVE_TYPE_LABELS[request.leaveType]} · {request.startDate} – {request.endDate} · {request.daysRequested}{" "}
+            {leaveTypeLabel(request.leaveType)} · {request.startDate} – {request.endDate} · {request.daysRequested}{" "}
             day{request.daysRequested === 1 ? "" : "s"}
           </div>
+          {request.dayPart !== "full" && (
+            <div className="text-xs text-label-tertiary mt-1">{request.dayPart === "first_half" ? "First half of the day" : "Second half of the day"}</div>
+          )}
           {request.reason && <div className="text-xs text-label-tertiary mt-1">&ldquo;{request.reason}&rdquo;</div>}
+          {request.status === "rejected" && request.rejectionReason && (
+            <div className="text-xs text-danger mt-1">Rejected: {request.rejectionReason}</div>
+          )}
+          {request.returnDate && request.status === "approved" && (
+            <div className="text-xs text-label-tertiary mt-1">Back on {request.returnDate}</div>
+          )}
+          {request.cancellationStatus === "declined" && <div className="text-xs text-label-tertiary mt-1">Cancellation request declined</div>}
         </div>
         <span
           className={`shrink-0 inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold ${STATUS_STYLES[request.status]}`}
@@ -332,6 +375,31 @@ function RequestRow({
           {STATUS_LABELS[request.status]}
         </span>
       </div>
+
+      {request.status === "approved" && !request.cancellationStatus && (
+        <div className="mt-3 pt-3 border-t border-black/5 flex items-center gap-3">
+          <button onClick={requestCancellation} disabled={busy} className="text-xs font-semibold text-label-secondary underline disabled:opacity-50">
+            Request cancellation
+          </button>
+          {error && <span className="text-danger text-xs">{error}</span>}
+        </div>
+      )}
+      {cancellationPending && (
+        <div className="mt-3 pt-3 border-t border-black/5 space-y-2">
+          <div className="text-xs text-label-secondary">Cancellation requested: {request.cancellationReason}</div>
+          {canDecide && (
+            <div className="flex gap-3">
+              <button onClick={() => decideCancellation("approved")} disabled={busy} className="text-xs font-semibold rounded-lg px-3 py-1.5 text-white bg-success disabled:opacity-50">
+                Approve cancellation
+              </button>
+              <button onClick={() => decideCancellation("declined")} disabled={busy} className="text-xs font-semibold rounded-lg px-3 py-1.5 bg-black/5 disabled:opacity-50">
+                Decline
+              </button>
+            </div>
+          )}
+          {error && <div className="text-danger text-xs">{error}</div>}
+        </div>
+      )}
 
       {canActOnThis && (
         <div className="mt-3 pt-3 border-t border-black/5">

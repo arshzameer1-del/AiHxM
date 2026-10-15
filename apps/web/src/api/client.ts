@@ -1,4 +1,76 @@
 import type {
+  BenefitContributionView,
+  BenefitEligibilityView,
+  BenefitEnrolmentView,
+  BenefitPlanView,
+  DryRunPayrollInputRequest,
+  EndBenefitEnrolmentRequest,
+  EnrolBenefitRequest,
+  GeneratedDocumentView,
+  GeneratePayrollJournalRequest,
+  GenerateSalaryCertificateRequest,
+  GenerateTaxCertificateRequest,
+  PayrollAccountingPreviewView,
+  PayrollCostingSummaryView,
+  PayrollDashboardView,
+  PayrollDocumentPlaceholderView,
+  PayrollDocumentSettingsView,
+  PayrollDocumentType,
+  PayrollEventCatalogEntry,
+  PayrollGlMappingView,
+  PayrollInputBatchView,
+  PayrollInputRowView,
+  PayrollInputTemplateView,
+  PayrollJournalTypeView,
+  PayrollJournalView,
+  PostPayrollJournalRequest,
+  UpdatePayrollDocumentSettingsRequest,
+  UpdatePayrollJournalTypeRequest,
+  UpsertBenefitPlanRequest,
+  UpsertPayrollGlMappingRequest,
+} from "@aihxm/shared-types";
+import type {
+  CompanyWorkTimeDefaultView,
+  GenerateLoanScheduleRequest,
+  HoldEmployeeLoanRequest,
+  LoanScheduleRowView,
+  LoanTypeView,
+  ResumeEmployeeLoanRequest,
+  SetCompanyWorkTimeDefaultRequest,
+  SettleEmployeeLoanRequest,
+  SkipLoanInstallmentsRequest,
+  UpsertLoanTypeRequest,
+  CreateHolidayCalendarRequest,
+  EmployeeWorkProfileView,
+  HolidayCalendarView,
+  OvertimePolicyView,
+  RollHolidaysForwardRequest,
+  ScopedOvertimePolicyView,
+  SetOvertimePolicyRequest,
+  SetScopedOvertimePolicyRequest,
+  SetWorkProfileRequest,
+  UpdateHolidayCalendarRequest,
+  AttendanceDailyResultView,
+  AttendanceDeviceView,
+  AttendanceDeviceWithKey,
+  AttendancePeriodSummary,
+  CreateAttendanceDeviceRequest,
+  DecideTimesheetRequest,
+  DeviceEnrollmentView,
+  EnrollDeviceUserRequest,
+  OverrideAttendanceDayRequest,
+  RawPunchView,
+  SaveTimesheetEntriesRequest,
+  TimesheetStatus,
+  TimesheetView,
+  UpdateAttendanceDeviceRequest,
+  AdjustLeaveBalanceRequest,
+  CreateLeaveTypeRequest,
+  DecideLeaveCancellationRequest,
+  LeaveLedgerEntryView,
+  LeaveTypeView,
+  RequestLeaveCancellationRequest,
+  UpdateLeaveTypeRequest,
   AddPayrollAreaScopeLinkRequest,
   ApplicationStage,
   ApplicationView,
@@ -54,6 +126,45 @@ import type {
   CreatePayrollAreaRequest,
   CreatePayrollRunRequest,
   ReversePayrollRunRequest,
+  PayrollRunValidationView,
+  PayrollCalendarView,
+  PayslipDetailView,
+  PayrollYtdView,
+  CreatePayrollCalendarRequest,
+  UpdatePayrollCalendarRequest,
+  GeneratePayrollPeriodsRequest,
+  GeneratePayrollPeriodsResponse,
+  PayrollPeriodStatus,
+  PayrollPeriodView,
+  PayrollRunPopulationView,
+  PayrollExceptionView,
+  PayrollRetroResultView,
+  PayrollRetroStatus,
+  TaxYearView,
+  CreateTaxYearRequest,
+  TaxProfileView,
+  CreateTaxProfileRequest,
+  UpdateTaxProfileRequest,
+  TaxProfileSlabInput,
+  TaxExemptionInput,
+  TaxCreditInput,
+  EmployeeTaxProfileView,
+  SetEmployeeTaxProfileRequest,
+  DetectPayrollRetroRequest,
+  DetectPayrollRetroResponse,
+  IncludePayrollRetroRequest,
+  PayrollCalculationProgressView,
+  RetryPayrollExceptionResponse,
+  StartPayrollCalculationResponse,
+  ClosePayrollRunRequest,
+  ReopenPayrollRunRequest,
+  CancelPayrollRunRequest,
+  PayrollRunEventView,
+  PayrollReversalView,
+  PayrollRunReopenView,
+  PayrollRuleSnapshotView,
+  PayrollOverrideView,
+  SetPayrollOverrideRequest,
   CreatePlatformAdminRequest,
   CreateReviewCycleRequest,
   CreateShiftRequest,
@@ -83,6 +194,7 @@ import type {
   InitiateOffboardingRequest,
   IntegrationProviderKey,
   JobHistoryEntryView,
+  JobRequisitionAction,
   JobRequisitionView,
   LeaveBalanceView,
   LeavePolicyVersionView,
@@ -109,6 +221,12 @@ import type {
   UpdatePositionRequest,
   AssignPositionRequest,
   PositionStatus,
+  PositionIncumbentView,
+  PositionBudgetView,
+  PositionRelationshipView,
+  PositionPlanningSummaryRow,
+  UpsertPositionBudgetRequest,
+  CreatePositionRelationshipRequest,
   PositionVersionView,
   PositionView,
   AssignmentStatus,
@@ -154,6 +272,22 @@ import type {
   PayrollCostCenterBreakdownView,
   PayrollDisbursementSettingsView,
   PayrollPaymentBatchView,
+  PayrollPaymentItemView,
+  PayrollSchemeDefinitionView,
+  UpsertPayrollSchemeRequest,
+  PayrollSettlementSettingsView,
+  UpdatePayrollSettlementSettingsRequest,
+  EmployeeSchemeAccountView,
+  SchemeLedgerEntryView,
+  PostSchemeLedgerEntryRequest,
+  FinalSettlementView,
+  FinalSettlementStatus,
+  PayrollReconciliationKind,
+  PayrollReconciliationView,
+  BankFileFormatView,
+  UpsertBankFileFormatRequest,
+  AcknowledgePaymentBatchRequest,
+  ReissuePaymentItemsRequest,
   PayrollRunView,
   PayrollSettingsView,
   PayslipView,
@@ -341,6 +475,53 @@ import type {
   AddCardCustomFieldRequest,
   CustomFieldDefinition,
 } from "@aihxm/shared-types";
+import type {
+  ApplicationTimelineView,
+  CandidateDocumentType,
+  CandidateDocumentView,
+  CandidateDuplicateMatch,
+  CandidateTimelineEntry,
+  CompetencyView,
+  CreateDevelopmentPlanRequest,
+  CreatePreEmploymentCheckRequest,
+  DevelopmentItemInput,
+  DevelopmentPlanView,
+  FeedbackRequestView,
+  FeedbackView,
+  GenerateOfferLetterRequest,
+  GiveFeedbackRequest,
+  GoalEvidenceView,
+  GoalPlanRequest,
+  GoalPlanView,
+  GoalUpdateView,
+  InterviewFeedbackView,
+  InterviewView,
+  OfferLetterView,
+  PerformanceSettingsView,
+  PreEmploymentCheckView,
+  RecruitmentCalendarEntry,
+  RecruitmentEventView,
+  RecruitmentSettingsView,
+  ReopenGoalPlanRequest,
+  RequestFeedbackRequest,
+  RespondFeedbackRequest,
+  ReviewCyclePhaseView,
+  ReviewPhaseKey,
+  ReviewRatingView,
+  ReviewScorecardView,
+  ScheduleInterviewRequest,
+  SetReviewCyclePhasesRequest,
+  SetReviewRatingsRequest,
+  SubmitInterviewFeedbackRequest,
+  UpdateCandidateRequest,
+  UpdateDevelopmentItemRequest,
+  UpdateDevelopmentPlanRequest,
+  UpdateInterviewRequest,
+  UpdatePreEmploymentCheckRequest,
+  UpdateRecruitmentSettingsRequest,
+  UpsertCompetencyRequest,
+  UpsertRecruitmentEventRequest,
+} from "@aihxm/shared-types";
 
 const TOKEN_KEY = "aihxm.platformAdminToken";
 
@@ -462,7 +643,9 @@ export class ApiError extends Error {
      * `undefined` for them. Lets a caller distinguish "needs step-up" from
      * an ordinary 403 without string-matching the message.
      */
-    public code?: string
+    public code?: string,
+    /** The parsed JSON error body, when there was one (e.g. the duplicate-candidate matches on a 409). */
+    public body?: Record<string, unknown>
   ) {
     super(message);
   }
@@ -535,14 +718,16 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (!res.ok) {
     let message = `Request failed (${res.status})`;
     let code: string | undefined;
+    let errorBody: Record<string, unknown> | undefined;
     try {
       const body = await res.json();
       message = body.message ?? message;
       code = typeof body.code === "string" ? body.code : undefined;
+      errorBody = body && typeof body === "object" ? body : undefined;
     } catch {
       // response body wasn't JSON — keep the generic message
     }
-    throw new ApiError(res.status, Array.isArray(message) ? message.join(", ") : message, code);
+    throw new ApiError(res.status, Array.isArray(message) ? message.join(", ") : message, code, errorBody);
   }
 
   // A void-returning Nest handler (every DELETE/unassign this project has —
@@ -1328,6 +1513,18 @@ export const api = {
 
   getJobHistory: (id: string) => request<JobVersionView[]>(`/organization/jobs/${id}/history`),
 
+  listPositionIncumbents: (id: string, includeEnded = false) =>
+    request<PositionIncumbentView[]>(`/organization/positions/${id}/incumbents${includeEnded ? "?includeEnded=true" : ""}`),
+  unassignPositionIncumbent: (id: string, employeeId?: string) =>
+    request<PositionView>(`/organization/positions/${id}/unassign`, { method: "POST", body: JSON.stringify({ employeeId }) }),
+  listPositionBudgets: (id: string) => request<PositionBudgetView[]>(`/organization/positions/${id}/budgets`),
+  upsertPositionBudget: (id: string, fiscalYear: number, input: UpsertPositionBudgetRequest) =>
+    request<PositionBudgetView>(`/organization/positions/${id}/budgets/${fiscalYear}`, { method: "PUT", body: JSON.stringify(input) }),
+  listPositionRelationships: (id: string) => request<PositionRelationshipView[]>(`/organization/positions/${id}/relationships`),
+  createPositionRelationship: (id: string, input: CreatePositionRelationshipRequest) =>
+    request<PositionRelationshipView>(`/organization/positions/${id}/relationships`, { method: "POST", body: JSON.stringify(input) }),
+  positionPlanningSummary: (fiscalYear?: number) =>
+    request<PositionPlanningSummaryRow[]>(`/organization/positions/planning/summary${fiscalYear ? `?fiscalYear=${fiscalYear}` : ""}`),
   listPositions: (filters?: { status?: PositionStatus; orgUnitId?: string }) => {
     const params = new URLSearchParams();
     if (filters?.status) params.set("status", filters.status);
@@ -1601,6 +1798,15 @@ export const api = {
 
   updateEmployeePaymentAccount: (id: string, patch: UpdateEmployeePaymentAccountRequest) =>
     request<EmployeePaymentAccountView>(`/employees/payment-accounts/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  approveEmployeePaymentAccount: (id: string) =>
+    request<EmployeePaymentAccountView>(`/employees/payment-accounts/${id}/approve`, { method: "POST" }),
+
+  rejectEmployeePaymentAccount: (id: string, reason: string) =>
+    request<EmployeePaymentAccountView>(`/employees/payment-accounts/${id}/reject`, { method: "POST", body: JSON.stringify({ reason }) }),
+
+  verifyEmployeePaymentAccount: (id: string, status: "unverified" | "verified" | "failed") =>
+    request<EmployeePaymentAccountView>(`/employees/payment-accounts/${id}/verify`, { method: "POST", body: JSON.stringify({ status }) }),
 
   endEmployeePaymentAccount: (id: string) =>
     request<EmployeePaymentAccountView>(`/employees/payment-accounts/${id}/end`, { method: "POST" }),
@@ -1984,7 +2190,35 @@ export const api = {
   // Unlike Shift Management's self/team/all split, there's a single view
   // permission here (holiday.view.all) granted broadly to every role —
   // the calendar is non-sensitive, company-wide data everyone sees.
-  listHolidays: (year?: string) => request<HolidayView[]>(`/holidays${year ? `?year=${year}` : ""}`),
+  listHolidays: (year?: string, calendarId?: string) => {
+    const qs = new URLSearchParams();
+    if (year) qs.set("year", year);
+    if (calendarId) qs.set("calendarId", calendarId);
+    const q = qs.toString();
+    return request<HolidayView[]>(`/holidays${q ? `?${q}` : ""}`);
+  },
+
+  // --- TLM-10 holiday calendars, TLM-07 overtime policies, TLM-08 work profile ---
+  listHolidayCalendars: (includeArchived = false) =>
+    request<HolidayCalendarView[]>(`/holiday-calendars${includeArchived ? "?includeArchived=true" : ""}`),
+  createHolidayCalendar: (input: CreateHolidayCalendarRequest) =>
+    request<HolidayCalendarView>("/holiday-calendars", { method: "POST", body: JSON.stringify(input) }),
+  updateHolidayCalendar: (id: string, input: UpdateHolidayCalendarRequest) =>
+    request<HolidayCalendarView>(`/holiday-calendars/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+  rollHolidaysForward: (input: RollHolidaysForwardRequest) =>
+    request<{ created: number; skipped: number; tentative: number }>("/holidays/roll-forward", { method: "POST", body: JSON.stringify(input) }),
+  getOvertimePolicy: () => request<OvertimePolicyView>("/overtime-policy"),
+  setOvertimePolicy: (input: SetOvertimePolicyRequest) =>
+    request<OvertimePolicyView>("/overtime-policy", { method: "PATCH", body: JSON.stringify(input) }),
+  listOvertimePolicies: () => request<ScopedOvertimePolicyView[]>("/overtime-policies"),
+  setScopedOvertimePolicy: (input: SetScopedOvertimePolicyRequest) =>
+    request<ScopedOvertimePolicyView>("/overtime-policies/scoped", { method: "PUT", body: JSON.stringify(input) }),
+  endScopedOvertimePolicy: (id: string) => request<void>(`/overtime-policies/${id}`, { method: "DELETE" }),
+  getWorkProfile: (employeeId: string, asOf?: string) =>
+    request<EmployeeWorkProfileView | null>(`/employees/${employeeId}/work-profile${asOf ? `?asOf=${asOf}` : ""}`),
+  workProfileHistory: (employeeId: string) => request<EmployeeWorkProfileView[]>(`/employees/${employeeId}/work-profile/history`),
+  setWorkProfile: (employeeId: string, input: SetWorkProfileRequest) =>
+    request<EmployeeWorkProfileView>(`/employees/${employeeId}/work-profile`, { method: "PUT", body: JSON.stringify(input) }),
 
   createHoliday: (input: CreateHolidayRequest) =>
     request<HolidayView>("/holidays", { method: "POST", body: JSON.stringify(input) }),
@@ -2082,6 +2316,70 @@ export const api = {
     request<LeaveRequestView>(`/leave-requests/${id}/decision`, { method: "PATCH", body: JSON.stringify(input) }),
 
   cancelLeaveRequest: (id: string) => request<void>(`/leave-requests/${id}/cancel`, { method: "POST" }),
+
+  // --- TLM-01/02/03 -----------------------------------------------------
+  listLeaveTypes: (includeInactive = false) =>
+    request<LeaveTypeView[]>(`/leave-types${includeInactive ? "?includeInactive=true" : ""}`),
+  createLeaveType: (input: CreateLeaveTypeRequest) =>
+    request<LeaveTypeView>("/leave-types", { method: "POST", body: JSON.stringify(input) }),
+  updateLeaveType: (id: string, input: UpdateLeaveTypeRequest) =>
+    request<LeaveTypeView>(`/leave-types/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+  leaveLedger: (employeeId: string, filter?: { leaveType?: string; year?: number }) => {
+    const qs = new URLSearchParams();
+    if (filter?.leaveType) qs.set("leaveType", filter.leaveType);
+    if (filter?.year) qs.set("year", String(filter.year));
+    const q = qs.toString();
+    return request<LeaveLedgerEntryView[]>(`/employees/${employeeId}/leave-ledger${q ? `?${q}` : ""}`);
+  },
+  adjustLeaveBalance: (input: AdjustLeaveBalanceRequest) =>
+    request<{ entitledDays: number; usedDays: number; remainingDays: number }>("/leave-balances/adjustments", { method: "POST", body: JSON.stringify(input) }),
+  requestLeaveCancellation: (id: string, input: RequestLeaveCancellationRequest) =>
+    request<LeaveRequestView>(`/leave-requests/${id}/cancellation-request`, { method: "POST", body: JSON.stringify(input) }),
+  decideLeaveCancellation: (id: string, input: DecideLeaveCancellationRequest) =>
+    request<LeaveRequestView>(`/leave-requests/${id}/cancellation-decision`, { method: "PATCH", body: JSON.stringify(input) }),
+
+  // --- TLM-04/05/06 -----------------------------------------------------
+  attendanceResults: (employeeId: string, from: string, to: string) =>
+    request<AttendanceDailyResultView[]>(`/employees/${employeeId}/attendance-results?from=${from}&to=${to}`),
+  attendanceSummary: (employeeId: string, from: string, to: string) =>
+    request<AttendancePeriodSummary>(`/employees/${employeeId}/attendance-summary?from=${from}&to=${to}`),
+  overrideAttendanceDay: (input: OverrideAttendanceDayRequest) =>
+    request<AttendanceDailyResultView>("/attendance-results/override", { method: "POST", body: JSON.stringify(input) }),
+  listAttendanceDevices: () => request<AttendanceDeviceView[]>("/attendance-devices"),
+  createAttendanceDevice: (input: CreateAttendanceDeviceRequest) =>
+    request<AttendanceDeviceWithKey>("/attendance-devices", { method: "POST", body: JSON.stringify(input) }),
+  updateAttendanceDevice: (id: string, input: UpdateAttendanceDeviceRequest) =>
+    request<AttendanceDeviceView>(`/attendance-devices/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+  rotateAttendanceDeviceKey: (id: string) => request<AttendanceDeviceWithKey>(`/attendance-devices/${id}/rotate-key`, { method: "POST" }),
+  listDeviceEnrollments: (id: string) => request<DeviceEnrollmentView[]>(`/attendance-devices/${id}/enrollments`),
+  enrollDeviceUser: (id: string, input: EnrollDeviceUserRequest) =>
+    request<{ enrollment: DeviceEnrollmentView; reprocessed: number }>(`/attendance-devices/${id}/enrollments`, { method: "POST", body: JSON.stringify(input) }),
+  revokeDeviceEnrollment: (id: string, enrollmentId: string) =>
+    request<void>(`/attendance-devices/${id}/enrollments/${enrollmentId}`, { method: "DELETE" }),
+  listAttendancePunches: (filter?: { deviceId?: string; status?: string; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (filter?.deviceId) qs.set("deviceId", filter.deviceId);
+    if (filter?.status) qs.set("status", filter.status);
+    if (filter?.limit) qs.set("limit", String(filter.limit));
+    const q = qs.toString();
+    return request<RawPunchView[]>(`/attendance-punches${q ? `?${q}` : ""}`);
+  },
+  timesheetForWeek: (employeeId: string, date: string) =>
+    request<TimesheetView>(`/employees/${employeeId}/timesheet?date=${date}`),
+  listTimesheets: (filter?: { employeeId?: string; status?: TimesheetStatus; forApproval?: boolean }) => {
+    const qs = new URLSearchParams();
+    if (filter?.employeeId) qs.set("employeeId", filter.employeeId);
+    if (filter?.status) qs.set("status", filter.status);
+    if (filter?.forApproval) qs.set("forApproval", "true");
+    const q = qs.toString();
+    return request<TimesheetView[]>(`/timesheets${q ? `?${q}` : ""}`);
+  },
+  saveTimesheetEntries: (id: string, input: SaveTimesheetEntriesRequest) =>
+    request<TimesheetView>(`/timesheets/${id}/entries`, { method: "PUT", body: JSON.stringify(input) }),
+  submitTimesheet: (id: string) => request<TimesheetView>(`/timesheets/${id}/submit`, { method: "POST" }),
+  decideTimesheet: (id: string, input: DecideTimesheetRequest) =>
+    request<TimesheetView>(`/timesheets/${id}/decision`, { method: "PATCH", body: JSON.stringify(input) }),
+  cancelTimesheet: (id: string) => request<TimesheetView>(`/timesheets/${id}/cancel`, { method: "POST" }),
 
   getLeaveBalances: (employeeId: string) =>
     request<LeaveBalanceView[]>(`/employees/${employeeId}/leave-balances`),
@@ -2230,6 +2528,8 @@ export const api = {
 
   getRequisition: (id: string) => request<JobRequisitionView>(`/job-requisitions/${id}`),
 
+  requisitionAction: (id: string, action: JobRequisitionAction, reason?: string) =>
+    request<JobRequisitionView>(`/job-requisitions/${id}/actions/${action}`, { method: "POST", body: JSON.stringify({ reason }) }),
   submitRequisition: (id: string) =>
     request<JobRequisitionView>(`/job-requisitions/${id}/submit`, { method: "POST" }),
 
@@ -2260,24 +2560,104 @@ export const api = {
   // "accepted") is the only path that reaches "hired". The UI only needs
   // to offer the buttons that make sense for the current stage; the
   // server is what actually enforces the rest.
-  moveApplicationStage: (id: string, stage: ApplicationStage) =>
+  moveApplicationStage: (id: string, stage: ApplicationStage, reason?: string) =>
     request<ApplicationView>(`/applications/${id}/stage`, {
       method: "PATCH",
-      body: JSON.stringify({ stage } satisfies MoveApplicationStageRequest),
+      body: JSON.stringify({ stage, reason } satisfies MoveApplicationStageRequest),
     }),
 
   extendOffer: (input: ExtendOfferRequest) =>
     request<OfferView>("/offers", { method: "POST", body: JSON.stringify(input) }),
 
-  rescindOffer: (id: string) => request<OfferView>(`/offers/${id}/rescind`, { method: "POST" }),
+  rescindOffer: (id: string, reason?: string) =>
+    request<OfferView>(`/offers/${id}/rescind`, { method: "POST", body: JSON.stringify({ reason }) }),
 
   // On "accepted" this creates a real Employee record (with a real
   // Employee Number) server-side in a separate transaction from the
   // offer/application status update — DecideOfferResponse.employee is
   // non-null only in that case, which is what the Pipeline UI uses to
   // show a "hired as employee #..." confirmation rather than assuming.
-  decideOffer: (id: string, decision: "accepted" | "declined") =>
-    request<DecideOfferResponse>(`/offers/${id}/decision`, { method: "PATCH", body: JSON.stringify({ decision }) }),
+  decideOffer: (id: string, decision: "accepted" | "declined", reason?: string) =>
+    request<DecideOfferResponse>(`/offers/${id}/decision`, { method: "PATCH", body: JSON.stringify({ decision, reason }) }),
+
+  // --- Step 11A (TAL-01..04): recruitment depth ---------------------------
+  checkCandidateDuplicates: (input: { nationalId?: string; email?: string; phone?: string }) =>
+    request<CandidateDuplicateMatch[]>("/candidates/duplicate-check", { method: "POST", body: JSON.stringify(input) }),
+  getCandidate: (id: string) => request<CandidateView>(`/candidates/${id}`),
+  updateCandidate: (id: string, input: UpdateCandidateRequest) =>
+    request<CandidateView>(`/candidates/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+  anonymiseCandidate: (id: string, reason: string) =>
+    request<CandidateView>(`/candidates/${id}/anonymise`, { method: "POST", body: JSON.stringify({ reason }) }),
+  getCandidateTimeline: (id: string) => request<CandidateTimelineEntry[]>(`/candidates/${id}/timeline`),
+  listCandidateDocuments: (id: string) => request<CandidateDocumentView[]>(`/candidates/${id}/documents`),
+  async uploadCandidateDocument(candidateId: string, docType: CandidateDocumentType, file: File): Promise<CandidateDocumentView> {
+    const token = getToken();
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("docType", docType);
+    const res = await fetch(`/api/candidates/${candidateId}/documents`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    });
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = await res.json();
+        message = Array.isArray(body.message) ? body.message.join(", ") : (body.message ?? message);
+      } catch {
+        // not JSON
+      }
+      throw new ApiError(res.status, message);
+    }
+    return res.json();
+  },
+  async downloadCandidateDocument(candidateId: string, documentId: string, fileName: string): Promise<void> {
+    const token = getToken();
+    const res = await fetch(`/api/candidates/${candidateId}/documents/${documentId}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new ApiError(res.status, `Request failed (${res.status})`);
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+  deleteCandidateDocument: (candidateId: string, documentId: string) =>
+    request<void>(`/candidates/${candidateId}/documents/${documentId}`, { method: "DELETE" }),
+  getRecruitmentSettings: () => request<RecruitmentSettingsView>("/recruitment/settings"),
+  updateRecruitmentSettings: (input: UpdateRecruitmentSettingsRequest) =>
+    request<RecruitmentSettingsView>("/recruitment/settings", { method: "PUT", body: JSON.stringify(input) }),
+  getApplicationTimeline: (id: string) => request<ApplicationTimelineView>(`/applications/${id}/timeline`),
+  listOffers: (applicationId?: string) => request<OfferView[]>(`/offers${applicationId ? `?applicationId=${applicationId}` : ""}`),
+  generateOfferLetter: (offerId: string, input: GenerateOfferLetterRequest = {}) =>
+    request<OfferLetterView>(`/offers/${offerId}/letters`, { method: "POST", body: JSON.stringify(input) }),
+  listOfferLetters: (offerId: string) => request<OfferLetterView[]>(`/offers/${offerId}/letters`),
+  scheduleInterview: (input: ScheduleInterviewRequest) =>
+    request<InterviewView>("/interviews", { method: "POST", body: JSON.stringify(input) }),
+  listInterviews: (applicationId?: string) => request<InterviewView[]>(`/interviews${applicationId ? `?applicationId=${applicationId}` : ""}`),
+  listMyInterviews: () => request<InterviewView[]>("/interviews/mine"),
+  updateInterview: (id: string, input: UpdateInterviewRequest) =>
+    request<InterviewView>(`/interviews/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+  submitInterviewFeedback: (id: string, input: SubmitInterviewFeedbackRequest) =>
+    request<InterviewFeedbackView>(`/interviews/${id}/feedback`, { method: "POST", body: JSON.stringify(input) }),
+  createPreEmploymentCheck: (input: CreatePreEmploymentCheckRequest) =>
+    request<PreEmploymentCheckView>("/pre-employment-checks", { method: "POST", body: JSON.stringify(input) }),
+  listPreEmploymentChecks: (applicationId: string) =>
+    request<PreEmploymentCheckView[]>(`/pre-employment-checks?applicationId=${applicationId}`),
+  updatePreEmploymentCheck: (id: string, input: UpdatePreEmploymentCheckRequest) =>
+    request<PreEmploymentCheckView>(`/pre-employment-checks/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+  listRecruitmentEvents: () => request<RecruitmentEventView[]>("/recruitment-events"),
+  createRecruitmentEvent: (input: UpsertRecruitmentEventRequest) =>
+    request<RecruitmentEventView>("/recruitment-events", { method: "POST", body: JSON.stringify(input) }),
+  updateRecruitmentEvent: (id: string, input: UpsertRecruitmentEventRequest) =>
+    request<RecruitmentEventView>(`/recruitment-events/${id}`, { method: "PUT", body: JSON.stringify(input) }),
+  addRecruitmentEventAttendee: (eventId: string, candidateId: string) =>
+    request<RecruitmentEventView>(`/recruitment-events/${eventId}/attendees`, { method: "POST", body: JSON.stringify({ candidateId }) }),
+  getRecruitmentCalendar: (from: string, to: string) =>
+    request<RecruitmentCalendarEntry[]>(`/recruitment-calendar?from=${from}&to=${to}`),
 
   // --- Task #52 (Decision #20): System Admin — workflow templates + role assignment ---
 
@@ -2370,6 +2750,61 @@ export const api = {
       body: JSON.stringify(input),
     }),
 
+  // --- Step 11B (TAL-05/06/07): performance depth -------------------------
+  listGoalUpdates: (goalId: string) => request<GoalUpdateView[]>(`/goals/${goalId}/updates`),
+  listGoalEvidence: (goalId: string) => request<GoalEvidenceView[]>(`/goals/${goalId}/evidence`),
+  addGoalEvidence: (goalId: string, input: { label: string; url: string }) =>
+    request<GoalEvidenceView>(`/goals/${goalId}/evidence`, { method: "POST", body: JSON.stringify(input) }),
+  removeGoalEvidence: (goalId: string, evidenceId: string) =>
+    request<{ removed: true }>(`/goals/${goalId}/evidence/${evidenceId}`, { method: "DELETE" }),
+  getGoalPlan: (reviewCycleId: string, employeeId: string) =>
+    request<GoalPlanView>(`/goal-plans?reviewCycleId=${reviewCycleId}&employeeId=${employeeId}`),
+  finaliseGoalPlan: (input: GoalPlanRequest) =>
+    request<GoalPlanView>("/goal-plans/finalise", { method: "POST", body: JSON.stringify(input) }),
+  reopenGoalPlan: (input: ReopenGoalPlanRequest) =>
+    request<GoalPlanView>("/goal-plans/reopen", { method: "POST", body: JSON.stringify(input) }),
+  getReviewCyclePhases: (cycleId: string) =>
+    request<{ phases: ReviewCyclePhaseView[]; currentPhase: ReviewPhaseKey | null }>(`/review-cycles/${cycleId}/phases`),
+  setReviewCyclePhases: (cycleId: string, input: SetReviewCyclePhasesRequest) =>
+    request<ReviewCycleView>(`/review-cycles/${cycleId}/phases`, { method: "PUT", body: JSON.stringify(input) }),
+  getPerformanceSettings: () => request<PerformanceSettingsView>("/performance/settings"),
+  updatePerformanceSettings: (input: { minRatersForAnonymity: number | null }) =>
+    request<PerformanceSettingsView>("/performance/settings", { method: "PUT", body: JSON.stringify(input) }),
+  listCompetencies: (includeInactive = false) => request<CompetencyView[]>(`/competencies${includeInactive ? "?includeInactive=true" : ""}`),
+  createCompetency: (input: UpsertCompetencyRequest) =>
+    request<CompetencyView>("/competencies", { method: "POST", body: JSON.stringify(input) }),
+  updateCompetency: (id: string, input: UpsertCompetencyRequest) =>
+    request<CompetencyView>(`/competencies/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+  setReviewRatings: (reviewId: string, input: SetReviewRatingsRequest) =>
+    request<ReviewRatingView[]>(`/performance-reviews/${reviewId}/ratings`, { method: "PUT", body: JSON.stringify(input) }),
+  getReviewScorecard: (reviewId: string) => request<ReviewScorecardView>(`/performance-reviews/${reviewId}/scorecard`),
+  giveFeedback: (input: GiveFeedbackRequest) => request<FeedbackView>("/feedback", { method: "POST", body: JSON.stringify(input) }),
+  listFeedbackAbout: (subjectEmployeeId: string) =>
+    request<{ items: FeedbackView[]; withheldAnonymousCount: number }>(`/feedback?subjectEmployeeId=${subjectEmployeeId}`),
+  listFeedbackGiven: () => request<FeedbackView[]>("/feedback/given"),
+  requestFeedback: (reviewId: string, input: RequestFeedbackRequest) =>
+    request<FeedbackRequestView[]>(`/performance-reviews/${reviewId}/feedback-requests`, { method: "POST", body: JSON.stringify(input) }),
+  listFeedbackRequestsForReview: (reviewId: string) =>
+    request<FeedbackRequestView[]>(`/performance-reviews/${reviewId}/feedback-requests`),
+  listMyFeedbackRequests: () => request<Array<FeedbackRequestView & { subjectName: string }>>("/feedback-requests/mine"),
+  respondToFeedbackRequest: (id: string, input: RespondFeedbackRequest) =>
+    request<FeedbackView>(`/feedback-requests/${id}/respond`, { method: "POST", body: JSON.stringify(input) }),
+  declineFeedbackRequest: (id: string) => request<FeedbackRequestView>(`/feedback-requests/${id}/decline`, { method: "POST" }),
+  cancelFeedbackRequest: (id: string) => request<FeedbackRequestView>(`/feedback-requests/${id}/cancel`, { method: "POST" }),
+  listDevelopmentPlans: (employeeId?: string) =>
+    request<DevelopmentPlanView[]>(`/development-plans${employeeId ? `?employeeId=${employeeId}` : ""}`),
+  getDevelopmentPlan: (id: string) => request<DevelopmentPlanView>(`/development-plans/${id}`),
+  createDevelopmentPlan: (input: CreateDevelopmentPlanRequest) =>
+    request<DevelopmentPlanView>("/development-plans", { method: "POST", body: JSON.stringify(input) }),
+  updateDevelopmentPlan: (id: string, input: UpdateDevelopmentPlanRequest) =>
+    request<DevelopmentPlanView>(`/development-plans/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+  addDevelopmentPlanItem: (planId: string, input: DevelopmentItemInput) =>
+    request<DevelopmentPlanView>(`/development-plans/${planId}/items`, { method: "POST", body: JSON.stringify(input) }),
+  updateDevelopmentPlanItem: (itemId: string, input: UpdateDevelopmentItemRequest) =>
+    request<DevelopmentPlanView>(`/development-plan-items/${itemId}`, { method: "PATCH", body: JSON.stringify(input) }),
+  removeDevelopmentPlanItem: (itemId: string) =>
+    request<DevelopmentPlanView>(`/development-plan-items/${itemId}`, { method: "DELETE" }),
+
   // --- Core Employee master data (SAP IT0008/IT0014-equivalent) ------------
   // Moved here from Payroll (2026-09-27, kumail's own architecture
   // correction): recurring compensation is a fact ABOUT an employee,
@@ -2412,6 +2847,32 @@ export const api = {
 
   cancelEmployeeLoan: (id: string, input: CancelEmployeeLoanRequest = {}) =>
     request<EmployeeLoanView>(`/employees/loans/${id}/cancel`, { method: "POST", body: JSON.stringify(input) }),
+
+  // PAY-13: loan catalogue, repayment schedule, hold / skip / settle.
+  listLoanTypes: (includeInactive = false) => request<LoanTypeView[]>(`/employees/loans/types?includeInactive=${includeInactive}`),
+  createLoanType: (input: UpsertLoanTypeRequest) => request<LoanTypeView>("/employees/loans/types", { method: "POST", body: JSON.stringify(input) }),
+  updateLoanType: (id: string, input: UpsertLoanTypeRequest) =>
+    request<LoanTypeView>(`/employees/loans/types/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+  getLoanSchedule: (id: string) => request<LoanScheduleRowView[]>(`/employees/loans/${id}/schedule`),
+  holdEmployeeLoan: (id: string, input: HoldEmployeeLoanRequest) =>
+    request<EmployeeLoanView>(`/employees/loans/${id}/hold`, { method: "POST", body: JSON.stringify(input) }),
+  resumeEmployeeLoan: (id: string, input: ResumeEmployeeLoanRequest = {}) =>
+    request<EmployeeLoanView>(`/employees/loans/${id}/resume`, { method: "POST", body: JSON.stringify(input) }),
+  skipLoanInstallments: (id: string, input: SkipLoanInstallmentsRequest) =>
+    request<LoanScheduleRowView[]>(`/employees/loans/${id}/skip`, { method: "POST", body: JSON.stringify(input) }),
+  settleEmployeeLoan: (id: string, input: SettleEmployeeLoanRequest) =>
+    request<EmployeeLoanView>(`/employees/loans/${id}/settle`, { method: "POST", body: JSON.stringify(input) }),
+  generateLoanSchedule: (id: string, input: GenerateLoanScheduleRequest = {}) =>
+    request<LoanScheduleRowView[]>(`/employees/loans/${id}/generate-schedule`, { method: "POST", body: JSON.stringify(input) }),
+
+  // PAY-24: tenant-wide standard working hours (an employee's work profile still wins).
+  getCompanyWorkTimeDefault: () => request<CompanyWorkTimeDefaultView>("/company/work-time-default"),
+  setCompanyWorkTimeDefault: (input: SetCompanyWorkTimeDefaultRequest) =>
+    request<CompanyWorkTimeDefaultView>("/company/work-time-default", { method: "PUT", body: JSON.stringify(input) }),
+
+  // PAY-28: the jurisdiction a place falls under for provincial social security.
+  setLocationStatutoryJurisdiction: (id: string, statutoryJurisdiction: string | null) =>
+    request<LocationView>(`/organization/locations/${id}/statutory-jurisdiction`, { method: "PATCH", body: JSON.stringify({ statutoryJurisdiction }) }),
 
   // --- Additional Payments (Phase P3, Section 6 — SAP IT0015-equivalent) —
   // same ownership/permission posture as Loans above.
@@ -2484,6 +2945,110 @@ export const api = {
   // Phase P2 — Correction/Reversal. Only a `finalized` run can be
   // reversed; PayrollService.reverseRun() enforces both the status check
   // and the elevated (finalize + disburse) permission check server-side.
+  // Step 9C — structured payslip results and year to date (PAY-05)
+  getPayslipDetail: (id: string) => request<PayslipDetailView>(`/payslips/${id}/detail`),
+  getPayrollYtd: (employeeId: string, taxYear?: number) =>
+    request<PayrollYtdView[]>(`/payroll/ytd/${employeeId}${taxYear ? `?taxYear=${taxYear}` : ""}`),
+
+  // Step 9B — calendars, periods, population (PAY-03, PAY-04)
+  listPayrollCalendars: (includeInactive = false) =>
+    request<PayrollCalendarView[]>(`/payroll/calendars${includeInactive ? "?includeInactive=true" : ""}`),
+  createPayrollCalendar: (input: CreatePayrollCalendarRequest) =>
+    request<PayrollCalendarView>("/payroll/calendars", { method: "POST", body: JSON.stringify(input) }),
+  updatePayrollCalendar: (id: string, patch: UpdatePayrollCalendarRequest) =>
+    request<PayrollCalendarView>(`/payroll/calendars/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  generatePayrollPeriods: (calendarId: string, input: GeneratePayrollPeriodsRequest) =>
+    request<GeneratePayrollPeriodsResponse>(`/payroll/calendars/${calendarId}/generate-periods`, { method: "POST", body: JSON.stringify(input) }),
+  listPayrollPeriods: (filter: { calendarId?: string; status?: PayrollPeriodStatus; year?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (filter.calendarId) q.set("calendarId", filter.calendarId);
+    if (filter.status) q.set("status", filter.status);
+    if (filter.year) q.set("year", String(filter.year));
+    const qs = q.toString();
+    return request<PayrollPeriodView[]>(`/payroll/periods${qs ? `?${qs}` : ""}`);
+  },
+  lockPayrollPeriod: (id: string) => request<PayrollPeriodView>(`/payroll/periods/${id}/lock`, { method: "POST" }),
+  unlockPayrollPeriod: (id: string) => request<PayrollPeriodView>(`/payroll/periods/${id}/unlock`, { method: "POST" }),
+  closePayrollPeriod: (id: string) => request<PayrollPeriodView>(`/payroll/periods/${id}/close`, { method: "POST" }),
+  reopenPayrollPeriod: (id: string, reason: string) =>
+    request<PayrollPeriodView>(`/payroll/periods/${id}/reopen`, { method: "POST", body: JSON.stringify({ reason }) }),
+  listPayrollRunPopulation: (runId: string, sequence?: number) =>
+    request<PayrollRunPopulationView[]>(`/payroll/runs/${runId}/population${sequence ? `?sequence=${sequence}` : ""}`),
+
+  // Step 9D — background calculation, progress and the exception queue
+  calculatePayrollRunInBackground: (id: string) =>
+    request<StartPayrollCalculationResponse>(`/payroll/runs/${id}/calculate-async`, { method: "POST" }),
+  getPayrollCalculationProgress: (id: string) => request<PayrollCalculationProgressView>(`/payroll/runs/${id}/calculation`),
+  listPayrollExceptions: (id: string, status?: string) =>
+    request<PayrollExceptionView[]>(`/payroll/runs/${id}/exceptions${status ? `?status=${encodeURIComponent(status)}` : ""}`),
+  retryPayrollException: (runId: string, exceptionId: string) =>
+    request<RetryPayrollExceptionResponse>(`/payroll/runs/${runId}/exceptions/${exceptionId}/retry`, { method: "POST" }),
+  waivePayrollException: (runId: string, exceptionId: string, note: string) =>
+    request<PayrollExceptionView>(`/payroll/runs/${runId}/exceptions/${exceptionId}/waive`, { method: "POST", body: JSON.stringify({ note }) }),
+
+  // Step 9E - arrears / retro
+  detectPayrollRetro: (runId: string, input: DetectPayrollRetroRequest = {}) =>
+    request<DetectPayrollRetroResponse>(`/payroll/runs/${runId}/retro/detect`, { method: "POST", body: JSON.stringify(input) }),
+  listPayrollRetro: (runId: string, status?: PayrollRetroStatus) =>
+    request<PayrollRetroResultView[]>(`/payroll/runs/${runId}/retro${status ? `?status=${status}` : ""}`),
+  includePayrollRetro: (runId: string, input: IncludePayrollRetroRequest = {}) =>
+    request<PayrollRetroResultView[]>(`/payroll/runs/${runId}/retro/include`, { method: "POST", body: JSON.stringify(input) }),
+  excludePayrollRetro: (runId: string, input: IncludePayrollRetroRequest = {}) =>
+    request<PayrollRetroResultView[]>(`/payroll/runs/${runId}/retro/exclude`, { method: "POST", body: JSON.stringify(input) }),
+  dismissPayrollRetro: (retroId: string, note: string) =>
+    request<PayrollRetroResultView>(`/payroll/retro/${retroId}/dismiss`, { method: "POST", body: JSON.stringify({ note }) }),
+
+  // Step 9F - tax years, tax profiles and employee tax profiles
+  listTaxYears: () => request<TaxYearView[]>("/payroll/tax/years"),
+  createTaxYear: (input: CreateTaxYearRequest) => request<TaxYearView>("/payroll/tax/years", { method: "POST", body: JSON.stringify(input) }),
+  publishTaxYear: (id: string, sourceReference: string) =>
+    request<TaxYearView>(`/payroll/tax/years/${id}/publish`, { method: "POST", body: JSON.stringify({ sourceReference }) }),
+  retireTaxYear: (id: string) => request<TaxYearView>(`/payroll/tax/years/${id}/retire`, { method: "POST" }),
+  listTaxProfiles: (taxYearId?: string) => request<TaxProfileView[]>(`/payroll/tax/profiles${taxYearId ? `?taxYearId=${taxYearId}` : ""}`),
+  createTaxProfile: (input: CreateTaxProfileRequest) => request<TaxProfileView>("/payroll/tax/profiles", { method: "POST", body: JSON.stringify(input) }),
+  updateTaxProfile: (id: string, input: UpdateTaxProfileRequest) =>
+    request<TaxProfileView>(`/payroll/tax/profiles/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+  setTaxProfileSlabs: (id: string, slabs: TaxProfileSlabInput[]) =>
+    request<TaxProfileView>(`/payroll/tax/profiles/${id}/slabs`, { method: "PUT", body: JSON.stringify({ slabs }) }),
+  addTaxExemption: (id: string, input: TaxExemptionInput) =>
+    request<TaxProfileView>(`/payroll/tax/profiles/${id}/exemptions`, { method: "POST", body: JSON.stringify(input) }),
+  removeTaxExemption: (id: string, exemptionId: string) =>
+    request<TaxProfileView>(`/payroll/tax/profiles/${id}/exemptions/${exemptionId}/remove`, { method: "POST" }),
+  addTaxCredit: (id: string, input: TaxCreditInput) =>
+    request<TaxProfileView>(`/payroll/tax/profiles/${id}/credits`, { method: "POST", body: JSON.stringify(input) }),
+  removeTaxCredit: (id: string, creditId: string) =>
+    request<TaxProfileView>(`/payroll/tax/profiles/${id}/credits/${creditId}/remove`, { method: "POST" }),
+  publishTaxProfile: (id: string, sourceReference: string) =>
+    request<TaxProfileView>(`/payroll/tax/profiles/${id}/publish`, { method: "POST", body: JSON.stringify({ sourceReference }) }),
+  retireTaxProfile: (id: string) => request<TaxProfileView>(`/payroll/tax/profiles/${id}/retire`, { method: "POST" }),
+  cloneTaxProfile: (id: string, code: string) =>
+    request<TaxProfileView>(`/payroll/tax/profiles/${id}/clone`, { method: "POST", body: JSON.stringify({ code }) }),
+  getEmployeeTaxProfile: (employeeId: string) => request<EmployeeTaxProfileView | null>(`/payroll/tax/employees/${employeeId}`),
+  getEmployeeTaxProfileHistory: (employeeId: string) => request<EmployeeTaxProfileView[]>(`/payroll/tax/employees/${employeeId}/history`),
+  setEmployeeTaxProfile: (employeeId: string, input: SetEmployeeTaxProfileRequest) =>
+    request<EmployeeTaxProfileView>(`/payroll/tax/employees/${employeeId}`, { method: "PUT", body: JSON.stringify(input) }),
+
+  // Step 9A — run lifecycle controls
+  preValidatePayrollRun: (id: string) =>
+    request<PayrollRunValidationView>(`/payroll/runs/${id}/pre-validate`, { method: "POST" }),
+  validatePayrollRun: (id: string) =>
+    request<PayrollRunValidationView>(`/payroll/runs/${id}/validate`, { method: "POST" }),
+  closePayrollRun: (id: string, input: ClosePayrollRunRequest = {}) =>
+    request<PayrollRunView>(`/payroll/runs/${id}/close`, { method: "POST", body: JSON.stringify(input) }),
+  reopenPayrollRun: (id: string, input: ReopenPayrollRunRequest) =>
+    request<PayrollRunView>(`/payroll/runs/${id}/reopen`, { method: "POST", body: JSON.stringify(input) }),
+  cancelPayrollRun: (id: string, input: CancelPayrollRunRequest) =>
+    request<PayrollRunView>(`/payroll/runs/${id}/cancel`, { method: "POST", body: JSON.stringify(input) }),
+  listPayrollRunEvents: (id: string) => request<PayrollRunEventView[]>(`/payroll/runs/${id}/events`),
+  getPayrollRunReversal: (id: string) => request<PayrollReversalView | null>(`/payroll/runs/${id}/reversal`),
+  listPayrollRunReopens: (id: string) => request<PayrollRunReopenView[]>(`/payroll/runs/${id}/reopens`),
+  getPayrollRuleSnapshot: (id: string) => request<PayrollRuleSnapshotView | null>(`/payroll/runs/${id}/rule-snapshot`),
+  listPayrollOverrides: (id: string) => request<PayrollOverrideView[]>(`/payroll/runs/${id}/overrides`),
+  applyPayrollOverride: (id: string, input: SetPayrollOverrideRequest) =>
+    request<PayrollOverrideView>(`/payroll/runs/${id}/overrides`, { method: "POST", body: JSON.stringify(input) }),
+  withdrawPayrollOverride: (id: string, overrideId: string) =>
+    request<PayrollOverrideView>(`/payroll/runs/${id}/overrides/${overrideId}`, { method: "DELETE" }),
+
   reversePayrollRun: (id: string, input: ReversePayrollRunRequest) =>
     request<PayrollRunView>(`/payroll/runs/${id}/reverse`, { method: "POST", body: JSON.stringify(input) }),
 
@@ -2550,10 +3115,10 @@ export const api = {
   // batch reference / excluded count ride back as response headers
   // (`X-Payroll-Batch-Reference` / `X-Payroll-Excluded-Count`) since a
   // file download response can't also carry a JSON body.
-  async downloadDisbursementFile(runId: string, confirmRegenerate = false): Promise<{ batchReference: string; excludedCount: number }> {
+  async downloadDisbursementFile(runId: string, confirmRegenerate = false, formatId?: string, fileExtension = "csv"): Promise<{ batchReference: string; excludedCount: number }> {
     const token = getToken();
     const res = await fetch(
-      `/api/payroll/runs/${runId}/disbursement${confirmRegenerate ? "?confirmRegenerate=true" : ""}`,
+      `/api/payroll/runs/${runId}/disbursement?${new URLSearchParams({ ...(confirmRegenerate ? { confirmRegenerate: "true" } : {}), ...(formatId ? { formatId } : {}) }).toString()}`,
       { headers: token ? { Authorization: `Bearer ${token}` } : {} }
     );
     if (!res.ok) {
@@ -2572,7 +3137,7 @@ export const api = {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `payroll-disbursement-${runId}.csv`;
+    link.download = `payroll-disbursement-${runId}.${fileExtension}`;
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -2601,9 +3166,140 @@ export const api = {
       body: JSON.stringify(patch),
     }),
 
+  // PAY-16 - tenant-defined bank file layouts and the life of a payment batch after it is generated.
+  listBankFileFormats: (includeInactive = false) => request<BankFileFormatView[]>(`/payroll/bank-file-formats${includeInactive ? "?includeInactive=true" : ""}`),
+  createBankFileFormat: (input: UpsertBankFileFormatRequest) => request<BankFileFormatView>("/payroll/bank-file-formats", { method: "POST", body: JSON.stringify(input) }),
+  updateBankFileFormat: (id: string, input: UpsertBankFileFormatRequest) => request<BankFileFormatView>(`/payroll/bank-file-formats/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+  listPaymentItems: (batchId: string) => request<PayrollPaymentItemView[]>(`/payroll/payment-batches/${batchId}/items`),
+  approvePaymentBatch: (id: string) => request<PayrollPaymentBatchView>(`/payroll/payment-batches/${id}/approve`, { method: "POST" }),
+  releasePaymentBatch: (id: string) => request<PayrollPaymentBatchView>(`/payroll/payment-batches/${id}/release`, { method: "POST" }),
+  acknowledgePaymentBatch: (id: string, input: AcknowledgePaymentBatchRequest = {}) =>
+    request<PayrollPaymentBatchView>(`/payroll/payment-batches/${id}/acknowledge`, { method: "POST", body: JSON.stringify(input) }),
+  reissuePaymentItems: (id: string, input: ReissuePaymentItemsRequest = {}) =>
+    request<{ batch: PayrollPaymentBatchView; csv: string; excluded: Array<{ employeeNumber: string; employeeName: string; reason: string }> }>(
+      `/payroll/payment-batches/${id}/reissue`, { method: "POST", body: JSON.stringify(input) }),
+
+  // PAY-14 / PAY-15 - final settlements, scheme definitions and employee scheme ledgers.
+  listPayrollSchemes: (history = false) => request<PayrollSchemeDefinitionView[]>(`/payroll/schemes${history ? "?history=true" : ""}`),
+  upsertPayrollScheme: (input: UpsertPayrollSchemeRequest) => request<PayrollSchemeDefinitionView>("/payroll/schemes", { method: "POST", body: JSON.stringify(input) }),
+  getSettlementSettings: () => request<PayrollSettlementSettingsView>("/payroll/settlement-settings"),
+  updateSettlementSettings: (patch: UpdatePayrollSettlementSettingsRequest) =>
+    request<PayrollSettlementSettingsView>("/payroll/settlement-settings", { method: "PATCH", body: JSON.stringify(patch) }),
+  listSchemeAccounts: (employeeId: string) => request<EmployeeSchemeAccountView[]>(`/payroll/employees/${employeeId}/scheme-accounts`),
+  openSchemeAccount: (employeeId: string, schemeCode: string) =>
+    request<EmployeeSchemeAccountView>(`/payroll/employees/${employeeId}/scheme-accounts`, { method: "POST", body: JSON.stringify({ schemeCode }) }),
+  listSchemeLedger: (accountId: string) => request<SchemeLedgerEntryView[]>(`/payroll/scheme-accounts/${accountId}/ledger`),
+  postSchemeLedgerEntry: (accountId: string, input: PostSchemeLedgerEntryRequest) =>
+    request<SchemeLedgerEntryView>(`/payroll/scheme-accounts/${accountId}/ledger`, { method: "POST", body: JSON.stringify(input) }),
+  reverseSchemeLedgerEntry: (entryId: string, reason: string) =>
+    request<SchemeLedgerEntryView>(`/payroll/scheme-ledger/${entryId}/reverse`, { method: "POST", body: JSON.stringify({ reason }) }),
+  listFinalSettlements: (status?: FinalSettlementStatus) => request<FinalSettlementView[]>(`/payroll/final-settlements${status ? `?status=${status}` : ""}`),
+  getFinalSettlement: (id: string) => request<FinalSettlementView>(`/payroll/final-settlements/${id}`),
+  calculateFinalSettlement: (id: string) => request<FinalSettlementView>(`/payroll/final-settlements/${id}/calculate`, { method: "POST" }),
+  approveFinalSettlement: (id: string) => request<FinalSettlementView>(`/payroll/final-settlements/${id}/approve`, { method: "POST" }),
+  withdrawFinalSettlementApproval: (id: string, reason: string) =>
+    request<FinalSettlementView>(`/payroll/final-settlements/${id}/withdraw-approval`, { method: "POST", body: JSON.stringify({ reason }) }),
+  cancelFinalSettlement: (id: string, reason: string) =>
+    request<FinalSettlementView>(`/payroll/final-settlements/${id}/cancel`, { method: "POST", body: JSON.stringify({ reason }) }),
+
+  // PAY-18 - reconciliations of a run.
+  listPayrollReconciliations: (runId: string) => request<PayrollReconciliationView[]>(`/payroll/runs/${runId}/reconciliations`),
+  runPayrollReconciliations: (runId: string, kinds?: PayrollReconciliationKind[]) =>
+    request<PayrollReconciliationView[]>(`/payroll/runs/${runId}/reconciliations`, { method: "POST", body: JSON.stringify({ kinds }) }),
+  resolvePayrollReconciliation: (id: string, note: string) =>
+    request<PayrollReconciliationView>(`/payroll/reconciliations/${id}/resolve`, { method: "POST", body: JSON.stringify({ note }) }),
+
   // Phase P5 — read-only cost-center report over each employee's CURRENT
   // active `employee_cost_allocations` row(s) (Core Employee Phase 8); see
   // `PayrollService.getCostCenterBreakdown()`'s own doc comment for why
   // this deliberately doesn't pin to the run's own period.
   getCostCenterBreakdown: (runId: string) => request<PayrollCostCenterBreakdownView>(`/payroll/runs/${runId}/cost-breakdown`),
+
+  // PAY-17 - GL mappings, journals, posting and costing.
+  listGlMappings: () => request<PayrollGlMappingView[]>("/payroll/gl-mappings"),
+  upsertGlMapping: (input: UpsertPayrollGlMappingRequest) => request<PayrollGlMappingView>("/payroll/gl-mappings", { method: "POST", body: JSON.stringify(input) }),
+  deleteGlMapping: (id: string) => request<void>(`/payroll/gl-mappings/${id}`, { method: "DELETE" }),
+  listJournalTypes: () => request<PayrollJournalTypeView[]>("/payroll/journal-types"),
+  updateJournalType: (id: string, input: UpdatePayrollJournalTypeRequest) => request<PayrollJournalTypeView>(`/payroll/journal-types/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+  previewRunAccounting: (runId: string) => request<PayrollAccountingPreviewView>(`/payroll/runs/${runId}/accounting/preview`),
+  generateRunJournal: (runId: string, input: GeneratePayrollJournalRequest = {}) =>
+    request<PayrollJournalView>(`/payroll/runs/${runId}/accounting/generate`, { method: "POST", body: JSON.stringify(input) }),
+  listRunJournals: (runId: string) => request<PayrollJournalView[]>(`/payroll/runs/${runId}/journals`),
+  getPayrollJournal: (id: string) => request<PayrollJournalView>(`/payroll/journals/${id}`),
+  postPayrollJournal: (id: string, input: PostPayrollJournalRequest = {}) => request<PayrollJournalView>(`/payroll/journals/${id}/post`, { method: "POST", body: JSON.stringify(input) }),
+  discardPayrollJournal: (id: string) => request<PayrollJournalView>(`/payroll/journals/${id}/discard`, { method: "POST" }),
+  reversePayrollJournal: (id: string, reason: string) => request<PayrollJournalView>(`/payroll/journals/${id}/reverse`, { method: "POST", body: JSON.stringify({ reason }) }),
+  getRunCosting: (runId: string) => request<PayrollCostingSummaryView>(`/payroll/runs/${runId}/costing`),
+  generateRunCosting: (runId: string) => request<PayrollCostingSummaryView>(`/payroll/runs/${runId}/costing/generate`, { method: "POST" }),
+  /** Saves a text/CSV response (journal export, error report) as a file; the endpoint answers with text, not JSON. */
+  async downloadPayrollText(path: string, fileName: string): Promise<void> {
+    const token = getToken();
+    const res = await fetch(`/api${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = await res.json();
+        message = body.message ?? message;
+      } catch {
+        // not JSON - keep the generic message
+      }
+      throw new ApiError(res.status, message);
+    }
+    const url = URL.createObjectURL(await res.blob());
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  },
+
+  // PAY-20 - payslip and certificate documents.
+  getDocumentSettings: () => request<PayrollDocumentSettingsView>("/payroll/document-settings"),
+  updateDocumentSettings: (input: UpdatePayrollDocumentSettingsRequest) => request<PayrollDocumentSettingsView>("/payroll/document-settings", { method: "PATCH", body: JSON.stringify(input) }),
+  listDocumentPlaceholders: () => request<PayrollDocumentPlaceholderView[]>("/payroll/document-placeholders"),
+  listPayrollDocuments: (filter: { employeeId?: string; runId?: string; documentType?: PayrollDocumentType; status?: string } = {}) => {
+    const q = new URLSearchParams(Object.entries(filter).filter(([, v]) => v) as [string, string][]).toString();
+    return request<GeneratedDocumentView[]>(`/payroll/documents${q ? `?${q}` : ""}`);
+  },
+  listMyPayrollDocuments: () => request<GeneratedDocumentView[]>("/payroll/my-documents"),
+  getPayrollDocument: (id: string) => request<GeneratedDocumentView>(`/payroll/documents/${id}`),
+  generateRunPayslipDocuments: (runId: string, input: { replace?: boolean; publish?: boolean } = {}) =>
+    request<{ generated: number; skipped: number; published: number }>(`/payroll/runs/${runId}/payslip-documents`, { method: "POST", body: JSON.stringify(input) }),
+  setRunPayslipPublication: (runId: string, published: boolean) =>
+    request<{ changed: number }>(`/payroll/runs/${runId}/payslip-documents/publication`, { method: "POST", body: JSON.stringify({ published }) }),
+  generateTaxCertificate: (input: GenerateTaxCertificateRequest) => request<GeneratedDocumentView>("/payroll/tax-certificates", { method: "POST", body: JSON.stringify(input) }),
+  generateSalaryCertificate: (input: GenerateSalaryCertificateRequest) => request<GeneratedDocumentView>("/payroll/salary-certificates", { method: "POST", body: JSON.stringify(input) }),
+  setPayrollDocumentPublication: (id: string, published: boolean) =>
+    request<GeneratedDocumentView>(`/payroll/documents/${id}/publication`, { method: "POST", body: JSON.stringify({ published }) }),
+  revokePayrollDocument: (id: string, reason: string) => request<GeneratedDocumentView>(`/payroll/documents/${id}/revoke`, { method: "POST", body: JSON.stringify({ reason }) }),
+
+  // PAY-22 - benefit plans, enrolments and contributions.
+  listBenefitPlans: (includeInactive = false) => request<BenefitPlanView[]>(`/payroll/benefit-plans${includeInactive ? "?includeInactive=true" : ""}`),
+  upsertBenefitPlan: (input: UpsertBenefitPlanRequest) => request<BenefitPlanView>("/payroll/benefit-plans", { method: "POST", body: JSON.stringify(input) }),
+  checkBenefitEligibility: (planId: string, employeeId: string, asOf?: string) =>
+    request<BenefitEligibilityView>(`/payroll/benefit-plans/${planId}/eligibility/${employeeId}${asOf ? `?asOf=${asOf}` : ""}`),
+  listBenefitEnrolments: (filter: { planId?: string; employeeId?: string; status?: string } = {}) => {
+    const q = new URLSearchParams(Object.entries(filter).filter(([, v]) => v) as [string, string][]).toString();
+    return request<BenefitEnrolmentView[]>(`/payroll/benefit-enrolments${q ? `?${q}` : ""}`);
+  },
+  enrolBenefit: (input: EnrolBenefitRequest) => request<BenefitEnrolmentView>("/payroll/benefit-enrolments", { method: "POST", body: JSON.stringify(input) }),
+  endBenefitEnrolment: (id: string, input: EndBenefitEnrolmentRequest) => request<BenefitEnrolmentView>(`/payroll/benefit-enrolments/${id}/end`, { method: "POST", body: JSON.stringify(input) }),
+  listBenefitContributions: (filter: { planId?: string; employeeId?: string; runId?: string } = {}) => {
+    const q = new URLSearchParams(Object.entries(filter).filter(([, v]) => v) as [string, string][]).toString();
+    return request<BenefitContributionView[]>(`/payroll/benefit-contributions${q ? `?${q}` : ""}`);
+  },
+
+  // PAY-25 / PAY-26 / PAY-27 - dashboard, bulk inputs and the event catalogue.
+  getPayrollDashboard: () => request<PayrollDashboardView>("/payroll/dashboard"),
+  getPayrollEventCatalog: () => request<PayrollEventCatalogEntry[]>("/payroll/event-catalog"),
+  listPayrollInputTemplates: () => request<PayrollInputTemplateView[]>("/payroll/input-imports/templates"),
+  listPayrollInputImports: () => request<PayrollInputBatchView[]>("/payroll/input-imports"),
+  getPayrollInputImport: (id: string) => request<PayrollInputBatchView>(`/payroll/input-imports/${id}`),
+  dryRunPayrollInputImport: (input: DryRunPayrollInputRequest) => request<PayrollInputBatchView>("/payroll/input-imports", { method: "POST", body: JSON.stringify(input) }),
+  listPayrollInputImportRows: (id: string, status?: string) => request<PayrollInputRowView[]>(`/payroll/input-imports/${id}/rows${status ? `?status=${status}` : ""}`),
+  executePayrollInputImport: (id: string) => request<PayrollInputBatchView>(`/payroll/input-imports/${id}/execute`, { method: "POST" }),
+  retryPayrollInputImport: (id: string) => request<PayrollInputBatchView>(`/payroll/input-imports/${id}/retry-failed`, { method: "POST" }),
+  cancelPayrollInputImport: (id: string) => request<PayrollInputBatchView>(`/payroll/input-imports/${id}/cancel`, { method: "POST" }),
 };

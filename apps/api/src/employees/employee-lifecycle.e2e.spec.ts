@@ -128,13 +128,13 @@ describe("Employee lifecycle HTTP surface — reasonCode (e2e)", () => {
     const wrongCatalog = await request(app.getHttpServer())
       .post(`/employees/${employeeId}/terminate`)
       .set("Authorization", `Bearer ${hrAdminToken}`)
-      .send({ terminationDate: "2026-10-31", reasonCode: "business_need" });
+      .send({ terminationDate: "2026-10-06", reasonCode: "business_need" });
     expect(wrongCatalog.status).toBe(400);
 
     const ok = await request(app.getHttpServer())
       .post(`/employees/${employeeId}/terminate`)
       .set("Authorization", `Bearer ${hrAdminToken}`)
-      .send({ terminationDate: "2026-10-31", reasonCode: "resignation" });
+      .send({ terminationDate: "2026-10-06", reasonCode: "resignation" });
     expect(ok.status).toBe(201);
     expect(ok.body.jobHistory.reasonCode).toBe("resignation");
   });

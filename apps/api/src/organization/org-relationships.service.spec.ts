@@ -277,12 +277,13 @@ describe("OrgRelationshipsService", () => {
         expect((await employees.get(hrAdminClaims, target)).managerId).toBe(bob);
       });
 
-      it("legacy EmployeesService.create() managerId writes do not create an org_relationships row (documented gap; update() now syncs — see employees.service.spec.ts)", async () => {
-        const legacyTarget = await employees.create(hrAdminClaims, { firstName: "Legacy", lastName: "Path", managerId: bob });
-        expect(legacyTarget.managerId).toBe(bob);
+      it("EmployeesService.create() with managerId also creates the direct org_relationships row (cross-module integration follow-up, 2026-10-01; was a documented gap — see employees.service.spec.ts's own 'create() with managerId' coverage)", async () => {
+        const hireTarget = await employees.create(hrAdminClaims, { firstName: "Hired", lastName: "WithManager", managerId: bob });
+        expect(hireTarget.managerId).toBe(bob);
 
-        const relationshipsForLegacy = await relationships.list(hrAdminClaims, { employeeId: legacyTarget.id });
-        expect(relationshipsForLegacy).toHaveLength(0);
+        const relationshipsForHire = await relationships.list(hrAdminClaims, { employeeId: hireTarget.id });
+        expect(relationshipsForHire).toHaveLength(1);
+        expect(relationshipsForHire[0]).toMatchObject({ managerEmployeeId: bob, relationshipType: "direct", status: "active" });
       });
 
       it("end() guards against clobbering a managerId that was changed out from under this relationship", async () => {

@@ -16,6 +16,19 @@ export const DEFAULT_CATALOG_SEED: { catalogType: string; code: string; label: s
   { catalogType: "employment_type", code: "probation", label: "Probationary", sortOrder: 2 },
   { catalogType: "employment_type", code: "intern", label: "Intern", sortOrder: 3 },
 
+  { catalogType: "employment_status", code: "active", label: "Active", sortOrder: 0 },
+  { catalogType: "employment_status", code: "on_leave", label: "On leave", sortOrder: 1 },
+  { catalogType: "employment_status", code: "suspended", label: "Suspended", sortOrder: 2 },
+  { catalogType: "employment_status", code: "notice_period", label: "Serving notice", sortOrder: 3 },
+  { catalogType: "employment_status", code: "terminated", label: "Terminated", sortOrder: 4 },
+
+  { catalogType: "employment_status_reason", code: "joined", label: "Joined", sortOrder: 0 },
+  { catalogType: "employment_status_reason", code: "leave_started", label: "Leave started", sortOrder: 1 },
+  { catalogType: "employment_status_reason", code: "returned_from_leave", label: "Returned from leave", sortOrder: 2 },
+  { catalogType: "employment_status_reason", code: "disciplinary", label: "Disciplinary action", sortOrder: 3 },
+  { catalogType: "employment_status_reason", code: "resignation_notice", label: "Resignation notice served", sortOrder: 4 },
+  { catalogType: "employment_status_reason", code: "separated", label: "Employment ended", sortOrder: 5 },
+
   { catalogType: "lifecycle_reason:hire", code: "new_position", label: "New position", sortOrder: 0 },
   { catalogType: "lifecycle_reason:hire", code: "replacement", label: "Replacement hire", sortOrder: 1 },
   { catalogType: "lifecycle_reason:hire", code: "business_growth", label: "Business growth", sortOrder: 2 },
@@ -172,4 +185,31 @@ export const DEFAULT_CATALOG_SEED: { catalogType: string; code: string; label: s
   { catalogType: "id_document_type", code: "nicop", label: "NICOP", sortOrder: 1 },
   { catalogType: "id_document_type", code: "passport", label: "Passport", sortOrder: 2 },
   { catalogType: "id_document_type", code: "b_form", label: "B-Form", sortOrder: 3 },
+
+  { catalogType: "gender", code: "male", label: "Male", sortOrder: 0 },
+  { catalogType: "gender", code: "female", label: "Female", sortOrder: 1 },
+  { catalogType: "gender", code: "other", label: "Other", sortOrder: 2 },
+
+  { catalogType: "worker_type", code: "employee", label: "Employee", sortOrder: 0 },
+  { catalogType: "worker_type", code: "contractor", label: "Contractor", sortOrder: 1 },
+  { catalogType: "worker_type", code: "consultant", label: "Consultant", sortOrder: 2 },
+
+  { catalogType: "asset_type", code: "laptop", label: "Laptop", sortOrder: 0 },
+  { catalogType: "asset_type", code: "mobile_phone", label: "Mobile phone", sortOrder: 1 },
+  { catalogType: "asset_type", code: "sim_card", label: "SIM card", sortOrder: 2 },
+  { catalogType: "asset_type", code: "vehicle", label: "Vehicle", sortOrder: 3 },
+  { catalogType: "asset_type", code: "access_card", label: "Access card", sortOrder: 4 },
+  { catalogType: "asset_type", code: "other", label: "Other", sortOrder: 5 },
+
+  { catalogType: "component_category", code: "basic_pay", label: "Basic pay", sortOrder: 0 },
+  { catalogType: "component_category", code: "allowance", label: "Allowance", sortOrder: 1 },
+  { catalogType: "component_category", code: "incentive", label: "Incentive / bonus", sortOrder: 2 },
+  { catalogType: "component_category", code: "benefit", label: "Benefit", sortOrder: 3 },
+  { catalogType: "component_category", code: "other", label: "Other", sortOrder: 4 },
+
+  { catalogType: "payroll_adjustment_reason", code: "correction", label: "Correction of an earlier payment", sortOrder: 0 },
+  { catalogType: "payroll_adjustment_reason", code: "one_time_award", label: "One-time award", sortOrder: 1 },
+  { catalogType: "payroll_adjustment_reason", code: "recovery", label: "Recovery of an overpayment", sortOrder: 2 },
+  { catalogType: "payroll_adjustment_reason", code: "retro_adjustment", label: "Retroactive adjustment", sortOrder: 3 },
+  { catalogType: "payroll_adjustment_reason", code: "other", label: "Other", sortOrder: 4 },
 ];

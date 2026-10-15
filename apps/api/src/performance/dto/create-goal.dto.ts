@@ -1,4 +1,4 @@
-import { IsNumber, IsOptional, IsString, IsUUID, Max, Min, MinLength } from "class-validator";
+import { IsDateString, IsNumber, IsOptional, IsString, IsUUID, Max, Min, MinLength } from "class-validator";
 
 export class CreateGoalDto {
   @IsUUID()
@@ -24,4 +24,17 @@ export class CreateGoalDto {
   @Min(0)
   @Max(100)
   weight?: number;
+
+  @IsOptional()
+  @IsDateString()
+  dueDate?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  targetValue?: number;
+
+  @IsOptional()
+  @IsString()
+  targetUnit?: string;
 }

@@ -6,6 +6,7 @@ import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
 import { WorkScheduleResolutionService } from "../shifts/work-schedule-resolution.service";
+import { localParts } from "./attendance-evaluation.service";
 import type { AttendanceRecordView, ClockInRequest, ClockOutRequest } from "@aihxm/shared-types";
 
 const LEAVE_MODULE_KEY = "leave" as const;
@@ -98,11 +99,14 @@ export class AttendanceService {
         throw new ConflictException("This employee is already clocked in — clock out first");
       }
 
+      // TLM-04: stamp the work date (in the schedule's own time zone) and the shift in force.
+      const schedule = await this.workSchedule.resolve(client, employee.id, new Date().toISOString().slice(0, 10));
+      const workDate = localParts(new Date(), schedule.timezone ?? "Asia/Karachi").date;
       const result = await client.query(
-        `INSERT INTO attendance_records (company_id, employee_id, employee_number, source, gps_lat, gps_lng)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        `INSERT INTO attendance_records (company_id, employee_id, employee_number, source, gps_lat, gps_lng, shift_id, work_date)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING *`,
-        [employee.company_id, employee.id, input.employeeNumber, input.source, input.gpsLat ?? null, input.gpsLng ?? null]
+        [employee.company_id, employee.id, input.employeeNumber, input.source, input.gpsLat ?? null, input.gpsLng ?? null, schedule.scheduleId, workDate]
       );
 
       await this.audit.record(client, claims, {
@@ -155,7 +159,9 @@ export class AttendanceService {
         target: result.rows[0].id,
       });
 
-      return rowToRecord(client, this.workSchedule, result.rows[0]);
+      const view = await rowToRecord(client, this.workSchedule, result.rows[0]);
+      await client.query("UPDATE attendance_records SET derived_status = $2 WHERE id = $1", [result.rows[0].id, view.status]);
+      return view;
     });
   }
 

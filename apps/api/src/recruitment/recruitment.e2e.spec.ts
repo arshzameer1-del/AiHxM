@@ -180,4 +180,60 @@ describe("Recruitment HTTP surface (e2e)", () => {
     expect(acceptResponse.body.employee.firstName).toBe("Hina");
     expect(acceptResponse.body.employee.employeeNumber).toMatch(/^EMP-/);
   });
+
+  it("Step 11A HTTP surface: duplicates, documents, rejection reason, interviews, settings and calendar", async () => {
+    const http = () => request(app.getHttpServer());
+    const auth = (r: request.Test) => r.set("Authorization", `Bearer ${hrAdminToken}`);
+
+    const req = await auth(http().post("/job-requisitions")).send({ title: "SDET", department: "Engineering", headcount: 3 }).expect(201);
+    await auth(http().post(`/job-requisitions/${req.body.id}/submit`)).expect(201);
+    await http().patch(`/job-requisitions/${req.body.id}/decision`).set("Authorization", `Bearer ${approverToken}`).send({ decision: "approved" }).expect(200);
+
+    const email = `e2e-dup-${Date.now()}@example.com`;
+    const cand = await auth(http().post("/candidates")).send({ firstName: "Sana", lastName: "Dup", email, nationalId: "35202-7654321-9", source: "job_board" }).expect(201);
+    expect(cand.body.nationalIdMasked).toMatch(/9$/);
+    expect(JSON.stringify(cand.body)).not.toContain("7654321");
+    const dup = await auth(http().post("/candidates")).send({ firstName: "Sana", lastName: "Again", email }).expect(409);
+    expect(dup.body.matches[0].candidateId).toBe(cand.body.id);
+    await auth(http().post("/candidates")).send({ firstName: "Sana", lastName: "Bad", nationalId: "12" }).expect(400);
+    await auth(http().post("/candidates")).send({ firstName: "Sana", lastName: "Extra", surprise: true }).expect(400);
+    const check = await auth(http().post("/candidates/duplicate-check")).send({ email }).expect(201);
+    expect(check.body).toHaveLength(1);
+
+    await auth(http().post(`/candidates/${cand.body.id}/documents`)).field("docType", "resume").attach("file", Buffer.from("%PDF-1.4 e2e"), { filename: "cv.pdf", contentType: "application/pdf" }).expect(201);
+    const docs = await auth(http().get(`/candidates/${cand.body.id}/documents`)).expect(200);
+    expect(docs.body).toHaveLength(1);
+    const dl = await auth(http().get(`/candidates/${cand.body.id}/documents/${docs.body[0].id}`)).expect(200);
+    expect(dl.headers["content-disposition"]).toContain("cv.pdf");
+    await auth(http().post(`/candidates/${cand.body.id}/documents`)).attach("file", Buffer.from("MZ"), { filename: "x.exe", contentType: "application/x-msdownload" }).expect(400);
+
+    const app1 = await auth(http().post("/applications")).send({ requisitionId: req.body.id, candidateId: cand.body.id }).expect(201);
+    const tl = await auth(http().get(`/applications/${app1.body.id}/timeline`)).expect(200);
+    expect(tl.body.stageHistory).toHaveLength(1);
+
+    const emp = await auth(http().post("/employees")).send({ firstName: "Omar", lastName: "Panel", dateOfJoining: "2024-02-01" }).expect(201);
+    const iv = await auth(http().post("/interviews")).send({
+      applicationId: app1.body.id, interviewType: "video", scheduledStart: "2027-04-05T09:00:00Z", scheduledEnd: "2027-04-05T10:00:00Z",
+      interviewerEmployeeIds: [emp.body.id],
+    }).expect(201);
+    expect(iv.body.roundNo).toBe(1);
+    await auth(http().post("/interviews")).send({
+      applicationId: app1.body.id, scheduledStart: "2027-04-05T09:30:00Z", scheduledEnd: "2027-04-05T10:30:00Z", interviewerEmployeeIds: [emp.body.id],
+    }).expect(409);
+    const cal = await auth(http().get("/recruitment-calendar?from=2027-04-01T00:00:00Z&to=2027-04-30T00:00:00Z")).expect(200);
+    expect(cal.body.some((e: { id: string }) => e.id === iv.body.id)).toBe(true);
+
+    await auth(http().patch(`/applications/${app1.body.id}/stage`)).send({ stage: "rejected" }).expect(400);
+    const rej = await auth(http().patch(`/applications/${app1.body.id}/stage`)).send({ stage: "rejected", reason: "Position filled internally" }).expect(200);
+    expect(rej.body.rejectionReason).toBe("Position filled internally");
+
+    await auth(http().put("/recruitment/settings")).send({ candidateRetentionMonths: 12, offerValidityDays: 10, consentRequired: false }).expect(200);
+    const settings = await auth(http().get("/recruitment/settings")).expect(200);
+    expect(settings.body).toMatchObject({ candidateRetentionMonths: 12, offerValidityDays: 10 });
+    await auth(http().put("/recruitment/settings")).send({ offerValidityDays: 0 }).expect(400);
+    await auth(http().put("/recruitment/settings")).send({ candidateRetentionMonths: null, offerValidityDays: null }).expect(200);
+
+    // no token -> 401
+    await http().get("/candidates").expect(401);
+  });
 });

@@ -68,7 +68,7 @@ export class WorkScheduleResolutionService {
       ]);
       const holiday =
         (employeeRow.rowCount ?? 0) > 0
-          ? await this.holidays.getHolidayOnDate(client, employeeRow.rows[0].company_id, dateIso)
+          ? await this.holidays.getHolidayOnDate(client, employeeRow.rows[0].company_id, dateIso, employeeId)
           : null;
       return {
         date: dateIso,
@@ -123,7 +123,7 @@ export class WorkScheduleResolutionService {
       breaks = breakResult.rows.map((b) => ({ id: b.id, startTime: b.start_time, endTime: b.end_time, isPaid: b.is_paid }));
     }
 
-    const holiday = await this.holidays.getHolidayOnDate(client, resolved.companyId, dateIso);
+    const holiday = await this.holidays.getHolidayOnDate(client, resolved.companyId, dateIso, employeeId);
 
     return {
       date: dateIso,

@@ -9,6 +9,8 @@ const STATUS_LABELS: Record<PositionStatus, string> = {
   filled: "Filled",
   frozen: "Frozen",
   abolished: "Abolished",
+  pending_approval: "Pending approval",
+  rejected: "Rejected",
 };
 const ALL_STATUSES = Object.keys(STATUS_LABELS) as PositionStatus[];
 
@@ -32,6 +34,10 @@ function statusBadgeClass(status: PositionStatus): string {
       return "bg-yellow-500/15 text-yellow-700";
     case "abolished":
       return "bg-black/10 text-label-tertiary";
+    case "pending_approval":
+      return "bg-amber-100 text-amber-800";
+    case "rejected":
+      return "bg-danger/15 text-red-700";
   }
 }
 

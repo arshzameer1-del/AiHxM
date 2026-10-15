@@ -169,6 +169,7 @@ describe("RecruitmentService", () => {
       const requisition = await recruitment.createRequisition(hrAdminClaims, {
         title: "Product Designer",
         department: "Design",
+        headcount: 2, // a filled requisition (ORG-01) stops taking applications, so leave room for the backup candidate
         salaryBand: "D3",
       });
       requisitionId = requisition.id;

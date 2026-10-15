@@ -6,9 +6,20 @@ import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
 import { EmployeeGroupsService } from "../employee-groups/employee-groups.service";
+import { assertPhaseOpen, currentPhase, loadPhases, tenantToday, validatePhaseSet } from "./performance-phases";
 import type {
   CalibrateReviewRequest,
   CreateGoalRequest,
+  GoalEvidenceView,
+  GoalPlanRequest,
+  GoalPlanView,
+  GoalStatus,
+  GoalUpdateType,
+  GoalUpdateView,
+  ReopenGoalPlanRequest,
+  ReviewCyclePhaseView,
+  ReviewPhaseKey,
+  SetReviewCyclePhasesRequest,
   CreateReviewCycleRequest,
   GoalView,
   LaunchReviewCycleResponse,
@@ -55,6 +66,15 @@ function toIsoDate(value: unknown): string {
   return v?.toISOString ? v.toISOString().slice(0, 10) : v;
 }
 
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+/** Evidence is a link people can open, so only http(s) URLs are accepted. */
+export function assertEvidenceUrl(url: string): void {
+  if (!/^https?:\/\/[^\s]+$/i.test(url?.trim() ?? "")) throw new BadRequestException("Evidence must be a web link starting with http:// or https://");
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function rowToCycle(row: any): ReviewCycleView {
   return {
@@ -72,7 +92,9 @@ function rowToCycle(row: any): ReviewCycleView {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function rowToGoal(row: any): GoalView {
+function rowToGoal(row: any, today: string): GoalView {
+  const dueDate = row.due_date ? toIsoDate(row.due_date) : null;
+  const open = ["active", "in_progress", "at_risk"].includes(row.status);
   return {
     id: row.id,
     companyId: row.company_id,
@@ -83,6 +105,13 @@ function rowToGoal(row: any): GoalView {
     description: row.description,
     weight: row.weight === null ? null : Number(row.weight),
     status: row.status,
+    effectiveStatus: open && dueDate !== null && dueDate < today ? "overdue" : row.status,
+    dueDate,
+    targetValue: row.target_value === null || row.target_value === undefined ? null : Number(row.target_value),
+    targetUnit: row.target_unit ?? null,
+    currentValue: row.current_value === null || row.current_value === undefined ? null : Number(row.current_value),
+    progressPct: Number(row.progress_pct ?? 0),
+    completedAt: toIso(row.completed_at),
     createdByUserAccountId: row.created_by_user_account_id,
     createdAt: toIso(row.created_at) as string,
     updatedAt: toIso(row.updated_at) as string,
@@ -164,7 +193,12 @@ export class PerformanceService {
     await this.requireHrManage(claims);
     return this.db.withClaims(claims, async (client) => {
       const result = await client.query("SELECT * FROM review_cycles ORDER BY created_at DESC");
-      return result.rows.map(rowToCycle);
+      const today = await tenantToday(client, claims.company_id);
+      const phases = await loadPhases(client, result.rows.map((r) => r.id), today);
+      return result.rows.map((r) => {
+        const list = phases.get(r.id) ?? [];
+        return { ...rowToCycle(r), phases: list, currentPhase: currentPhase(list) };
+      });
     });
   }
 
@@ -173,7 +207,7 @@ export class PerformanceService {
     return this.db.withClaims(claims, async (client) => {
       const result = await client.query("SELECT * FROM review_cycles WHERE id = $1", [id]);
       if (result.rowCount === 0) throw new NotFoundException("Review cycle not found");
-      return rowToCycle(result.rows[0]);
+      return this.cycleWithPhases(client, claims, id);
     });
   }
 
@@ -290,17 +324,61 @@ export class PerformanceService {
 
   // --- Goals -----------------------------------------------------------
 
+  /** Sum of weights of the employee's non-cancelled goals in the cycle, optionally leaving one goal out. */
+  private async weightTotal(client: PoolClient, cycleId: string, employeeId: string, excludeGoalId?: string): Promise<number> {
+    const r = await client.query(
+      `SELECT COALESCE(SUM(weight), 0) AS total FROM goals
+        WHERE review_cycle_id = $1 AND employee_id = $2 AND status <> 'cancelled' AND ($3::uuid IS NULL OR id <> $3)`,
+      [cycleId, employeeId, excludeGoalId ?? null]
+    );
+    return Number(r.rows[0].total);
+  }
+
+  private async planStatus(client: PoolClient, cycleId: string, employeeId: string): Promise<"draft" | "finalised"> {
+    const r = await client.query(`SELECT status FROM goal_plans WHERE review_cycle_id = $1 AND employee_id = $2`, [cycleId, employeeId]);
+    return r.rows[0]?.status ?? "draft";
+  }
+
+  private async recordGoalUpdate(
+    client: PoolClient,
+    claims: RequestClaims,
+    goalId: string,
+    u: {
+      type: GoalUpdateType;
+      fromStatus?: string | null;
+      toStatus?: string | null;
+      progressPct?: number | null;
+      currentValue?: number | null;
+      note?: string | null;
+      changes?: Record<string, unknown>;
+    }
+  ): Promise<void> {
+    await client.query(
+      `INSERT INTO goal_updates (company_id, goal_id, update_type, from_status, to_status, progress_pct, current_value, note, changes, author_user_account_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10)`,
+      [
+        claims.company_id, goalId, u.type, u.fromStatus ?? null, u.toStatus ?? null, u.progressPct ?? null, u.currentValue ?? null, u.note ?? null,
+        JSON.stringify(u.changes ?? {}), /^[0-9a-f-]{36}$/i.test(claims.sub) ? claims.sub : null,
+      ]
+    );
+  }
+
   async createGoal(claims: RequestClaims, input: CreateGoalRequest): Promise<GoalView> {
     await this.requireModule(claims);
     return this.db.withClaims(claims, async (client) => {
       const employee = await this.loadEmployee(client, input.employeeId);
       if (!employee) throw new NotFoundException("Employee not found");
       await this.requireGoalAccess(claims, employee);
+      const isHr = await this.rbac.can(claims, HR_MANAGE_PERMISSION);
 
       const cycle = await client.query("SELECT status FROM review_cycles WHERE id = $1", [input.reviewCycleId]);
       if (cycle.rowCount === 0) throw new NotFoundException("Review cycle not found");
       if (cycle.rows[0].status === "closed") {
         throw new BadRequestException("Cannot add a goal to a closed review cycle");
+      }
+      await assertPhaseOpen(client, claims.company_id, input.reviewCycleId, "goal_setting", isHr);
+      if (!isHr && (await this.planStatus(client, input.reviewCycleId, input.employeeId)) === "finalised") {
+        throw new BadRequestException("This goal plan is finalised. Ask HR to reopen it before adding goals.");
       }
 
       if (input.parentGoalId) {
@@ -312,10 +390,22 @@ export class PerformanceService {
           throw new BadRequestException("Parent goal not found in this review cycle");
         }
       }
+      if (input.weight !== undefined && input.weight !== null) {
+        // Serialise concurrent weight edits for the same plan.
+        await client.query(`SELECT id FROM goals WHERE review_cycle_id = $1 AND employee_id = $2 FOR UPDATE`, [input.reviewCycleId, input.employeeId]);
+        const total = (await this.weightTotal(client, input.reviewCycleId, input.employeeId)) + Number(input.weight);
+        if (total > 100.0001) {
+          throw new BadRequestException(`Goal weights cannot add up to more than 100 (this would make ${round2(total)}).`);
+        }
+      }
+      if (input.targetValue !== undefined && input.targetValue !== null && Number(input.targetValue) <= 0) {
+        throw new BadRequestException("A goal target must be greater than zero");
+      }
 
       const result = await client.query(
-        `INSERT INTO goals (company_id, review_cycle_id, employee_id, parent_goal_id, title, description, weight, created_by_user_account_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        `INSERT INTO goals (company_id, review_cycle_id, employee_id, parent_goal_id, title, description, weight, created_by_user_account_id,
+                            due_date, target_value, target_unit, current_value)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
         [
           claims.company_id,
           input.reviewCycleId,
@@ -325,21 +415,26 @@ export class PerformanceService {
           input.description ?? null,
           input.weight ?? null,
           claims.sub,
+          input.dueDate ?? null,
+          input.targetValue ?? null,
+          input.targetUnit ?? null,
+          input.targetValue !== undefined && input.targetValue !== null ? 0 : null,
         ]
       );
+      await this.recordGoalUpdate(client, claims, result.rows[0].id, { type: "created", toStatus: "active", progressPct: 0 });
       await this.audit.record(client, claims, {
         companyId: claims.company_id ?? null,
         action: "goal.create",
         target: result.rows[0].id,
       });
-      return rowToGoal(result.rows[0]);
+      return rowToGoal(result.rows[0], await tenantToday(client, claims.company_id));
     });
   }
 
   async listGoals(claims: RequestClaims, filter?: { reviewCycleId?: string; employeeId?: string }): Promise<GoalView[]> {
     await this.requireModule(claims);
     return this.db.withClaims(claims, async (client) => {
-      const [scope, hasHrAll, result] = await Promise.all([
+      const [scope, hasHrAll, result, today] = await Promise.all([
         this.rbac.resolveViewScope(claims, "performance_goal.manage"),
         this.rbac.can(claims, HR_MANAGE_PERMISSION),
         client.query(
@@ -352,6 +447,7 @@ export class PerformanceService {
            ORDER BY g.created_at ASC`,
           [filter?.reviewCycleId ?? null, filter?.employeeId ?? null]
         ),
+        tenantToday(client, claims.company_id),
       ]);
       const hasAll = scope.hasAll || hasHrAll;
       return result.rows
@@ -361,34 +457,330 @@ export class PerformanceService {
             (scope.hasSelf && row.employee_user_account_id === claims.sub) ||
             (scope.hasTeam && row.manager_user_account_id === claims.sub)
         )
-        .map(rowToGoal);
+        .map((row) => rowToGoal(row, today));
     });
   }
 
   async updateGoal(claims: RequestClaims, id: string, patch: UpdateGoalRequest): Promise<GoalView> {
     await this.requireModule(claims);
     return this.db.withClaims(claims, async (client) => {
-      const current = await client.query("SELECT * FROM goals WHERE id = $1", [id]);
+      const current = await client.query("SELECT * FROM goals WHERE id = $1 FOR UPDATE", [id]);
       if (current.rowCount === 0) throw new NotFoundException("Goal not found");
       const before = current.rows[0];
 
       const employee = await this.loadEmployee(client, before.employee_id);
       if (!employee) throw new NotFoundException("Employee not found");
       await this.requireGoalAccess(claims, employee);
+      const isHr = await this.rbac.can(claims, HR_MANAGE_PERMISSION);
+
+      const cycle = await client.query("SELECT status FROM review_cycles WHERE id = $1", [before.review_cycle_id]);
+      if (cycle.rows[0]?.status === "closed") throw new BadRequestException("This review cycle is closed; its goals can no longer change");
+
+      // Wording, weight and the due date are goal-setting decisions: they follow the goal-setting window and the plan lock.
+      const shapesPlan = patch.title !== undefined || patch.description !== undefined || patch.weight !== undefined || patch.dueDate !== undefined || patch.targetValue !== undefined || patch.targetUnit !== undefined;
+      if (shapesPlan) {
+        await assertPhaseOpen(client, claims.company_id, before.review_cycle_id, "goal_setting", isHr);
+        if (!isHr && (await this.planStatus(client, before.review_cycle_id, before.employee_id)) === "finalised") {
+          throw new BadRequestException("This goal plan is finalised. Ask HR to reopen it before changing goals.");
+        }
+      }
+      if (patch.weight !== undefined && patch.weight !== null) {
+        await client.query(`SELECT id FROM goals WHERE review_cycle_id = $1 AND employee_id = $2 FOR UPDATE`, [before.review_cycle_id, before.employee_id]);
+        const total = (await this.weightTotal(client, before.review_cycle_id, before.employee_id, id)) + Number(patch.weight);
+        if (before.status !== "cancelled" && total > 100.0001) {
+          throw new BadRequestException(`Goal weights cannot add up to more than 100 (this would make ${round2(total)}).`);
+        }
+      }
+      if (patch.targetValue !== undefined && patch.targetValue !== null && Number(patch.targetValue) <= 0) {
+        throw new BadRequestException("A goal target must be greater than zero");
+      }
+      if (patch.progressPct !== undefined && (patch.progressPct < 0 || patch.progressPct > 100)) {
+        throw new BadRequestException("Progress must be between 0 and 100");
+      }
+      if (patch.currentValue !== undefined && patch.currentValue < 0) throw new BadRequestException("Current value cannot be negative");
+
+      const next = {
+        title: patch.title ?? before.title,
+        description: patch.description !== undefined ? patch.description : before.description,
+        weight: patch.weight !== undefined ? patch.weight : before.weight,
+        due_date: patch.dueDate !== undefined ? patch.dueDate : before.due_date,
+        target_value: patch.targetValue !== undefined ? patch.targetValue : before.target_value,
+        target_unit: patch.targetUnit !== undefined ? patch.targetUnit : before.target_unit,
+        current_value: patch.currentValue !== undefined ? patch.currentValue : before.current_value,
+      };
+      // Progress: an explicit percentage wins; otherwise it follows current/target when both are known.
+      let progress = Number(before.progress_pct);
+      if (patch.progressPct !== undefined) progress = patch.progressPct;
+      else if (patch.currentValue !== undefined && next.target_value) progress = Math.min(100, round2((Number(patch.currentValue) / Number(next.target_value)) * 100));
+      else if (patch.targetValue !== undefined && next.target_value && next.current_value !== null && next.current_value !== undefined) {
+        progress = Math.min(100, round2((Number(next.current_value) / Number(next.target_value)) * 100));
+      }
+
+      let status: GoalStatus = before.status;
+      if (patch.status !== undefined) status = patch.status;
+      else if (before.status === "overdue" && patch.dueDate && patch.dueDate >= (await tenantToday(client, claims.company_id))) status = progress > 0 ? "in_progress" : "active";
+      else if (progress >= 100 && !["completed", "cancelled"].includes(before.status)) status = "completed";
+      else if (progress > Number(before.progress_pct) && before.status === "active") status = "in_progress";
+      if (before.status === "completed" && status !== "completed" && patch.status === undefined) status = "completed";
+      if (status === "completed") progress = 100;
 
       const result = await client.query(
-        `UPDATE goals SET title = $2, description = $3, weight = $4, status = $5, updated_at = now()
-         WHERE id = $1 RETURNING *`,
-        [
-          id,
-          patch.title ?? before.title,
-          patch.description ?? before.description,
-          patch.weight ?? before.weight,
-          patch.status ?? before.status,
-        ]
+        `UPDATE goals SET title = $2, description = $3, weight = $4, status = $5, due_date = $6, target_value = $7, target_unit = $8,
+                current_value = $9, progress_pct = $10,
+                completed_at = CASE WHEN $5 = 'completed' THEN COALESCE(completed_at, now()) ELSE NULL END, updated_at = now()
+          WHERE id = $1 RETURNING *`,
+        [id, next.title, next.description, next.weight, status, next.due_date, next.target_value, next.target_unit, next.current_value, progress]
       );
-      return rowToGoal(result.rows[0]);
+
+      // History: one row per kind of change so the timeline reads naturally.
+      const changes: Record<string, unknown> = {};
+      if (next.title !== before.title) changes.title = { from: before.title, to: next.title };
+      if (next.description !== before.description) changes.description = true;
+      if (Number(next.weight ?? -1) !== Number(before.weight ?? -1)) changes.weight = { from: before.weight === null ? null : Number(before.weight), to: next.weight };
+      if (Object.keys(changes).length > 0) await this.recordGoalUpdate(client, claims, id, { type: changes.weight ? "weight" : "edit", changes, note: patch.note });
+      if (String(next.due_date ?? "") !== String(before.due_date ? toIsoDate(before.due_date) : "")) {
+        await this.recordGoalUpdate(client, claims, id, {
+          type: "due_date", changes: { from: before.due_date ? toIsoDate(before.due_date) : null, to: next.due_date ?? null }, note: patch.note,
+        });
+      }
+      if (progress !== Number(before.progress_pct) || patch.currentValue !== undefined) {
+        await this.recordGoalUpdate(client, claims, id, { type: "progress", progressPct: progress, currentValue: next.current_value === null ? null : Number(next.current_value), note: patch.note });
+      }
+      if (status !== before.status) await this.recordGoalUpdate(client, claims, id, { type: "status", fromStatus: before.status, toStatus: status, note: patch.note });
+      if (patch.note && Object.keys(changes).length === 0 && status === before.status && progress === Number(before.progress_pct) && patch.currentValue === undefined) {
+        await this.recordGoalUpdate(client, claims, id, { type: "note", note: patch.note });
+      }
+      await this.audit.record(client, claims, {
+        companyId: claims.company_id ?? null,
+        action: "goal.update",
+        target: id,
+        metadata: { fields: Object.keys(patch), status, progress },
+        reason: isHr && shapesPlan ? patch.note ?? null : null,
+      });
+      return rowToGoal(result.rows[0], await tenantToday(client, claims.company_id));
     });
+  }
+
+  async listGoalUpdates(claims: RequestClaims, goalId: string): Promise<GoalUpdateView[]> {
+    await this.requireModule(claims);
+    return this.db.withClaims(claims, async (client) => {
+      const g = await client.query(`SELECT employee_id FROM goals WHERE id = $1`, [goalId]);
+      if (g.rowCount === 0) throw new NotFoundException("Goal not found");
+      const employee = await this.loadEmployee(client, g.rows[0].employee_id);
+      if (!employee) throw new NotFoundException("Employee not found");
+      await this.requireGoalAccess(claims, employee);
+      const r = await client.query(`SELECT * FROM goal_updates WHERE goal_id = $1 ORDER BY created_at, id`, [goalId]);
+      return r.rows.map(
+        (u): GoalUpdateView => ({
+          id: u.id,
+          goalId: u.goal_id,
+          updateType: u.update_type,
+          fromStatus: u.from_status ?? null,
+          toStatus: u.to_status ?? null,
+          progressPct: u.progress_pct === null ? null : Number(u.progress_pct),
+          currentValue: u.current_value === null ? null : Number(u.current_value),
+          note: u.note ?? null,
+          changes: u.changes ?? {},
+          authorUserAccountId: u.author_user_account_id ?? null,
+          createdAt: toIso(u.created_at) as string,
+        })
+      );
+    });
+  }
+
+  // --- Goal plans (weights must add up to 100) ----------------------------
+
+  async getGoalPlan(claims: RequestClaims, reviewCycleId: string, employeeId: string): Promise<GoalPlanView> {
+    await this.requireModule(claims);
+    return this.db.withClaims(claims, async (client) => {
+      const employee = await this.loadEmployee(client, employeeId);
+      if (!employee) throw new NotFoundException("Employee not found");
+      await this.requireGoalAccess(claims, employee);
+      return this.buildPlanView(client, reviewCycleId, employeeId);
+    });
+  }
+
+  private async buildPlanView(client: PoolClient, cycleId: string, employeeId: string): Promise<GoalPlanView> {
+    const g = await client.query(
+      `SELECT COUNT(*) AS n, COALESCE(SUM(weight), 0) AS total, bool_and(weight IS NOT NULL) AS all_weighted
+         FROM goals WHERE review_cycle_id = $1 AND employee_id = $2 AND status <> 'cancelled'`,
+      [cycleId, employeeId]
+    );
+    const plan = await client.query(`SELECT * FROM goal_plans WHERE review_cycle_id = $1 AND employee_id = $2`, [cycleId, employeeId]);
+    const n = Number(g.rows[0].n);
+    const total = round2(Number(g.rows[0].total));
+    return {
+      reviewCycleId: cycleId,
+      employeeId,
+      status: plan.rows[0]?.status ?? "draft",
+      goalCount: n,
+      totalWeight: total,
+      remainingWeight: round2(100 - total),
+      isComplete: n > 0 && g.rows[0].all_weighted === true && Math.abs(total - 100) < 0.005,
+      finalisedAt: toIso(plan.rows[0]?.finalised_at),
+      reopenedReason: plan.rows[0]?.reopened_reason ?? null,
+    };
+  }
+
+  /** Locks the plan once every open goal is weighted and the weights add up to exactly 100. */
+  async finaliseGoalPlan(claims: RequestClaims, input: GoalPlanRequest): Promise<GoalPlanView> {
+    await this.requireModule(claims);
+    return this.db.withClaims(claims, async (client) => {
+      const employee = await this.loadEmployee(client, input.employeeId);
+      if (!employee) throw new NotFoundException("Employee not found");
+      await this.requireGoalAccess(claims, employee);
+      const isHr = await this.rbac.can(claims, HR_MANAGE_PERMISSION);
+      const cycle = await client.query("SELECT status FROM review_cycles WHERE id = $1", [input.reviewCycleId]);
+      if (cycle.rowCount === 0) throw new NotFoundException("Review cycle not found");
+      if (cycle.rows[0].status === "closed") throw new BadRequestException("This review cycle is closed");
+      await assertPhaseOpen(client, claims.company_id, input.reviewCycleId, "goal_setting", isHr);
+      await client.query(`SELECT id FROM goals WHERE review_cycle_id = $1 AND employee_id = $2 FOR UPDATE`, [input.reviewCycleId, input.employeeId]);
+      const view = await this.buildPlanView(client, input.reviewCycleId, input.employeeId);
+      if (view.goalCount === 0) throw new BadRequestException("Add at least one goal before finalising the plan");
+      const unweighted = await client.query(
+        `SELECT COUNT(*) AS n FROM goals WHERE review_cycle_id = $1 AND employee_id = $2 AND status <> 'cancelled' AND weight IS NULL`,
+        [input.reviewCycleId, input.employeeId]
+      );
+      if (Number(unweighted.rows[0].n) > 0) throw new BadRequestException("Every goal needs a weight before the plan can be finalised");
+      if (Math.abs(view.totalWeight - 100) >= 0.005) {
+        throw new BadRequestException(`Goal weights must add up to exactly 100 (currently ${view.totalWeight}).`);
+      }
+      await client.query(
+        `INSERT INTO goal_plans (company_id, review_cycle_id, employee_id, status, finalised_at, finalised_by, reopened_reason, updated_at)
+         VALUES ($1, $2, $3, 'finalised', now(), $4, NULL, now())
+         ON CONFLICT (review_cycle_id, employee_id) DO UPDATE SET status = 'finalised', finalised_at = now(), finalised_by = $4, reopened_reason = NULL, updated_at = now()`,
+        [claims.company_id, input.reviewCycleId, input.employeeId, claims.sub]
+      );
+      await this.audit.record(client, claims, {
+        companyId: claims.company_id ?? null,
+        action: "goal_plan.finalise",
+        target: `${input.reviewCycleId}:${input.employeeId}`,
+        metadata: { goalCount: view.goalCount },
+      });
+      return this.buildPlanView(client, input.reviewCycleId, input.employeeId);
+    });
+  }
+
+  /** HR or the employee's manager reopens a finalised plan, with a reason. */
+  async reopenGoalPlan(claims: RequestClaims, input: ReopenGoalPlanRequest): Promise<GoalPlanView> {
+    await this.requireModule(claims);
+    if (!input.reason?.trim()) throw new BadRequestException("A reason is required to reopen a goal plan");
+    return this.db.withClaims(claims, async (client) => {
+      const employee = await this.loadEmployee(client, input.employeeId);
+      if (!employee) throw new NotFoundException("Employee not found");
+      const [isHr, isTeam] = await Promise.all([
+        this.rbac.can(claims, HR_MANAGE_PERMISSION),
+        this.rbac.can(claims, GOAL_TEAM_PERMISSION, { teamOwnerId: employee.manager_user_account_id }),
+      ]);
+      if (!isHr && !isTeam) throw new ForbiddenException("Only HR or the employee's manager can reopen a goal plan");
+      const cycle = await client.query("SELECT status FROM review_cycles WHERE id = $1", [input.reviewCycleId]);
+      if (cycle.rowCount === 0) throw new NotFoundException("Review cycle not found");
+      if (cycle.rows[0].status === "closed") throw new BadRequestException("This review cycle is closed");
+      const r = await client.query(
+        `UPDATE goal_plans SET status = 'draft', reopened_reason = $3, updated_at = now() WHERE review_cycle_id = $1 AND employee_id = $2 AND status = 'finalised' RETURNING id`,
+        [input.reviewCycleId, input.employeeId, input.reason.trim()]
+      );
+      if (r.rowCount === 0) throw new BadRequestException("This goal plan is not finalised");
+      await this.audit.record(client, claims, {
+        companyId: claims.company_id ?? null,
+        action: "goal_plan.reopen",
+        target: `${input.reviewCycleId}:${input.employeeId}`,
+        reason: input.reason.trim(),
+      });
+      return this.buildPlanView(client, input.reviewCycleId, input.employeeId);
+    });
+  }
+
+  // --- Goal evidence ---------------------------------------------------------
+
+  async addGoalEvidence(claims: RequestClaims, goalId: string, input: { label: string; url: string }): Promise<GoalEvidenceView> {
+    await this.requireModule(claims);
+    assertEvidenceUrl(input.url);
+    return this.db.withClaims(claims, async (client) => {
+      const g = await client.query(`SELECT employee_id, review_cycle_id FROM goals WHERE id = $1`, [goalId]);
+      if (g.rowCount === 0) throw new NotFoundException("Goal not found");
+      const employee = await this.loadEmployee(client, g.rows[0].employee_id);
+      if (!employee) throw new NotFoundException("Employee not found");
+      await this.requireGoalAccess(claims, employee);
+      const r = await client.query(
+        `INSERT INTO performance_evidence (company_id, goal_id, label, url, created_by) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [claims.company_id, goalId, input.label.trim(), input.url.trim(), claims.sub]
+      );
+      await this.audit.record(client, claims, { companyId: claims.company_id ?? null, action: "goal.evidence_add", target: goalId, metadata: { label: input.label } });
+      return { id: r.rows[0].id, goalId, label: r.rows[0].label, url: r.rows[0].url, createdBy: r.rows[0].created_by, createdAt: toIso(r.rows[0].created_at) as string };
+    });
+  }
+
+  async listGoalEvidence(claims: RequestClaims, goalId: string): Promise<GoalEvidenceView[]> {
+    await this.requireModule(claims);
+    return this.db.withClaims(claims, async (client) => {
+      const g = await client.query(`SELECT employee_id FROM goals WHERE id = $1`, [goalId]);
+      if (g.rowCount === 0) throw new NotFoundException("Goal not found");
+      const employee = await this.loadEmployee(client, g.rows[0].employee_id);
+      if (!employee) throw new NotFoundException("Employee not found");
+      await this.requireGoalAccess(claims, employee);
+      const r = await client.query(`SELECT * FROM performance_evidence WHERE goal_id = $1 ORDER BY created_at`, [goalId]);
+      return r.rows.map((e): GoalEvidenceView => ({ id: e.id, goalId, label: e.label, url: e.url, createdBy: e.created_by ?? null, createdAt: toIso(e.created_at) as string }));
+    });
+  }
+
+  async removeGoalEvidence(claims: RequestClaims, goalId: string, evidenceId: string): Promise<{ removed: true }> {
+    await this.requireModule(claims);
+    return this.db.withClaims(claims, async (client) => {
+      const g = await client.query(`SELECT employee_id FROM goals WHERE id = $1`, [goalId]);
+      if (g.rowCount === 0) throw new NotFoundException("Goal not found");
+      const employee = await this.loadEmployee(client, g.rows[0].employee_id);
+      if (!employee) throw new NotFoundException("Employee not found");
+      await this.requireGoalAccess(claims, employee);
+      const r = await client.query(`DELETE FROM performance_evidence WHERE id = $1 AND goal_id = $2`, [evidenceId, goalId]);
+      if (r.rowCount === 0) throw new NotFoundException("Evidence not found");
+      await this.audit.record(client, claims, { companyId: claims.company_id ?? null, action: "goal.evidence_remove", target: goalId, metadata: { evidenceId } });
+      return { removed: true as const };
+    });
+  }
+
+  // --- Cycle phases (TAL-07) ---------------------------------------------------
+
+  async getPhases(claims: RequestClaims, cycleId: string): Promise<{ phases: ReviewCyclePhaseView[]; currentPhase: ReviewPhaseKey | null }> {
+    await this.requireModule(claims);
+    return this.db.withClaims(claims, async (client) => {
+      const c = await client.query(`SELECT 1 FROM review_cycles WHERE id = $1`, [cycleId]);
+      if (c.rowCount === 0) throw new NotFoundException("Review cycle not found");
+      const today = await tenantToday(client, claims.company_id);
+      const phases = (await loadPhases(client, [cycleId], today)).get(cycleId) ?? [];
+      return { phases, currentPhase: currentPhase(phases) };
+    });
+  }
+
+  /** Replaces the cycle's phase windows. HR only; a closed cycle's schedule is frozen. */
+  async setPhases(claims: RequestClaims, cycleId: string, input: SetReviewCyclePhasesRequest): Promise<ReviewCycleView> {
+    await this.requireHrManage(claims);
+    validatePhaseSet(input.phases);
+    return this.db.withClaims(claims, async (client) => {
+      const c = await client.query(`SELECT status FROM review_cycles WHERE id = $1 FOR UPDATE`, [cycleId]);
+      if (c.rowCount === 0) throw new NotFoundException("Review cycle not found");
+      if (c.rows[0].status === "closed") throw new BadRequestException("A closed review cycle's schedule cannot change");
+      await client.query(`DELETE FROM review_cycle_phases WHERE review_cycle_id = $1`, [cycleId]);
+      for (const p of input.phases) {
+        await client.query(`INSERT INTO review_cycle_phases (company_id, review_cycle_id, phase_key, starts_on, ends_on) VALUES ($1, $2, $3, $4, $5)`, [
+          claims.company_id, cycleId, p.phaseKey, p.startsOn, p.endsOn,
+        ]);
+      }
+      await this.audit.record(client, claims, {
+        companyId: claims.company_id ?? null,
+        action: "review_cycle.set_phases",
+        target: cycleId,
+        metadata: { phases: input.phases },
+      });
+      return this.cycleWithPhases(client, claims, cycleId);
+    });
+  }
+
+  private async cycleWithPhases(client: PoolClient, claims: RequestClaims, cycleId: string): Promise<ReviewCycleView> {
+    const r = await client.query("SELECT * FROM review_cycles WHERE id = $1", [cycleId]);
+    const today = await tenantToday(client, claims.company_id);
+    const phases = (await loadPhases(client, [cycleId], today)).get(cycleId) ?? [];
+    return { ...rowToCycle(r.rows[0]), phases, currentPhase: currentPhase(phases) };
   }
 
   // --- Performance reviews ----------------------------------------------
@@ -469,6 +861,7 @@ export class PerformanceService {
         throw new ForbiddenException("Not permitted to submit a self-assessment for this review");
       }
       await this.assertCycleActive(client, review.review_cycle_id);
+      await assertPhaseOpen(client, claims.company_id, review.review_cycle_id, "self_assessment", await this.rbac.can(claims, HR_MANAGE_PERMISSION));
 
       const nextStatus = review.manager_assessment_submitted_at ? "completed" : "in_progress";
       const result = await client.query(
@@ -494,6 +887,7 @@ export class PerformanceService {
         throw new ForbiddenException("Not permitted to submit a manager assessment for this review");
       }
       await this.assertCycleActive(client, review.review_cycle_id);
+      await assertPhaseOpen(client, claims.company_id, review.review_cycle_id, "manager_assessment", await this.rbac.can(claims, HR_MANAGE_PERMISSION));
 
       const nextStatus = review.self_assessment_submitted_at ? "completed" : "in_progress";
       const result = await client.query(

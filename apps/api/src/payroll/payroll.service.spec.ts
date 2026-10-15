@@ -1066,6 +1066,43 @@ describe("PayrollService", () => {
       expect(payslips.some((p) => p.employeeId === staffEmployeeId)).toBe(true);
     });
 
+    it("TLM-07: an approved overtime claim is paid by exactly one finalised run - marked paid, never picked up again, released when that run is reversed", async () => {
+      const otEmployee = await createEmployee({ dateOfJoining: "2037-05-01", terminationDate: "2037-05-31" });
+      await compensation.setCompensation(hrAdminClaims, { employeeId: otEmployee.id, monthlySalary: 80000, effectiveFrom: "2020-01-01" });
+      await insertOvertime(otEmployee.id, { workDate: "2037-05-12", minutes: 120, multiplier: 1.5, hourlyRate: 400, amount: 1200 });
+      const claimId = (await db.withClaims(FIXTURE_CLAIMS, (c) => c.query("SELECT id FROM overtime_records WHERE employee_id = $1", [otEmployee.id]))).rows[0].id as string;
+      const claimRow = async () => (await db.withClaims(FIXTURE_CLAIMS, (c) => c.query("SELECT status, consumed_payroll_run_id, consumed_at FROM overtime_records WHERE id = $1", [claimId]))).rows[0];
+
+      // calculating alone consumes nothing
+      const run = await payroll.createRun(hrAdminClaims, { periodStart: "2037-05-01", periodEnd: "2037-05-31" });
+      await payroll.calculateRun(hrAdminClaims, run.id);
+      const slip = (await payroll.listPayslips(hrAdminClaims, { payrollRunId: run.id })).find((p) => p.employeeId === otEmployee.id)!;
+      expect(slip.consumedOvertime).toEqual([{ overtimeId: claimId, amount: 1200 }]);
+      expect((await claimRow()).status).toBe("approved");
+
+      await submitAndApprove(run.id);
+      await payroll.finalizeRun(hrAdminClaims, run.id);
+      const paid = await claimRow();
+      expect(paid.status).toBe("paid");
+      expect(paid.consumed_payroll_run_id).toBe(run.id);
+      expect(paid.consumed_at).not.toBeNull();
+
+      // a claim already paid is not offered to a later calculation
+      const direct = await db.withClaims(hrAdminClaims, (c) => overtime.getApprovedOvertimeInRange(c, otEmployee.id, "2037-05-01", "2037-05-31"));
+      expect(direct).toEqual([]);
+      // ... and finalising a stale run that still lists it is refused loudly
+      await expect(db.withClaims(hrAdminClaims, (c) => overtime.markPaidWithinTransaction(c, claimId, run.id))).rejects.toThrow(/already paid/);
+
+      // reversing the run voids its payslips, so the claim becomes payable again and the corrective run pays it
+      const reversed = await payroll.reverseRun(hrAdminClaims, run.id, { reason: "Wrong attendance data" });
+      const released = await claimRow();
+      expect(released.status).toBe("approved");
+      expect(released.consumed_payroll_run_id).toBeNull();
+      await payroll.calculateRun(hrAdminClaims, reversed.correctiveRunId!);
+      const again = (await payroll.listPayslips(hrAdminClaims, { payrollRunId: reversed.correctiveRunId! })).find((p) => p.employeeId === otEmployee.id)!;
+      expect(again.consumedOvertime).toEqual([{ overtimeId: claimId, amount: 1200 }]);
+    });
+
     /**
      * Integration gap audit item 5/10 — work-schedule-aware proration. A
      * Mon/Wed/Fri part-timer with an explicit (individual) schedule

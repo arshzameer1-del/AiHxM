@@ -1,3 +1,4 @@
+import { fieldCrypto, isEncrypted } from "../crypto/field-crypto";
 import { Pool } from "pg";
 import { BadRequestException } from "@nestjs/common";
 import { IntegrationsService } from "./integrations.service";
@@ -94,7 +95,12 @@ describe("IntegrationsService — sensitive value masking audit", () => {
           [companyId, providerKey]
         )
       );
-      expect(raw.rows[0].config[secretField]).toBe(secretValue);
+      // SEC-03: persisted ENCRYPTED -- never the plaintext -- and decryptable by the server.
+      const stored = raw.rows[0].config[secretField] as string;
+      expect(isEncrypted(stored)).toBe(true);
+      expect(stored).not.toContain(secretValue);
+      await db.withClaims(FIXTURE_CLAIMS, (client) => fieldCrypto.warm(client, companyId));
+      expect(fieldCrypto.decrypt(companyId, stored)).toBe(secretValue);
     }
   );
 

@@ -229,7 +229,7 @@ describe("Payroll formula overrides", () => {
     });
 
     it("resolveAndEvaluate(): the override in force on the as-of date, or null (= fall back) outside every range", async () => {
-      const ctx = { defaultAmount: 407, wageBase: 40700, ratePercent: 1, paidDays: 31, employmentWindowDays: 31, paidDaysRatio: 1, grossPay: 150000 };
+      const ctx = { defaultAmount: 407, wageBase: 40700, ratePercent: 1, paidDays: 31, employmentWindowDays: 31, paidDaysRatio: 1, grossPay: 150000, eobiEligibleEarnings: 150000 };
       const at = (date: string) =>
         db.withClaims(crudHrClaims, (client) => formulaService.resolveAndEvaluate(client, crudCompanyId, "eobi_employee", date, ctx));
       expect(await at("2025-12-31")).toBeNull(); // before the first generation
@@ -250,7 +250,7 @@ describe("Payroll formula overrides", () => {
       expect(await overrides.list(calcHrClaims)).toEqual([]);
       const leaked = await db.withClaims(calcHrClaims, (client) =>
         formulaService.resolveAndEvaluate(client, crudCompanyId, "eobi_employee", "2026-08-01", {
-          defaultAmount: 1, wageBase: 1, ratePercent: 1, paidDays: 1, employmentWindowDays: 1, paidDaysRatio: 1, grossPay: 1,
+          defaultAmount: 1, wageBase: 1, ratePercent: 1, paidDays: 1, employmentWindowDays: 1, paidDaysRatio: 1, grossPay: 1, eobiEligibleEarnings: 1,
         })
       );
       expect(leaked).toBeNull();
@@ -261,7 +261,7 @@ describe("Payroll formula overrides", () => {
     it("documents exactly the variables each key exposes", async () => {
       const contract = await overrides.getContract(crudHrClaims);
       const names = Object.fromEntries(contract.map((c) => [c.formulaKey, c.variables.map((v) => v.name)]));
-      expect(names.eobi_employee).toEqual(["defaultAmount", "wageBase", "ratePercent", "paidDays", "employmentWindowDays", "paidDaysRatio", "grossPay"]);
+      expect(names.eobi_employee).toEqual(["defaultAmount", "wageBase", "ratePercent", "paidDays", "employmentWindowDays", "paidDaysRatio", "grossPay", "eobiEligibleEarnings"]);
       expect(names.eobi_employer).toEqual(names.eobi_employee);
       expect(names.income_tax).toEqual([
         "defaultAmount",

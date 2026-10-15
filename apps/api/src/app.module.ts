@@ -1,4 +1,5 @@
-import { Module } from "@nestjs/common";
+import { MiddlewareConsumer, Module, NestModule } from "@nestjs/common";
+import { RequestContextMiddleware } from "./common/request-context";
 import { APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
 import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { ScheduleModule } from "@nestjs/schedule";
@@ -9,10 +10,13 @@ import { CacheModule } from "./cache/cache.module";
 import { AuthModule } from "./auth/auth.module";
 import { CompaniesModule } from "./companies/companies.module";
 import { AuditModule } from "./audit/audit.module";
+import { IdempotencyModule } from "./idempotency/idempotency.module";
+import { BackgroundJobsModule } from "./background-jobs/background-jobs.module";
+import { DomainEventsModule } from "./domain-events/domain-events.module";
 import { PlatformAdminsModule } from "./platform-admins/platform-admins.module";
 import { RbacModule } from "./rbac/rbac.module";
 import { EntitlementsModule } from "./entitlements/entitlements.module";
-import { DummyModule } from "./dummy/dummy.module";
+import { demoFixtureModules } from "./dummy/demo-fixtures.gate";
 import { WorkflowModule } from "./workflow/workflow.module";
 import { CustomFieldsModule } from "./custom-fields/custom-fields.module";
 import { NotificationsModule } from "./notifications/notifications.module";
@@ -66,10 +70,13 @@ import { HrAdministrationModule } from "./hr-administration/hr-administration.mo
     AuthModule,
     CompaniesModule,
     AuditModule,
+    IdempotencyModule,
+    BackgroundJobsModule,
+    DomainEventsModule,
     PlatformAdminsModule,
     RbacModule,
     EntitlementsModule,
-    DummyModule,
+    ...demoFixtureModules(),
     WorkflowModule,
     CustomFieldsModule,
     NotificationsModule,
@@ -106,4 +113,8 @@ import { HrAdministrationModule } from "./hr-administration/hr-administration.mo
     { provide: APP_INTERCEPTOR, useClass: UsageTrackingInterceptor },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(RequestContextMiddleware).forRoutes("*");
+  }
+}

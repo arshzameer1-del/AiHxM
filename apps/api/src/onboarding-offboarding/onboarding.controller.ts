@@ -5,6 +5,7 @@ import type { RequestClaims } from "../database/tenant-context";
 import { OnboardingService } from "./onboarding.service";
 import { CreateChecklistItemTemplateDto, UpdateChecklistItemTemplateDto } from "./dto/checklist-item-template.dto";
 import { UpdateChecklistItemDto } from "./dto/update-checklist-item.dto";
+import { AssignChecklistItemDto } from "./dto/assign-checklist-item.dto";
 
 /**
  * Any real session can call these (SessionGuard) — OnboardingService's
@@ -38,6 +39,21 @@ export class OnboardingController {
   @Patch("onboarding/item-templates/:id/deactivate")
   deactivateItemTemplate(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
     return this.onboarding.deactivateItemTemplate(claims, id);
+  }
+
+  @Get("onboarding/my-items")
+  listMyItems(@CurrentClaims() claims: RequestClaims) {
+    return this.onboarding.listMyItems(claims);
+  }
+
+  @Get("onboarding/overdue-items")
+  listOverdue(@CurrentClaims() claims: RequestClaims) {
+    return this.onboarding.listOverdue(claims);
+  }
+
+  @Patch("onboarding-items/:itemId/assignment")
+  assignItem(@CurrentClaims() claims: RequestClaims, @Param("itemId") itemId: string, @Body() dto: AssignChecklistItemDto) {
+    return this.onboarding.assignItem(claims, itemId, dto);
   }
 
   @Get("onboarding")

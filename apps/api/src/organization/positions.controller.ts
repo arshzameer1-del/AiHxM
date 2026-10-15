@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseIntPipe, Patch, Post, Put, Query, UseGuards } from "@nestjs/common";
 import { SessionGuard } from "../auth/session.guard";
 import { CurrentClaims } from "../auth/current-claims.decorator";
 import type { RequestClaims } from "../database/tenant-context";
@@ -7,6 +7,8 @@ import { PositionsService } from "./positions.service";
 import { CreatePositionDto } from "./dto/create-position.dto";
 import { UpdatePositionDto } from "./dto/update-position.dto";
 import { AssignPositionDto } from "./dto/assign-position.dto";
+import { PositionPlanningService } from "./position-planning.service";
+import { CreatePositionRelationshipDto, UnassignPositionDto, UpsertPositionBudgetDto } from "./dto/position-planning.dto";
 
 /**
  * Any real session (SessionGuard) can call these — PositionsService's own
@@ -17,7 +19,16 @@ import { AssignPositionDto } from "./dto/assign-position.dto";
 @Controller("organization/positions")
 @UseGuards(SessionGuard)
 export class PositionsController {
-  constructor(private readonly positions: PositionsService) {}
+  constructor(
+    private readonly positions: PositionsService,
+    private readonly planning: PositionPlanningService
+  ) {}
+
+  // ORG-02 planning routes. Declared before ":id" so "planning" is not read as an id.
+  @Get("planning/summary")
+  planningSummary(@CurrentClaims() claims: RequestClaims, @Query("fiscalYear") fiscalYear?: string) {
+    return this.planning.summary(claims, fiscalYear ? Number(fiscalYear) : undefined);
+  }
 
   @Post()
   create(@CurrentClaims() claims: RequestClaims, @Body() dto: CreatePositionDto) {
@@ -54,8 +65,49 @@ export class PositionsController {
   }
 
   @Post(":id/unassign")
-  unassign(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
-    return this.positions.unassignEmployee(claims, id);
+  unassign(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: UnassignPositionDto) {
+    return this.positions.unassignEmployee(claims, id, dto?.effectiveFrom, dto?.employeeId);
+  }
+
+  @Get(":id/incumbents")
+  incumbents(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Query("includeEnded") includeEnded?: string) {
+    return this.planning.listIncumbents(claims, id, includeEnded === "true");
+  }
+
+  @Get(":id/budgets")
+  budgets(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.planning.listBudgets(claims, id);
+  }
+
+  @Put(":id/budgets/:fiscalYear")
+  upsertBudget(
+    @CurrentClaims() claims: RequestClaims,
+    @Param("id") id: string,
+    @Param("fiscalYear", ParseIntPipe) fiscalYear: number,
+    @Body() dto: UpsertPositionBudgetDto
+  ) {
+    return this.planning.upsertBudget(claims, id, fiscalYear, dto);
+  }
+
+  @Delete(":id/budgets/:fiscalYear")
+  @HttpCode(204)
+  async deleteBudget(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Param("fiscalYear", ParseIntPipe) fiscalYear: number) {
+    await this.planning.deleteBudget(claims, id, fiscalYear);
+  }
+
+  @Get(":id/relationships")
+  relationships(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.planning.listRelationships(claims, id);
+  }
+
+  @Post(":id/relationships")
+  createRelationship(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: CreatePositionRelationshipDto) {
+    return this.planning.createRelationship(claims, id, dto);
+  }
+
+  @Post(":id/relationships/:relationshipId/end")
+  endRelationship(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Param("relationshipId") relationshipId: string) {
+    return this.planning.endRelationship(claims, id, relationshipId);
   }
 
   @Post(":id/freeze")

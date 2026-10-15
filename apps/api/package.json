@@ -11,7 +11,8 @@
     "migrate": "node -r ts-node/register/transpile-only src/database/migrate.ts",
     "seed": "node -r ts-node/register/transpile-only src/database/seed.ts",
     "seed:pilot": "npm run seed && node -r ts-node/register/transpile-only src/database/seed-pilot-company.ts",
-    "grant-role": "node -r ts-node/register/transpile-only src/database/grant-role.ts"
+    "grant-role": "node -r ts-node/register/transpile-only src/database/grant-role.ts",
+    "encrypt-backfill": "node -r ts-node/register/transpile-only src/database/encrypt-backfill.ts"
   },
   "dependencies": {
     "@aihxm/shared-types": "*",

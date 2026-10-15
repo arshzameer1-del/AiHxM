@@ -16,7 +16,9 @@ import { OnboardingOffboardingSection } from "../onboarding-offboarding/Onboardi
 import { LifecycleActionsPanel } from "./LifecycleActionsPanel";
 import { EmployeeCustomFieldsPanel } from "./EmployeeCustomFieldsPanel";
 import { EmployeeCompensationPanel } from "./EmployeeCompensationPanel";
+import { EmployeeTaxProfilePanel } from "./EmployeeTaxProfilePanel";
 import { EmployeeLoansPanel } from "./EmployeeLoansPanel";
+import { EmployeeSchemeAccountsPanel } from "../payroll/PayrollSettlementPanels";
 import { EmployeeAdditionalPaymentsPanel } from "./EmployeeAdditionalPaymentsPanel";
 import { SubEntityPanel } from "./subentities/SubEntityPanel";
 import {
@@ -229,12 +231,14 @@ export function EmployeeDetailPage() {
       {tab === "Compensation & Assets" && (
         <>
           <EmployeeCompensationPanel employeeId={employee.id} canManage={canManage} />
+          <EmployeeTaxProfilePanel employeeId={employee.id} canManage={canManage} />
           {/* Payroll Enterprise Gap Analysis Phase P3 (2026-10-02) — Loans/
               Salary Advances (IT0045) and Additional Payments (IT0015),
               Core-Employee-owned the same way Compensation is (see each
               panel's own doc comment). */}
           <EmployeeLoansPanel employeeId={employee.id} canManage={canManage} />
           <EmployeeAdditionalPaymentsPanel employeeId={employee.id} canManage={canManage} />
+          <EmployeeSchemeAccountsPanel employeeId={employee.id} canManage={canManage} />
           <SubEntityPanel employeeId={employee.id} canManage={canManage} config={paymentAccountsConfig} />
           <SubEntityPanel employeeId={employee.id} canManage={canManage} config={costAllocationsConfig(costCenterOptions)} />
           <SubEntityPanel employeeId={employee.id} canManage={canManage} config={assetsConfig} />

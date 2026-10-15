@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
-import { IsNotEmpty, IsString } from "class-validator";
+import { IsNotEmpty, IsOptional, IsString, Matches, MaxLength } from "class-validator";
 import { PlatformAdminGuard } from "../auth/platform-admin.guard";
 import { ScopedCompanyParam } from "../auth/scoped-company-param.decorator";
 import { CurrentClaims } from "../auth/current-claims.decorator";
@@ -9,6 +9,26 @@ import { TenantConfigurationService } from "./tenant-configuration.service";
 class SetOverrideDto {
   @IsNotEmpty()
   value!: unknown;
+}
+
+class ScheduleDto {
+  @IsNotEmpty()
+  value!: unknown;
+
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  effectiveFrom!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  reason?: string;
+}
+
+class CancelDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  reason?: string;
 }
 
 class RollbackDto {
@@ -29,6 +49,43 @@ export class TenantConfigurationController {
   @Get()
   getEffective(@CurrentClaims() claims: RequestClaims, @Param("companyId") companyId: string) {
     return this.config.getEffective(claims, companyId);
+  }
+
+  @Get("scheduled")
+  listScheduled(@CurrentClaims() claims: RequestClaims, @Param("companyId") companyId: string) {
+    return this.config.listScheduled(claims, companyId);
+  }
+
+  @Post("scheduled/apply-due")
+  async applyDue(@CurrentClaims() claims: RequestClaims, @Param("companyId") companyId: string) {
+    return { applied: await this.config.applyDue(claims, companyId) };
+  }
+
+  @Post("scheduled/:versionId/cancel")
+  cancelScheduled(@CurrentClaims() claims: RequestClaims, @Param("companyId") companyId: string, @Param("versionId") versionId: string, @Body() dto: CancelDto) {
+    return this.config.cancelScheduled(claims, companyId, versionId, dto.reason);
+  }
+
+  @Get(":category/:settingKey/as-of/:asOf")
+  resolveAsOf(
+    @CurrentClaims() claims: RequestClaims,
+    @Param("companyId") companyId: string,
+    @Param("category") category: string,
+    @Param("settingKey") settingKey: string,
+    @Param("asOf") asOf: string
+  ) {
+    return this.config.resolveAsOf(claims, companyId, category, settingKey, asOf);
+  }
+
+  @Post(":category/:settingKey/schedule")
+  schedule(
+    @CurrentClaims() claims: RequestClaims,
+    @Param("companyId") companyId: string,
+    @Param("category") category: string,
+    @Param("settingKey") settingKey: string,
+    @Body() dto: ScheduleDto
+  ) {
+    return this.config.scheduleChange(claims, companyId, category, settingKey, dto.value, dto.effectiveFrom, dto.reason);
   }
 
   @Post(":category/:settingKey")

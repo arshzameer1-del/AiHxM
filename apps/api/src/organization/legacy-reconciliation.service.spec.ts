@@ -147,12 +147,21 @@ describe("LegacyReconciliationService", () => {
     });
     locationGapEmployeeId = locationGapEmployee.id;
 
-    const managerGapEmployee = await employees.create(hrAdminClaims, {
-      firstName: "Legacy",
-      lastName: "Manager",
-      managerId,
-    });
+    const managerGapEmployee = await employees.create(hrAdminClaims, { firstName: "Legacy", lastName: "Manager" });
     managerGapEmployeeId = managerGapEmployee.id;
+    // Cross-module integration follow-up (2026-10-01): EmployeesService
+    // .create() now opens the typed `direct` relationship itself when
+    // `managerId` is given — see employees.service.spec.ts's own "create()
+    // with managerId" describe block — so that path can no longer produce
+    // the gap this fixture needs (`manager_id` set, no org_relationships
+    // row behind it). Writing `manager_id` with raw SQL instead keeps
+    // simulating what this service actually exists to reconcile: data
+    // that reached the column some OTHER way (an old import, a row
+    // written before this sync existed), not a brand-new hire through
+    // this codebase's own create path.
+    await db.withClaims(FIXTURE_CLAIMS, (client) =>
+      client.query("UPDATE employees SET manager_id = $2 WHERE id = $1", [managerGapEmployeeId, managerId])
+    );
 
     const noMatchGapEmployee = await employees.create(hrAdminClaims, {
       firstName: "Legacy",

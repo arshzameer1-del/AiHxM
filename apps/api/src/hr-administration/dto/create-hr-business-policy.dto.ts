@@ -1,4 +1,4 @@
-import { IsBoolean, IsObject, IsOptional, IsString, MaxLength } from "class-validator";
+import { IsBoolean, IsObject, IsOptional, IsString, Matches, MaxLength, ValidateIf } from "class-validator";
 
 export class CreateHrBusinessPolicyDto {
   @IsString()
@@ -25,4 +25,16 @@ export class CreateHrBusinessPolicyDto {
   @IsOptional()
   @IsBoolean()
   isDefault?: boolean;
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  effectiveFrom?: string;
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  effectiveTo?: string;
+
+  @IsOptional()
+  @IsObject()
+  applicability?: Record<string, unknown>;
 }

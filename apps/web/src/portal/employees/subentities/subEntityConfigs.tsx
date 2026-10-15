@@ -184,6 +184,27 @@ export const paymentAccountsConfig: SubEntityPanelConfig<EmployeePaymentAccountV
     primary: `${PAYMENT_METHOD_OPTIONS.find((o) => o.value === item.paymentMethod)?.label ?? item.paymentMethod}${item.isPrimary ? " ★" : ""}`,
     secondary: [item.bankName, item.accountNumber].filter(Boolean).join(" · ") || undefined,
   }),
+  renderBadges: (item) => [
+    ...(item.approvalStatus === "pending" ? [item.replacesAccountId ? "Pending approval (replaces current)" : "Pending approval"] : []),
+    ...(item.approvalStatus === "rejected" ? ["Rejected"] : []),
+    ...(item.verificationStatus === "verified" ? ["Verified"] : item.verificationStatus === "failed" ? ["Verification failed"] : []),
+    ...(item.splitPercent ? [`${item.splitPercent}% split`] : []),
+  ],
+  extraActions: (item) =>
+    item.approvalStatus === "pending"
+      ? [
+          { label: "Approve", run: () => api.approveEmployeePaymentAccount(item.id) },
+          {
+            label: "Reject",
+            run: () => {
+              const reason = window.prompt("Reason for rejecting this payment account change?");
+              return reason && reason.trim() ? api.rejectEmployeePaymentAccount(item.id, reason.trim()) : undefined;
+            },
+          },
+        ]
+      : item.approvalStatus === "approved" && item.status === "active" && item.verificationStatus !== "verified"
+        ? [{ label: "Mark verified", run: () => api.verifyEmployeePaymentAccount(item.id, "verified") }]
+        : [],
   openStatus: "active",
   closedStatusLabel: "Ended",
   closeActionLabel: "End",

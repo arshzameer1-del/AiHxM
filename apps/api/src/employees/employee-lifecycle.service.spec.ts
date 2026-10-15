@@ -36,6 +36,19 @@ describe("EmployeeLifecycleService", () => {
   let locationAId: string;
   let locationBId: string;
 
+  // Step 4 (LIF-03): lifecycle actions dated in the future are now SCHEDULED
+  // instead of applied. These tests use fixed 2026-2027 dates and mean "apply
+  // now", so "today" (JS Date only - timers stay real) is pinned after all of them.
+  beforeAll(() => {
+    jest.useFakeTimers({
+      now: new Date("2027-06-01T12:00:00Z"),
+      doNotFake: ["nextTick", "setImmediate", "clearImmediate", "setInterval", "clearInterval", "setTimeout", "clearTimeout", "queueMicrotask", "performance", "hrtime"],
+    });
+  });
+  afterAll(() => {
+    jest.useRealTimers();
+  });
+
   beforeAll(async () => {
     pool = new Pool({ connectionString: process.env.APP_DATABASE_URL });
     db = new DatabaseService(pool);
@@ -154,8 +167,8 @@ describe("EmployeeLifecycleService", () => {
     expect(result.employee.department).toBe("Finance");
     expect(result.employee.locationId).toBe(locationBId);
     expect(result.employee.location).toBe("Lahore Office");
-    expect(result.jobHistory.eventType).toBe("transfer");
-    expect(result.jobHistory.effectiveDate).toBe("2026-10-01");
+    expect(result.jobHistory!.eventType).toBe("transfer");
+    expect(result.jobHistory!.effectiveDate).toBe("2026-10-01");
 
     const row = await latestHistory(employeeId);
     expect(row.event_type).toBe("transfer");
@@ -172,7 +185,7 @@ describe("EmployeeLifecycleService", () => {
     });
     expect(promoted.employee.designation).toBe("Senior Software Engineer");
     expect(promoted.employee.salaryBand).toBe("E4");
-    expect(promoted.jobHistory.eventType).toBe("promotion");
+    expect(promoted.jobHistory!.eventType).toBe("promotion");
 
     const demoted = await lifecycle.demote(hrAdminClaims, employeeId, {
       designation: "Software Engineer",
@@ -180,7 +193,7 @@ describe("EmployeeLifecycleService", () => {
       effectiveDate: "2026-11-01",
     });
     expect(demoted.employee.designation).toBe("Software Engineer");
-    expect(demoted.jobHistory.eventType).toBe("demotion");
+    expect(demoted.jobHistory!.eventType).toBe("demotion");
   });
 
   it("second() requires endDate >= effectiveDate and records both dates on a 'secondment' row", async () => {
@@ -202,8 +215,8 @@ describe("EmployeeLifecycleService", () => {
     });
     expect(result.employee.orgUnitId).toBe(orgUnitBId);
     expect(result.employee.department).toBe("Finance");
-    expect(result.jobHistory.eventType).toBe("secondment");
-    expect(result.jobHistory.endDate).toBe("2027-01-01");
+    expect(result.jobHistory!.eventType).toBe("secondment");
+    expect(result.jobHistory!.endDate).toBe("2027-01-01");
 
     const row = await latestHistory(employeeId);
     expect(row.end_date?.toISOString?.().slice(0, 10) ?? row.end_date).toBe("2027-01-01");
@@ -226,8 +239,8 @@ describe("EmployeeLifecycleService", () => {
       endDate: "2026-11-01",
     });
     expect(result.employee.designation).toBe("Acting Engineering Manager");
-    expect(result.jobHistory.eventType).toBe("acting");
-    expect(result.jobHistory.endDate).toBe("2026-11-01");
+    expect(result.jobHistory!.eventType).toBe("acting");
+    expect(result.jobHistory!.endDate).toBe("2026-11-01");
   });
 
   it("changeManager() validates the manager exists, isn't terminated, and isn't the employee themselves", async () => {
@@ -251,7 +264,7 @@ describe("EmployeeLifecycleService", () => {
 
     const result = await lifecycle.changeManager(hrAdminClaims, employeeId, { managerId, effectiveDate: "2026-10-01" });
     expect(result.employee.managerId).toBe(managerId);
-    expect(result.jobHistory.eventType).toBe("manager_change");
+    expect(result.jobHistory!.eventType).toBe("manager_change");
   });
 
   it("changeLocation() derives the location name and records 'location_change'", async () => {
@@ -263,7 +276,7 @@ describe("EmployeeLifecycleService", () => {
     });
     expect(result.employee.locationId).toBe(locationBId);
     expect(result.employee.location).toBe("Lahore Office");
-    expect(result.jobHistory.eventType).toBe("location_change");
+    expect(result.jobHistory!.eventType).toBe("location_change");
   });
 
   it("terminate() sets employment status and fires the pre-existing employee.terminated event; reactivate() requires a terminated employee first", async () => {
@@ -279,7 +292,7 @@ describe("EmployeeLifecycleService", () => {
     });
     expect(terminated.employee.employmentStatus).toBe("terminated");
     expect(terminated.employee.terminationDate).toBe("2026-10-01");
-    expect(terminated.jobHistory.eventType).toBe("termination");
+    expect(terminated.jobHistory!.eventType).toBe("termination");
 
     const reactivated = await lifecycle.reactivate(hrAdminClaims, employeeId, {
       effectiveDate: "2026-11-01",
@@ -287,7 +300,7 @@ describe("EmployeeLifecycleService", () => {
     });
     expect(reactivated.employee.employmentStatus).toBe("active");
     expect(reactivated.employee.terminationDate).toBeNull();
-    expect(reactivated.jobHistory.eventType).toBe("reactivation");
+    expect(reactivated.jobHistory!.eventType).toBe("reactivation");
   });
 
   it("every method enforces employee.manage.all, throwing ForbiddenException for a caller without it", async () => {
@@ -348,8 +361,10 @@ describe("EmployeeLifecycleService", () => {
       expect(second.employee.positionId).toBeNull();
       expect(await positionStatus(seatA)).toBe("vacant");
       state = await orgState(employeeId);
-      expect(state.assignments.filter((a) => a.assignment_type === "primary")).toHaveLength(2);
+      // create() now opens the initial primary slot (ORG-03): initial -> seat A -> unit B = 3 slots.
+      expect(state.assignments.filter((a) => a.assignment_type === "primary")).toHaveLength(3);
       expect(state.assignments[0].status).toBe("ended");
+      expect(state.assignments[1].status).toBe("ended");
       expect(state.activePrimary).toHaveLength(1);
       expect(state.activePrimary[0]).toMatchObject({ org_unit_id: orgUnitBId, position_id: null, location_id: locationBId });
 
@@ -358,7 +373,7 @@ describe("EmployeeLifecycleService", () => {
         (
           await client.query(
             "SELECT status, effective_from, effective_to FROM employee_org_assignment_versions WHERE employee_org_assignment_id = $1 ORDER BY effective_from",
-            [state.assignments[0].id]
+            [state.assignments[1].id]
           )
         ).rows
       );
@@ -376,7 +391,7 @@ describe("EmployeeLifecycleService", () => {
       const after = await orgState(employeeId);
       expect(after.employee.org_unit_id).toBe(orgUnitAId);
       expect(after.historyCount).toBe(before.historyCount);
-      expect(after.assignments).toHaveLength(0);
+      expect(after.assignments).toHaveLength(before.assignments.length);
     });
 
     it("promote()/demote() with a positionId vacate the old seat, occupy the new one, and move the org unit with the seat", async () => {
@@ -551,7 +566,7 @@ describe("EmployeeLifecycleService", () => {
         effectiveDate: "2026-10-01",
         reasonCode: "business_need",
       });
-      expect(result.jobHistory.reasonCode).toBe("business_need");
+      expect(result.jobHistory!.reasonCode).toBe("business_need");
     });
 
     it("rejects a reason code that isn't an active item in that transaction's mapped catalog", async () => {
@@ -575,13 +590,13 @@ describe("EmployeeLifecycleService", () => {
         terminationDate: "2026-10-01",
         reasonCode: "resignation",
       });
-      expect(terminated.jobHistory.reasonCode).toBe("resignation");
+      expect(terminated.jobHistory!.reasonCode).toBe("resignation");
 
       const reactivated = await lifecycleWithCatalog.reactivate(hrAdminClaims, employeeId, {
         effectiveDate: "2026-11-01",
         reasonCode: "leave_completed",
       });
-      expect(reactivated.jobHistory.reasonCode).toBe("leave_completed");
+      expect(reactivated.jobHistory!.reasonCode).toBe("leave_completed");
     });
 
     it("leaves reasonCode null when none is supplied, exactly like before this phase", async () => {
@@ -590,7 +605,7 @@ describe("EmployeeLifecycleService", () => {
         orgUnitId: orgUnitBId,
         effectiveDate: "2026-10-01",
       });
-      expect(result.jobHistory.reasonCode).toBeNull();
+      expect(result.jobHistory!.reasonCode).toBeNull();
     });
   });
 

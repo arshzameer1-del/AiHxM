@@ -725,8 +725,10 @@ export class AuthService {
       );
       const roles = await client.query<{ key: TenantRoleKey }>(
         `SELECT r.key FROM user_role_assignments ura
-         JOIN roles r ON r.id = ura.role_id
-         WHERE ura.user_account_id = $1 AND ura.company_id = $2`,
+         JOIN roles r ON r.id = ura.role_id AND r.is_active
+         WHERE ura.user_account_id = $1 AND ura.company_id = $2
+           AND (ura.effective_from IS NULL OR ura.effective_from <= CURRENT_DATE)
+           AND (ura.effective_to IS NULL OR ura.effective_to >= CURRENT_DATE)`,
         [claims.sub, companyId]
       );
       const enabledModules = await this.entitlements.getEnabledModuleKeys(client, companyId);

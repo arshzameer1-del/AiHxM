@@ -1,4 +1,5 @@
 import type { Pool, PoolClient } from "pg";
+import { fieldCrypto } from "../crypto/field-crypto";
 
 /**
  * The claims shape every request-scoped query runs under.
@@ -48,6 +49,28 @@ export type RequestClaims = {
  * get attached to a query, so it's also the one place to check when
  * asking "could this leak across tenants."
  */
+/**
+ * SEC-02: make the tenant's field-encryption keys available (in-process
+ * cache) so services can encrypt/decrypt synchronously. A SAVEPOINT keeps a
+ * failure here (e.g. key table not migrated yet, master key unset) from
+ * poisoning the request's transaction -- requests that never touch an
+ * encrypted field keep working, and the ones that do fail loudly with
+ * FIELD_KEYS_NOT_LOADED instead of silently writing plaintext.
+ */
+async function warmFieldKeys(client: PoolClient, claims: RequestClaims): Promise<void> {
+  if (!claims.company_id) return;
+  await client.query("SAVEPOINT warm_field_keys");
+  try {
+    await fieldCrypto.warm(client, claims.company_id);
+    await client.query("RELEASE SAVEPOINT warm_field_keys");
+  } catch (err) {
+    await client.query("ROLLBACK TO SAVEPOINT warm_field_keys");
+    await client.query("RELEASE SAVEPOINT warm_field_keys");
+    // eslint-disable-next-line no-console
+    console.warn(`[field-crypto] could not load tenant keys: ${(err as Error).message}`);
+  }
+}
+
 export async function runInTenantContext<T>(
   pool: Pool,
   claims: RequestClaims,
@@ -59,6 +82,7 @@ export async function runInTenantContext<T>(
     await client.query("SELECT set_config('request.jwt.claims', $1, true)", [
       JSON.stringify(claims),
     ]);
+    await warmFieldKeys(client, claims);
     const result = await fn(client);
     await client.query("COMMIT");
     return result;

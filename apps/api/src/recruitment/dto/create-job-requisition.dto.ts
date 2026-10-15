@@ -25,4 +25,20 @@ export class CreateJobRequisitionDto {
   @IsOptional()
   @IsUUID()
   hiringManagerId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  positionId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  orgUnitId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  jobId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  locationId?: string;
 }

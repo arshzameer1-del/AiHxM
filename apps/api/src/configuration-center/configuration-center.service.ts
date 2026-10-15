@@ -64,7 +64,7 @@ export class ConfigurationCenterService {
     const registryRows = await this.db.withClaims(claims, async (client) => {
       const result = await client.query<RegistryRow>(
         `SELECT domain_key, label, description, admin_route, supports_effective_dating
-         FROM configuration_registry ORDER BY sort_order ASC`
+         FROM configuration_registry WHERE show_in_center ORDER BY sort_order ASC`
       );
       return result.rows;
     });

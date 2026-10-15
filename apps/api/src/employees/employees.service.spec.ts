@@ -230,7 +230,7 @@ describe("EmployeesService", () => {
     }
 
     it("links two hires that share a CNIC to the same person (a rehire, or a data-entry duplicate), and gives a CNIC-less hire a person of their own", async () => {
-      const cnic = `${Date.now()}-REHIRE`;
+      const cnic = `${Date.now()}`;
       const firstStint = await employees.create(hrAdminClaims, { firstName: "Rehired", lastName: "Once", cnic });
       const secondStint = await employees.create(hrAdminClaims, { firstName: "Rehired", lastName: "Twice", cnic });
       expect(firstStint.personId).not.toBeNull();
@@ -257,7 +257,7 @@ describe("EmployeesService", () => {
     });
 
     it("rejects editing an employee's CNIC to one already on file for a different employee's person", async () => {
-      const cnicInUse = `${Date.now()}-INUSE`;
+      const cnicInUse = `${Date.now()}`;
       await employees.create(hrAdminClaims, { firstName: "Holds", lastName: "TheCnic", cnic: cnicInUse });
       const other = await employees.create(hrAdminClaims, { firstName: "Wants", lastName: "TheCnic" });
 
@@ -398,7 +398,7 @@ describe("EmployeesService", () => {
     });
 
     it("allows an immediate rehire when the Rehire Policy's cooldownDays is 0 (the seeded default)", async () => {
-      const cnic = `${Date.now()}-REHIRE-ALLOWED`;
+      const cnic = `${Date.now()}`;
       const first = await employeesWithPolicy.create(hrAdminClaims, { firstName: "Rehire", lastName: "Allowed", cnic });
       await db.withClaims(hrAdminClaims, (client) =>
         client.query("UPDATE employees SET employment_status = 'terminated', termination_date = CURRENT_DATE WHERE id = $1", [first.id])
@@ -408,7 +408,7 @@ describe("EmployeesService", () => {
     });
 
     it("rejects a rehire inside the configured cooldown window, and allows it once the window has passed", async () => {
-      const cnic = `${Date.now()}-REHIRE-BLOCKED`;
+      const cnic = `${Date.now()}`;
       const first = await employeesWithPolicy.create(hrAdminClaims, { firstName: "Rehire", lastName: "Blocked", cnic });
 
       const policyList = await businessPolicy.listPolicies(hrAdminClaims, "rehire");
@@ -441,7 +441,7 @@ describe("EmployeesService", () => {
       const policyList = await businessPolicy.listPolicies(hrAdminClaims, "rehire");
       await businessPolicy.update(hrAdminClaims, policyList[0].id, { rules: { cooldownDays: 365 } });
 
-      const cnic = `${Date.now()}-CONCURRENT`;
+      const cnic = `${Date.now()}`;
       const first = await employeesWithPolicy.create(hrAdminClaims, { firstName: "Concurrent", lastName: "One" });
       expect(first).toBeTruthy();
       const second = await employeesWithPolicy.create(hrAdminClaims, { firstName: "Concurrent", lastName: "Two", cnic });

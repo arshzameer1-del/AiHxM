@@ -16,6 +16,10 @@ export class SubmitOnDutyRequestDto {
   location?: string;
 
   @IsOptional()
+  @IsUUID()
+  locationId?: string;
+
+  @IsOptional()
   @IsString()
   @MinLength(1)
   reason?: string;

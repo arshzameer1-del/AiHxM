@@ -91,6 +91,22 @@ export const BUSINESS_POLICY_REGISTRY: BusinessPolicyTypeDefinition[] = [
       "Not yet consumed by any transaction — seeded and editable, ready for future wiring into the Data Subject Requests module (0057_data_subject_requests.sql).",
   },
   {
+    policyType: "hiring",
+    label: "Hiring Policy",
+    description: "Whether a completed hiring process must be submitted and approved by a second person before the employee is created.",
+    rulesShape: "requireApproval (boolean), requirePositionForRequisition (boolean)",
+    wiredInto:
+      "HiringProcessService.complete() - when requireApproval is true a hire can only be completed from the 'approved' state (submit -> approve), otherwise completion works as before. Default (no policy): no approval step. RecruitmentService.createRequisition()/updateRequisition() - when requirePositionForRequisition is true every requisition must be raised against an approved position with open capacity (ORG-01).",
+  },
+  {
+    policyType: "payroll",
+    label: "Payroll Run Policy",
+    description: "Controls on how a payroll run moves through its lifecycle.",
+    rulesShape: "requireValidationBeforeApproval (boolean), requirePeriodForRun (boolean)",
+    wiredInto:
+      "PayrollService.submitForApproval() - when requireValidationBeforeApproval is true a run must pass validation (POST payroll/runs/:id/validate) before it can be submitted. PayrollService.createRun() - when requirePeriodForRun is true a regular run must be created from an open payroll period (PAY-03). Default (no policy): neither is required.",
+  },
+  {
     policyType: "required_info",
     label: "Required Information Policy",
     description: "The personal/employment fields that must be filled in before a hire can be completed.",

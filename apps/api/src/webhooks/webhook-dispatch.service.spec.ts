@@ -163,6 +163,35 @@ describe("WebhookDispatchService", () => {
       expect(list[0].attemptCount).toBe(0);
       expect(list[0].payload).toEqual({ employeeId: "abc-123" });
     });
+
+    it("never puts CNIC / DOB / bank / salary / secrets into a webhook body (SEC-13)", async () => {
+      await integrations.configure(FIXTURE_CLAIMS, companyId, "webhook", {
+        enabled: true,
+        config: { url: "http://127.0.0.1:1/hook", signingSecret: "test-signing-secret" },
+      });
+
+      await service.enqueue(companyId, "employee.created", {
+        employee: {
+          id: "e-1",
+          firstName: "Sana",
+          cnic: "35202-1234567-1",
+          dateOfBirth: "1992-03-04",
+          bankAccountNumber: "PK36SCBL0000001123456702",
+          iban: "PK36SCBL0000001123456702",
+          salary: 150000,
+          nested: { apiKey: "sk-live-1", token: "t0k" },
+        },
+      });
+
+      const list = await service.list(FIXTURE_CLAIMS, companyId);
+      const evt = list.find((e) => (e.payload as { employee?: { id?: string } }).employee?.id === "e-1");
+      expect(evt).toBeDefined();
+      const body = JSON.stringify(evt!.payload);
+      for (const leaked of ["35202-1234567-1", "1992-03-04", "PK36SCBL", "150000", "sk-live-1", "t0k"]) {
+        expect(body).not.toContain(leaked);
+      }
+      expect((evt!.payload as { employee: { firstName: string } }).employee.firstName).toBe("Sana");
+    });
   });
 
   describe("delivery sweep", () => {

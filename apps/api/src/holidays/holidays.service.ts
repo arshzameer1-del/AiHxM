@@ -5,7 +5,7 @@ import type { RequestClaims } from "../database/tenant-context";
 import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
-import type { CreateHolidayRequest, HolidayView, UpdateHolidayRequest } from "@aihxm/shared-types";
+import type { CreateHolidayRequest, HolidayView, RollHolidaysForwardRequest, UpdateHolidayRequest } from "@aihxm/shared-types";
 
 // Reuses the `leave` module's entitlement, same reasoning as Shift
 // Management (0026) and Attendance Corrections (0028) — see
@@ -21,6 +21,10 @@ function rowToHoliday(row: any): HolidayView {
     name: row.name,
     holidayDate: row.holiday_date instanceof Date ? row.holiday_date.toISOString().slice(0, 10) : row.holiday_date,
     isOptional: row.is_optional,
+    calendarId: row.calendar_id ?? null,
+    isGazetted: row.is_gazetted ?? false,
+    dateBasis: row.date_basis ?? "fixed",
+    isTentative: row.is_tentative ?? false,
   };
 }
 
@@ -37,6 +41,10 @@ function rowToHoliday(row: any): HolidayView {
  * migration's own comment on why this is granted broadly rather than
  * scoped per-role.
  */
+function isLeapYear(y: number): boolean {
+  return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+}
+
 @Injectable()
 export class HolidaysService {
   constructor(
@@ -72,17 +80,19 @@ export class HolidaysService {
   async createHoliday(claims: RequestClaims, input: CreateHolidayRequest): Promise<HolidayView> {
     await this.requireManage(claims);
     return this.db.withClaims(claims, async (client) => {
+      const calendarId = input.calendarId ?? null;
+      await this.assertCalendar(client, claims.company_id!, calendarId);
       const existing = await client.query(
-        "SELECT 1 FROM holidays WHERE company_id = $1 AND holiday_date = $2 AND name = $3",
-        [claims.company_id, input.holidayDate, input.name]
+        "SELECT 1 FROM holidays WHERE company_id = $1 AND holiday_date = $2 AND name = $3 AND calendar_id IS NOT DISTINCT FROM $4",
+        [claims.company_id, input.holidayDate, input.name, calendarId]
       );
       if ((existing.rowCount ?? 0) > 0) {
-        throw new ConflictException(`A holiday named "${input.name}" on ${input.holidayDate} already exists`);
+        throw new ConflictException(`A holiday named "${input.name}" on ${input.holidayDate} already exists${calendarId ? " in this calendar" : ""}`);
       }
       const result = await client.query(
-        `INSERT INTO holidays (company_id, name, holiday_date, is_optional)
-         VALUES ($1, $2, $3, $4) RETURNING *`,
-        [claims.company_id, input.name, input.holidayDate, input.isOptional ?? false]
+        `INSERT INTO holidays (company_id, name, holiday_date, is_optional, calendar_id, is_gazetted, date_basis, is_tentative)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [claims.company_id, input.name, input.holidayDate, input.isOptional ?? false, calendarId, input.isGazetted ?? false, input.dateBasis ?? "fixed", input.isTentative ?? false]
       );
       await this.audit.record(client, claims, {
         companyId: claims.company_id ?? null,
@@ -101,10 +111,23 @@ export class HolidaysService {
       if (current.rowCount === 0) throw new NotFoundException("Holiday not found");
       const row = current.rows[0];
 
+      const calendarId = input.calendarId !== undefined ? input.calendarId : row.calendar_id;
+      if (input.calendarId !== undefined) await this.assertCalendar(client, claims.company_id!, calendarId);
+      const name = input.name ?? row.name;
+      const holidayDate = input.holidayDate ?? row.holiday_date;
+      const clash = await client.query(
+        "SELECT 1 FROM holidays WHERE company_id = $1 AND holiday_date = $2 AND name = $3 AND calendar_id IS NOT DISTINCT FROM $4 AND id <> $5",
+        [claims.company_id, holidayDate, name, calendarId, id]
+      );
+      if ((clash.rowCount ?? 0) > 0) throw new ConflictException(`A holiday named "${name}" on that date already exists${calendarId ? " in this calendar" : ""}`);
       const result = await client.query(
-        `UPDATE holidays SET name = $2, holiday_date = $3, is_optional = $4, updated_at = now()
+        `UPDATE holidays SET name = $2, holiday_date = $3, is_optional = $4, calendar_id = $5,
+                is_gazetted = $6, date_basis = $7, is_tentative = $8, updated_at = now()
          WHERE id = $1 RETURNING *`,
-        [id, input.name ?? row.name, input.holidayDate ?? row.holiday_date, input.isOptional ?? row.is_optional]
+        [id, name, holidayDate, input.isOptional ?? row.is_optional, calendarId,
+         input.isGazetted ?? row.is_gazetted, input.dateBasis ?? row.date_basis,
+         // confirming or moving the date of a moon-dependent holiday clears "tentative" unless said otherwise
+         input.isTentative ?? (input.holidayDate !== undefined ? false : row.is_tentative)]
       );
       await this.audit.record(client, claims, {
         companyId: claims.company_id ?? null,
@@ -133,18 +156,75 @@ export class HolidaysService {
   }
 
   /** `year` (e.g. "2026") optionally narrows the calendar to one year. */
-  async listHolidays(claims: RequestClaims, year?: string): Promise<HolidayView[]> {
+  async listHolidays(claims: RequestClaims, year?: string, calendarId?: string): Promise<HolidayView[]> {
     await this.requireView(claims);
     return this.db.withClaims(claims, async (client) => {
-      const result = year
-        ? await client.query(
-            "SELECT * FROM holidays WHERE company_id = $1 AND EXTRACT(YEAR FROM holiday_date) = $2 ORDER BY holiday_date",
-            [claims.company_id, year]
-          )
-        : await client.query("SELECT * FROM holidays WHERE company_id = $1 ORDER BY holiday_date", [
-            claims.company_id,
-          ]);
+      const params: unknown[] = [claims.company_id];
+      let where = "company_id = $1";
+      if (year) {
+        params.push(year);
+        where += ` AND EXTRACT(YEAR FROM holiday_date) = $${params.length}`;
+      }
+      // "company" = the company-wide holidays only; a uuid = that calendar's; omitted = everything
+      if (calendarId === "company") where += " AND calendar_id IS NULL";
+      else if (calendarId) {
+        params.push(calendarId);
+        where += ` AND calendar_id = $${params.length}`;
+      }
+      const result = await client.query(`SELECT * FROM holidays WHERE ${where} ORDER BY holiday_date, name`, params);
       return result.rows.map(rowToHoliday);
+    });
+  }
+
+  private async assertCalendar(client: PoolClient, companyId: string, calendarId: string | null): Promise<void> {
+    if (!calendarId) return;
+    const r = await client.query("SELECT status FROM holiday_calendars WHERE id = $1 AND company_id = $2", [calendarId, companyId]);
+    if (r.rowCount === 0) throw new NotFoundException("Holiday calendar not found");
+    if (r.rows[0].status !== "active") throw new ConflictException("That holiday calendar is archived");
+  }
+
+  /**
+   * Copies one year's holidays into another so the new year starts populated. Fixed-date
+   * holidays keep their month and day; lunar ones (Eid, Muharram...) are copied at the same
+   * Gregorian date but flagged tentative - HR moves each to the announced date, which clears the
+   * flag. A holiday that already exists in the target year is left alone, so this is safe to run twice.
+   */
+  async rollForward(claims: RequestClaims, input: RollHolidaysForwardRequest): Promise<{ created: number; skipped: number; tentative: number }> {
+    await this.requireManage(claims);
+    if (input.toYear === input.fromYear) throw new ConflictException("Choose two different years");
+    return this.db.withClaims(claims, async (client) => {
+      const calendarId = input.calendarId ?? null;
+      if (calendarId) await this.assertCalendar(client, claims.company_id!, calendarId);
+      const source = await client.query(
+        `SELECT * FROM holidays WHERE company_id = $1 AND EXTRACT(YEAR FROM holiday_date) = $2 AND calendar_id IS NOT DISTINCT FROM $3 ORDER BY holiday_date`,
+        [claims.company_id, input.fromYear, calendarId]
+      );
+      let created = 0;
+      let skipped = 0;
+      let tentative = 0;
+      for (const h of source.rows) {
+        const src = (h.holiday_date instanceof Date ? h.holiday_date.toISOString() : String(h.holiday_date)).slice(5, 10);
+        // 29 Feb has no equivalent in a non-leap target year; it lands on 28 Feb
+        const target = src === "02-29" && !isLeapYear(input.toYear) ? "02-28" : src;
+        const date = `${input.toYear}-${target}`;
+        const isLunar = h.date_basis === "lunar";
+        const r = await client.query(
+          `INSERT INTO holidays (company_id, name, holiday_date, is_optional, calendar_id, is_gazetted, date_basis, is_tentative)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+           ON CONFLICT (company_id, COALESCE(calendar_id, '00000000-0000-0000-0000-000000000000'::uuid), holiday_date, name) DO NOTHING`,
+          [claims.company_id, h.name, date, h.is_optional, calendarId, h.is_gazetted, h.date_basis, isLunar]
+        );
+        if ((r.rowCount ?? 0) > 0) {
+          created++;
+          if (isLunar) tentative++;
+        } else skipped++;
+      }
+      await this.audit.record(client, claims, {
+        companyId: claims.company_id ?? null,
+        action: "holiday.roll_forward",
+        metadata: { fromYear: input.fromYear, toYear: input.toYear, calendarId, created, skipped, tentative },
+      });
+      return { created, skipped, tentative };
     });
   }
 
@@ -184,10 +264,31 @@ export class HolidaysService {
    * the resolution service needs to know WHICH holiday and whether it's
    * optional, not just whether one exists.
    */
-  async getHolidayOnDate(client: PoolClient, companyId: string, dateIso: string): Promise<{ name: string; isOptional: boolean } | null> {
+  async getHolidayOnDate(client: PoolClient, companyId: string, dateIso: string, employeeId?: string): Promise<{ name: string; isOptional: boolean } | null> {
+    // TLM-10: company-wide holidays (no calendar) apply to everyone. A calendar's holidays apply to
+    // the employees it is scoped to - its locations (and their sub-locations) or org units; a calendar
+    // with no scope applies to everyone. Without an employee only the company-wide ones are considered
+    // plus unscoped calendars. A mandatory holiday outranks an optional one on the same date.
     const result = await client.query<{ name: string; is_optional: boolean }>(
-      `SELECT name, is_optional FROM holidays WHERE company_id = $1 AND holiday_date = $2`,
-      [companyId, dateIso]
+      `WITH RECURSIVE loc AS (
+         SELECT location_id AS id FROM employees WHERE id = $3::uuid AND location_id IS NOT NULL
+         UNION
+         SELECT l.parent_id FROM locations l JOIN loc ON l.id = loc.id WHERE l.parent_id IS NOT NULL
+       )
+       SELECT h.name, h.is_optional FROM holidays h
+         LEFT JOIN holiday_calendars c ON c.id = h.calendar_id
+        WHERE h.company_id = $1 AND h.holiday_date = $2
+          AND (h.calendar_id IS NULL OR (c.status = 'active' AND (
+                NOT EXISTS (SELECT 1 FROM holiday_calendar_applicability a WHERE a.calendar_id = c.id)
+                OR ($3::uuid IS NOT NULL AND EXISTS (
+                     SELECT 1 FROM holiday_calendar_applicability a
+                      LEFT JOIN employees e ON e.id = $3::uuid
+                      WHERE a.calendar_id = c.id
+                        AND ((a.org_unit_id IS NOT NULL AND a.org_unit_id = e.org_unit_id)
+                          OR (a.location_id IS NOT NULL AND a.location_id IN (SELECT id FROM loc))))))))
+        ORDER BY h.is_optional ASC, h.calendar_id NULLS FIRST
+        LIMIT 1`,
+      [companyId, dateIso, employeeId ?? null]
     );
     if (result.rowCount === 0) return null;
     return { name: result.rows[0].name, isOptional: result.rows[0].is_optional };

@@ -56,6 +56,10 @@ function rowToArea(row: any, links: PayrollAreaScopeLinkView[]): PayrollAreaView
     description: row.description ?? null,
     isActive: row.is_active,
     employeeCount: Number(row.employee_count ?? 0),
+    frequency: row.frequency ?? "monthly",
+    currencyCode: row.currency_code ?? "PKR",
+    calendarId: row.calendar_id ?? null,
+    jurisdiction: row.jurisdiction ?? null,
     scopeLinks: links,
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
@@ -140,9 +144,11 @@ export class PayrollAreasService {
       if ((existing.rowCount ?? 0) > 0) {
         throw new ConflictException(`A payroll area with code "${code}" already exists`);
       }
+      const attrs = await this.resolveAttributes(client, claims, input, null);
       const result = await client.query(
-        `INSERT INTO payroll_areas (company_id, code, name, description) VALUES ($1, $2, $3, $4) RETURNING id`,
-        [claims.company_id, code, name, input.description?.trim() || null]
+        `INSERT INTO payroll_areas (company_id, code, name, description, frequency, currency_code, calendar_id, jurisdiction)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+        [claims.company_id, code, name, input.description?.trim() || null, attrs.frequency, attrs.currencyCode, attrs.calendarId, attrs.jurisdiction]
       );
       const id = result.rows[0].id as string;
       await this.audit.record(client, claims, {
@@ -163,11 +169,14 @@ export class PayrollAreasService {
       if (!isPayrollAreaInScope(access, id)) {
         throw new ForbiddenException("This payroll area is outside your data scope");
       }
+      const current = await client.query("SELECT frequency, currency_code, calendar_id, jurisdiction FROM payroll_areas WHERE id = $1", [id]);
+      const attrs = await this.resolveAttributes(client, claims, patch, current.rows[0]);
       await client.query(
         `UPDATE payroll_areas SET
            name = COALESCE($2, name),
            description = CASE WHEN $3::boolean THEN $4 ELSE description END,
            is_active = COALESCE($5, is_active),
+           frequency = $6, currency_code = $7, calendar_id = $8, jurisdiction = $9,
            updated_at = now()
          WHERE id = $1`,
         [
@@ -176,6 +185,10 @@ export class PayrollAreasService {
           patch.description !== undefined,
           patch.description?.trim() || null,
           patch.isActive ?? null,
+          attrs.frequency,
+          attrs.currencyCode,
+          attrs.calendarId,
+          attrs.jurisdiction,
         ]
       );
       await this.audit.record(client, claims, {
@@ -291,6 +304,48 @@ export class PayrollAreasService {
     if (!(await this.entitlements.isModuleEnabled(claims, MODULE_KEY))) {
       throw new NotFoundException();
     }
+  }
+
+  /**
+   * PAY-04 - frequency, currency, calendar and jurisdiction. They steer which periods a run can use, so changing
+   * them needs payroll_calendar.manage.all (a scoped area manager cannot re-point an area at another calendar).
+   * A calendar fixes the pay frequency and currency, so the area must agree with it.
+   */
+  private async resolveAttributes(
+    client: PoolClient,
+    claims: RequestClaims,
+    input: { frequency?: string; currencyCode?: string; calendarId?: string | null; jurisdiction?: string | null },
+    current: { frequency: string; currency_code: string; calendar_id: string | null; jurisdiction: string | null } | null
+  ): Promise<{ frequency: string; currencyCode: string; calendarId: string | null; jurisdiction: string | null }> {
+    const touched =
+      input.frequency !== undefined || input.currencyCode !== undefined || input.calendarId !== undefined || input.jurisdiction !== undefined;
+    if (touched && !(await this.rbac.can(claims, "payroll_calendar.manage.all"))) {
+      throw new ForbiddenException("Changing a payroll area's frequency, currency, calendar or jurisdiction needs payroll_calendar.manage.all");
+    }
+    const out = {
+      frequency: input.frequency ?? current?.frequency ?? "monthly",
+      currencyCode: input.currencyCode ?? current?.currency_code ?? "PKR",
+      calendarId: input.calendarId !== undefined ? input.calendarId : (current?.calendar_id ?? null),
+      jurisdiction: input.jurisdiction !== undefined ? (input.jurisdiction?.trim() || null) : (current?.jurisdiction ?? null),
+    };
+    if (out.calendarId) {
+      const cal = await client.query<{ frequency: string; currency_code: string; is_active: boolean }>(
+        "SELECT frequency, currency_code, is_active FROM payroll_calendars WHERE id = $1 AND company_id = $2",
+        [out.calendarId, claims.company_id]
+      );
+      if (cal.rowCount === 0) throw new NotFoundException("Payroll calendar not found");
+      if (!cal.rows[0].is_active) throw new BadRequestException("That payroll calendar is inactive");
+      // taking the calendar's frequency/currency unless the caller explicitly chose different ones
+      if (input.frequency === undefined && (current === null || input.calendarId !== undefined)) out.frequency = cal.rows[0].frequency;
+      if (input.currencyCode === undefined && (current === null || input.calendarId !== undefined)) out.currencyCode = cal.rows[0].currency_code;
+      if (out.frequency !== cal.rows[0].frequency) {
+        throw new BadRequestException(`This area's frequency (${out.frequency}) must match its calendar's (${cal.rows[0].frequency})`);
+      }
+      if (out.currencyCode !== cal.rows[0].currency_code) {
+        throw new BadRequestException(`This area's currency (${out.currencyCode}) must match its calendar's (${cal.rows[0].currency_code})`);
+      }
+    }
+    return out;
   }
 
   private async requireManageAll(claims: RequestClaims): Promise<void> {

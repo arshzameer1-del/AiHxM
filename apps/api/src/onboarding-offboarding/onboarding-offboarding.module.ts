@@ -1,3 +1,4 @@
+import { WorkflowModule } from "../workflow/workflow.module";
 import { Module } from "@nestjs/common";
 import { OnboardingController } from "./onboarding.controller";
 import { OnboardingService } from "./onboarding.service";
@@ -7,6 +8,7 @@ import { RbacModule } from "../rbac/rbac.module";
 import { EntitlementsModule } from "../entitlements/entitlements.module";
 import { AuditModule } from "../audit/audit.module";
 import { EmployeesModule } from "../employees/employees.module";
+import { HrAdministrationModule } from "../hr-administration/hr-administration.module";
 
 /**
  * One module for both sides — see 0035_onboarding_offboarding.sql for
@@ -19,7 +21,7 @@ import { EmployeesModule } from "../employees/employees.module";
  * them is unaffected by living in one NestJS module.
  */
 @Module({
-  imports: [RbacModule, EntitlementsModule, AuditModule, EmployeesModule],
+  imports: [RbacModule, EntitlementsModule, AuditModule, EmployeesModule, HrAdministrationModule, WorkflowModule],
   controllers: [OnboardingController, OffboardingController],
   providers: [OnboardingService, OffboardingService],
   exports: [OnboardingService, OffboardingService],

@@ -6,6 +6,7 @@ import { JobsController } from "./jobs.controller";
 import { JobsService } from "./jobs.service";
 import { PositionsController } from "./positions.controller";
 import { PositionsService } from "./positions.service";
+import { PositionPlanningService } from "./position-planning.service";
 import { EmployeeOrgAssignmentsController } from "./employee-org-assignments.controller";
 import { EmployeeOrgAssignmentsService } from "./employee-org-assignments.service";
 import { OrgRelationshipsController } from "./org-relationships.controller";
@@ -22,6 +23,8 @@ import { OrganizationCommandCenterController } from "./organization-command-cent
 import { OrganizationCommandCenterService } from "./organization-command-center.service";
 import { LegacyReconciliationController } from "./legacy-reconciliation.controller";
 import { LegacyReconciliationService } from "./legacy-reconciliation.service";
+import { OrgReconciliationService } from "./org-reconciliation.service";
+import { OrgEventConsumerService } from "./org-event-consumers.service";
 import { RbacModule } from "../rbac/rbac.module";
 import { EntitlementsModule } from "../entitlements/entitlements.module";
 import { AuditModule } from "../audit/audit.module";
@@ -157,6 +160,7 @@ class OrgChangeExecutionScheduler {
     OrgUnitsService,
     JobsService,
     PositionsService,
+    PositionPlanningService,
     EmployeeOrgAssignmentsService,
     OrgRelationshipsService,
     LocationsService,
@@ -166,6 +170,8 @@ class OrgChangeExecutionScheduler {
     OrgChangeExecutionScheduler,
     OrganizationCommandCenterService,
     LegacyReconciliationService,
+    OrgReconciliationService,
+    OrgEventConsumerService,
   ],
   exports: [
     OrgUnitsService,

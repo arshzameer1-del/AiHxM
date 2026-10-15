@@ -1,9 +1,18 @@
 import { Module } from "@nestjs/common";
 import { LeaveController } from "./leave.controller";
 import { LeaveRequestsService } from "./leave-requests.service";
+import { LeaveTypesService } from "./leave-types.service";
+import { LeaveLedgerService } from "./leave-ledger.service";
+import { LeaveAccrualService } from "./leave-accrual.service";
+import { AttendanceEvaluationService } from "./attendance-evaluation.service";
+import { AttendanceDevicesService } from "./attendance-devices.service";
+import { TimesheetsService } from "./timesheets.service";
+import { AttendanceOpsController, DeviceIngestController } from "./attendance-ops.controller";
+import { DeviceKeyGuard } from "./device-key.guard";
 import { AttendanceService } from "./attendance.service";
 import { AttendanceCorrectionsService } from "./attendance-corrections.service";
 import { OvertimeService } from "./overtime.service";
+import { WorkProfileService } from "./work-profile.service";
 import { OnDutyService } from "./on-duty.service";
 import { RbacModule } from "../rbac/rbac.module";
 import { EntitlementsModule } from "../entitlements/entitlements.module";
@@ -34,8 +43,8 @@ import { EffectiveDatingModule } from "../effective-dating/effective-dating.modu
     ShiftsModule,
     EffectiveDatingModule,
   ],
-  controllers: [LeaveController],
-  providers: [LeaveRequestsService, AttendanceService, AttendanceCorrectionsService, OvertimeService, OnDutyService],
-  exports: [LeaveRequestsService, AttendanceService, AttendanceCorrectionsService, OvertimeService, OnDutyService],
+  controllers: [LeaveController, AttendanceOpsController, DeviceIngestController],
+  providers: [LeaveRequestsService, LeaveTypesService, LeaveLedgerService, LeaveAccrualService, AttendanceEvaluationService, AttendanceDevicesService, TimesheetsService, DeviceKeyGuard, AttendanceService, AttendanceCorrectionsService, OvertimeService, WorkProfileService, OnDutyService],
+  exports: [LeaveRequestsService, LeaveTypesService, LeaveLedgerService, LeaveAccrualService, AttendanceEvaluationService, AttendanceDevicesService, TimesheetsService, AttendanceService, AttendanceCorrectionsService, OvertimeService, WorkProfileService, OnDutyService],
 })
 export class LeaveModule {}

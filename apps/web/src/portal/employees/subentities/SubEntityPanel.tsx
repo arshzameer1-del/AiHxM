@@ -59,6 +59,10 @@ export type SubEntityPanelConfig<TView extends SubEntityRow> = {
   create: (employeeId: string, values: Record<string, unknown>) => Promise<TView>;
   update: (id: string, values: Record<string, unknown>) => Promise<TView>;
   close: (id: string) => Promise<TView>;
+  /** Small status chips shown next to the summary (e.g. "Pending approval"). */
+  renderBadges?: (item: TView) => string[];
+  /** Extra per-row actions (e.g. approve / reject a pending change). `run` returning void/undefined cancels quietly. */
+  extraActions?: (item: TView) => { label: string; run: () => Promise<unknown> | undefined }[];
 };
 
 function toFormValue(v: unknown): string {
@@ -329,11 +333,35 @@ export function SubEntityPanel<TView extends SubEntityRow>({
                             {config.closedStatusLabel}
                           </span>
                         )}
+                        {config.renderBadges?.(item).map((badge) => (
+                          <span key={badge} className="text-xs px-2 py-0.5 rounded-full bg-black/5 text-label-tertiary">
+                            {badge}
+                          </span>
+                        ))}
                       </div>
                       {summary.secondary && <div className="text-xs text-label-tertiary mt-0.5">{summary.secondary}</div>}
                     </div>
                     {canManage && (
                       <div className="flex items-center gap-3 shrink-0">
+                        {config.extraActions?.(item).map((action) => (
+                          <button
+                            key={action.label}
+                            onClick={async () => {
+                              setRowError(null);
+                              try {
+                                const pending = action.run();
+                                if (!pending) return;
+                                await pending;
+                                load();
+                              } catch (err) {
+                                setRowError(err instanceof ApiError ? err.message : "Could not do that.");
+                              }
+                            }}
+                            className="text-xs font-medium text-accent hover:underline"
+                          >
+                            {action.label}
+                          </button>
+                        ))}
                         {isOpen && (
                           <button onClick={() => setEditingId(item.id)} className="text-xs font-medium text-accent hover:underline">
                             Edit

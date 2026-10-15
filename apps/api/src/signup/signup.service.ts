@@ -109,7 +109,7 @@ export class SignupService {
       // caller could otherwise reach into.
       const hrAdminRole = await client.query("SELECT id FROM roles WHERE key = 'hr_admin'");
       await client.query(
-        "INSERT INTO user_role_assignments (user_account_id, company_id, role_id) VALUES ($1, $2, $3)",
+        "INSERT INTO user_role_assignments (user_account_id, company_id, role_id, source) VALUES ($1, $2, $3, 'system')",
         [userAccountId, companyId, hrAdminRole.rows[0].id]
       );
 

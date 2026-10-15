@@ -1254,7 +1254,7 @@ export class CompaniesService {
       }
       for (const role of bootstrapRoles.rows) {
         await client.query(
-          "INSERT INTO user_role_assignments (user_account_id, company_id, role_id) VALUES ($1, $2, $3)",
+          "INSERT INTO user_role_assignments (user_account_id, company_id, role_id, source) VALUES ($1, $2, $3, 'system')",
           [userAccountId, companyId, role.id]
         );
       }

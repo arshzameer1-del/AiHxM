@@ -621,7 +621,10 @@ export class OrgUnitsService {
       throw new ForbiddenException("Not permitted to view the org unit hierarchy");
     }
     const assignedIds = await this.rbac.resolveDataScopeEntityIds(claims, "org_unit");
-    const allowedIds = await this.expandToSubtreeIds(claims, assignedIds);
+    const expanded = await this.expandToSubtreeIds(claims, assignedIds);
+    // ACC-04: assignments with include_descendants = false grant exactly that entity.
+    const exactIds = await this.rbac.resolveDataScopeExactIds(claims, "org_unit");
+    const allowedIds = [...new Set([...expanded, ...exactIds])];
     return { unrestricted: false, allowedIds };
   }
 

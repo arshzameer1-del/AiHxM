@@ -1,4 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Post, Put, UseGuards } from "@nestjs/common";
+import type { UpdateCardDefinitionRequest, UpdateCardFieldConfigRequest } from "@aihxm/shared-types";
+import { IdempotencyKey } from "../../idempotency/idempotency-key.decorator";
 import { SessionGuard } from "../../auth/session.guard";
 import { CurrentClaims } from "../../auth/current-claims.decorator";
 import type { RequestClaims } from "../../database/tenant-context";
@@ -9,6 +11,7 @@ import { AdvanceHireProcessDto } from "./dto/advance-hire-process.dto";
 import { UpdateHiringConfigurationDto } from "./dto/update-hiring-configuration.dto";
 import { UpdateCardFieldConfigDto } from "./dto/update-card-field-config.dto";
 import { AddCardCustomFieldDto } from "./dto/add-card-custom-field.dto";
+import { RejectHireProcessDto, SetHireDelegateDto, StartHireProcessDto, TransferHireOwnershipDto } from "./dto/hire-process-workflow.dto";
 
 /**
  * Core Employee Enterprise Phase 2/3 — the spec's own Section 37 API list,
@@ -27,8 +30,8 @@ export class HiringController {
   constructor(private readonly hiring: HiringProcessService) {}
 
   @Post()
-  start(@CurrentClaims() claims: RequestClaims) {
-    return this.hiring.start(claims);
+  start(@CurrentClaims() claims: RequestClaims, @Body() dto: StartHireProcessDto, @IdempotencyKey() idempotencyKey?: string) {
+    return this.hiring.start(claims, dto ?? {}, idempotencyKey);
   }
 
   @Get("drafts")
@@ -80,6 +83,43 @@ export class HiringController {
   complete(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
     return this.hiring.complete(claims, id);
   }
+
+  /** CFG-08: re-validate every saved card against the current rules. */
+  @Post(":id/validate")
+  validate(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.hiring.validate(claims, id);
+  }
+
+  @Post(":id/submit")
+  submit(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.hiring.submit(claims, id);
+  }
+
+  @Post(":id/approve")
+  approve(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.hiring.approve(claims, id);
+  }
+
+  @Post(":id/reject")
+  reject(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: RejectHireProcessDto) {
+    return this.hiring.reject(claims, id, dto.reason);
+  }
+
+  @Get(":id/history")
+  history(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.hiring.getStatusHistory(claims, id);
+  }
+
+  /** CFG-09: ownership transfer and delegate. */
+  @Post(":id/owner")
+  transferOwner(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: TransferHireOwnershipDto) {
+    return this.hiring.transferOwnership(claims, id, dto.ownerUserAccountId, dto.reason);
+  }
+
+  @Put(":id/delegate")
+  setDelegate(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: SetHireDelegateDto) {
+    return this.hiring.setDelegate(claims, id, dto.delegateUserAccountId);
+  }
 }
 
 /** Configuration Center — Phase 3's own scoped admin surface. Separate controller (different base route), same service. */
@@ -100,7 +140,7 @@ export class HiringConfigurationController {
   async update(@CurrentClaims() claims: RequestClaims, @Body() dto: UpdateHiringConfigurationDto) {
     const results = [];
     for (const entry of dto.cards) {
-      results.push(await this.hiring.updateCardDefinition(claims, entry.cardKey, entry));
+      results.push(await this.hiring.updateCardDefinition(claims, entry.cardKey, entry as UpdateCardDefinitionRequest));
     }
     return results;
   }
@@ -121,7 +161,7 @@ export class HiringConfigurationController {
     @Param("fieldKey") fieldKey: string,
     @Body() dto: UpdateCardFieldConfigDto
   ) {
-    return this.cardFields.updateFieldConfig(claims, cardKey, fieldKey, dto);
+    return this.cardFields.updateFieldConfig(claims, cardKey, fieldKey, dto as UpdateCardFieldConfigRequest);
   }
 
   @Post(":cardKey/fields/custom")

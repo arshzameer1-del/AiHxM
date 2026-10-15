@@ -29,6 +29,9 @@ const MANAGE_PERMISSION = "configuration_change.manage.all";
 const APPROVE_PERMISSION = "configuration_change.approve.all";
 const VIEW_PERMISSION = "configuration_change.view.all";
 
+import { computeImpact } from "./configuration-impact";
+import { ConfigurationVersionService } from "./configuration-version.service";
+
 const DOMAINS = ["hr_reference_catalog_item", "hr_business_policy", "configuration_rule_mapping"] as const;
 const OPERATIONS = ["create", "update", "deactivate"] as const;
 
@@ -52,6 +55,10 @@ function rowToView(row: any): ConfigurationChangeRequestView {
     approvedAt: row.approved_at?.toISOString ? row.approved_at.toISOString() : row.approved_at,
     publishedAt: row.published_at?.toISOString ? row.published_at.toISOString() : row.published_at,
     retiredAt: row.retired_at?.toISOString ? row.retired_at.toISOString() : row.retired_at,
+    impactSummary: row.impact_summary ?? null,
+    affectedCounts: row.affected_counts ?? null,
+    riskLevel: row.risk_level ?? null,
+    impactComputedAt: row.impact_computed_at?.toISOString ? row.impact_computed_at.toISOString() : (row.impact_computed_at ?? null),
     createdAt: row.created_at?.toISOString ? row.created_at.toISOString() : row.created_at,
     updatedAt: row.updated_at?.toISOString ? row.updated_at.toISOString() : row.updated_at,
   };
@@ -91,7 +98,8 @@ export class ConfigurationChangeRequestService {
     private readonly audit: AuditService,
     private readonly hrCatalog: HrReferenceCatalogService = new HrReferenceCatalogService(db, rbac, entitlements, audit),
     private readonly businessPolicy: HrBusinessPolicyService = new HrBusinessPolicyService(db, rbac, entitlements, audit),
-    private readonly ruleMapping: ConfigurationRuleMappingService = new ConfigurationRuleMappingService(db, rbac, entitlements, audit)
+    private readonly ruleMapping: ConfigurationRuleMappingService = new ConfigurationRuleMappingService(db, rbac, entitlements, audit),
+    private readonly versions: ConfigurationVersionService = new ConfigurationVersionService(db, rbac, entitlements, audit)
   ) {}
 
   async list(claims: RequestClaims, configDomain?: string, status?: string): Promise<ConfigurationChangeRequestView[]> {
@@ -188,9 +196,14 @@ export class ConfigurationChangeRequestService {
         throw new BadRequestException(`Can't validate a change request that is already "${row.status}"`);
       }
       const result = await this.runValidation(client, claims.company_id!, row);
+      // CFG-07: the impact preview is computed here and stored; approval is
+      // refused without one.
+      const impact = await computeImpact(client, claims.company_id!, row);
       const updated = await client.query(
-        `UPDATE configuration_change_requests SET validation_result = $2::jsonb, status = $3, updated_at = now() WHERE id = $1 RETURNING *`,
-        [id, JSON.stringify(result), result.hasBlockingIssues ? "draft" : "validated"]
+        `UPDATE configuration_change_requests SET validation_result = $2::jsonb, status = $3,
+                impact_summary = $4::jsonb, affected_counts = $5::jsonb, risk_level = $6, impact_computed_at = now(), updated_at = now()
+          WHERE id = $1 RETURNING *`,
+        [id, JSON.stringify(result), result.hasBlockingIssues ? "draft" : "validated", JSON.stringify(impact.summary), JSON.stringify(impact.counts), impact.risk]
       );
       await this.audit.record(client, claims, {
         companyId: claims.company_id ?? null,
@@ -241,6 +254,9 @@ export class ConfigurationChangeRequestService {
       if (row.submitted_by && row.submitted_by === claims.sub) {
         throw new ForbiddenException("You can't approve a configuration change you submitted yourself — ask another HR Administrator to review it.");
       }
+      if (!row.impact_computed_at) {
+        throw new BadRequestException("This change has no impact preview yet. Validate it again so the approver can see what it affects.");
+      }
       const updated = await client.query(
         "UPDATE configuration_change_requests SET status = 'approved', approved_by = $2, approved_at = now(), updated_at = now() WHERE id = $1 RETURNING *",
         [id, claims.sub]
@@ -249,7 +265,7 @@ export class ConfigurationChangeRequestService {
         companyId: claims.company_id ?? null,
         action: "configuration_change_request.approve",
         target: id,
-        metadata: {},
+        metadata: { riskLevel: row.risk_level, affectedCounts: row.affected_counts },
       });
       return rowToView(updated.rows[0]);
     });
@@ -319,6 +335,13 @@ export class ConfigurationChangeRequestService {
         "UPDATE configuration_change_requests SET status = 'published', target_id = $2, published_at = now(), updated_at = now() WHERE id = $1 RETURNING *",
         [id, resultingTargetId]
       );
+      // CFG-02: every publish leaves an immutable, numbered snapshot of the
+      // domain as it now stands.
+      await this.versions.recordPublished(client, claims.company_id!, domain, {
+        changeRequestId: id,
+        userId: /^[0-9a-f-]{36}$/i.test(String(claims.sub)) ? String(claims.sub) : null,
+        reason: `Change request ${id} (${operation})`,
+      });
       await this.audit.record(client, claims, {
         companyId: claims.company_id ?? null,
         action: "configuration_change_request.publish",

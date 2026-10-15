@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
-import type { PerformanceReviewView } from "@aihxm/shared-types";
+import { useEffect, useRef, useState } from "react";
+import type { EmployeeView, PerformanceReviewView } from "@aihxm/shared-types";
 import { api } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
+import { ScorecardSection } from "./ScorecardSection";
 
 export function PerformanceReviewsPanel() {
   const { identity } = useAuth();
@@ -11,6 +12,32 @@ export function PerformanceReviewsPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedReview, setSelectedReview] = useState<PerformanceReviewView | null>(null);
+  // Employee id -> display name. The list endpoint only returns ids, and the
+  // table used to print raw UUIDs, which made it unusable for finding a
+  // specific person's review. A failed/forbidden employee lookup just falls
+  // back to the id rather than blocking the list.
+  const [employeesById, setEmployeesById] = useState<Map<string, EmployeeView>>(new Map());
+  const detailRef = useRef<HTMLDivElement | null>(null);
+
+  const employeeLabel = (employeeId: string) => {
+    const e = employeesById.get(employeeId);
+    return e ? `${e.firstName} ${e.lastName} (${e.employeeNumber})` : employeeId;
+  };
+
+  // The detail card renders BELOW the table. With a long list it was
+  // off-screen, so clicking View looked like it did nothing — bring it into
+  // view whenever a review is selected.
+  const selectedReviewId = selectedReview?.id;
+  useEffect(() => {
+    if (selectedReviewId) detailRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [selectedReviewId]);
+
+  useEffect(() => {
+    api
+      .listEmployees()
+      .then((list) => setEmployeesById(new Map(list.map((e) => [e.id, e]))))
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     const loadReviews = async () => {
@@ -96,8 +123,11 @@ export function PerformanceReviewsPanel() {
               </thead>
               <tbody>
                 {reviews.map((review) => (
-                  <tr key={review.id} className="border-b border-black/5 hover:bg-surface">
-                    <td className="py-3 px-4">{review.employeeId}</td>
+                  <tr
+                    key={review.id}
+                    className={`border-b border-black/5 hover:bg-surface ${selectedReview?.id === review.id ? "bg-accent/5" : ""}`}
+                  >
+                    <td className="py-3 px-4">{employeeLabel(review.employeeId)}</td>
                     <td className="py-3 px-4">{getStatusBadge(review.status)}</td>
                     <td className="py-3 px-4">
                       {review.selfAssessmentSubmittedAt ? "✓" : "-"}
@@ -120,9 +150,9 @@ export function PerformanceReviewsPanel() {
           </div>
 
           {selectedReview && (
-            <div className="border border-black/10 rounded-lg p-6 bg-surface">
+            <div ref={detailRef} className="border border-black/10 rounded-lg p-6 bg-surface">
               <div className="flex justify-between items-start mb-4">
-                <h3 className="font-semibold">Review Details: {selectedReview.employeeId}</h3>
+                <h3 className="font-semibold">Review Details: {employeeLabel(selectedReview.employeeId)}</h3>
                 <button
                   onClick={() => setSelectedReview(null)}
                   className="text-label-tertiary hover:text-label-primary text-xl leading-none"
@@ -162,7 +192,7 @@ export function PerformanceReviewsPanel() {
                   ) : roleKeys.includes("line_manager") || roleKeys.includes("hr_admin") ? (
                     <AssessmentForm
                       placeholder="Manager's assessment..."
-                      onSubmit={(text) => handleSubmitManagerAssessment(selectedReview.id, text, 3)}
+                      onSubmit={(text, rating) => handleSubmitManagerAssessment(selectedReview.id, text, rating ?? 3)}
                       isManager={true}
                     />
                   ) : (
@@ -170,6 +200,7 @@ export function PerformanceReviewsPanel() {
                   )}
                 </div>
               </div>
+              <ScorecardSection key={selectedReview.id} review={selectedReview} employeeName={employeeLabel(selectedReview.employeeId)} />
             </div>
           )}
         </div>
@@ -184,16 +215,19 @@ function AssessmentForm({
   isManager,
 }: {
   placeholder: string;
-  onSubmit: (text: string) => void;
+  onSubmit: (text: string, rating?: number) => void | Promise<void>;
   isManager: boolean;
 }) {
   const [text, setText] = useState("");
+  // Previously the manager rating was hardcoded to 3 on every submission —
+  // the form never asked for one. Fixed 1-5 scale per the performance spec.
+  const [rating, setRating] = useState(3);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async () => {
     setLoading(true);
     try {
-      await onSubmit(text);
+      await onSubmit(text, isManager ? rating : undefined);
       setText("");
     } finally {
       setLoading(false);
@@ -212,6 +246,22 @@ function AssessmentForm({
         className="w-full px-3 py-2 border border-black/20 rounded focus:outline-none focus:ring-2 focus:ring-accent text-sm"
         rows={3}
       />
+      {isManager && (
+        <label className="flex items-center gap-2 text-xs font-medium">
+          Rating
+          <select
+            value={rating}
+            onChange={(e) => setRating(Number(e.target.value))}
+            className="rounded border border-black/20 px-2 py-1 text-sm"
+          >
+            {[1, 2, 3, 4, 5].map((n) => (
+              <option key={n} value={n}>
+                {n} / 5
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <button
         onClick={handleSubmit}
         disabled={loading || !text.trim()}

@@ -3,17 +3,18 @@ import { Cron, CronExpression } from "@nestjs/schedule";
 import { Injectable, Logger } from "@nestjs/common";
 import { WorkflowController } from "./workflow.controller";
 import { WorkflowService } from "./workflow.service";
+import { WorkflowAdapterRegistry } from "./workflow-adapter.registry";
+import { InboxService } from "./inbox.service";
+import { InboxController, DelegationsController } from "./inbox.controller";
+import { DelegationsService } from "./delegations.service";
 import { RbacModule } from "../rbac/rbac.module";
 import { AuditModule } from "../audit/audit.module";
+import { FileStorageModule } from "../file-storage/file-storage.module";
 
 /**
- * Wraps WorkflowService.escalateOverdue in a real recurring trigger for
- * production use. A plain @nestjs/schedule cron rather than BullMQ/Redis
- * (the plan doc's original Section 8 pick for "SLA timers") — see
- * KNOWN_ISSUES.md for the reasoning: a single idempotent DB sweep, run
- * every few minutes, needs no extra infrastructure and is trivially
- * testable by calling escalateOverdue() directly, which is exactly what
- * this phase's automated test suite does rather than waiting on a timer.
+ * Wraps the SLA sweeps in recurring triggers. Plain @nestjs/schedule cron rather
+ * than BullMQ/Redis: each sweep is a single idempotent DB pass that is trivially
+ * testable by calling the method directly (see KNOWN_ISSUES.md).
  */
 @Injectable()
 class WorkflowEscalationScheduler {
@@ -26,13 +27,15 @@ class WorkflowEscalationScheduler {
     if (count > 0) {
       this.logger.log(`Escalated ${count} overdue workflow approval(s)`);
     }
+    const reminded = await this.workflow.remindDue();
+    if (reminded > 0) this.logger.log(`Recorded ${reminded} workflow reminder(s)`);
   }
 }
 
 @Module({
-  imports: [RbacModule, AuditModule],
-  controllers: [WorkflowController],
-  providers: [WorkflowService, WorkflowEscalationScheduler],
-  exports: [WorkflowService],
+  imports: [RbacModule, AuditModule, FileStorageModule],
+  controllers: [WorkflowController, InboxController, DelegationsController],
+  providers: [WorkflowAdapterRegistry, WorkflowService, InboxService, DelegationsService, WorkflowEscalationScheduler],
+  exports: [WorkflowService, WorkflowAdapterRegistry, InboxService, DelegationsService],
 })
 export class WorkflowModule {}

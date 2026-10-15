@@ -7,6 +7,11 @@ const CONDITION_FIELDS: EmployeeGroupConditionField[] = [
   "designation",
   "employmentType",
   "employmentStatus",
+  "orgUnitId",
+  "locationId",
+  "positionId",
+  "jobId",
+  "subgroupId",
 ];
 
 /** Shared by create/update — kept as its own class so @ValidateNested/@Type

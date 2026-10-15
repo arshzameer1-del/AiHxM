@@ -9,6 +9,7 @@ import { HR_CATALOG_REGISTRY, getCatalogTypeDefinition, isRegisteredCatalogType 
 import { DEFAULT_CATALOG_SEED } from "./default-catalog-seed";
 import type {
   CreateHrReferenceCatalogItemRequest,
+  HrReferenceCatalogItemUsage,
   HrReferenceCatalogItemView,
   HrReferenceCatalogTypeSummary,
   UpdateHrReferenceCatalogItemRequest,
@@ -17,6 +18,32 @@ import type {
 const MODULE_KEY = "employee" as const;
 const MANAGE_PERMISSION = "hr_reference_catalog.manage.all";
 const VIEW_PERMISSION = "hr_reference_catalog.view.all";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function toIsoDate(value: any): string | null {
+  if (!value) return null;
+  if (typeof value === "string") return value.slice(0, 10);
+  return value.toISOString ? value.toISOString().slice(0, 10) : null;
+}
+
+function assertDateRange(from: string | null | undefined, to: string | null | undefined): void {
+  const iso = /^\d{4}-\d{2}-\d{2}$/;
+  if (from && !iso.test(from)) throw new BadRequestException("effectiveFrom must be YYYY-MM-DD");
+  if (to && !iso.test(to)) throw new BadRequestException("effectiveTo must be YYYY-MM-DD");
+  if (from && to && to < from) throw new BadRequestException("effectiveTo cannot be before effectiveFrom");
+}
+
+function assertLabels(labels: unknown): void {
+  if (labels === undefined) return;
+  if (labels === null || typeof labels !== "object" || Array.isArray(labels)) {
+    throw new BadRequestException("labels must be an object of locale -> text");
+  }
+  for (const [locale, text] of Object.entries(labels as Record<string, unknown>)) {
+    if (!/^[a-z]{2,3}(-[A-Za-z0-9]+)?$/.test(locale) || typeof text !== "string" || !text.trim()) {
+      throw new BadRequestException("labels must map a locale such as 'ur' to non-empty text");
+    }
+  }
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function rowToView(row: any): HrReferenceCatalogItemView {
@@ -29,6 +56,11 @@ function rowToView(row: any): HrReferenceCatalogItemView {
     description: row.description,
     sortOrder: row.sort_order,
     isActive: row.is_active,
+    effectiveFrom: toIsoDate(row.effective_from),
+    effectiveTo: toIsoDate(row.effective_to),
+    applicability: row.applicability ?? {},
+    labels: row.labels ?? {},
+    retiredAt: row.retired_at?.toISOString ? row.retired_at.toISOString() : (row.retired_at ?? null),
     createdAt: row.created_at?.toISOString ? row.created_at.toISOString() : row.created_at,
     updatedAt: row.updated_at?.toISOString ? row.updated_at.toISOString() : row.updated_at,
   };
@@ -74,9 +106,13 @@ export class HrReferenceCatalogService {
    * that migration inserted, kept in one place so the two never drift.
    */
   private async ensureDefaultCatalogItems(client: PoolClient, companyId: string): Promise<void> {
-    const existing = await client.query("SELECT 1 FROM hr_reference_catalog_items WHERE company_id = $1 LIMIT 1", [companyId]);
-    if ((existing.rowCount ?? 0) > 0) return;
+    // Per catalog TYPE (CAT-02): a company seeded before a new type existed
+    // still gets that type's defaults. Items are soft-deactivated, never
+    // deleted, so "no rows of this type at all" reliably means "never seeded".
+    const present = await client.query("SELECT DISTINCT catalog_type FROM hr_reference_catalog_items WHERE company_id = $1", [companyId]);
+    const have = new Set<string>(present.rows.map((r) => r.catalog_type));
     for (const item of DEFAULT_CATALOG_SEED) {
+      if (have.has(item.catalogType)) continue;
       await client.query(
         `INSERT INTO hr_reference_catalog_items (company_id, catalog_type, code, label, sort_order)
          VALUES ($1, $2, $3, $4, $5)
@@ -147,6 +183,8 @@ export class HrReferenceCatalogService {
     this.assertRegistered(input.catalogType);
     if (!input.code?.trim()) throw new BadRequestException("code is required");
     if (!input.label?.trim()) throw new BadRequestException("label is required");
+    assertDateRange(input.effectiveFrom, input.effectiveTo);
+    assertLabels(input.labels);
     await this.requireManage(claims);
     return this.db.withClaims(claims, async (client) => {
       await this.ensureDefaultCatalogItems(client, claims.company_id!);
@@ -162,9 +200,13 @@ export class HrReferenceCatalogService {
         [claims.company_id, input.catalogType]
       );
       const inserted = await client.query(
-        `INSERT INTO hr_reference_catalog_items (company_id, catalog_type, code, label, description, sort_order)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-        [claims.company_id, input.catalogType, input.code.trim(), input.label.trim(), input.description ?? null, maxOrder.rows[0].next]
+        `INSERT INTO hr_reference_catalog_items
+           (company_id, catalog_type, code, label, description, sort_order, effective_from, effective_to, applicability, labels)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb) RETURNING *`,
+        [
+          claims.company_id, input.catalogType, input.code.trim(), input.label.trim(), input.description ?? null, maxOrder.rows[0].next,
+          input.effectiveFrom ?? null, input.effectiveTo ?? null, JSON.stringify(input.applicability ?? {}), JSON.stringify(input.labels ?? {}),
+        ]
       );
       const view = rowToView(inserted.rows[0]);
       await this.audit.record(client, claims, {
@@ -178,17 +220,36 @@ export class HrReferenceCatalogService {
   }
 
   async update(claims: RequestClaims, id: string, patch: UpdateHrReferenceCatalogItemRequest): Promise<HrReferenceCatalogItemView> {
+    assertDateRange(patch.effectiveFrom, patch.effectiveTo);
+    assertLabels(patch.labels);
     await this.requireManage(claims);
     return this.db.withClaims(claims, async (client) => {
       const before = await this.mustExist(client, id);
+      const fromGiven = patch.effectiveFrom !== undefined;
+      const toGiven = patch.effectiveTo !== undefined;
+      // validate the merged range, not just the patch
+      assertDateRange(fromGiven ? patch.effectiveFrom : toIsoDate(before.effective_from), toGiven ? patch.effectiveTo : toIsoDate(before.effective_to));
+      // Retiring keeps the row and every reference to it (history stays
+      // readable); reactivating clears the retirement stamp.
       const result = await client.query(
         `UPDATE hr_reference_catalog_items SET
            label = COALESCE($2, label),
            description = COALESCE($3, description),
            is_active = COALESCE($4, is_active),
+           retired_at = CASE WHEN $4::boolean IS FALSE AND is_active THEN now()
+                             WHEN $4::boolean IS TRUE THEN NULL ELSE retired_at END,
+           effective_from = CASE WHEN $5::boolean THEN $6::date ELSE effective_from END,
+           effective_to = CASE WHEN $7::boolean THEN $8::date ELSE effective_to END,
+           applicability = COALESCE($9::jsonb, applicability),
+           labels = COALESCE($10::jsonb, labels),
            updated_at = now()
          WHERE id = $1 RETURNING *`,
-        [id, patch.label ?? null, patch.description ?? null, patch.isActive ?? null]
+        [
+          id, patch.label ?? null, patch.description ?? null, patch.isActive ?? null,
+          fromGiven, patch.effectiveFrom ?? null, toGiven, patch.effectiveTo ?? null,
+          patch.applicability ? JSON.stringify(patch.applicability) : null,
+          patch.labels ? JSON.stringify(patch.labels) : null,
+        ]
       );
       await this.audit.record(client, claims, {
         companyId: claims.company_id ?? null,
@@ -243,13 +304,31 @@ export class HrReferenceCatalogService {
     if (!code) return;
     await this.ensureDefaultCatalogItems(client, companyId);
     const result = await client.query(
-      "SELECT 1 FROM hr_reference_catalog_items WHERE company_id = $1 AND catalog_type = $2 AND code = $3 AND is_active = true",
+      `SELECT 1 FROM hr_reference_catalog_items
+        WHERE company_id = $1 AND catalog_type = $2 AND code = $3 AND is_active = true
+          AND (effective_from IS NULL OR effective_from <= CURRENT_DATE)
+          AND (effective_to IS NULL OR effective_to >= CURRENT_DATE)`,
       [companyId, catalogType, code]
     );
     if (result.rowCount === 0) {
       const def = getCatalogTypeDefinition(catalogType);
       throw new BadRequestException(`"${code}" is not a valid, active ${def?.label ?? catalogType} value for this company`);
     }
+  }
+
+  /**
+   * CAT-01 usage-count query: how many rows across the whole schema point at
+   * this item. A referenced item may be retired (isActive=false) but never
+   * removed; `canRemove` is true only when nothing references it.
+   */
+  async getUsage(claims: RequestClaims, id: string): Promise<HrReferenceCatalogItemUsage> {
+    await this.requireView(claims);
+    return this.db.withClaims(claims, async (client) => {
+      await this.mustExist(client, id);
+      const r = await client.query("SELECT app.catalog_item_usage($1)::int AS n", [id]);
+      const n = r.rows[0].n as number;
+      return { itemId: id, usageCount: n, canRemove: n === 0 };
+    });
   }
 
   private assertRegistered(catalogType: string): void {

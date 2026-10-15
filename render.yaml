@@ -35,7 +35,13 @@ services:
         sync: false
       - key: JWT_SECRET
         sync: false
+      - key: NODE_ENV
+        value: production
       - key: MFA_ENCRYPTION_KEY
+        sync: false
+      # SEC-02: master key wrapping per-tenant field-encryption keys. Back it up
+      # OUTSIDE Render -- losing it makes encrypted CNIC/DOB/bank data unrecoverable.
+      - key: FIELD_ENCRYPTION_KEY
         sync: false
       - key: PLATFORM_ADMIN_BOOTSTRAP_EMAIL
         sync: false

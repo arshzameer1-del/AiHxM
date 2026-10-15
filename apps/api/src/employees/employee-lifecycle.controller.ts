@@ -1,4 +1,4 @@
-import { Body, Controller, Param, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, UseGuards } from "@nestjs/common";
 import { SessionGuard } from "../auth/session.guard";
 import { CurrentClaims } from "../auth/current-claims.decorator";
 import type { RequestClaims } from "../database/tenant-context";
@@ -12,6 +12,7 @@ import { ChangeEmployeeManagerDto } from "./dto/change-employee-manager.dto";
 import { ChangeEmployeeLocationDto } from "./dto/change-employee-location.dto";
 import { TerminateEmployeeLifecycleDto } from "./dto/terminate-employee-lifecycle.dto";
 import { ReactivateEmployeeDto } from "./dto/reactivate-employee.dto";
+import { CancelLifecycleEventDto, CorrectLifecycleEventDto } from "./dto/correct-lifecycle-event.dto";
 
 /**
  * Core Employee Enterprise Phase 10 — the explicit Lifecycle Transactions
@@ -67,5 +68,32 @@ export class EmployeeLifecycleController {
   @Post(":id/reactivate")
   reactivate(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: ReactivateEmployeeDto) {
     return this.lifecycle.reactivate(claims, id, dto);
+  }
+
+  // Step 4 (LIF-01/03/04): the event stream, cancelling a scheduled action,
+  // and corrections (a new event referencing the original).
+  @Get(":id/lifecycle-events")
+  events(@CurrentClaims() claims: RequestClaims, @Param("id", ParseUUIDPipe) id: string) {
+    return this.lifecycle.listEvents(claims, id);
+  }
+
+  @Post(":id/lifecycle-events/:eventId/cancel")
+  cancelEvent(
+    @CurrentClaims() claims: RequestClaims,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Param("eventId", ParseUUIDPipe) eventId: string,
+    @Body() dto: CancelLifecycleEventDto
+  ) {
+    return this.lifecycle.cancelScheduled(claims, id, eventId, dto.reason);
+  }
+
+  @Post(":id/lifecycle-events/:eventId/correct")
+  correctEvent(
+    @CurrentClaims() claims: RequestClaims,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Param("eventId", ParseUUIDPipe) eventId: string,
+    @Body() dto: CorrectLifecycleEventDto
+  ) {
+    return this.lifecycle.correct(claims, id, eventId, dto);
   }
 }

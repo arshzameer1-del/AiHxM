@@ -36,6 +36,7 @@ type LocationRow = {
   name: string;
   address: string | null;
   status: string;
+  statutory_jurisdiction?: string | null;
   created_at: unknown;
   updated_at: unknown;
 };
@@ -56,6 +57,7 @@ function rowToLocation(row: any): LocationView {
     name: row.name,
     address: row.address,
     status: row.status,
+    statutoryJurisdiction: row.statutory_jurisdiction ?? null,
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
   };
@@ -330,6 +332,31 @@ export class LocationsService {
     });
   }
 
+  /**
+   * PAY-28: the province / jurisdiction a place falls under for provincial social security. It is a plain attribute of
+   * the location (not part of its effective-dated structure): payroll reads the value in force when it calculates and
+   * records it on the payslip's input snapshot, so a later change never rewrites a payslip already produced.
+   */
+  async setStatutoryJurisdiction(claims: RequestClaims, id: string, code: string | null): Promise<LocationView> {
+    await this.requireManage(claims);
+    if (code !== null && !/^[a-z][a-z0-9_]{1,39}$/.test(code)) {
+      throw new BadRequestException("The jurisdiction must be lower-case letters, digits or underscores, starting with a letter");
+    }
+    return this.db.withClaims(claims, async (client) => {
+      const before = await this.mustExist(client, id);
+      const result = await client.query("UPDATE locations SET statutory_jurisdiction = $2, updated_at = now() WHERE id = $1 RETURNING *", [id, code]);
+      await this.audit.record(client, claims, {
+        companyId: claims.company_id ?? null,
+        action: "location.set_statutory_jurisdiction",
+        target: id,
+        metadata: { from: before.statutory_jurisdiction ?? null, to: code },
+      });
+      const location = rowToLocation(result.rows[0]);
+      this.publishChanged(claims, "statutory_jurisdiction_set", location);
+      return location;
+    });
+  }
+
   async archive(claims: RequestClaims, id: string): Promise<LocationView> {
     return this.setStatus(claims, id, "archived");
   }
@@ -455,7 +482,10 @@ export class LocationsService {
       throw new ForbiddenException("Not permitted to view the location hierarchy");
     }
     const assignedIds = await this.rbac.resolveDataScopeEntityIds(claims, "location");
-    const allowedIds = await this.expandToSubtreeIds(claims, assignedIds);
+    const expanded = await this.expandToSubtreeIds(claims, assignedIds);
+    // ACC-04: assignments with include_descendants = false grant exactly that entity.
+    const exactIds = await this.rbac.resolveDataScopeExactIds(claims, "location");
+    const allowedIds = [...new Set([...expanded, ...exactIds])];
     return { unrestricted: false, allowedIds };
   }
 

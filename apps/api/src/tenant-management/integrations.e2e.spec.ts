@@ -1,3 +1,4 @@
+import { isEncrypted } from "../crypto/field-crypto";
 import { INestApplication, ValidationPipe } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { generate as generateTotp } from "otplib";
@@ -126,7 +127,8 @@ describe("Integrations catalog (e2e)", () => {
         [companyId]
       )
     );
-    expect(stored.rows[0].config.password).toBe("hunter2secret");
+    expect(isEncrypted(stored.rows[0].config.password)).toBe(true); // SEC-03: encrypted at rest
+    expect(JSON.stringify(stored.rows[0].config)).not.toContain("hunter2secret");
   });
 
   it("preserves a previously-set secret across a partial update", async () => {
@@ -144,7 +146,8 @@ describe("Integrations catalog (e2e)", () => {
         [companyId]
       )
     );
-    expect(stored.rows[0].config.password).toBe("hunter2secret");
+    expect(isEncrypted(stored.rows[0].config.password)).toBe(true); // SEC-03: encrypted at rest
+    expect(JSON.stringify(stored.rows[0].config)).not.toContain("hunter2secret");
     expect(stored.rows[0].config.username).toBe("notifier");
   });
 

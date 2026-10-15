@@ -5,9 +5,12 @@ import type { RequestClaims } from "../database/tenant-context";
 import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
+import { WorkflowService } from "../workflow/workflow.service";
+import { decideInEngine, statusForOutcome, submitToEngineIfConfigured } from "../workflow/engine-routing";
 import type { DecideOnDutyRequestRequest, OnDutyRequestView, SubmitOnDutyRequestRequest } from "@aihxm/shared-types";
 
 const LEAVE_MODULE_KEY = "leave" as const;
+const WORKFLOW_OBJECT_KEY = "on_duty_request";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toIso(value: any): string | null {
@@ -29,6 +32,9 @@ function rowToView(row: any, employeeUserAccountId: string | null): OnDutyReques
     startDate: toIsoDate(row.start_date),
     endDate: toIsoDate(row.end_date),
     location: row.location,
+    locationId: row.location_id ?? null,
+    // a configured location keeps its name in `location` (snapshot at submission)
+    locationName: row.location_id ? row.location : null,
     reason: row.reason,
     status: row.status,
     // Same "derive it, don't store it twice" comparison
@@ -64,8 +70,46 @@ export class OnDutyService {
     private readonly db: DatabaseService,
     private readonly rbac: RbacService,
     private readonly entitlements: EntitlementsService,
-    private readonly audit: AuditService
-  ) {}
+    private readonly audit: AuditService,
+    // WFL-01 (Step 6): optional + appended so positional spec constructions keep working.
+    private readonly workflow?: WorkflowService
+  ) {
+    this.workflow?.adapters?.register({
+      objectKey: WORKFLOW_OBJECT_KEY,
+      label: "On-duty request",
+      canSendBack: true,
+      describe: async (client, recordId) => {
+        const r = await client.query(
+          `SELECT odr.start_date, odr.end_date, odr.location, e.first_name, e.last_name
+             FROM on_duty_requests odr JOIN employees e ON e.id = odr.employee_id WHERE odr.id = $1`,
+          [recordId]
+        );
+        if (!r.rowCount) return null;
+        const x = r.rows[0];
+        return { title: `On-duty: ${x.first_name} ${x.last_name}`, summary: `${toIsoDate(x.start_date)} to ${toIsoDate(x.end_date)}${x.location ? ` at ${x.location}` : ""}`, deepLink: "/attendance/on-duty" };
+      },
+      onOutcome: async (ctx) => {
+        const status = statusForOutcome(ctx.event);
+        const decided = status === "approved" || status === "rejected";
+        const r = await ctx.client.query(
+          `UPDATE on_duty_requests
+              SET status = $2, updated_at = now(),
+                  decided_by_user_account_id = CASE WHEN $3 THEN $4::uuid ELSE decided_by_user_account_id END,
+                  decision_comment = CASE WHEN $3 THEN $5 ELSE decision_comment END,
+                  decided_at = CASE WHEN $3 THEN now() ELSE decided_at END
+            WHERE id = $1 RETURNING employee_id`,
+          [ctx.recordId, status, decided, ctx.claims.sub, ctx.comment]
+        );
+        if (!r.rowCount) return;
+        await this.audit.record(ctx.client, ctx.claims, {
+          companyId: ctx.claims.company_id ?? null,
+          action: `on_duty.${ctx.event}`,
+          target: ctx.recordId,
+          metadata: { employeeId: r.rows[0].employee_id, viaWorkflow: ctx.instanceId },
+        });
+      },
+    });
+  }
 
   private async loadEmployee(client: PoolClient, employeeId: string): Promise<EmployeeRow> {
     const result = await client.query<EmployeeRow>(
@@ -114,7 +158,7 @@ export class OnDutyService {
       // shape, scoped to one employee and blocking rather than warning.
       const overlap = await client.query(
         `SELECT id FROM on_duty_requests
-         WHERE employee_id = $1 AND status IN ('pending', 'approved')
+         WHERE employee_id = $1 AND status IN ('pending', 'approved', 'returned')
            AND start_date <= $2 AND end_date >= $3`,
         [employee.id, input.endDate, input.startDate]
       );
@@ -122,13 +166,31 @@ export class OnDutyService {
         throw new ConflictException("This employee already has a pending or approved on-duty request overlapping these dates");
       }
 
-      const result = await client.query(
+      // TLM-11: a configured location, when given, must exist and be active in this company; its
+      // name is kept on the row as the display text (the free-text `location` stays the note otherwise).
+      let locationText = input.location ?? null;
+      if (input.locationId) {
+        const loc = await client.query("SELECT name FROM locations WHERE id = $1 AND company_id = $2 AND status = 'active'", [input.locationId, employee.company_id]);
+        if (loc.rowCount === 0) throw new NotFoundException("Location not found");
+        locationText = loc.rows[0].name;
+      }
+      let result = await client.query(
         `INSERT INTO on_duty_requests
-           (company_id, employee_id, start_date, end_date, location, reason, submitted_by_user_account_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+           (company_id, employee_id, start_date, end_date, location, location_id, reason, submitted_by_user_account_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING *`,
-        [employee.company_id, employee.id, input.startDate, input.endDate, input.location ?? null, input.reason ?? null, claims.sub]
+        [employee.company_id, employee.id, input.startDate, input.endDate, locationText, input.locationId ?? null, input.reason ?? null, claims.sub]
       );
+      // WFL-01: when the tenant has an active template the request is approved through the engine.
+      const instanceId = await submitToEngineIfConfigured(this.workflow, client, claims, {
+        objectKey: WORKFLOW_OBJECT_KEY,
+        table: "on_duty_requests",
+        recordId: result.rows[0].id,
+        record: { employeeId: employee.id, startDate: input.startDate, endDate: input.endDate, location: locationText, locationId: input.locationId ?? null },
+        subjectUserAccountId: employee.user_account_id,
+        title: `On-duty: ${employee.first_name} ${employee.last_name}`,
+      });
+      if (instanceId) result = await client.query("SELECT * FROM on_duty_requests WHERE id = $1", [result.rows[0].id]);
 
       await this.audit.record(client, claims, {
         companyId: employee.company_id,
@@ -192,7 +254,7 @@ export class OnDutyService {
          FROM on_duty_requests odr
          JOIN employees e ON e.id = odr.employee_id
          LEFT JOIN employees m ON m.id = e.manager_id
-         WHERE odr.company_id = $1 AND odr.status = 'pending'
+         WHERE odr.company_id = $1 AND odr.status = 'pending' AND odr.workflow_instance_id IS NULL
          ORDER BY odr.created_at ASC`,
         [claims.company_id]
       );
@@ -220,6 +282,16 @@ export class OnDutyService {
       const row = existing.rows[0];
       if (row.status !== "pending") {
         throw new ConflictException("This on-duty request has already been decided");
+      }
+
+      if (row.workflow_instance_id && this.workflow) {
+        // routed through the workflow engine: the configured approvers decide; onOutcome applies the status
+        await decideInEngine(this.workflow, client, claims, row.workflow_instance_id, { decision: input.decision, comment: input.comment });
+        const fresh = await client.query("SELECT * FROM on_duty_requests WHERE id = $1", [id]);
+        return rowToView(
+          { ...fresh.rows[0], employee_number: row.employee_number, first_name: row.first_name, last_name: row.last_name },
+          row.employee_user_account_id
+        );
       }
 
       const canAll = await this.rbac.can(claims, "on_duty.decide.all");

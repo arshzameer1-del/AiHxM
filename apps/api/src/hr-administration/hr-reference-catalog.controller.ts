@@ -23,6 +23,11 @@ export class HrReferenceCatalogController {
     return this.catalog.listCatalogTypes(claims);
   }
 
+  @Get("items/:id/usage")
+  usage(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.catalog.getUsage(claims, id);
+  }
+
   @Get(":catalogType")
   listItems(
     @CurrentClaims() claims: RequestClaims,

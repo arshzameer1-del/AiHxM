@@ -1,8 +1,32 @@
 import { Module } from "@nestjs/common";
 import { PayrollController } from "./payroll.controller";
+import { PayrollSchemesController } from "./payroll-schemes.controller";
+import { PayrollSchemesService } from "./payroll-schemes.service";
+import { PayrollFinalSettlementService } from "./payroll-final-settlement.service";
+import { PayrollPaymentsController } from "./payroll-payments.controller";
+import { PayrollPaymentsService } from "./payroll-payments.service";
+import { PayrollReconciliationService } from "./payroll-reconciliation.service";
+import { PayrollAccountingController } from "./payroll-accounting.controller";
+import { PayrollAccountingService } from "./payroll-accounting.service";
+import { PayrollDocumentsController } from "./payroll-documents.controller";
+import { PayrollDocumentsService } from "./payroll-documents.service";
+import { PayrollBenefitsController } from "./payroll-benefits.controller";
+import { PayrollBenefitsService } from "./payroll-benefits.service";
+import { PayrollOperationsController } from "./payroll-operations.controller";
+import { PayrollDashboardService } from "./payroll-dashboard.service";
+import { PayrollInputImportService } from "./payroll-input-import.service";
+import { PayrollInputImportWorker } from "./payroll-input-import.worker";
 import { PayrollService } from "./payroll.service";
+import { PayrollRunControlService } from "./payroll-run-control.service";
+import { PayrollRetroService } from "./payroll-retro.service";
+import { PayrollTaxService } from "./payroll-tax.service";
+import { PayrollTaxController } from "./payroll-tax.controller";
+import { PayrollCalculationWorker } from "./payroll-calculation.worker";
+import { HrAdministrationModule } from "../hr-administration/hr-administration.module";
 import { PayrollAreasController } from "./payroll-areas.controller";
 import { PayrollAreasService } from "./payroll-areas.service";
+import { PayrollPeriodsController } from "./payroll-periods.controller";
+import { PayrollPeriodsService } from "./payroll-periods.service";
 import { FormulaExpressionEngine } from "./formula-expression.engine";
 import { PayrollFormulaService } from "./payroll-formula.service";
 import { PayrollFormulaOverridesController } from "./payroll-formula-overrides.controller";
@@ -56,6 +80,7 @@ import { EmployeesModule } from "../employees/employees.module";
     ShiftsModule,
     WebhooksModule,
     EmployeesModule,
+    HrAdministrationModule,
   ],
   // Payroll Areas (0101_payroll_areas.sql) — needs only RbacModule/
   // EntitlementsModule/AuditModule, all already imported above.
@@ -64,8 +89,8 @@ import { EmployeesModule } from "../employees/employees.module";
   // the boolean-only RulesEngine; see its header). PayrollFormulaService
   // resolves/evaluates overrides inside calculateRun(); the Overrides
   // service/controller manage them. All reuse modules already imported above.
-  controllers: [PayrollController, PayrollAreasController, PayrollFormulaOverridesController],
-  providers: [PayrollService, PayrollAreasService, FormulaExpressionEngine, PayrollFormulaService, PayrollFormulaOverridesService],
-  exports: [PayrollService, PayrollAreasService],
+  controllers: [PayrollController, PayrollPaymentsController, PayrollSchemesController, PayrollAccountingController, PayrollDocumentsController, PayrollBenefitsController, PayrollOperationsController, PayrollAreasController, PayrollPeriodsController, PayrollFormulaOverridesController, PayrollTaxController],
+  providers: [PayrollService, PayrollRunControlService, PayrollAreasService, PayrollPeriodsService, FormulaExpressionEngine, PayrollFormulaService, PayrollFormulaOverridesService, PayrollCalculationWorker, PayrollRetroService, PayrollTaxService, PayrollPaymentsService, PayrollReconciliationService, PayrollSchemesService, PayrollFinalSettlementService, PayrollAccountingService, PayrollDocumentsService, PayrollBenefitsService, PayrollDashboardService, PayrollInputImportService, PayrollInputImportWorker],
+  exports: [PayrollService, PayrollAccountingService, PayrollDocumentsService, PayrollBenefitsService, PayrollDashboardService, PayrollInputImportService, PayrollSchemesService, PayrollFinalSettlementService, PayrollPaymentsService, PayrollReconciliationService, PayrollRetroService, PayrollTaxService, PayrollRunControlService, PayrollAreasService, PayrollPeriodsService],
 })
 export class PayrollModule {}

@@ -1,4 +1,8 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { publishEmployeesCalculated, publishPaymentStatusChanged } from "./payroll-events";
+import { payslipsHiddenFromSelf } from "./payroll-payslip-publication";
+import { sensitive } from "../crypto/sensitive-fields";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { currentCorrelationId } from "../common/request-context";
 import type { PoolClient } from "pg";
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
@@ -14,7 +18,20 @@ import { WorkScheduleResolutionService } from "../shifts/work-schedule-resolutio
 import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
 import { isPayrollAreaInScope, resolvePayrollAreaAccess, type PayrollAreaAccess } from "./payroll-area-access";
 import { FormulaExpressionEngine } from "./formula-expression.engine";
+import { rowToRunView, ZERO_RUN_SUMMARY, type RunSummary } from "./payroll-run-view";
+import { selectEmployeesByIds, selectRunPopulation } from "./payroll-population";
+import { resolvePeriodForRun } from "./payroll-periods.service";
+import { ComponentLedger, type ComponentLine, type PayslipInputSnapshot } from "./payroll-components";
+import { markRetroPaid } from "./payroll-retro-support";
+import { computeAnnualTax, loadEmployeeTaxContext, taxProfileTrace } from "./payroll-tax-profile";
+import { payrollRunHooks } from "./payroll-run-hooks";
+import { loadConsumptionLinks, persistPayslipDetail, refreshYtd, settlePayslips, voidPayslips, type EngineDetail, type InsertedPayslip } from "./payroll-payslip-detail";
+import { PayrollRunControlService, POST_FINAL_STATUS_LIST, PAYROLL_ENGINE_VERSION, REVERSIBLE_STATUSES } from "./payroll-run-control.service";
 import { PayrollFormulaService, type ResolvedPayrollFormulas } from "./payroll-formula.service";
+import { BackgroundJobsService } from "../background-jobs/background-jobs.service";
+import { renderBankFile, rowToBankFormat, rowToPaymentBatch } from "./payroll-payments-support";
+import { resolveStatutoryJurisdiction } from "./payroll-jurisdiction";
+import { writeCompanyWorkTimeDefault } from "../leave/work-time-defaults";
 import { EmployeeLoansService } from "../employees/employee-loans.service";
 import { EmployeeAdditionalPaymentsService } from "../employees/employee-additional-payments.service";
 import { EmployeeOffCyclePaymentsService } from "../employees/employee-offcycle-payments.service";
@@ -32,8 +49,13 @@ import type {
   PayrollPaymentBatchView,
   PayrollRunType,
   PayrollRunView,
+  RetryPayrollExceptionResponse,
+  StartPayrollCalculationResponse,
   PayrollSettingsView,
   PayslipView,
+  PayslipDetailView,
+  PayslipConsumptionView,
+  PayrollYtdView,
   ReversePayrollRunRequest,
   SetTaxSlabsRequest,
   TaxSlabSetView,
@@ -106,6 +128,36 @@ const DEFAULT_TAX_SLABS = [
   { min: 5_600_000, max: 7_000_000, base: 976_000, rate: 32 },
   { min: 7_000_000, max: null as number | null, base: 1_424_000, rate: 35 },
 ];
+
+/** background_jobs.job_type of an asynchronous payroll calculation (PAY-06). */
+export const PAYROLL_CALCULATION_JOB = "payroll_calculation";
+/** Above this many employees a run must be calculated in the background rather than inside one request. */
+const SYNC_CALCULATION_MAX_EMPLOYEES = Number(process.env.PAYROLL_SYNC_MAX_EMPLOYEES ?? 2000);
+/** Component types whose "taxable" flag is meaningless: they are never taxable pay. */
+const NEVER_TAXABLE_COMPONENT_TYPES = new Set(["deduction", "employer_contribution", "reimbursement", "non_cash_benefit"]);
+const DUPLICATE_PAYMENT_MESSAGE = "Already has a payslip in another active payroll run for this exact period (moved between payroll areas?)";
+function partitionSize(): number {
+  const n = Number(process.env.PAYROLL_PARTITION_SIZE ?? 250);
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 250;
+}
+
+type CalculationFailure = { employeeId: string; exceptionClass: "calculation" | "duplicate_payment"; message: string };
+
+type CalculationContext = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  run: Record<string, any>;
+  runType: PayrollRunType;
+  offCycleReason: OffCycleReason | null;
+  periodStart: string;
+  periodEnd: string;
+  daysInPeriod: number;
+  settings: PayrollSettingsView;
+  taxSlabs: TaxSlabView[];
+  formulas: ResolvedPayrollFormulas;
+  companyHasScheduleRules: boolean;
+  employees: EmployeeRow[];
+  alreadyPaidIds: Set<string>;
+};
 
 type EmployeeRow = {
   id: string;
@@ -206,26 +258,8 @@ function rowToDisbursementSettings(row: any): PayrollDisbursementSettingsView {
   return {
     companyId: row.company_id,
     columns: row.columns as DisbursementFieldKey[],
+    requireReleaseApproval: !!row.require_release_approval,
     updatedAt: toIso(row.updated_at) as string,
-  };
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function rowToPaymentBatch(row: any): PayrollPaymentBatchView {
-  return {
-    id: row.id,
-    companyId: row.company_id,
-    payrollRunId: row.payroll_run_id,
-    batchReference: row.batch_reference,
-    rowCount: Number(row.row_count),
-    excludedCount: Number(row.excluded_count),
-    totalNetPay: Number(row.total_net_pay),
-    status: row.status,
-    voidedReason: row.voided_reason ?? null,
-    voidedAt: toIso(row.voided_at),
-    voidedByUserAccountId: row.voided_by_user_account_id ?? null,
-    generatedByUserAccountId: row.generated_by_user_account_id,
-    generatedAt: toIso(row.generated_at) as string,
   };
 }
 
@@ -251,43 +285,9 @@ function rowToTaxSlab(row: any): TaxSlabView {
 // service was built.
 const FALLBACK_FORMULA_SERVICE = new PayrollFormulaService(new FormulaExpressionEngine());
 
-type RunSummary = { payslipCount: number; totalGrossPay: number; totalNetPay: number };
-const ZERO_RUN_SUMMARY: RunSummary = { payslipCount: 0, totalGrossPay: 0, totalNetPay: 0 };
-
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function rowToRun(row: any, summary: RunSummary = ZERO_RUN_SUMMARY): PayrollRunView {
-  return {
-    id: row.id,
-    companyId: row.company_id,
-    periodStart: toIsoDate(row.period_start),
-    periodEnd: toIsoDate(row.period_end),
-    status: row.status,
-    // Phase P4 (0113_payroll_off_cycle_runs.sql) — `run_type` defaults
-    // 'regular' at the column level, so every run created before this
-    // phase reads back unchanged.
-    runType: row.run_type as PayrollRunType,
-    offCycleReason: (row.off_cycle_reason ?? null) as OffCycleReason | null,
-    targetEmployeeId: row.target_employee_id ?? null,
-    workflowInstanceId: row.workflow_instance_id,
-    createdByUserAccountId: row.created_by_user_account_id,
-    finalizedAt: toIso(row.finalized_at),
-    createdAt: toIso(row.created_at) as string,
-    updatedAt: toIso(row.updated_at) as string,
-    payslipCount: summary.payslipCount,
-    totalGrossPay: summary.totalGrossPay,
-    totalNetPay: summary.totalNetPay,
-    reversedAt: toIso(row.reversed_at),
-    reversedByUserAccountId: row.reversed_by_user_account_id ?? null,
-    reversalReason: row.reversal_reason ?? null,
-    correctiveRunId: row.corrective_run_id ?? null,
-    // Unrelated to this task's overtime-settings work: 0101_payroll_areas.sql
-    // (a concurrently-landed migration) added payroll_runs.payroll_area_id
-    // and shared-types' PayrollRunView.payrollAreaId, but this mapping
-    // function hadn't been updated yet, which broke compilation of this
-    // whole file. One-line, mechanical wiring of an already-existing
-    // column to an already-existing type field — not a design decision.
-    payrollAreaId: row.payroll_area_id ?? null,
-  };
+  return rowToRunView(row, summary);
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -306,7 +306,8 @@ function rowToPayslip(row: any): PayslipView {
     payrollRunPeriodEnd: row.run_period_end,
     employeeId: row.employee_id,
     employeeNumber: row.employee_number,
-    bankAccountNumber: row.bank_account_number,
+    // SEC-02: the payslip snapshot is stored encrypted (legacy plaintext passes through).
+    bankAccountNumber: sensitive.decrypt(row.company_id, row.bank_account_number),
     daysInPeriod: Number(row.days_in_period),
     paidDays: Number(row.paid_days),
     unpaidLeaveDays: Number(row.unpaid_leave_days),
@@ -322,6 +323,7 @@ function rowToPayslip(row: any): PayslipView {
     loanDeductions: row.loan_deductions ?? [],
     consumedAdditionalPayments: row.consumed_additional_payments ?? [],
     consumedOffCyclePayments: row.consumed_offcycle_payments ?? [],
+    consumedOvertime: row.consumed_overtime ?? [],
     createdAt: toIso(row.created_at) as string,
     updatedAt: toIso(row.updated_at) as string,
   };
@@ -410,8 +412,28 @@ export class PayrollService {
     // runs & Final Settlement's own Additional Off-Cycle Payments
     // (IT0267 equivalent). Same optional-but-required-for-calculation
     // posture as `loans`/`additionalPayments` immediately above.
-    private readonly offCyclePayments?: EmployeeOffCyclePaymentsService
-  ) {}
+    private readonly offCyclePayments?: EmployeeOffCyclePaymentsService,
+    // Gap Register Step 9A (PAY-01/02/19/23) - state machine, events, overrides.
+    // Optional for the same hand-constructed-fixture reason as the rest; `control()`
+    // falls back to an identical instance built from the same collaborators.
+    private readonly runControl?: PayrollRunControlService,
+    // PAY-06 - background calculation. Optional for the same hand-constructed-fixture reason as the rest.
+    private readonly jobs?: BackgroundJobsService
+  ) {
+    this.workflow?.adapters?.register({
+      objectKey: WORKFLOW_OBJECT_KEY,
+      label: "Payroll run",
+      legacyDecide: (c, id, dto) => this.decideApproval(c, id, dto),
+    });
+  }
+
+  private fallbackControl?: PayrollRunControlService;
+  /** The run state machine / event log / overrides (PAY-01, PAY-19, PAY-23). */
+  control(): PayrollRunControlService {
+    if (this.runControl) return this.runControl;
+    this.fallbackControl ??= new PayrollRunControlService(this.db, this.rbac, this.entitlements, this.audit);
+    return this.fallbackControl;
+  }
 
   // --- Settings & tax slabs -----------------------------------------------
 
@@ -464,6 +486,10 @@ export class PayrollService {
           updated_at: new Date(),
         },
       });
+      // PAY-24: the standard hours belong with working time; the old field stays in step so nothing reading it breaks.
+      if (patch.standardMonthlyHours !== undefined) {
+        await writeCompanyWorkTimeDefault(client, this.effectiveDating, claims.company_id!, { standardMonthlyHours: patch.standardMonthlyHours });
+      }
       await this.audit.record(client, claims, { companyId: claims.company_id ?? null, action: "payroll_settings.update" });
       return rowToSettings(row);
     });
@@ -579,7 +605,11 @@ export class PayrollService {
           : "Only a caller with payroll.calculate.all can create a company-wide payroll run"
       );
     }
-    if (new Date(input.periodEnd) < new Date(input.periodStart)) {
+    const payrollPeriodId = input.payrollPeriodId ?? null;
+    if (!payrollPeriodId && (!input.periodStart || !input.periodEnd)) {
+      throw new BadRequestException("periodStart and periodEnd are required unless the run is created for a payroll period");
+    }
+    if (input.periodStart && input.periodEnd && new Date(input.periodEnd) < new Date(input.periodStart)) {
       throw new BadRequestException("periodEnd cannot be before periodStart");
     }
     // Phase P4 — off-cycle fields. `runType` defaults 'regular' (every
@@ -592,6 +622,10 @@ export class PayrollService {
     const runType: PayrollRunType = input.runType ?? "regular";
     const offCycleReason = input.offCycleReason ?? null;
     const targetEmployeeId = input.targetEmployeeId ?? null;
+    // PAY-02: a simulation is a throw-away calculation - it never blocks a period, never reaches approval.
+    const isSimulation = input.isSimulation === true;
+    const idempotencyKey = input.idempotencyKey?.trim() || null;
+    if (idempotencyKey && idempotencyKey.length > 200) throw new BadRequestException("idempotencyKey is too long (200 characters at most)");
     if (runType === "regular") {
       if (offCycleReason || targetEmployeeId) {
         throw new BadRequestException("offCycleReason/targetEmployeeId are only valid on an off-cycle run");
@@ -611,6 +645,35 @@ export class PayrollService {
       }
     }
     return this.db.withClaims(claims, async (client) => {
+      // PAY-03 - a run created for a payroll period takes the period's dates; a tenant policy can make that mandatory.
+      if (!payrollPeriodId && runType === "regular" && !isSimulation && (await this.control().policy(client, claims.company_id!)).requirePeriodForRun) {
+        throw new BadRequestException("This company requires a regular payroll run to be created for a payroll period (payrollPeriodId)");
+      }
+      if (payrollPeriodId) {
+        const period = await resolvePeriodForRun(client, claims.company_id!, payrollPeriodId, {
+          runType: runType === "regular" ? "regular" : "off_cycle",
+          payrollAreaId,
+          periodStart: input.periodStart,
+          periodEnd: input.periodEnd,
+        });
+        input = { ...input, periodStart: period.periodStart, periodEnd: period.periodEnd };
+      }
+      const periodStartIso = input.periodStart!;
+      const periodEndIso = input.periodEnd!;
+      const fingerprint = {
+        periodStart: periodStartIso,
+        periodEnd: periodEndIso,
+        payrollAreaId,
+        runType,
+        offCycleReason,
+        targetEmployeeId,
+        isSimulation,
+        payrollPeriodId,
+      };
+      if (idempotencyKey) {
+        const prior = await client.query("SELECT * FROM payroll_runs WHERE company_id = $1 AND idempotency_key = $2", [claims.company_id, idempotencyKey]);
+        if (prior.rowCount) return this.replayIdempotentRun(client, prior.rows[0], fingerprint);
+      }
       let targetTerminationDate: string | null = null;
       if (targetEmployeeId) {
         const target = await client.query<{ termination_date: unknown }>(
@@ -623,7 +686,7 @@ export class PayrollService {
           if (!targetTerminationDate) {
             throw new BadRequestException("Target employee has no termination date set — final settlement requires a terminated employee");
           }
-          if (targetTerminationDate < input.periodStart || targetTerminationDate > input.periodEnd) {
+          if (targetTerminationDate < periodStartIso || targetTerminationDate > periodEndIso) {
             throw new BadRequestException(
               `This run's period must cover the employee's termination date (${targetTerminationDate})`
             );
@@ -632,12 +695,14 @@ export class PayrollService {
           // also enforced by `payroll_runs_one_final_settlement_per_employee`
           // (0113), this pre-check just turns that constraint violation
           // into a clean 400.
-          const existingSettlement = await client.query(
-            "SELECT 1 FROM payroll_runs WHERE target_employee_id = $1 AND off_cycle_reason = 'final_settlement' AND status <> 'reversed'",
-            [targetEmployeeId]
-          );
-          if (existingSettlement.rowCount! > 0) {
-            throw new BadRequestException("A final settlement run already exists for this employee");
+          if (!isSimulation) {
+            const existingSettlement = await client.query(
+              "SELECT 1 FROM payroll_runs WHERE target_employee_id = $1 AND off_cycle_reason = 'final_settlement' AND status NOT IN ('reversed', 'cancelled') AND is_simulation = false",
+              [targetEmployeeId]
+            );
+            if (existingSettlement.rowCount! > 0) {
+              throw new BadRequestException("A final settlement run already exists for this employee");
+            }
           }
         }
       }
@@ -656,16 +721,19 @@ export class PayrollService {
       //
       // Phase P4: every check in this block is REGULAR-run-only — an
       // off-cycle run never participates in period-uniqueness at all
-      // (see this method's own comment above).
+      // (see this method's own comment above). PAY-02: cancelled runs and
+      // simulations never count either (0142 widened the index the same way).
       if (runType === "regular") {
         if (payrollAreaId) {
           const area = await client.query("SELECT is_active FROM payroll_areas WHERE id = $1", [payrollAreaId]);
           if (area.rowCount === 0) throw new NotFoundException("Payroll area not found");
           if (!area.rows[0].is_active) throw new BadRequestException("Cannot create a payroll run for an inactive payroll area");
         }
+      }
+      if (runType === "regular" && !isSimulation) {
         const existing = await client.query<{ payroll_area_id: string | null }>(
-          "SELECT payroll_area_id FROM payroll_runs WHERE company_id = $1 AND period_start = $2 AND period_end = $3 AND status <> 'reversed' AND run_type = 'regular'",
-          [claims.company_id, input.periodStart, input.periodEnd]
+          "SELECT payroll_area_id FROM payroll_runs WHERE company_id = $1 AND period_start = $2 AND period_end = $3 AND status NOT IN ('reversed', 'cancelled') AND run_type = 'regular' AND is_simulation = false",
+          [claims.company_id, periodStartIso, periodEndIso]
         );
         if (existing.rows.some((r) => (r.payroll_area_id ?? null) === payrollAreaId)) {
           throw new BadRequestException(
@@ -683,19 +751,73 @@ export class PayrollService {
           );
         }
       }
-      const result = await client.query(
-        `INSERT INTO payroll_runs (company_id, period_start, period_end, created_by_user_account_id, payroll_area_id, run_type, off_cycle_reason, target_employee_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-        [claims.company_id, input.periodStart, input.periodEnd, claims.sub, payrollAreaId, runType, offCycleReason, targetEmployeeId]
-      );
+      const currency = await client.query<{ currency: string | null }>("SELECT currency FROM companies WHERE id = $1", [claims.company_id]);
+      let result;
+      try {
+        result = await client.query(
+          `INSERT INTO payroll_runs (company_id, period_start, period_end, created_by_user_account_id, payroll_area_id, run_type, off_cycle_reason, target_employee_id,
+                                     is_simulation, idempotency_key, currency_code, correlation_id, payroll_period_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
+          [
+            claims.company_id,
+            periodStartIso,
+            periodEndIso,
+            claims.sub,
+            payrollAreaId,
+            runType,
+            offCycleReason,
+            targetEmployeeId,
+            isSimulation,
+            idempotencyKey,
+            currency.rows[0]?.currency ?? "PKR",
+            currentCorrelationId(),
+            payrollPeriodId,
+          ]
+        );
+      } catch (err) {
+        // A concurrent request with the same idempotency key won the race: hand back its run.
+        if (idempotencyKey && (err as { code?: string }).code === "23505") {
+          const prior = await client.query("SELECT * FROM payroll_runs WHERE company_id = $1 AND idempotency_key = $2", [claims.company_id, idempotencyKey]);
+          if (prior.rowCount) return this.replayIdempotentRun(client, prior.rows[0], fingerprint);
+        }
+        throw err;
+      }
+      await this.control().recordCreated(client, claims, result.rows[0], { ...fingerprint, idempotencyKey: idempotencyKey ?? undefined });
       await this.audit.record(client, claims, {
         companyId: claims.company_id ?? null,
         action: "payroll_run.create",
         target: result.rows[0].id,
-        metadata: { payrollAreaId: payrollAreaId ?? undefined, runType, offCycleReason: offCycleReason ?? undefined, targetEmployeeId: targetEmployeeId ?? undefined },
+        metadata: {
+          payrollAreaId: payrollAreaId ?? undefined,
+          runType,
+          offCycleReason: offCycleReason ?? undefined,
+          targetEmployeeId: targetEmployeeId ?? undefined,
+          isSimulation: isSimulation || undefined,
+          idempotencyKey: idempotencyKey ?? undefined,
+          payrollPeriodId: payrollPeriodId ?? undefined,
+        },
       });
       return rowToRun(result.rows[0]);
     });
+  }
+
+  /** Same idempotency key + same request = the run already created; same key + a different request = conflict. */
+  private async replayIdempotentRun(
+    client: PoolClient,
+    existing: Record<string, any>, // eslint-disable-line @typescript-eslint/no-explicit-any
+    fingerprint: Record<string, unknown>
+  ): Promise<PayrollRunView> {
+    const same =
+      toIsoDate(existing.period_start) === fingerprint.periodStart &&
+      toIsoDate(existing.period_end) === fingerprint.periodEnd &&
+      (existing.payroll_area_id ?? null) === fingerprint.payrollAreaId &&
+      existing.run_type === fingerprint.runType &&
+      (existing.off_cycle_reason ?? null) === fingerprint.offCycleReason &&
+      (existing.target_employee_id ?? null) === fingerprint.targetEmployeeId &&
+      existing.is_simulation === fingerprint.isSimulation &&
+      (existing.payroll_period_id ?? null) === (fingerprint.payrollPeriodId ?? null);
+    if (!same) throw new ConflictException("This idempotency key was already used for a different payroll run request");
+    return rowToRun(existing, await this.loadRunSummary(client, existing.id));
   }
 
   /** Readable by anyone holding at least one of the four payroll-staff
@@ -776,13 +898,8 @@ export class PayrollService {
     return this.db.withClaims(claims, async (client) => {
       const run = await this.loadRun(client, id);
       this.assertRunInScope(access, run);
-      if (run.status === "finalized") {
-        throw new BadRequestException("Cannot recalculate a finalized payroll run");
-      }
-
-      const periodStart = toIsoDate(run.period_start);
-      const periodEnd = toIsoDate(run.period_end);
-      const daysInPeriod = inclusiveDayCount(periodStart, periodEnd);
+      this.assertRunCalculable(run);
+      const approvalInvalidated = run.status === "approved";
 
       // Compensation is Core Employee master data now (moved 2026-09-27,
       // kumail's own architecture correction — see
@@ -792,188 +909,647 @@ export class PayrollService {
       // yet simply has every employee collect a "No compensation record
       // covers this employee for this period" error below, the same as
       // any other genuinely-missing-data case this loop already handles.
-      const settings = await this.loadSettingsAsOf(client, claims, periodEnd);
-      const taxSlabs = await this.loadTaxSlabsAsOf(client, claims, periodEnd);
-      // Payroll Formula Engine: tenant overrides in force at periodEnd —
-      // the same as-of rule as settings/tax slabs above, resolved once per
-      // run. Empty (the default for every tenant) = built-in math only.
-      const formulas = await this.formulaService().resolveAsOf(client, claims.company_id!, periodEnd);
-      // Once per run, not per employee — see resolveProrationBasis().
-      const companyHasScheduleRules = await this.companyHasActiveScheduleAssignmentRules(client, claims.company_id!);
-
-      // Phase P4 — employee selection branches on run_type/target_employee_id:
-      //  - A TARGETED run (final_settlement always; bonus/arrears/other
-      //    optionally) selects exactly that one employee, regardless of
-      //    termination status — a final settlement run's whole point is
-      //    paying someone the normal active-population filter below
-      //    would exclude.
-      //  - Every other case (a regular run, or a BATCH bonus/arrears/
-      //    other run with no target) uses the same active-population
-      //    filter as always.
-      const runType = (run.run_type ?? "regular") as PayrollRunType;
-      const offCycleReason = (run.off_cycle_reason ?? null) as OffCycleReason | null;
-      const targetEmployeeId: string | null = run.target_employee_id ?? null;
-      const employeesResult = targetEmployeeId
-        ? await client.query<EmployeeRow>(
-            `SELECT id, company_id, user_account_id, employee_number, bank_account_number, date_of_joining, termination_date
-             FROM employees WHERE id = $1 AND company_id = $2`,
-            [targetEmployeeId, claims.company_id]
-          )
-        : await client.query<EmployeeRow>(
-            `SELECT id, company_id, user_account_id, employee_number, bank_account_number, date_of_joining, termination_date
-             FROM employees
-             WHERE date_of_joining <= $2
-               AND (termination_date IS NULL OR termination_date >= $1)
-               AND ($3::uuid IS NULL OR payroll_area_id = $3)`,
-            [periodStart, periodEnd, run.payroll_area_id ?? null]
-          );
-
-      // Final Settlement's own double-pay guard: `calculateOnePayslip()`
-      // computes this employee's full regular pay for the window — if a
-      // REGULAR run already has a non-reversed payslip for this exact
-      // employee overlapping this settlement's period, that salary was
-      // already paid once; final_settlement would pay it a second time
-      // on top of gratuity/leave-encashment/loan-payoff. Reverse that
-      // regular run (or correct the settlement's own period so it
-      // doesn't overlap) before calculating — the same "never silently
-      // double-pay" posture as the Payroll Areas guard just below.
-      if (offCycleReason === "final_settlement") {
-        const overlapping = await client.query(
-          `SELECT 1 FROM payslips p JOIN payroll_runs pr ON pr.id = p.payroll_run_id
-           WHERE p.employee_id = $1 AND pr.company_id = $2 AND pr.run_type = 'regular' AND pr.status <> 'reversed'
-             AND pr.period_start <= $4 AND pr.period_end >= $3`,
-          [targetEmployeeId, claims.company_id, periodStart, periodEnd]
+      const ctx = await this.buildCalculationContext(client, claims, run, true);
+      if (ctx.employees.length > SYNC_CALCULATION_MAX_EMPLOYEES) {
+        throw new BadRequestException(
+          `This run covers ${ctx.employees.length} employees; calculate it in the background instead (limit for an immediate calculation is ${SYNC_CALCULATION_MAX_EMPLOYEES}).`
         );
-        if ((overlapping.rowCount ?? 0) > 0) {
-          throw new BadRequestException(
-            "This employee already has a regular-run payslip overlapping this settlement's period — reverse that run first, or choose a final settlement period that doesn't overlap it, to avoid paying their final salary twice"
-          );
-        }
       }
 
-      // Payroll Areas double-pay guard: an employee who moved between
-      // areas after one area's run for this exact period was calculated
-      // must not be paid again by another area's run. A company-wide run
-      // can never coexist with another active REGULAR run for the same
-      // period (createRun() refuses it), so this only ever bites area
-      // runs — and, as of Phase P4, only ever other REGULAR runs: an
-      // off-cycle run (bonus/arrears/final settlement) is explicitly
-      // allowed to pay someone who already has a regular-run payslip for
-      // the identical period, and never blocks (or is blocked by) this
-      // guard itself.
-      const alreadyPaid =
-        runType === "regular"
-          ? await client.query<{ employee_id: string }>(
-              `SELECT DISTINCT p.employee_id
-               FROM payslips p JOIN payroll_runs pr ON pr.id = p.payroll_run_id
-               WHERE pr.company_id = $1 AND pr.id <> $2 AND pr.status <> 'reversed' AND pr.run_type = 'regular'
-                 AND pr.period_start = $3 AND pr.period_end = $4`,
-              [claims.company_id, id, periodStart, periodEnd]
-            )
-          : { rows: [] as { employee_id: string }[] };
-      const alreadyPaidIds = new Set(alreadyPaid.rows.map((r) => r.employee_id));
-
-      const errors: PayrollCalculationError[] = [];
+      // PAY-06 - one employee failing never stops the others: each is calculated inside its own savepoint.
+      const failures: CalculationFailure[] = [];
       const payslipRows: Array<Record<string, unknown>> = [];
-
-      for (const employee of employeesResult.rows) {
-        if (alreadyPaidIds.has(employee.id)) {
-          errors.push({
-            employeeId: employee.id,
-            message: "Already has a payslip in another active payroll run for this exact period (moved between payroll areas?)",
-          });
+      for (const employee of ctx.employees) {
+        if (ctx.alreadyPaidIds.has(employee.id)) {
+          failures.push({ employeeId: employee.id, exceptionClass: "duplicate_payment", message: DUPLICATE_PAYMENT_MESSAGE });
           continue;
         }
-        try {
-          const payslip =
-            runType === "off_cycle" && offCycleReason !== "final_settlement"
-              ? // Bonus / arrears / other: a lean, self-contained
-                // calculation — no compensation proration, no unpaid
-                // leave, no loan deduction. It pays exactly what's
-                // queued against THIS run in `employee_offcycle_payments`
-                // (IT0267), nothing else. See the method's own doc comment.
-                await this.calculateOffCyclePayslip(client, employee, run.id, periodStart, periodEnd, taxSlabs, formulas)
-              : // Regular run, OR a final_settlement off-cycle run: both
-                // go through the full, tested engine. `offCycleOptions`
-                // is undefined for a regular run (byte-identical
-                // behavior to before this phase) and set for
-                // final_settlement (forces the tax true-up and full loan
-                // payoff, and additionally consumes this run's own
-                // IT0267 lines — see that option's own doc comment).
-                await this.calculateOnePayslip(
-                  client,
-                  employee,
-                  periodStart,
-                  periodEnd,
-                  daysInPeriod,
-                  settings,
-                  taxSlabs,
-                  companyHasScheduleRules,
-                  formulas,
-                  offCycleReason === "final_settlement" ? { isFinalSettlement: true, offCycleRunId: run.id } : undefined
-                );
-          payslipRows.push(payslip);
-        } catch (err) {
-          errors.push({ employeeId: employee.id, message: err instanceof Error ? err.message : "Calculation failed" });
-        }
+        const outcome = await this.isolated(client, () => this.calculateEmployeeRow(client, ctx, employee));
+        if (outcome.ok) payslipRows.push(outcome.value);
+        else failures.push({ employeeId: employee.id, exceptionClass: "calculation", message: outcome.message });
       }
+      const errors: PayrollCalculationError[] = failures.map((f) => ({ employeeId: f.employeeId, message: f.message }));
 
       await client.query("DELETE FROM payslips WHERE payroll_run_id = $1", [id]);
-      for (const row of payslipRows) {
-        await client.query(
-          `INSERT INTO payslips (
-             company_id, payroll_run_id, employee_id, employee_number, bank_account_number,
-             days_in_period, paid_days, unpaid_leave_days, gross_pay, taxable_gross_this_period,
-             taxable_annual_income, income_tax_monthly, eobi_employee_contribution, eobi_employer_contribution,
-             social_security_employer_contribution, net_pay, calculation_breakdown,
-             loan_deductions, consumed_additional_payments, consumed_offcycle_payments
-           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,$18::jsonb,$19::jsonb,$20::jsonb)`,
-          [
-            claims.company_id,
-            id,
-            row.employeeId,
-            row.employeeNumber,
-            row.bankAccountNumber,
-            row.daysInPeriod,
-            row.paidDays,
-            row.unpaidLeaveDays,
-            row.grossPay,
-            row.taxableGrossThisPeriod,
-            row.taxableAnnualIncome,
-            row.incomeTaxMonthly,
-            row.eobiEmployeeContribution,
-            row.eobiEmployerContribution,
-            row.socialSecurityEmployerContribution,
-            row.netPay,
-            JSON.stringify(row.calculationBreakdown),
-            JSON.stringify(row.loanDeductions ?? []),
-            JSON.stringify(row.consumedAdditionalPayments ?? []),
-            JSON.stringify(row.consumedOffCyclePayments ?? []),
-          ]
-        );
-      }
+      const insertedPayslips: InsertedPayslip[] = [];
+      for (const row of payslipRows) insertedPayslips.push(await this.insertPayslipRow(client, claims, id, row));
 
-      const updated = await client.query(
-        "UPDATE payroll_runs SET status = 'calculated', updated_at = now() WHERE id = $1 RETURNING *",
-        [id]
+      // PAY-02 - freeze the rules this calculation read, then record the (audited) move.
+      const snapshot = await this.control().captureRuleSnapshot(client, run, ctx.periodEnd, ctx.settings as unknown as Record<string, unknown>, ctx.taxSlabs as unknown as Array<Record<string, unknown> & { id?: string }>);
+      await this.control().transition(client, claims, id, "calculated", {
+        action: "calculate",
+        metadata: {
+          payslipCount: payslipRows.length,
+          errorCount: errors.length,
+          calculationSequence: snapshot.sequence,
+          ruleSnapshotId: snapshot.id,
+          approvalInvalidated: approvalInvalidated || undefined,
+        },
+      });
+      await client.query(
+        "UPDATE payroll_runs SET rule_snapshot_id = $2, calculation_sequence = $3, calculated_at = now(), warning_count = 0, calculation_mode = 'sync' WHERE id = $1",
+        [id, snapshot.id, snapshot.sequence]
       );
+      // PAY-05 / PAY-21 - the structured result, input snapshot and typed input links of every payslip just written.
+      await persistPayslipDetail(client, run, insertedPayslips, snapshot.sequence);
+      // PAY-27 - one event per calculated payslip (only while a subscription listens)
+      await publishEmployeesCalculated(client, claims, { id, company_id: run.company_id, calculation_sequence: snapshot.sequence });
+      // PAY-06 - the error queue: earlier open exceptions belonged to the previous calculation.
+      await this.control().supersedeOpenExceptions(client, id);
+      for (const f of failures) {
+        await this.control().recordException(client, run, { employeeId: f.employeeId, sequence: snapshot.sequence, message: f.message, exceptionClass: f.exceptionClass });
+      }
+      // PAY-04 - who this calculation covered, and why (one set per calculation).
+      const outcome = new Map<string, { status: "calculated" | "failed" | "excluded"; reason?: string }>();
+      for (const row of payslipRows) outcome.set(row.employeeId as string, { status: "calculated" });
+      for (const e of errors) outcome.set(e.employeeId, { status: "failed", reason: e.message });
+      await this.control().recordPopulation(client, run, ctx.employees, outcome, snapshot.sequence);
+      // PAY-23 - a manual override survives a rerun (and loses its earlier approval).
+      await this.control().reapplyOverrides(client, claims, id);
+      await this.control().refreshRunTotals(client, id, { population: ctx.employees.length, failed: errors.length });
+      const updated = await client.query("SELECT * FROM payroll_runs WHERE id = $1", [id]);
       await this.audit.record(client, claims, {
         companyId: claims.company_id ?? null,
         action: "payroll_run.calculate",
         target: id,
-        metadata: { payslipCount: payslipRows.length, errorCount: errors.length },
+        metadata: { payslipCount: payslipRows.length, errorCount: errors.length, calculationSequence: snapshot.sequence },
       });
 
-      // Sums straight from the rows this call just computed and wrote —
-      // no reason to re-query `payslips` for numbers already sitting in
-      // memory (unlike finalize/submit/decide below, which didn't just
-      // compute these payslips themselves and so ask loadRunSummary()).
-      const summary: RunSummary = {
-        payslipCount: payslipRows.length,
-        totalGrossPay: payslipRows.reduce((sum, r) => sum + Number(r.grossPay), 0),
-        totalNetPay: payslipRows.reduce((sum, r) => sum + Number(r.netPay), 0),
-      };
+      const summary: RunSummary = await this.loadRunSummary(client, id);
       return { run: rowToRun(updated.rows[0], summary), payslipCount: payslipRows.length, errors };
+    });
+  }
+
+  // ------------------------------------------------------------------ calculation building blocks (PAY-06)
+
+  /** The statuses a run may be (re)calculated from; one guard shared by the immediate and background paths. */
+  private assertRunCalculable(run: { status: string }): void {
+    if (POST_FINAL_STATUS_LIST.includes(run.status as never)) {
+      throw new BadRequestException("Cannot recalculate a finalized payroll run");
+    }
+    if (run.status === "pending_approval") {
+      throw new BadRequestException("This payroll run is awaiting approval; have it rejected before recalculating it");
+    }
+    if (run.status === "reversed" || run.status === "cancelled") {
+      throw new BadRequestException(`Payroll run is ${run.status} and cannot be calculated`);
+    }
+    if (run.status === "calculating") {
+      throw new BadRequestException("This payroll run is already being calculated in the background");
+    }
+  }
+
+  /**
+   * Everything a calculation reads that is the same for every employee of the run: rules as of the period end,
+   * the population (when asked) and the double-pay guards. Phase P1: settings/tax slabs are resolved AS OF the
+   * run's own `periodEnd`, not "whatever is current today" — a run recalculated after a later rate change still
+   * uses the rates that were actually in force during its own period.
+   */
+  private async buildCalculationContext(client: PoolClient, claims: RequestClaims, run: Record<string, any>, withPopulation: boolean): Promise<CalculationContext> { // eslint-disable-line @typescript-eslint/no-explicit-any
+    const periodStart = toIsoDate(run.period_start);
+    const periodEnd = toIsoDate(run.period_end);
+    const daysInPeriod = inclusiveDayCount(periodStart, periodEnd);
+    const settings = await this.loadSettingsAsOf(client, claims, periodEnd);
+    const taxSlabs = await this.loadTaxSlabsAsOf(client, claims, periodEnd);
+    // Payroll Formula Engine: tenant overrides in force at periodEnd — the same as-of rule as settings/tax slabs
+    // above, resolved once per run. Empty (the default for every tenant) = built-in math only.
+    const formulas = await this.formulaService().resolveAsOf(client, claims.company_id!, periodEnd);
+    // Once per run, not per employee — see resolveProrationBasis().
+    const companyHasScheduleRules = await this.companyHasActiveScheduleAssignmentRules(client, claims.company_id!);
+
+    // Phase P4 — employee selection branches on run_type/target_employee_id:
+    //  - A TARGETED run (final_settlement always; bonus/arrears/other optionally) selects exactly that one
+    //    employee, regardless of termination status — a final settlement run's whole point is paying someone the
+    //    normal active-population filter would exclude.
+    //  - Every other case uses the same active-population filter as always.
+    const runType = (run.run_type ?? "regular") as PayrollRunType;
+    const offCycleReason = (run.off_cycle_reason ?? null) as OffCycleReason | null;
+    const targetEmployeeId: string | null = run.target_employee_id ?? null;
+    const employees = withPopulation ? await selectRunPopulation(client, run as never) : [];
+
+    // Final Settlement's own double-pay guard: `calculateOnePayslip()` computes this employee's full regular pay
+    // for the window — if a REGULAR run already has a non-reversed payslip for this exact employee overlapping
+    // this settlement's period, that salary was already paid once; final_settlement would pay it a second time on
+    // top of gratuity/leave-encashment/loan-payoff. Reverse that regular run (or correct the settlement's own
+    // period so it doesn't overlap) before calculating.
+    if (withPopulation && offCycleReason === "final_settlement") {
+      const overlapping = await client.query(
+        `SELECT 1 FROM payslips p JOIN payroll_runs pr ON pr.id = p.payroll_run_id
+         WHERE p.employee_id = $1 AND pr.company_id = $2 AND pr.run_type = 'regular' AND pr.status NOT IN ('reversed', 'cancelled')
+           AND pr.is_simulation = false AND pr.period_start <= $4 AND pr.period_end >= $3`,
+        [targetEmployeeId, claims.company_id, periodStart, periodEnd]
+      );
+      if ((overlapping.rowCount ?? 0) > 0) {
+        throw new BadRequestException(
+          "This employee already has a regular-run payslip overlapping this settlement's period — reverse that run first, or choose a final settlement period that doesn't overlap it, to avoid paying their final salary twice"
+        );
+      }
+    }
+
+    // Payroll Areas double-pay guard: an employee who moved between areas after one area's run for this exact
+    // period was calculated must not be paid again by another area's run. Only other REGULAR runs count; an
+    // off-cycle run is explicitly allowed to pay someone who already has a regular-run payslip for the period.
+    const alreadyPaid =
+      withPopulation && runType === "regular"
+        ? await client.query<{ employee_id: string }>(
+            `SELECT DISTINCT p.employee_id
+             FROM payslips p JOIN payroll_runs pr ON pr.id = p.payroll_run_id
+             WHERE pr.company_id = $1 AND pr.id <> $2 AND pr.status NOT IN ('reversed', 'cancelled') AND pr.run_type = 'regular'
+               AND pr.is_simulation = false AND pr.period_start = $3 AND pr.period_end = $4`,
+            [claims.company_id, run.id, periodStart, periodEnd]
+          )
+        : { rows: [] as { employee_id: string }[] };
+
+    return {
+      run,
+      runType,
+      offCycleReason,
+      periodStart,
+      periodEnd,
+      daysInPeriod,
+      settings,
+      taxSlabs,
+      formulas,
+      companyHasScheduleRules,
+      employees,
+      alreadyPaidIds: new Set(alreadyPaid.rows.map((r) => r.employee_id)),
+    };
+  }
+
+  /** One employee's payslip row, by the same dispatch the run has always used. Throws on bad data. */
+  private async calculateEmployeeRow(client: PoolClient, ctx: CalculationContext, employee: EmployeeRow): Promise<Record<string, unknown>> {
+    if (ctx.runType === "off_cycle" && ctx.offCycleReason !== "final_settlement") {
+      // Bonus / arrears / other: a lean, self-contained calculation — no compensation proration, no unpaid
+      // leave, no loan deduction. It pays exactly what's queued against THIS run in `employee_offcycle_payments`
+      // (IT0267), nothing else. See the method's own doc comment.
+      return this.calculateOffCyclePayslip(client, employee, ctx.run.id, ctx.periodStart, ctx.periodEnd, ctx.taxSlabs, ctx.formulas);
+    }
+    // Regular run, OR a final_settlement off-cycle run: both go through the full, tested engine.
+    // `offCycleOptions` is undefined for a regular run and set for final_settlement (forces the tax true-up and
+    // full loan payoff, and additionally consumes this run's own IT0267 lines).
+    return this.calculateOnePayslip(
+      client,
+      employee,
+      ctx.periodStart,
+      ctx.periodEnd,
+      ctx.daysInPeriod,
+      ctx.settings,
+      ctx.taxSlabs,
+      ctx.companyHasScheduleRules,
+      ctx.formulas,
+      ctx.offCycleReason === "final_settlement" ? { isFinalSettlement: true, offCycleRunId: ctx.run.id } : undefined,
+      { runId: ctx.run.is_simulation ? undefined : ctx.run.id, currencyCode: ctx.run.currency_code ?? undefined }
+    );
+  }
+
+  /**
+   * PAY-06 - runs `fn` inside a savepoint so a failure (even a failed SQL statement, which would otherwise poison
+   * the whole transaction) undoes only that employee's work and reports the message instead of throwing.
+   */
+  private async isolated<T>(client: PoolClient, fn: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false; message: string }> {
+    await client.query("SAVEPOINT payroll_employee");
+    try {
+      const value = await fn();
+      await client.query("RELEASE SAVEPOINT payroll_employee");
+      return { ok: true, value };
+    } catch (err) {
+      await client.query("ROLLBACK TO SAVEPOINT payroll_employee");
+      await client.query("RELEASE SAVEPOINT payroll_employee");
+      return { ok: false, message: err instanceof Error ? err.message : "Calculation failed" };
+    }
+  }
+
+  /**
+   * PAY-12 - what an employee's pay for an ALREADY PAID run would be if it were calculated today with the rules of
+   * that period: the retro detector compares these lines with what was actually paid. Nothing is written - the
+   * calculation runs as a simulation (no run id, so it consumes nothing) inside a savepoint that is always undone.
+   */
+  async recalculateForRetro(client: PoolClient, claims: RequestClaims, sourceRun: Record<string, any>, employeeId: string): Promise<ComponentLine[] | { error: string }> { // eslint-disable-line @typescript-eslint/no-explicit-any
+    this.requireCalculationCollaborators();
+    const ctx = await this.buildCalculationContext(client, claims, { ...sourceRun, is_simulation: true }, false);
+    const [employee] = await selectEmployeesByIds(client, sourceRun.company_id, [employeeId]);
+    if (!employee) return { error: "Employee not found" };
+    await client.query("SAVEPOINT payroll_retro_probe");
+    try {
+      const row = await this.calculateEmployeeRow(client, ctx, employee);
+      return (row.components ?? []) as ComponentLine[];
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : "Calculation failed" };
+    } finally {
+      await client.query("ROLLBACK TO SAVEPOINT payroll_retro_probe");
+      await client.query("RELEASE SAVEPOINT payroll_retro_probe");
+    }
+  }
+
+  /** Retro (PAY-12) entry points: the same permission and payroll-area scope as calculating a run. */
+  requireCalculateAccess(claims: RequestClaims): Promise<PayrollAreaAccess> {
+    return this.requireRunAction(claims, CALCULATE_PERMISSION_BASE, "Not permitted to calculate payroll");
+  }
+
+  assertCalculateScope(access: PayrollAreaAccess, run: { payroll_area_id?: string | null }): void {
+    this.assertRunInScope(access, run);
+  }
+
+  /** Writes one calculated row to `payslips` and returns what persistPayslipDetail() needs for it. */
+  private async insertPayslipRow(client: PoolClient, claims: RequestClaims, runId: string, row: Record<string, unknown>): Promise<InsertedPayslip> {
+    const insertedRow = await client.query<{ id: string }>(
+      `INSERT INTO payslips (
+         company_id, payroll_run_id, employee_id, employee_number, bank_account_number,
+         days_in_period, paid_days, unpaid_leave_days, gross_pay, taxable_gross_this_period,
+         taxable_annual_income, income_tax_monthly, eobi_employee_contribution, eobi_employer_contribution,
+         social_security_employer_contribution, net_pay, calculation_breakdown,
+         loan_deductions, consumed_additional_payments, consumed_offcycle_payments, consumed_overtime, employer_cost,
+         arrears_amount, retro_detail
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,$18::jsonb,$19::jsonb,$20::jsonb,$21::jsonb,$22,$23,$24::jsonb)
+       RETURNING id`,
+      [
+        claims.company_id,
+        runId,
+        row.employeeId,
+        row.employeeNumber,
+        sensitive.encrypt(claims.company_id!, row.bankAccountNumber as string | null),
+        row.daysInPeriod,
+        row.paidDays,
+        row.unpaidLeaveDays,
+        row.grossPay,
+        row.taxableGrossThisPeriod,
+        row.taxableAnnualIncome,
+        row.incomeTaxMonthly,
+        row.eobiEmployeeContribution,
+        row.eobiEmployerContribution,
+        row.socialSecurityEmployerContribution,
+        row.netPay,
+        JSON.stringify(row.calculationBreakdown),
+        JSON.stringify(row.loanDeductions ?? []),
+        JSON.stringify(row.consumedAdditionalPayments ?? []),
+        JSON.stringify(row.consumedOffCyclePayments ?? []),
+        JSON.stringify(row.consumedOvertime ?? []),
+        row.employerCost ?? 0,
+        row.arrearsAmount ?? 0,
+        JSON.stringify(row.retroDetail ?? []),
+      ]
+    );
+    return {
+      payslipId: insertedRow.rows[0].id,
+      employeeId: row.employeeId as string,
+      detail: {
+        components: row.components as EngineDetail["components"],
+        inputSnapshot: row.inputSnapshot as EngineDetail["inputSnapshot"],
+        consumedLeave: (row.consumedLeave ?? []) as EngineDetail["consumedLeave"],
+        consumedAdditionalPayments: row.consumedAdditionalPayments as EngineDetail["consumedAdditionalPayments"],
+        consumedOffCyclePayments: row.consumedOffCyclePayments as EngineDetail["consumedOffCyclePayments"],
+        consumedOvertime: row.consumedOvertime as EngineDetail["consumedOvertime"],
+        loanDeductions: row.loanDeductions as EngineDetail["loanDeductions"],
+        consumedRetro: (row.consumedRetro ?? []) as EngineDetail["consumedRetro"],
+      },
+    };
+  }
+
+  // ------------------------------------------------------------------ background calculation (PAY-06)
+
+  /**
+   * Queues the run's calculation as a background job and returns at once with the run in `calculating`. The
+   * population is cut into partitions, each committed on its own, so a large run is resumable and a failing
+   * employee lands in the exception queue instead of stopping the run.
+   */
+  async calculateRunAsync(claims: RequestClaims, id: string): Promise<StartPayrollCalculationResponse> {
+    const access = await this.requireRunAction(claims, CALCULATE_PERMISSION_BASE, "Not permitted to calculate payroll");
+    this.requireCalculationCollaborators();
+    if (!this.jobs) throw new Error("PayrollService was constructed without BackgroundJobsService - background calculation is unavailable");
+    const jobs = this.jobs;
+    return this.db.withClaims(claims, async (client) => {
+      const run = await this.loadRun(client, id);
+      this.assertRunInScope(access, run);
+      this.assertRunCalculable(run);
+      const approvalInvalidated = run.status === "approved";
+      if (approvalInvalidated) {
+        await this.control().transition(client, claims, id, "calculated", { action: "approval_invalidated", reason: "Recalculation requested" });
+      }
+      const next = await client.query<{ n: number }>("SELECT COALESCE(max(calculation_sequence), 0)::int + 1 AS n FROM payroll_rule_snapshots WHERE payroll_run_id = $1", [id]);
+      const sequence = next.rows[0].n;
+      const job = await jobs.enqueue(client, claims, {
+        companyId: claims.company_id!,
+        jobType: PAYROLL_CALCULATION_JOB,
+        payload: {
+          runId: id,
+          sequence,
+          approvalInvalidated,
+          claims: { sub: claims.sub, company_id: claims.company_id ?? null, is_platform_admin: claims.is_platform_admin === true },
+        },
+        idempotencyKey: `payroll-calc:${id}:${sequence}`,
+        maxAttempts: 3,
+      });
+      await this.control().transition(client, claims, id, "calculating", {
+        action: "calculate_start",
+        metadata: { jobId: job.id, calculationSequence: sequence, mode: "async" },
+      });
+      const updated = await client.query(
+        `UPDATE payroll_runs SET calculation_mode = 'async', calculation_job_id = $2, calculation_started_at = now(), calculation_error = NULL,
+                partition_count = 0, partitions_completed = 0 WHERE id = $1 RETURNING *`,
+        [id, job.id]
+      );
+      await this.audit.record(client, claims, {
+        companyId: claims.company_id ?? null,
+        action: "payroll_run.calculate_async",
+        target: id,
+        metadata: { jobId: job.id, calculationSequence: sequence },
+      });
+      const summary: RunSummary = await this.loadRunSummary(client, id);
+      return { run: rowToRun(updated.rows[0], summary), jobId: job.id };
+    });
+  }
+
+  /**
+   * The body of a `payroll_calculation` job (called by PayrollCalculationWorker). Three phases, each its own
+   * transaction: start (snapshot rules, cut partitions), one transaction per partition, finish. Every phase is
+   * safe to run again after a crash: the work already committed is detected and skipped.
+   */
+  async runCalculationJob(
+    payload: { runId: string; sequence: number; approvalInvalidated?: boolean; claims: { sub: string; company_id: string | null; is_platform_admin: boolean } },
+    report: (percent: number, note: string) => Promise<void>
+  ): Promise<{ payslipCount: number; failedCount: number } | null> {
+    this.requireCalculationCollaborators();
+    const claims: RequestClaims = { sub: payload.claims.sub, company_id: payload.claims.company_id, is_platform_admin: payload.claims.is_platform_admin };
+    const runId = payload.runId;
+
+    const started = await this.db.withClaims(claims, (c) => this.startAsyncCalculation(c, claims, runId, payload.sequence));
+    if (!started) return null;
+    await report(5, "Population cut into partitions");
+
+    const pending = await this.db.withClaims(claims, async (c) => {
+      const r = await c.query<{ id: string; partition_no: number }>(
+        `SELECT id, partition_no FROM payroll_run_partitions
+          WHERE payroll_run_id = $1 AND calculation_sequence = $2 AND state <> 'completed' ORDER BY partition_no`,
+        [runId, started.sequence]
+      );
+      return r.rows;
+    });
+    let done = started.partitionCount - pending.length;
+    for (const part of pending) {
+      try {
+        await this.db.withClaims(claims, (c) => this.processPartition(c, claims, runId, part.id));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        await this.db.withClaims(claims, (c) =>
+          c.query("UPDATE payroll_run_partitions SET state = 'failed', last_error = left($2, 2000), updated_at = now() WHERE id = $1", [part.id, message])
+        );
+        throw err;
+      }
+      done++;
+      await report(5 + (90 * done) / Math.max(started.partitionCount, 1), `Partition ${done} of ${started.partitionCount} calculated`);
+    }
+
+    const result = await this.db.withClaims(claims, (c) => this.finishAsyncCalculation(c, claims, runId, payload.approvalInvalidated === true));
+    await report(100, "Calculation finished");
+    return result;
+  }
+
+  private async startAsyncCalculation(
+    client: PoolClient,
+    claims: RequestClaims,
+    runId: string,
+    sequence: number
+  ): Promise<{ sequence: number; partitionCount: number } | null> {
+    const locked = await client.query("SELECT * FROM payroll_runs WHERE id = $1 FOR UPDATE", [runId]);
+    if (locked.rowCount === 0) return null;
+    const run = locked.rows[0];
+    if (run.status !== "calculating") return null; // a stale job: the run was cancelled or already finished
+    const existing = await client.query("SELECT 1 FROM payroll_rule_snapshots WHERE payroll_run_id = $1 AND calculation_sequence = $2", [runId, sequence]);
+    if ((existing.rowCount ?? 0) > 0) {
+      return { sequence, partitionCount: Number(run.partition_count) }; // resuming after a crash: start already committed
+    }
+    const ctx = await this.buildCalculationContext(client, claims, run, true);
+    const snapshot = await this.control().captureRuleSnapshot(client, run, ctx.periodEnd, ctx.settings as unknown as Record<string, unknown>, ctx.taxSlabs as unknown as Array<Record<string, unknown> & { id?: string }>);
+    await client.query("DELETE FROM payslips WHERE payroll_run_id = $1", [runId]);
+    await this.control().supersedeOpenExceptions(client, runId);
+
+    const payable: string[] = [];
+    let duplicates = 0;
+    for (const e of ctx.employees) {
+      if (ctx.alreadyPaidIds.has(e.id)) {
+        duplicates++;
+        await this.control().recordException(client, run, { employeeId: e.id, sequence: snapshot.sequence, message: DUPLICATE_PAYMENT_MESSAGE, exceptionClass: "duplicate_payment" });
+      } else {
+        payable.push(e.id);
+      }
+    }
+    const size = partitionSize();
+    let partitionCount = 0;
+    for (let i = 0; i < payable.length; i += size) {
+      const ids = payable.slice(i, i + size);
+      await client.query(
+        `INSERT INTO payroll_run_partitions (company_id, payroll_run_id, calculation_sequence, partition_no, employee_ids, employee_count)
+         VALUES ($1, $2, $3, $4, $5::uuid[], $6)`,
+        [run.company_id, runId, snapshot.sequence, partitionCount + 1, ids, ids.length]
+      );
+      partitionCount++;
+    }
+    await client.query(
+      `UPDATE payroll_runs SET rule_snapshot_id = $2, calculation_sequence = $3, partition_count = $4, partitions_completed = 0,
+              population_count = $5, failed_count = $6, calculated_count = 0 WHERE id = $1`,
+      [runId, snapshot.id, snapshot.sequence, partitionCount, ctx.employees.length, duplicates]
+    );
+    return { sequence: snapshot.sequence, partitionCount };
+  }
+
+  private async processPartition(client: PoolClient, claims: RequestClaims, runId: string, partitionId: string): Promise<void> {
+    const runRow = await client.query("SELECT * FROM payroll_runs WHERE id = $1 FOR UPDATE", [runId]);
+    const run = runRow.rows[0];
+    if (!run || run.status !== "calculating") return;
+    const partRow = await client.query("SELECT * FROM payroll_run_partitions WHERE id = $1 FOR UPDATE", [partitionId]);
+    const part = partRow.rows[0];
+    if (!part || part.state === "completed") return;
+    await client.query("UPDATE payroll_run_partitions SET state = 'running', attempts = attempts + 1, started_at = COALESCE(started_at, now()), updated_at = now() WHERE id = $1", [partitionId]);
+
+    const ctx = await this.buildCalculationContext(client, claims, run, false);
+    // The rules read here must be the rules snapshotted when the run started; otherwise stop rather than mix versions.
+    await this.control().assertRulesUnchanged(client, run, ctx.periodEnd, ctx.settings as unknown as Record<string, unknown>, ctx.taxSlabs);
+    const employees = await selectEmployeesByIds(client, run.company_id, part.employee_ids);
+    const sequence = Number(run.calculation_sequence);
+    let calculated = 0;
+    let failed = 0;
+    for (const employee of employees) {
+      const outcome = await this.isolated(client, async () => {
+        const row = await this.calculateEmployeeRow(client, ctx, employee);
+        const inserted = await this.insertPayslipRow(client, claims, runId, row);
+        await persistPayslipDetail(client, run, [inserted], sequence);
+      });
+      if (outcome.ok) {
+        calculated++;
+      } else {
+        failed++;
+        await this.control().recordException(client, run, { employeeId: employee.id, sequence, message: outcome.message, partitionId });
+      }
+    }
+    await client.query(
+      `UPDATE payroll_run_partitions SET state = 'completed', calculated_count = $2, failed_count = $3, last_error = NULL,
+              checkpoint = jsonb_build_object('processed', $4::int), completed_at = now(), updated_at = now() WHERE id = $1`,
+      [partitionId, calculated, failed, employees.length]
+    );
+    await client.query("UPDATE payroll_runs SET partitions_completed = partitions_completed + 1 WHERE id = $1", [runId]);
+  }
+
+  private async finishAsyncCalculation(
+    client: PoolClient,
+    claims: RequestClaims,
+    runId: string,
+    approvalInvalidated: boolean
+  ): Promise<{ payslipCount: number; failedCount: number } | null> {
+    const locked = await client.query("SELECT * FROM payroll_runs WHERE id = $1 FOR UPDATE", [runId]);
+    const run = locked.rows[0];
+    if (!run || run.status !== "calculating") return null;
+    const sequence = Number(run.calculation_sequence);
+    const unfinished = await client.query(
+      "SELECT count(*)::int AS n FROM payroll_run_partitions WHERE payroll_run_id = $1 AND calculation_sequence = $2 AND state <> 'completed'",
+      [runId, sequence]
+    );
+    if (unfinished.rows[0].n > 0) throw new Error(`${unfinished.rows[0].n} partition(s) of this payroll run are not calculated yet`);
+
+    const ids = await client.query<{ employee_id: string }>(
+      `SELECT unnest(employee_ids) AS employee_id FROM payroll_run_partitions WHERE payroll_run_id = $1 AND calculation_sequence = $2
+       UNION
+       SELECT employee_id FROM payroll_exceptions WHERE payroll_run_id = $1 AND calculation_sequence = $2 AND employee_id IS NOT NULL`,
+      [runId, sequence]
+    );
+    const employees = await selectEmployeesByIds(client, run.company_id, ids.rows.map((r) => r.employee_id));
+    const paid = await client.query<{ employee_id: string }>("SELECT employee_id FROM payslips WHERE payroll_run_id = $1", [runId]);
+    const open = await client.query<{ employee_id: string; message: string }>(
+      "SELECT employee_id, message FROM payroll_exceptions WHERE payroll_run_id = $1 AND calculation_sequence = $2 AND status = 'open' AND employee_id IS NOT NULL",
+      [runId, sequence]
+    );
+    const outcome = new Map<string, { status: "calculated" | "failed" | "excluded"; reason?: string }>();
+    for (const p of paid.rows) outcome.set(p.employee_id, { status: "calculated" });
+    for (const e of open.rows) outcome.set(e.employee_id, { status: "failed", reason: e.message });
+
+    await this.control().transition(client, claims, runId, "calculated", {
+      action: "calculate",
+      metadata: {
+        payslipCount: paid.rowCount ?? 0,
+        errorCount: open.rowCount ?? 0,
+        calculationSequence: sequence,
+        ruleSnapshotId: run.rule_snapshot_id,
+        mode: "async",
+        approvalInvalidated: approvalInvalidated || undefined,
+      },
+    });
+    await client.query("UPDATE payroll_runs SET calculated_at = now(), warning_count = 0, calculation_error = NULL WHERE id = $1", [runId]);
+    await this.control().recordPopulation(client, run, employees, outcome, sequence);
+    await this.control().reapplyOverrides(client, claims, runId);
+    await this.control().refreshRunTotals(client, runId, { population: employees.length, failed: open.rowCount ?? 0 });
+    await publishEmployeesCalculated(client, claims, { id: runId, company_id: run.company_id, calculation_sequence: sequence });
+    await this.audit.record(client, claims, {
+      companyId: claims.company_id ?? null,
+      action: "payroll_run.calculate",
+      target: runId,
+      metadata: { payslipCount: paid.rowCount ?? 0, errorCount: open.rowCount ?? 0, calculationSequence: sequence, mode: "async" },
+    });
+    return { payslipCount: paid.rowCount ?? 0, failedCount: open.rowCount ?? 0 };
+  }
+
+  /** Called by the worker once a job has used all its attempts: the run goes back to draft with the reason shown. */
+  async failCalculationJob(payload: { runId: string; claims: { sub: string; company_id: string | null; is_platform_admin: boolean } }, message: string): Promise<void> {
+    const claims: RequestClaims = { sub: payload.claims.sub, company_id: payload.claims.company_id, is_platform_admin: payload.claims.is_platform_admin };
+    await this.db.withClaims(claims, async (client) => {
+      const locked = await client.query("SELECT * FROM payroll_runs WHERE id = $1 FOR UPDATE", [payload.runId]);
+      const run = locked.rows[0];
+      if (!run || run.status !== "calculating") return;
+      await this.control().transition(client, claims, payload.runId, "draft", { action: "calculate_failed", reason: message.slice(0, 500) });
+      await client.query("UPDATE payroll_runs SET calculation_error = left($2, 2000) WHERE id = $1", [payload.runId, message]);
+      await this.control().recordException(client, run, {
+        employeeId: null,
+        sequence: Number(run.calculation_sequence),
+        message,
+        exceptionClass: /rules .* have changed/i.test(message) ? "rule_change" : "system",
+      });
+      await this.audit.record(client, claims, {
+        companyId: claims.company_id ?? null,
+        action: "payroll_run.calculate_failed",
+        target: payload.runId,
+        metadata: { message: message.slice(0, 500) },
+      });
+    });
+  }
+
+  /**
+   * PAY-06 - retries one employee of a calculated run without recalculating everyone else. Allowed only while the
+   * rules in force still hash to the run's snapshot, so a retried payslip can never mix rule versions.
+   */
+  async retryException(claims: RequestClaims, runId: string, exceptionId: string): Promise<RetryPayrollExceptionResponse> {
+    const access = await this.requireRunAction(claims, CALCULATE_PERMISSION_BASE, "Not permitted to calculate payroll");
+    this.requireCalculationCollaborators();
+    return this.db.withClaims(claims, async (client) => {
+      const locked = await client.query("SELECT * FROM payroll_runs WHERE id = $1 FOR UPDATE", [runId]);
+      if (locked.rowCount === 0) throw new NotFoundException("Payroll run not found");
+      const run = locked.rows[0];
+      this.assertRunInScope(access, run);
+      if (!["calculated", "validated"].includes(run.status)) {
+        throw new BadRequestException(`An employee can only be retried while the run is calculated or validated (this one is ${run.status})`);
+      }
+      const ex = await client.query("SELECT * FROM payroll_exceptions WHERE id = $1 AND payroll_run_id = $2 FOR UPDATE", [exceptionId, runId]);
+      if (ex.rowCount === 0) throw new NotFoundException("Exception not found");
+      const exception = ex.rows[0];
+      if (exception.status !== "open") throw new BadRequestException(`This exception is already ${exception.status}`);
+      if (!exception.employee_id) throw new BadRequestException("This exception is about the whole run, not one employee; recalculate the run");
+      const sequence = Number(run.calculation_sequence);
+      if (Number(exception.calculation_sequence) !== sequence) {
+        throw new BadRequestException("The run has been recalculated since this exception was raised");
+      }
+
+      const ctx = await this.buildCalculationContext(client, claims, run, true);
+      await this.control().assertRulesUnchanged(client, run, ctx.periodEnd, ctx.settings as unknown as Record<string, unknown>, ctx.taxSlabs);
+      const [employee] = await selectEmployeesByIds(client, run.company_id, [exception.employee_id]);
+      let message: string | null = null;
+      if (!employee) {
+        message = "Employee not found";
+      } else if (ctx.alreadyPaidIds.has(employee.id)) {
+        message = DUPLICATE_PAYMENT_MESSAGE;
+      }
+      let resolved = false;
+      if (!message) {
+        const outcome = await this.isolated(client, async () => {
+          await client.query("DELETE FROM payslips WHERE payroll_run_id = $1 AND employee_id = $2", [runId, employee.id]);
+          const row = await this.calculateEmployeeRow(client, ctx, employee);
+          const inserted = await this.insertPayslipRow(client, claims, runId, row);
+          await persistPayslipDetail(client, run, [inserted], sequence);
+        });
+        if (outcome.ok) resolved = true;
+        else message = outcome.message;
+      }
+
+      if (resolved) {
+        await client.query(
+          `UPDATE payroll_exceptions SET status = 'resolved', resolution = 'retried', resolved_by = $2, resolved_at = now(),
+                  retry_count = retry_count + 1, last_retry_at = now(), updated_at = now() WHERE id = $1`,
+          [exceptionId, claims.sub]
+        );
+        await client.query(
+          `UPDATE payroll_run_population SET status = 'calculated', exclusion_reason = NULL
+            WHERE payroll_run_id = $1 AND employee_id = $2 AND calculation_sequence = $3`,
+          [runId, exception.employee_id, sequence]
+        );
+        if (run.status === "validated") {
+          await this.control().transition(client, claims, runId, "calculated", { action: "retry_employee", reason: "A payslip was added after validation" });
+        }
+        await this.control().reapplyOverrides(client, claims, runId);
+      } else {
+        await client.query(
+          `UPDATE payroll_exceptions SET message = left($2, 2000), retry_count = retry_count + 1, last_retry_at = now(), updated_at = now() WHERE id = $1`,
+          [exceptionId, message]
+        );
+      }
+      await this.control().refreshRunTotals(client, runId, { failed: await this.control().countOpenExceptions(client, runId, sequence) });
+      await this.audit.record(client, claims, {
+        companyId: claims.company_id ?? null,
+        action: "payroll_exception.retry",
+        target: exceptionId,
+        metadata: { payrollRunId: runId, employeeId: exception.employee_id, resolved, message: resolved ? undefined : message },
+      });
+      const out = await client.query(
+        `SELECT x.*, e.employee_number, concat_ws(' ', e.first_name, e.last_name) AS employee_name
+           FROM payroll_exceptions x LEFT JOIN employees e ON e.id = x.employee_id WHERE x.id = $1`,
+        [exceptionId]
+      );
+      const view = this.control().exceptionView(out.rows[0]);
+      return { resolved, message: resolved ? "Payslip calculated" : (message ?? "Calculation failed"), exception: view };
     });
   }
 
@@ -988,7 +1564,10 @@ export class PayrollService {
     const finalized = await this.db.withClaims(claims, async (client) => {
       const run = await this.loadRun(client, id);
       this.assertRunInScope(access, run);
-      if (run.status === "finalized") {
+      if (run.is_simulation) {
+        throw new BadRequestException("A simulation run cannot be approved or finalized; create a real run for this period");
+      }
+      if (POST_FINAL_STATUS_LIST.includes(run.status)) {
         throw new BadRequestException("This payroll run is already finalized");
       }
       if (run.status !== "approved") {
@@ -1014,12 +1593,22 @@ export class PayrollService {
       // takes no `payrollRunId` argument the way `additionalPayments`'
       // does — an off-cycle payment is already scoped to exactly one run
       // at creation, so there is no "which run consumed it" to record.
-      const { loans, additionalPayments, offCyclePayments } = this.requireCalculationCollaborators();
+      const { loans, additionalPayments, offCyclePayments, overtime } = this.requireCalculationCollaborators();
       const payslipsToCommit = await client.query(
-        "SELECT id, loan_deductions, consumed_additional_payments, consumed_offcycle_payments FROM payslips WHERE payroll_run_id = $1",
+        "SELECT id, loan_deductions, consumed_additional_payments, consumed_offcycle_payments, consumed_overtime FROM payslips WHERE payroll_run_id = $1",
         [id]
       );
+      // PAY-05 - the typed links are the record of what each payslip used; a payslip calculated before they existed
+      // (no links at all) still commits from its jsonb arrays.
+      const links = await loadConsumptionLinks(client, id);
       for (const payslip of payslipsToCommit.rows) {
+        const own = links.get(payslip.id);
+        if (own) {
+          payslip.loan_deductions = own.loans.map((l) => ({ loanId: l.id, amount: l.amount }));
+          payslip.consumed_additional_payments = own.additionalPaymentIds.map((a) => ({ additionalPaymentId: a.id, amount: a.amount }));
+          payslip.consumed_offcycle_payments = own.offCyclePaymentIds.map((a) => ({ offCyclePaymentId: a.id, amount: a.amount }));
+          payslip.consumed_overtime = own.overtimeIds.map((a) => ({ overtimeId: a.id, amount: a.amount }));
+        }
         const loanDeductions = (payslip.loan_deductions ?? []) as Array<{ loanId: string; amount: number }>;
         for (const deduction of loanDeductions) {
           await loans.recordRepaymentWithinTransaction(client, {
@@ -1037,14 +1626,25 @@ export class PayrollService {
         for (const entry of consumedOffCycle) {
           await offCyclePayments.markConsumedWithinTransaction(client, entry.offCyclePaymentId);
         }
+        // TLM-07 - an overtime claim is paid by exactly one finalised run
+        const consumedOvertime = (payslip.consumed_overtime ?? []) as Array<{ overtimeId: string; amount: number }>;
+        for (const entry of consumedOvertime) {
+          await overtime.markPaidWithinTransaction(client, entry.overtimeId, id);
+        }
       }
 
-      const result = await client.query(
-        "UPDATE payroll_runs SET status = 'finalized', finalized_at = now(), updated_at = now() WHERE id = $1 RETURNING *",
-        [id]
-      );
+      await markRetroPaid(client, id);
+      await this.control().refreshRunTotals(client, id);
+      await settlePayslips(client, id);
+      const finalizedRow = await this.control().transition(client, claims, id, "finalized", {
+        action: "finalize",
+        set: { finalized_at: new Date() },
+        metadata: { payslipCount: payslipsToCommit.rowCount },
+      });
+      await refreshYtd(client, run, taxYearLabelFor(toIsoDate(run.period_end)));
+      await payrollRunHooks.finalized(client, claims, finalizedRow);
       await this.audit.record(client, claims, { companyId: claims.company_id ?? null, action: "payroll_run.finalize", target: id });
-      return rowToRun(result.rows[0], await this.loadRunSummary(client, id));
+      return rowToRun(finalizedRow, await this.loadRunSummary(client, id));
     });
 
     // Integration gap audit item 9 — the same fire-and-forget
@@ -1084,8 +1684,17 @@ export class PayrollService {
     const access = await this.requireRunAction(claims, CALCULATE_PERMISSION_BASE, "Not permitted to calculate payroll");
     const run = await this.db.withClaims(claims, (client) => this.loadRun(client, id));
     this.assertRunInScope(access, run);
-    if (run.status !== "calculated") {
+    if (run.is_simulation) {
+      throw new BadRequestException("A simulation run cannot be submitted for approval; create a real run for this period");
+    }
+    if (run.status !== "calculated" && run.status !== "validated") {
       throw new BadRequestException(`Payroll run is ${run.status}, must be freshly calculated before it can be submitted for approval`);
+    }
+    if (run.status !== "validated") {
+      const policy = await this.db.withClaims(claims, (client) => this.control().policy(client, claims.company_id!));
+      if (policy.requireValidationBeforeApproval) {
+        throw new BadRequestException("Your payroll policy requires the run to pass validation before it is submitted for approval");
+      }
     }
 
     const instance = await this.workflow.submitForApproval(claims, {
@@ -1096,12 +1705,13 @@ export class PayrollService {
     });
 
     return this.db.withClaims(claims, async (client) => {
-      const result = await client.query(
-        `UPDATE payroll_runs SET status = 'pending_approval', workflow_instance_id = $2, updated_at = now() WHERE id = $1 RETURNING *`,
-        [id, instance.id]
-      );
+      const submitted = await this.control().transition(client, claims, id, "pending_approval", {
+        action: "submit",
+        set: { workflow_instance_id: instance.id },
+        metadata: { workflowInstanceId: instance.id },
+      });
       await this.audit.record(client, claims, { companyId: claims.company_id ?? null, action: "payroll_run.submit", target: id });
-      return rowToRun(result.rows[0], await this.loadRunSummary(client, id));
+      return rowToRun(submitted, await this.loadRunSummary(client, id));
     });
   }
 
@@ -1136,17 +1746,19 @@ export class PayrollService {
       let newStatus = run.status;
       if (decidedInstance.status === "approved") newStatus = "approved";
       else if (decidedInstance.status === "rejected") newStatus = "calculated";
-      const result = await client.query(
-        `UPDATE payroll_runs SET status = $2, updated_at = now() WHERE id = $1 RETURNING *`,
-        [id, newStatus]
-      );
+      const decided = await this.control().transition(client, claims, id, newStatus, {
+        action: decidedInstance.status === "approved" ? "approve" : decidedInstance.status === "rejected" ? "reject" : "decide_step",
+        reason: dto.comment ?? null,
+        metadata: { decision: dto.decision },
+      });
+      if (newStatus === "approved") await this.control().approveOverrides(client, id, claims.sub!);
       await this.audit.record(client, claims, {
         companyId: claims.company_id ?? null,
         action: "payroll_run.decide",
         target: id,
         metadata: { decision: dto.decision },
       });
-      return rowToRun(result.rows[0], await this.loadRunSummary(client, id));
+      return rowToRun(decided, await this.loadRunSummary(client, id));
     });
   }
 
@@ -1167,19 +1779,25 @@ export class PayrollService {
          JOIN payroll_runs pr ON pr.id = p.payroll_run_id
          WHERE ($1::uuid IS NULL OR p.payroll_run_id = $1)
            AND ($2::uuid IS NULL OR p.employee_id = $2)
-         ORDER BY p.created_at DESC`,
+         ORDER BY p.created_at DESC, p.employee_number, p.id`,
         [filter.payrollRunId ?? null, filter.employeeId ?? null]
       );
       // Payroll Areas: a `payroll.*.scoped` holder also sees every payslip
       // of in-scope runs (reviewing the numbers they calculate/finalize).
       const scoped = hasAll ? null : await resolvePayrollAreaAccess(this.db, this.rbac, claims, RUN_SCOPED_VIEW_BASES);
-      const visible = hasAll
+      let visible = hasAll
         ? result.rows
         : result.rows.filter(
             (row) =>
               (scoped !== null && isPayrollAreaInScope(scoped, row.run_payroll_area_id)) ||
-              (row.employee_user_account_id === claims.sub && row.run_status === "finalized")
+              (row.employee_user_account_id === claims.sub && POST_FINAL_STATUS_LIST.includes(row.run_status))
           );
+      if (!hasAll) {
+        // PAY-20 - an employee's own payslip may need publishing first; payroll staff are never affected
+        const selfOnly = visible.filter((row) => !(scoped !== null && isPayrollAreaInScope(scoped, row.run_payroll_area_id)));
+        const hidden = await payslipsHiddenFromSelf(client, selfOnly.map((row) => row.id));
+        if (hidden.size) visible = visible.filter((row) => !hidden.has(row.id));
+      }
       return visible.map(rowToPayslip);
     });
   }
@@ -1212,10 +1830,108 @@ export class PayrollService {
       if (scoped && isPayrollAreaInScope(scoped, row.run_payroll_area_id)) return rowToPayslip(row);
 
       const hasSelf = await this.rbac.can(claims, SELF_VIEW_PERMISSION, { ownerId: row.employee_user_account_id });
-      if (!hasSelf || row.run_status !== "finalized") {
+      if (!hasSelf || !POST_FINAL_STATUS_LIST.includes(row.run_status)) {
         throw new NotFoundException("Payslip not found");
       }
+      if ((await payslipsHiddenFromSelf(client, [row.id])).size) throw new NotFoundException("Payslip not found");
       return rowToPayslip(row);
+    });
+  }
+
+  /**
+   * PAY-05 - the structured result behind a payslip. Anyone who may see the payslip sees its component lines;
+   * the input snapshot and the consumption links are for payroll staff only (they carry organisation and
+   * compensation detail an employee's own view does not need).
+   */
+  async getPayslipDetail(claims: RequestClaims, id: string): Promise<PayslipDetailView> {
+    await this.getPayslip(claims, id); // same visibility rules as the payslip itself
+    const staff = (await this.hasAnyPayrollStaffPermission(claims)) || !!(await resolvePayrollAreaAccess(this.db, this.rbac, claims, RUN_SCOPED_VIEW_BASES));
+    return this.db.withClaims(claims, async (client) => {
+      const slip = await client.query("SELECT * FROM payslips WHERE id = $1", [id]);
+      const lines = await client.query("SELECT * FROM payroll_component_results WHERE payslip_id = $1 ORDER BY line_no", [id]);
+      let consumptions: PayslipConsumptionView[] | null = null;
+      let snapshot: Record<string, unknown> | null = null;
+      let hash: string | null = null;
+      if (staff) {
+        const links = await client.query("SELECT * FROM payslip_consumptions WHERE payslip_id = $1 ORDER BY created_at, id", [id]);
+        consumptions = links.rows.map((l) => ({
+          sourceType: l.source_type,
+          sourceId: l.source_id,
+          amount: Number(l.amount),
+          quantity: l.quantity === null ? null : Number(l.quantity),
+          unit: l.unit ?? null,
+          status: l.status,
+        }));
+        const snap = await client.query("SELECT snapshot, content_hash FROM payroll_input_snapshots WHERE payslip_id = $1", [id]);
+        snapshot = snap.rows[0]?.snapshot ?? null;
+        hash = snap.rows[0]?.content_hash ?? null;
+      }
+      const row = slip.rows[0];
+      const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+      return {
+        payslipId: row.id,
+        payrollRunId: row.payroll_run_id,
+        employeeId: row.employee_id,
+        status: row.status,
+        isImmutable: row.is_immutable,
+        calculationSequence: row.calculation_sequence,
+        employerCost: Number(row.employer_cost),
+        components: lines.rows.map((l) => ({
+          lineNo: l.line_no,
+          key: l.component_key,
+          label: l.label,
+          category: l.category,
+          affects: l.affects,
+          amount: Number(l.amount),
+          isTaxable: l.is_taxable,
+          quantity: num(l.quantity),
+          unit: l.unit ?? null,
+          rate: num(l.rate),
+          basisAmount: num(l.basis_amount),
+          sourceType: l.source_type,
+          sourceId: l.source_id ?? null,
+          isOverridden: l.is_overridden,
+          trace: l.trace ?? {},
+        })),
+        consumptions,
+        inputSnapshot: snapshot,
+        inputSnapshotHash: hash,
+      };
+    });
+  }
+
+  /**
+   * PAY-05 - year-to-date accumulations. Payroll staff may read any employee's; an employee only their own
+   * (the same self-view permission the payslip itself uses).
+   */
+  async getYtd(claims: RequestClaims, employeeId: string, taxYear?: number): Promise<PayrollYtdView[]> {
+    await this.requireModule(claims);
+    const staff = (await this.hasAnyPayrollStaffPermission(claims)) || !!(await resolvePayrollAreaAccess(this.db, this.rbac, claims, RUN_SCOPED_VIEW_BASES));
+    return this.db.withClaims(claims, async (client) => {
+      if (!staff) {
+        const owner = await client.query<{ user_account_id: string | null }>("SELECT user_account_id FROM employees WHERE id = $1", [employeeId]);
+        if (owner.rowCount === 0 || !(await this.rbac.can(claims, SELF_VIEW_PERMISSION, { ownerId: owner.rows[0].user_account_id }))) {
+          throw new NotFoundException("Employee not found");
+        }
+      }
+      const r = await client.query(
+        "SELECT * FROM payroll_ytd WHERE employee_id = $1 AND ($2::text IS NULL OR tax_year = $2) ORDER BY tax_year DESC",
+        [employeeId, taxYear === undefined ? null : String(taxYear)]
+      );
+      return r.rows.map((y) => ({
+        employeeId: y.employee_id,
+        taxYear: y.tax_year,
+        grossPay: Number(y.gross_pay),
+        taxableGross: Number(y.taxable_gross),
+        incomeTax: Number(y.income_tax),
+        eobiEmployee: Number(y.eobi_employee),
+        eobiEmployer: Number(y.eobi_employer),
+        socialSecurityEmployer: Number(y.social_security_employer),
+        netPay: Number(y.net_pay),
+        employerCost: Number(y.employer_cost),
+        payslipCount: y.payslip_count,
+        lastPeriodEnd: y.last_period_end ? toIsoDate(y.last_period_end) : null,
+      }));
     });
   }
 
@@ -1256,13 +1972,17 @@ export class PayrollService {
   async generateDisbursementFile(
     claims: RequestClaims,
     runId: string,
-    confirmRegenerate = false
+    confirmRegenerate = false,
+    formatId?: string
   ): Promise<GenerateDisbursementFileResponse> {
     const access = await this.requireRunAction(claims, DISBURSE_PERMISSION_BASE, "Not permitted to generate payroll disbursement files");
     const { csv, batch, excluded, event } = await this.db.withClaims(claims, async (client) => {
       const run = await this.loadRun(client, runId);
       this.assertRunInScope(access, run);
-      if (run.status !== "finalized") {
+      if (run.status === "closed") {
+        throw new BadRequestException("This payroll run is closed; reopen it before generating payment files");
+      }
+      if (!REVERSIBLE_STATUSES.includes(run.status)) {
         throw new BadRequestException("Cannot disburse a payroll run that is not finalized yet");
       }
 
@@ -1271,7 +1991,9 @@ export class PayrollService {
         [runId]
       );
       const existingActive = await client.query(
-        "SELECT * FROM payroll_payment_batches WHERE payroll_run_id = $1 AND status = 'generated' ORDER BY generated_at DESC LIMIT 1",
+        `SELECT * FROM payroll_payment_batches
+          WHERE payroll_run_id = $1 AND status IN ('generated', 'approved', 'released', 'acknowledged')
+          ORDER BY generated_at DESC LIMIT 1`,
         [runId]
       );
       if ((existingActive.rowCount ?? 0) > 0 && !confirmRegenerate) {
@@ -1283,26 +2005,70 @@ export class PayrollService {
         );
       }
 
-      const { rows, excluded, totalNetPay } = await this.buildDisbursementRows(client, runId);
+      // PAY-16: a file that was generated (or approved) but never released is replaced by the new one. Money that was
+      // already released to the bank stays where it is - those payments are left out of the new file, never repeated.
+      const superseded = await client.query<{ id: string; batch_reference: string }>(
+        `SELECT id, batch_reference FROM payroll_payment_batches
+          WHERE payroll_run_id = $1 AND status IN ('generated', 'approved') FOR UPDATE`,
+        [runId]
+      );
+      const { rows, entries, excluded: baseExcluded } = await this.buildDisbursementRows(client, runId);
+      const lockedPayslips = await client.query<{ payslip_id: string; status: string; batch_reference: string }>(
+        `SELECT i.payslip_id, i.status, b.batch_reference
+           FROM payroll_payment_items i JOIN payroll_payment_batches b ON b.id = i.batch_id
+          WHERE i.payroll_run_id = $1 AND i.status IN ('released', 'acknowledged')`,
+        [runId]
+      );
+      const locked = new Map(lockedPayslips.rows.map((r) => [r.payslip_id, r]));
+      const excluded = [...baseExcluded];
+      const keptRows: typeof rows = [];
+      const keptEntries: typeof entries = [];
+      entries.forEach((entry, i) => {
+        const lock = locked.get(entry.payslipId);
+        if (lock) {
+          excluded.push({ employeeNumber: entry.employeeNumber, employeeName: entry.employeeName, reason: `Already ${lock.status === "acknowledged" ? "paid" : "released"} in payment batch ${lock.batch_reference}` });
+        } else {
+          keptRows.push(rows[i]);
+          keptEntries.push(entry);
+        }
+      });
+      if (keptEntries.length === 0 && locked.size > 0) {
+        throw new BadRequestException("Every payment in this run has already been released to the bank; there is nothing left to put in a new file");
+      }
+      const totalNetPay = Number(keptEntries.reduce((a, e) => a + e.amount, 0).toFixed(2));
+
+      for (const old of superseded.rows) {
+        await client.query(
+          `UPDATE payroll_payment_batches
+              SET status = 'voided', voided_reason = $2, voided_at = now(), voided_by_user_account_id = $3
+            WHERE id = $1 RETURNING *`,
+          [old.id, "Replaced by a newer payment file before release", claims.sub]
+        ).then((r) => publishPaymentStatusChanged(client, claims, r.rows[0], "generated"));
+        await client.query("UPDATE payroll_payment_items SET status = 'voided', updated_at = now() WHERE batch_id = $1 AND status = 'generated'", [old.id]);
+      }
+
       const settings = await this.loadOrSeedDisbursementSettings(client, claims);
+      const format = await this.resolveBankFormat(client, claims.company_id!, formatId, settings.columns);
       const batchReference = `PB-${runId.slice(0, 8).toUpperCase()}-${(priorCount.rows[0].n as number) + 1}`;
 
       const inserted = await client.query(
         `INSERT INTO payroll_payment_batches
-           (company_id, payroll_run_id, batch_reference, row_count, excluded_count, total_net_pay, generated_by_user_account_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-        [claims.company_id, runId, batchReference, rows.length, excluded.length, totalNetPay, claims.sub]
+           (company_id, payroll_run_id, batch_reference, row_count, excluded_count, total_net_pay, generated_by_user_account_id, format_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [claims.company_id, runId, batchReference, keptRows.length, excluded.length, totalNetPay, claims.sub, format.id]
       );
+      await this.insertPaymentItems(client, claims.company_id!, inserted.rows[0].id, runId, keptEntries);
+      await publishPaymentStatusChanged(client, claims, inserted.rows[0], null);
 
       await this.audit.record(client, claims, {
         companyId: claims.company_id ?? null,
         action: "payroll_run.disburse",
         target: runId,
-        metadata: { batchReference, rowCount: rows.length, excludedCount: excluded.length, confirmRegenerate },
+        metadata: { batchReference, rowCount: keptRows.length, excludedCount: excluded.length, confirmRegenerate, formatId: format.id, supersededBatches: superseded.rows.map((b) => b.batch_reference) },
       });
 
       return {
-        csv: this.importExport.toCsv(settings.columns, rows),
+        csv: renderBankFile(format, keptRows),
         batch: rowToPaymentBatch(inserted.rows[0]),
         excluded,
         event: {
@@ -1310,7 +2076,7 @@ export class PayrollService {
           companyId: run.company_id as string,
           periodStart: toIsoDate(run.period_start),
           periodEnd: toIsoDate(run.period_end),
-          totalEmployees: rows.length,
+          totalEmployees: keptRows.length,
           totalNetPay,
         },
       };
@@ -1336,6 +2102,58 @@ export class PayrollService {
     return { csv, batch, excluded };
   }
 
+  /** The tenant's chosen payment-file layout: the named format, else its default, else the older column setting. */
+  async resolveBankFormat(
+    client: PoolClient,
+    companyId: string,
+    formatId: string | undefined,
+    fallbackColumns: DisbursementFieldKey[]
+  ): Promise<{ id: string | null; delimiter: string; includeHeader: boolean; columns: DisbursementFieldKey[]; headerLabels: Record<string, string> }> {
+    if (formatId) {
+      const r = await client.query("SELECT * FROM bank_file_formats WHERE id = $1 AND company_id = $2", [formatId, companyId]);
+      if (r.rowCount === 0) throw new BadRequestException("The payment file format does not exist");
+      if (!r.rows[0].is_active) throw new BadRequestException(`The payment file format "${r.rows[0].name}" is not active`);
+      const f = rowToBankFormat(r.rows[0]);
+      return { id: f.id, delimiter: f.delimiter, includeHeader: f.includeHeader, columns: f.columns, headerLabels: f.headerLabels };
+    }
+    const d = await client.query("SELECT * FROM bank_file_formats WHERE company_id = $1 AND is_default AND is_active", [companyId]);
+    if (d.rowCount) {
+      const f = rowToBankFormat(d.rows[0]);
+      return { id: f.id, delimiter: f.delimiter, includeHeader: f.includeHeader, columns: f.columns, headerLabels: f.headerLabels };
+    }
+    return { id: null, delimiter: "comma", includeHeader: true, columns: fallbackColumns, headerLabels: {} };
+  }
+
+  /** One item per payslip in the file, with the account as it is now (encrypted; only the last four digits in clear). */
+  async insertPaymentItems(
+    client: PoolClient,
+    companyId: string,
+    batchId: string,
+    runId: string,
+    entries: Array<{ payslipId: string; employeeId: string; employeeNumber: string; amount: number; paymentMethod: string; bankName: string; accountTitle: string; accountNumber: string; iban: string; branchCode: string }>
+  ): Promise<void> {
+    for (const e of entries) {
+      try {
+        await client.query(
+          `INSERT INTO payroll_payment_items
+             (company_id, batch_id, payroll_run_id, payslip_id, employee_id, employee_number, amount, payment_method,
+              bank_name, account_title, account_number_enc, iban_enc, account_last4, branch_code)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+          [
+            companyId, batchId, runId, e.payslipId, e.employeeId, e.employeeNumber, e.amount, e.paymentMethod,
+            e.bankName || null, e.accountTitle || null, sensitive.encrypt(companyId, e.accountNumber || null), sensitive.encrypt(companyId, e.iban || null),
+            e.accountNumber ? e.accountNumber.slice(-4) : null, e.branchCode || null,
+          ]
+        );
+      } catch (err) {
+        if ((err as { code?: string }).code === "23505") {
+          throw new BadRequestException(`${e.employeeNumber} already has a live payment for this payslip; the same salary cannot be paid twice`);
+        }
+        throw err;
+      }
+    }
+  }
+
   /** Read-only — builds the exact same rows `generateDisbursementFile()`
    * would, and reports the existing batch (if any), WITHOUT writing a new
    * `payroll_payment_batches` row. The frontend calls this first so HR sees
@@ -1356,12 +2174,39 @@ export class PayrollService {
     return this.db.withClaims(claims, async (client) => {
       const run = await this.loadRun(client, runId);
       this.assertRunInScope(access, run);
-      if (run.status !== "finalized") {
+      if (run.status === "closed") {
+        throw new BadRequestException("This payroll run is closed; reopen it before generating payment files");
+      }
+      if (!REVERSIBLE_STATUSES.includes(run.status)) {
         throw new BadRequestException("Cannot disburse a payroll run that is not finalized yet");
       }
-      const { rows, excluded, totalNetPay } = await this.buildDisbursementRows(client, runId);
+      const built = await this.buildDisbursementRows(client, runId);
+      const lockedRows = await client.query<{ payslip_id: string; status: string; batch_reference: string }>(
+        `SELECT i.payslip_id, i.status, b.batch_reference
+           FROM payroll_payment_items i JOIN payroll_payment_batches b ON b.id = i.batch_id
+          WHERE i.payroll_run_id = $1 AND i.status IN ('released', 'acknowledged')`,
+        [runId]
+      );
+      const lockedIds = new Map(lockedRows.rows.map((r) => [r.payslip_id, r]));
+      const excluded = [...built.excluded];
+      let rows = built.rows;
+      let totalNetPay = built.totalNetPay;
+      if (lockedIds.size > 0) {
+        rows = [];
+        totalNetPay = 0;
+        built.entries.forEach((entry, i) => {
+          const lock = lockedIds.get(entry.payslipId);
+          if (lock) excluded.push({ employeeNumber: entry.employeeNumber, employeeName: entry.employeeName, reason: `Already ${lock.status === "acknowledged" ? "paid" : "released"} in payment batch ${lock.batch_reference}` });
+          else {
+            rows.push(built.rows[i]);
+            totalNetPay += entry.amount;
+          }
+        });
+        totalNetPay = Number(totalNetPay.toFixed(2));
+      }
       const existing = await client.query(
-        "SELECT * FROM payroll_payment_batches WHERE payroll_run_id = $1 AND status = 'generated' ORDER BY generated_at DESC LIMIT 1",
+        `SELECT * FROM payroll_payment_batches WHERE payroll_run_id = $1 AND status IN ('generated', 'approved', 'released', 'acknowledged')
+          ORDER BY generated_at DESC LIMIT 1`,
         [runId]
       );
       return {
@@ -1414,18 +2259,22 @@ export class PayrollService {
       const run = await this.loadRun(client, batchRow.payroll_run_id);
       this.assertRunInScope(access, run);
       if (batchRow.status === "voided") throw new BadRequestException("This batch is already voided");
+      const paid = await client.query("SELECT 1 FROM payroll_payment_items WHERE batch_id = $1 AND status = 'acknowledged' LIMIT 1", [id]);
+      if (paid.rowCount) throw new BadRequestException("The bank has already acknowledged payments in this batch; they cannot be voided");
       const result = await client.query(
         `UPDATE payroll_payment_batches
          SET status = 'voided', voided_reason = $2, voided_at = now(), voided_by_user_account_id = $3
          WHERE id = $1 RETURNING *`,
         [id, trimmed, claims.sub]
       );
+      await client.query("UPDATE payroll_payment_items SET status = 'voided', updated_at = now() WHERE batch_id = $1 AND status IN ('generated', 'released')", [id]);
       await this.audit.record(client, claims, {
         companyId: claims.company_id ?? null,
         action: "payroll_payment_batch.void",
         target: id,
         metadata: { reason: trimmed },
       });
+      await publishPaymentStatusChanged(client, claims, result.rows[0], batchRow.status);
       return rowToPaymentBatch(result.rows[0]);
     });
   }
@@ -1446,24 +2295,29 @@ export class PayrollService {
     patch: UpdatePayrollDisbursementSettingsRequest
   ): Promise<PayrollDisbursementSettingsView> {
     await this.requirePayrollDisburseAll(claims);
-    if (!Array.isArray(patch.columns) || patch.columns.length === 0) {
-      throw new BadRequestException("columns must be a non-empty array");
+    if (patch.columns === undefined && patch.requireReleaseApproval === undefined) {
+      throw new BadRequestException("Nothing to change: give columns or requireReleaseApproval");
     }
-    const unknown = patch.columns.filter((c) => !DISBURSEMENT_FIELD_KEYS.includes(c));
-    if (unknown.length > 0) {
-      throw new BadRequestException(`Unknown disbursement column(s): ${unknown.join(", ")}`);
+    if (patch.columns !== undefined) {
+      if (!Array.isArray(patch.columns) || patch.columns.length === 0) {
+        throw new BadRequestException("columns must be a non-empty array");
+      }
+      const unknown = patch.columns.filter((c) => !DISBURSEMENT_FIELD_KEYS.includes(c));
+      if (unknown.length > 0) {
+        throw new BadRequestException(`Unknown disbursement column(s): ${unknown.join(", ")}`);
+      }
     }
     return this.db.withClaims(claims, async (client) => {
-      await this.loadOrSeedDisbursementSettings(client, claims);
+      const current = await this.loadOrSeedDisbursementSettings(client, claims);
       const result = await client.query(
-        `UPDATE payroll_disbursement_settings SET columns = $2, updated_at = now() WHERE company_id = $1 RETURNING *`,
-        [claims.company_id, JSON.stringify(patch.columns)]
+        `UPDATE payroll_disbursement_settings SET columns = $2, require_release_approval = $3, updated_at = now() WHERE company_id = $1 RETURNING *`,
+        [claims.company_id, JSON.stringify(patch.columns ?? current.columns), patch.requireReleaseApproval ?? current.requireReleaseApproval]
       );
       await this.audit.record(client, claims, {
         companyId: claims.company_id ?? null,
         action: "payroll_disbursement_settings.update",
         target: claims.company_id ?? "",
-        metadata: { columns: patch.columns },
+        metadata: { columns: patch.columns ?? null, requireReleaseApproval: patch.requireReleaseApproval ?? null },
       });
       return rowToDisbursementSettings(result.rows[0]);
     });
@@ -1616,15 +2470,30 @@ export class PayrollService {
     }
     return this.db.withClaims(claims, async (client) => {
       const run = await this.loadRun(client, id);
-      if (run.status !== "finalized") {
+      if (run.status === "closed") {
+        throw new BadRequestException("This payroll run is closed; reopen it (payroll.reopen.all) before reversing it");
+      }
+      if (!REVERSIBLE_STATUSES.includes(run.status)) {
         throw new BadRequestException(`Payroll run is ${run.status}, only a finalized run can be reversed`);
       }
 
+      await this.control().transition(client, claims, id, "reversed", {
+        action: "reverse",
+        reason,
+        set: { reversed_at: new Date(), reversed_by_user_account_id: claims.sub, reversal_reason: reason },
+      });
+
+      // PAY-19 - the money side of a reversal: a bank file generated for this run no longer stands.
+      const voided = await client.query(
+        `UPDATE payroll_payment_batches
+            SET status = 'voided', voided_reason = $2, voided_at = now(), voided_by_user_account_id = $3
+          WHERE payroll_run_id = $1 AND status IN ('generated', 'approved', 'released') RETURNING *`,
+        [id, `Payroll run reversed: ${reason}`, claims.sub]
+      );
+      for (const b of voided.rows) await publishPaymentStatusChanged(client, claims, b, null);
       await client.query(
-        `UPDATE payroll_runs
-         SET status = 'reversed', reversed_at = now(), reversed_by_user_account_id = $2, reversal_reason = $3, updated_at = now()
-         WHERE id = $1`,
-        [id, claims.sub, reason]
+        "UPDATE payroll_payment_items SET status = 'voided', updated_at = now() WHERE payroll_run_id = $1 AND status IN ('generated', 'released')",
+        [id]
       );
 
       // Phase P4 — the corrective run carries over the SAME run_type/
@@ -1637,8 +2506,8 @@ export class PayrollService {
       // UPDATE just above, inside this same transaction, before this
       // INSERT runs).
       const corrective = await client.query(
-        `INSERT INTO payroll_runs (company_id, period_start, period_end, created_by_user_account_id, payroll_area_id, run_type, off_cycle_reason, target_employee_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+        `INSERT INTO payroll_runs (company_id, period_start, period_end, created_by_user_account_id, payroll_area_id, run_type, off_cycle_reason, target_employee_id, payroll_period_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
         [
           run.company_id,
           run.period_start,
@@ -1648,20 +2517,37 @@ export class PayrollService {
           run.run_type ?? "regular",
           run.off_cycle_reason ?? null,
           run.target_employee_id ?? null,
+          run.payroll_period_id ?? null,
         ]
       );
       const correctiveRunId = corrective.rows[0].id as string;
+
+      // TLM-07 - overtime is the one thing a reversal gives back: the reversed run's payslips are
+      // void and the corrective run for the same period must pay those claims again.
+      const releasedOvertime = this.overtime ? await this.overtime.releaseForRunWithinTransaction(client, id) : 0;
+      // PAY-05 - the payslips stay on record but are void, their input links are given back and the YTD is rebuilt without them
+      await voidPayslips(client, id);
+      await refreshYtd(client, run, taxYearLabelFor(toIsoDate(run.period_end)));
+      await payrollRunHooks.reversed(client, claims, run);
 
       const result = await client.query(
         `UPDATE payroll_runs SET corrective_run_id = $2, updated_at = now() WHERE id = $1 RETURNING *`,
         [id, correctiveRunId]
       );
 
+      const impact = {
+        payslipCount: (await this.loadRunSummary(client, id)).payslipCount,
+        releasedOvertimeClaims: releasedOvertime,
+        voidedPaymentBatches: voided.rows.map((r) => r.id),
+        journals: [] as string[],
+      };
+      await this.control().recordReversal(client, claims, run, correctiveRunId, reason, impact);
+      await this.control().recordCreated(client, claims, { id: correctiveRunId, company_id: run.company_id, status: "draft" }, { reversalOf: id });
       await this.audit.record(client, claims, {
         companyId: claims.company_id ?? null,
         action: "payroll_run.reverse",
         target: id,
-        metadata: { reason, correctiveRunId },
+        metadata: { reason, correctiveRunId, releasedOvertimeClaims: releasedOvertime, voidedPaymentBatches: voided.rowCount ?? 0 },
       });
       await this.audit.record(client, claims, {
         companyId: claims.company_id ?? null,
@@ -1744,9 +2630,15 @@ export class PayrollService {
     //    the date-range-matched IT0015 entity just below, BEFORE tax is
     //    computed — so a final settlement's tax true-up is computed on
     //    the WHOLE settlement, not just the final period's regular pay.
-    offCycleOptions?: { isFinalSettlement: boolean; offCycleRunId: string }
+    offCycleOptions?: { isFinalSettlement: boolean; offCycleRunId: string },
+    // PAY-07 / PAY-12: the run this payslip is for (retro results targeted at it are paid here) and the currency it
+    // pays in. Both omitted when a historical payslip is recalculated only to be compared (retro detection).
+    runContext?: { runId?: string; currencyCode?: string }
   ): Promise<Record<string, unknown>> {
     const breakdown: PayrollCalculationStep[] = [];
+    // PAY-05 - the structured twin of `breakdown`: one signed line per component, and what the payslip was built from.
+    const ledger = new ComponentLedger();
+    const snapshotCompensation: PayslipInputSnapshot["compensation"] = [];
     breakdown.push({ label: "Period", value: `${periodStart} to ${periodEnd} (${daysInPeriod} days)` });
 
     // --- Proration basis (integration gap audit item 5/10) ---------------
@@ -1783,12 +2675,14 @@ export class PayrollService {
     breakdown.push({ label: "Employment window within period", value: `${windowStart} to ${windowEnd} (${employmentWindowDays} ${dayUnit})` });
 
     const componentSegments = await client.query(
-      `SELECT ecc.*, cc.key AS component_key, cc.name AS component_name, cc.is_taxable AS component_is_taxable, cc.component_type
+      `SELECT ecc.*, cc.key AS component_key, cc.name AS component_name, cc.is_taxable AS component_is_taxable, cc.component_type,
+              cc.calculation_type, cc.proration_mode, cc.payslip_label, cc.eligibility,
+              cc.counts_toward_eobi_base, cc.counts_toward_gratuity_base, cc.counts_toward_provident_fund_base
        FROM employee_compensation_components ecc
        JOIN compensation_components cc ON cc.id = ecc.component_id
        WHERE ecc.employee_id = $1 AND cc.is_active = true
          AND ecc.effective_from <= $3 AND (ecc.effective_to IS NULL OR ecc.effective_to >= $2)
-       ORDER BY cc.sort_order ASC, ecc.effective_from ASC`,
+       ORDER BY cc.display_order ASC, cc.sort_order ASC, ecc.effective_from ASC`,
       [employee.id, windowStart, windowEnd]
     );
     if (componentSegments.rowCount === 0) {
@@ -1797,23 +2691,73 @@ export class PayrollService {
 
     let grossFromSegments = 0;
     let taxableGrossFromSegments = 0;
-    // Phase P3, Section 1 — a 'deduction'-type component (a recurring
-    // Benefits-style deduction: health-insurance premium, society
-    // membership fee, ...) is never part of gross/taxable gross and never
-    // part of the unpaid-leave rate base below (a society fee is owed
-    // regardless of attendance) — see 0112's own header comment. It
-    // reduces NET pay only, alongside loan repayments/additional
-    // deductions further down.
+    // Only plain 'earning' components are the unpaid-leave base; a reimbursement or a premium is not reduced by leave.
+    let earningGrossFromSegments = 0;
+    let earningTaxableFromSegments = 0;
+    // PAY-07 - what the component flags say counts toward each statutory / benefit base (exposed to formulas and the snapshot).
+    let eobiEligibleEarnings = 0;
+    let gratuityBase = 0;
+    let providentFundBase = 0;
+    // Phase P3, Section 1 - a 'deduction'-type component (a recurring Benefits-style deduction: health-insurance
+    // premium, society membership fee, ...) is never part of gross/taxable gross and never part of the unpaid-leave
+    // rate base below (a society fee is owed regardless of attendance) - see 0112's own header comment. It reduces
+    // NET pay only, alongside loan repayments/additional deductions further down.
     let recurringDeductionTotal = 0;
+    // PAY-07 - an employer-paid recurring cost (e.g. an insurance premium the company pays on top): never touches
+    // the employee's pay, adds to the employer cost.
+    let recurringEmployerCost = 0;
     const latestAmountByComponent = new Map<string, number>();
+    const runCurrency = runContext?.currencyCode ?? null;
+    const eligibilityFacts = await this.loadEligibilityFacts(client, employee.id);
+    // A component with proration 'none' is paid in full for any employment in the period: only its latest segment counts.
+    const lastSegmentOfUnprorated = new Map<string, string>();
+    for (const seg of componentSegments.rows) {
+      if (seg.proration_mode === "none") lastSegmentOfUnprorated.set(seg.component_id, seg.id);
+    }
     for (const seg of componentSegments.rows) {
       const segStart = dateMax(windowStart, toIsoDate(seg.effective_from));
       const segEnd = dateMin(windowEnd, seg.effective_to ? toIsoDate(seg.effective_to) : windowEnd);
       if (segEnd < segStart) continue;
+      if (runCurrency && seg.currency_code && seg.currency_code !== runCurrency) {
+        throw new Error(`"${seg.component_name}" is set in ${seg.currency_code} but this run pays in ${runCurrency}; multi-currency payroll is not supported`);
+      }
+      const notEligible = this.ineligibilityReason(seg.eligibility, eligibilityFacts, windowEnd);
+      if (notEligible) {
+        breakdown.push({ label: `${seg.component_name} — not paid: ${notEligible}`, value: 0 });
+        continue;
+      }
+      if (seg.proration_mode === "none" && lastSegmentOfUnprorated.get(seg.component_id) !== seg.id) continue;
       const segDays = countDays(segStart, segEnd);
       const amount = Number(seg.amount);
-      const proratedAmount = (amount * segDays) / prorationDays;
-      if (seg.component_type === "deduction") {
+      const unprorated = seg.proration_mode === "none";
+      const proratedAmount = unprorated ? amount : (amount * segDays) / prorationDays;
+      const label = seg.payslip_label || seg.component_name;
+      const type = seg.component_type as string;
+      snapshotCompensation.push({
+        segmentId: seg.id,
+        componentKey: seg.component_key,
+        componentType: type,
+        monthlyAmount: amount,
+        from: segStart,
+        to: segEnd,
+        days: segDays,
+        taxable: !!seg.component_is_taxable,
+      });
+      const trace = {
+        from: segStart,
+        to: segEnd,
+        prorationDays,
+        componentType: type,
+        calculationType: seg.calculation_type,
+        prorated: !unprorated,
+        percentage: seg.percentage === null ? undefined : Number(seg.percentage),
+        units: seg.units === null ? undefined : Number(seg.units),
+      };
+      if (type === "deduction") {
+        ledger.add({
+          key: seg.component_key, label, category: "employee_deduction", affects: "net", amount: -proratedAmount, isTaxable: false,
+          quantity: segDays, unit: dayUnit, rate: amount, basisAmount: amount, sourceType: "compensation", sourceId: seg.id, componentId: seg.component_id, trace,
+        });
         recurringDeductionTotal += proratedAmount;
         breakdown.push({
           label: `${seg.component_name} — ${segStart} to ${segEnd} (${segDays} ${dayUnit}) @ ${amount}/mo (recurring deduction, reduces net pay only)`,
@@ -1821,11 +2765,35 @@ export class PayrollService {
         });
         continue;
       }
+      if (type === "employer_contribution") {
+        ledger.add({
+          key: seg.component_key, label, category: "employer_contribution", affects: "employer_cost", amount: proratedAmount, isTaxable: false,
+          quantity: segDays, unit: dayUnit, rate: amount, basisAmount: amount, sourceType: "compensation", sourceId: seg.id, componentId: seg.component_id, trace,
+        });
+        recurringEmployerCost += proratedAmount;
+        breakdown.push({
+          label: `${seg.component_name} — ${segStart} to ${segEnd} (${segDays} ${dayUnit}) @ ${amount}/mo (employer cost only; not part of the employee's pay)`,
+          value: Number(proratedAmount.toFixed(2)),
+        });
+        continue;
+      }
+      const taxable = !!seg.component_is_taxable && !NEVER_TAXABLE_COMPONENT_TYPES.has(type);
+      ledger.add({
+        key: seg.component_key, label, category: "earning", affects: "gross", amount: proratedAmount, isTaxable: taxable,
+        quantity: segDays, unit: dayUnit, rate: amount, basisAmount: amount, sourceType: "compensation", sourceId: seg.id, componentId: seg.component_id, trace,
+      });
       grossFromSegments += proratedAmount;
-      if (seg.component_is_taxable) taxableGrossFromSegments += proratedAmount;
-      latestAmountByComponent.set(seg.component_id, amount);
+      if (taxable) taxableGrossFromSegments += proratedAmount;
+      if (type === "earning") {
+        earningGrossFromSegments += proratedAmount;
+        if (taxable) earningTaxableFromSegments += proratedAmount;
+        latestAmountByComponent.set(seg.component_id, amount);
+      }
+      if (seg.counts_toward_eobi_base) eobiEligibleEarnings += proratedAmount;
+      if (seg.counts_toward_gratuity_base) gratuityBase += proratedAmount;
+      if (seg.counts_toward_provident_fund_base) providentFundBase += proratedAmount;
       breakdown.push({
-        label: `${seg.component_name} — ${segStart} to ${segEnd} (${segDays} ${dayUnit}) @ ${amount}/mo${seg.component_is_taxable ? "" : " (non-taxable)"}`,
+        label: `${seg.component_name} — ${segStart} to ${segEnd} (${segDays} ${dayUnit}) @ ${amount}/mo${taxable ? "" : " (non-taxable)"}${unprorated ? " (paid in full, not prorated)" : ""}`,
         value: Number(proratedAmount.toFixed(2)),
       });
     }
@@ -1859,8 +2827,21 @@ export class PayrollService {
     const unpaidDeduction = unpaidLeaveDays > 0 ? (latestTotalMonthlyRate * unpaidLeaveDays) / prorationDays : 0;
     if (unpaidLeaveDays > 0) {
       breakdown.push({ label: `Unpaid-leave deduction @ ${latestTotalMonthlyRate}/mo total rate`, value: -Number(unpaidDeduction.toFixed(2)) });
+      ledger.add({
+        key: "unpaid_leave_deduction",
+        label: "Unpaid leave deduction",
+        category: "adjustment",
+        affects: "gross",
+        amount: -unpaidDeduction,
+        quantity: unpaidLeaveDays,
+        unit: dayUnit,
+        rate: latestTotalMonthlyRate,
+        basisAmount: latestTotalMonthlyRate,
+        sourceType: "leave",
+        trace: { prorationDays, monthlyRate: latestTotalMonthlyRate },
+      });
     }
-    const taxableShare = grossFromSegments > 0 ? taxableGrossFromSegments / grossFromSegments : 0;
+    const taxableShare = earningGrossFromSegments > 0 ? earningTaxableFromSegments / earningGrossFromSegments : 0;
     const taxableUnpaidDeduction = unpaidDeduction * taxableShare;
 
     // --- Approved overtime (integration gap audit item 4, 0097) ----------
@@ -1886,9 +2867,25 @@ export class PayrollService {
     }
     let overtimePay = 0;
     let overtimeMinutes = 0;
+    const consumedOvertime: Array<{ overtimeId: string; amount: number }> = [];
     for (const claim of overtimeClaims) {
       overtimePay += claim.amount as number;
       overtimeMinutes += claim.overtimeMinutes;
+      consumedOvertime.push({ overtimeId: claim.id, amount: Number((claim.amount as number).toFixed(2)) });
+      ledger.add({
+        key: "overtime",
+        label: `Overtime ${claim.workDate}`,
+        category: "earning",
+        affects: "gross",
+        amount: claim.amount as number,
+        isTaxable: true,
+        quantity: claim.overtimeMinutes,
+        unit: "minutes",
+        rate: claim.hourlyRate ?? undefined,
+        sourceType: "overtime",
+        sourceId: claim.id,
+        trace: { workDate: claim.workDate, dayType: claim.dayType, rateMultiplier: claim.rateMultiplier, amountSnapshottedAtApproval: true },
+      });
       breakdown.push({
         label: `Overtime ${claim.workDate} (${claim.dayType}) — ${claim.overtimeMinutes} min @ ${claim.hourlyRate}/hr x ${claim.rateMultiplier}`,
         value: Number((claim.amount as number).toFixed(2)),
@@ -1923,6 +2920,17 @@ export class PayrollService {
     let additionalDeductionTotal = 0;
     const consumedAdditionalPayments: Array<{ additionalPaymentId: string; amount: number }> = [];
     for (const payment of pendingAdditionalPayments) {
+      ledger.add({
+        key: payment.paymentType === "earning" ? "additional_earning" : "additional_deduction",
+        label: payment.label,
+        category: payment.paymentType === "earning" ? "earning" : "employee_deduction",
+        affects: payment.paymentType === "earning" ? "gross" : "net",
+        amount: payment.paymentType === "earning" ? payment.amount : -payment.amount,
+        isTaxable: payment.paymentType === "earning" && payment.isTaxable,
+        sourceType: "additional_payment",
+        sourceId: payment.id,
+        trace: { effectiveDate: payment.effectiveDate },
+      });
       if (payment.paymentType === "earning") {
         if (payment.isTaxable) additionalEarningsTaxable += payment.amount;
         else additionalEarningsNonTaxable += payment.amount;
@@ -1956,6 +2964,17 @@ export class PayrollService {
         employee.id
       );
       for (const payment of pendingOffCyclePayments) {
+        ledger.add({
+          key: payment.paymentType === "earning" ? "offcycle_earning" : "offcycle_deduction",
+          label: payment.label,
+          category: payment.paymentType === "earning" ? "earning" : "employee_deduction",
+          affects: payment.paymentType === "earning" ? "gross" : "net",
+          amount: payment.paymentType === "earning" ? payment.amount : -payment.amount,
+          isTaxable: payment.paymentType === "earning" && payment.isTaxable,
+          sourceType: "off_cycle_payment",
+          sourceId: payment.id,
+          trace: { finalSettlement: true },
+        });
         if (payment.paymentType === "earning") {
           if (payment.isTaxable) additionalEarningsTaxable += payment.amount;
           else additionalEarningsNonTaxable += payment.amount;
@@ -1972,9 +2991,44 @@ export class PayrollService {
     }
     const additionalEarningsTotal = additionalEarningsTaxable + additionalEarningsNonTaxable;
 
+    // --- Arrears / retro (PAY-12) ----------------------------------------
+    // Differences in already-paid history that HR included in THIS run (compensation changed or unpaid leave
+    // decided after the period was paid). Like any one-time earning they are taxed this period and never projected
+    // forward; a negative result is a recovery of an overpayment.
+    let arrearsTotal = 0;
+    let arrearsTaxable = 0;
+    const consumedRetro: Array<{ retroResultId: string; amount: number }> = [];
+    const retroDetail: Array<Record<string, unknown>> = [];
+    if (runContext?.runId && !offCycleOptions) {
+      const retro = await client.query(
+        `SELECT * FROM payroll_retro_results WHERE target_run_id = $1 AND employee_id = $2 AND status = 'included' ORDER BY affected_period_start, component_key`,
+        [runContext.runId, employee.id]
+      );
+      for (const r of retro.rows) {
+        const delta = Number(r.delta);
+        const label = `Arrears: ${r.component_label} (${toIsoDate(r.affected_period_start)} to ${toIsoDate(r.affected_period_end)})`;
+        ledger.add({
+          key: `arrears_${r.component_key}`,
+          label,
+          category: delta >= 0 ? "earning" : "adjustment",
+          affects: "gross",
+          amount: delta,
+          isTaxable: !!r.is_taxable,
+          sourceType: "retro",
+          sourceId: r.id,
+          trace: { sourceRunId: r.source_run_id, originalAmount: Number(r.original_amount), recalculatedAmount: Number(r.recalculated_amount), sourceEvent: r.source_event_type },
+        });
+        arrearsTotal += delta;
+        if (r.is_taxable) arrearsTaxable += delta;
+        consumedRetro.push({ retroResultId: r.id, amount: Number(delta.toFixed(2)) });
+        retroDetail.push({ retroResultId: r.id, componentKey: r.component_key, label, delta, isTaxable: !!r.is_taxable, sourceRunId: r.source_run_id });
+        breakdown.push({ label, value: Number(delta.toFixed(2)) });
+      }
+    }
+
     const paidDays = Math.max(0, employmentWindowDays - unpaidLeaveDays);
-    const grossPay = Math.max(0, grossFromSegments - unpaidDeduction) + overtimePay + additionalEarningsTotal;
-    const taxableGrossThisPeriod = Math.max(0, taxableGrossFromSegments - taxableUnpaidDeduction) + overtimePay + additionalEarningsTaxable;
+    const grossPay = Math.max(0, Math.max(0, grossFromSegments - unpaidDeduction) + overtimePay + additionalEarningsTotal + arrearsTotal);
+    const taxableGrossThisPeriod = Math.max(0, Math.max(0, taxableGrossFromSegments - taxableUnpaidDeduction) + overtimePay + additionalEarningsTaxable + arrearsTaxable);
     breakdown.push({ label: "Gross pay", value: Number(grossPay.toFixed(2)) });
     breakdown.push({ label: "Of which taxable this period", value: Number(taxableGrossThisPeriod.toFixed(2)) });
 
@@ -1985,11 +3039,14 @@ export class PayrollService {
       `SELECT COALESCE(SUM(p.taxable_gross_this_period), 0) AS taxable, COALESCE(SUM(p.income_tax_monthly), 0) AS tax
        FROM payslips p
        JOIN payroll_runs pr ON pr.id = p.payroll_run_id
-       WHERE p.employee_id = $1 AND pr.status = 'finalized' AND pr.period_end >= $2 AND pr.period_end < $3`,
+       WHERE p.employee_id = $1 AND pr.status IN ('finalized','accounting','payment_released','reconciled','closed','reopened') AND pr.is_simulation = false AND pr.period_end >= $2 AND pr.period_end < $3`,
       [employee.id, taxYearStart, periodStart]
     );
-    const priorYtdTaxable = Number(ytdResult.rows[0].taxable);
-    const priorYtdTaxWithheld = Number(ytdResult.rows[0].tax);
+    // PAY-09/PAY-10 - an employee tax profile (published slabs, exemptions, credits, previous employer) replaces the
+    // company-wide slabs for that employee; without one nothing here changes.
+    const taxContext = await loadEmployeeTaxContext(client, employee.id, periodStart, periodEnd, taxYear);
+    const priorYtdTaxable = Number(ytdResult.rows[0].taxable) + (taxContext?.previousEmployerIncome ?? 0);
+    const priorYtdTaxWithheld = Number(ytdResult.rows[0].tax) + (taxContext?.previousEmployerTax ?? 0);
     breakdown.push({
       label: `Tax year ${taxYear} (${taxYearStart} to ${taxYearEnd}) — YTD taxable income before this period (finalized runs only)`,
       value: Number(priorYtdTaxable.toFixed(2)),
@@ -2016,7 +3073,7 @@ export class PayrollService {
     // from the projection for the identical reason overtime is (see the
     // Additional Payments block above) — one taxable windfall this period
     // must not get annualized into every remaining period's estimate.
-    const recurringTaxableThisPeriod = Math.max(0, taxableGrossThisPeriod - overtimePay - additionalEarningsTaxable);
+    const recurringTaxableThisPeriod = Math.max(0, taxableGrossThisPeriod - overtimePay - additionalEarningsTaxable - arrearsTaxable);
     const dailyTaxableRate = daysInPeriod > 0 ? recurringTaxableThisPeriod / daysInPeriod : 0;
     const projectedRemainingIncome = dailyTaxableRate * daysRemaining;
     const estimatedAnnualTaxableIncome = priorYtdTaxable + taxableGrossThisPeriod + projectedRemainingIncome;
@@ -2027,13 +3084,22 @@ export class PayrollService {
       value: Number(estimatedAnnualTaxableIncome.toFixed(2)),
     });
 
-    const totalAnnualTaxEstimate = taxFromSlabs(estimatedAnnualTaxableIncome, taxSlabs);
+    const profileTax = taxContext ? computeAnnualTax(taxContext, estimatedAnnualTaxableIncome, taxFromSlabs) : null;
+    const slabsInUse = taxContext ? taxContext.slabs : taxSlabs;
+    const incomeForSlabs = profileTax ? profileTax.taxableForSlabs : estimatedAnnualTaxableIncome;
+    const totalAnnualTaxEstimate = profileTax ? profileTax.annualTax : taxFromSlabs(estimatedAnnualTaxableIncome, taxSlabs);
     const fractionElapsed = offCycleOptions?.isFinalSettlement ? 1 : totalDaysInTaxYear > 0 ? daysElapsedInclusive / totalDaysInTaxYear : 1;
     const totalTaxDueToDate = totalAnnualTaxEstimate * fractionElapsed;
     const bracket =
-      taxSlabs.find(
-        (s) => estimatedAnnualTaxableIncome >= s.minAnnualIncome && (s.maxAnnualIncome === null || estimatedAnnualTaxableIncome <= s.maxAnnualIncome)
-      ) ?? taxSlabs[taxSlabs.length - 1];
+      slabsInUse.find(
+        (s) => incomeForSlabs >= s.minAnnualIncome && (s.maxAnnualIncome === null || incomeForSlabs <= s.maxAnnualIncome)
+      ) ?? slabsInUse[slabsInUse.length - 1];
+    if (taxContext && profileTax) {
+      breakdown.push({
+        label: `Tax profile "${taxContext.profileName}" (tax year ${taxContext.taxYearLabel}): taxable income after exemptions ${incomeForSlabs.toFixed(2)}, surcharge ${profileTax.surcharge.toFixed(2)}`,
+        value: Number(profileTax.annualTax.toFixed(2)),
+      });
+    }
     breakdown.push({
       label: `Tax bracket ${bracket.minAnnualIncome}-${bracket.maxAnnualIncome ?? "∞"} @ ${bracket.ratePercent}% (base ${bracket.baseTax}) — estimated full-year tax`,
       value: Number(totalAnnualTaxEstimate.toFixed(2)),
@@ -2072,6 +3138,29 @@ export class PayrollService {
       taxYearFractionElapsed: fractionElapsed,
     });
     const incomeTaxMonthly = incomeTaxOverride === null ? builtInIncomeTaxMonthly : incomeTaxOverride.value;
+    ledger.add({
+      key: "income_tax",
+      label: "Income tax",
+      category: "tax",
+      affects: "net",
+      amount: -incomeTaxMonthly,
+      basisAmount: taxableGrossThisPeriod,
+      sourceType: "tax",
+      trace: {
+        taxYear,
+        estimatedAnnualTaxableIncome,
+        priorYtdTaxable,
+        priorYtdTaxWithheld,
+        slabAnnualTax: totalAnnualTaxEstimate,
+        taxDueToDate: totalTaxDueToDate,
+        bracket: { min: bracket.minAnnualIncome, max: bracket.maxAnnualIncome, ratePercent: bracket.ratePercent, baseTax: bracket.baseTax },
+        taxYearDaysElapsed: daysElapsedInclusive,
+        taxYearTotalDays: totalDaysInTaxYear,
+        finalSettlementTrueUp: !!offCycleOptions?.isFinalSettlement,
+        formulaOverride: incomeTaxOverride === null ? null : { effectiveFrom: incomeTaxOverride.effectiveFrom, builtInAmount: Number(builtInIncomeTaxMonthly.toFixed(2)) },
+        ...(taxContext && profileTax ? { taxProfile: taxProfileTrace(taxContext, profileTax) } : {}),
+      },
+    });
     breakdown.push(
       incomeTaxOverride === null
         ? { label: "Income tax this period", value: Number(incomeTaxMonthly.toFixed(2)) }
@@ -2096,6 +3185,7 @@ export class PayrollService {
       employmentWindowDays,
       paidDaysRatio,
       grossPay,
+      eobiEligibleEarnings,
     });
     const eobiEmployerOverride = formulas.evaluate("eobi_employer", {
       defaultAmount: builtInEobiEmployerContribution,
@@ -2105,9 +3195,32 @@ export class PayrollService {
       employmentWindowDays,
       paidDaysRatio,
       grossPay,
+      eobiEligibleEarnings,
     });
     const eobiEmployeeContribution = eobiEmployeeOverride === null ? builtInEobiEmployeeContribution : eobiEmployeeOverride.value;
     const eobiEmployerContribution = eobiEmployerOverride === null ? builtInEobiEmployerContribution : eobiEmployerOverride.value;
+    ledger.add({
+      key: "eobi_employee",
+      label: "EOBI employee contribution",
+      category: "statutory_deduction",
+      affects: "net",
+      amount: -eobiEmployeeContribution,
+      basisAmount: settings.eobiWageBase,
+      rate: settings.eobiEmployeeRatePercent,
+      sourceType: "statutory",
+      trace: { wageBase: settings.eobiWageBase, ratePercent: settings.eobiEmployeeRatePercent, paidDaysRatio, formulaOverride: eobiEmployeeOverride === null ? null : { effectiveFrom: eobiEmployeeOverride.effectiveFrom, builtInAmount: Number(builtInEobiEmployeeContribution.toFixed(2)) } },
+    });
+    ledger.add({
+      key: "eobi_employer",
+      label: "EOBI employer contribution",
+      category: "employer_contribution",
+      affects: "employer_cost",
+      amount: eobiEmployerContribution,
+      basisAmount: settings.eobiWageBase,
+      rate: settings.eobiEmployerRatePercent,
+      sourceType: "statutory",
+      trace: { wageBase: settings.eobiWageBase, ratePercent: settings.eobiEmployerRatePercent, paidDaysRatio, formulaOverride: eobiEmployerOverride === null ? null : { effectiveFrom: eobiEmployerOverride.effectiveFrom, builtInAmount: Number(builtInEobiEmployerContribution.toFixed(2)) } },
+    });
     breakdown.push(
       eobiEmployeeOverride === null
         ? { label: `EOBI employee contribution (${settings.eobiEmployeeRatePercent}% of wage base ${settings.eobiWageBase}, prorated)`, value: Number(eobiEmployeeContribution.toFixed(2)) }
@@ -2129,6 +3242,19 @@ export class PayrollService {
       settings.socialSecurityScheme !== "none" &&
       (settings.socialSecurityWageCeiling === null || grossPay <= settings.socialSecurityWageCeiling);
     const socialSecurityEmployerContribution = ssApplies ? grossPay * (settings.socialSecurityEmployerRatePercent / 100) : 0;
+    if (socialSecurityEmployerContribution > 0 || settings.socialSecurityScheme !== "none") {
+      ledger.add({
+        key: "social_security_employer",
+        label: `Social security (${settings.socialSecurityScheme}) employer contribution`,
+        category: "employer_contribution",
+        affects: "employer_cost",
+        amount: socialSecurityEmployerContribution,
+        basisAmount: grossPay,
+        rate: settings.socialSecurityEmployerRatePercent,
+        sourceType: "statutory",
+        trace: { scheme: settings.socialSecurityScheme, wageCeiling: settings.socialSecurityWageCeiling, applies: ssApplies },
+      });
+    }
     breakdown.push({
       label: `Social security (${settings.socialSecurityScheme}) employer contribution`,
       value: Number(socialSecurityEmployerContribution.toFixed(2)),
@@ -2143,26 +3269,43 @@ export class PayrollService {
     // and 0112's header comment for why). A repayment reduces NET pay
     // only — it is recovering money already disbursed outside payroll,
     // never a tax-relevant event.
+    const jurisdiction = await resolveStatutoryJurisdiction(client, employee.id);
     const { loans } = this.requireCalculationCollaborators();
-    const activeLoans = await loans.listActiveLoansWithinTransaction(client, employee.id);
+    const loanPreviews = await loans.previewDeductionsWithinTransaction(client, employee.id, periodEnd, { fullPayoff: !!offCycleOptions?.isFinalSettlement });
     let loanDeductionTotal = 0;
     const loanDeductions: Array<{ loanId: string; amount: number }> = [];
-    for (const loan of activeLoans) {
-      // Final Settlement (Phase P4): the employee is leaving, so there
-      // are no more installments to come — the FULL outstanding balance
-      // is recovered now, not just this period's usual installment.
-      // Every other run (regular, bonus, arrears) keeps the normal
-      // `min(installment, outstanding)` preview.
-      const amount = Number(
-        (offCycleOptions?.isFinalSettlement ? loan.outstandingBalance : Math.min(loan.installmentAmount, loan.outstandingBalance)).toFixed(2)
-      );
-      if (amount <= 0) continue;
+    for (const { loan, amount, basis, dueInstallments } of loanPreviews) {
+      // PAY-13: the amount is what the approved repayment schedule says is due up to the period end (a loan with no
+      // schedule keeps `min(installment, outstanding)`). A final settlement, or an early settlement the employer
+      // requested, recovers the FULL outstanding balance instead.
       loanDeductionTotal += amount;
       loanDeductions.push({ loanId: loan.id, amount });
+      const kindLabel = loan.loanType === "loan" ? "Loan" : "Salary advance";
+      ledger.add({
+        key: loan.loanType === "loan" ? "loan_repayment" : "advance_repayment",
+        label: `${kindLabel} repayment`,
+        category: "recovery",
+        affects: "net",
+        amount: -amount,
+        sourceType: "loan",
+        sourceId: loan.id,
+        trace: {
+          outstandingBalance: loan.outstandingBalance,
+          installmentAmount: loan.installmentAmount,
+          fullPayoff: basis === "final_settlement" || basis === "early_settlement",
+          basis,
+          dueInstallments,
+        },
+      });
       breakdown.push({
-        label: offCycleOptions?.isFinalSettlement
-          ? `${loan.loanType === "loan" ? "Loan" : "Salary advance"} FULL payoff at final settlement (outstanding balance ${loan.outstandingBalance})`
-          : `${loan.loanType === "loan" ? "Loan" : "Salary advance"} repayment installment (outstanding balance ${loan.outstandingBalance})`,
+        label:
+          basis === "final_settlement"
+            ? `${kindLabel} FULL payoff at final settlement (outstanding balance ${loan.outstandingBalance})`
+            : basis === "early_settlement"
+              ? `${kindLabel} early settlement of the full balance (outstanding balance ${loan.outstandingBalance})`
+              : basis === "schedule"
+                ? `${kindLabel} repayment installment per schedule, ${dueInstallments} due (outstanding balance ${loan.outstandingBalance})`
+                : `${kindLabel} repayment installment (outstanding balance ${loan.outstandingBalance})`,
         value: -amount,
       });
     }
@@ -2204,6 +3347,93 @@ export class PayrollService {
       // populated for final_settlement only, see that option's own doc
       // comment above.
       consumedOffCyclePayments,
+      consumedOvertime,
+      // PAY-05 / PAY-21
+      employerCost: Number((grossPay + eobiEmployerContribution + socialSecurityEmployerContribution + recurringEmployerCost).toFixed(2)),
+      arrearsAmount: Number(arrearsTotal.toFixed(2)),
+      retroDetail,
+      consumedRetro,
+      components: ledger.finish(Number(grossPay.toFixed(2)), Number(netPay.toFixed(2))),
+      inputSnapshot: {
+        period: { start: periodStart, end: periodEnd, daysInPeriod },
+        employment: { dateOfJoining, terminationDate, windowStart, windowEnd, windowDays: employmentWindowDays },
+        organisation: await this.loadOrganisationFacts(client, employee.id),
+        workingDays: {
+          mode: basis.mode,
+          prorationDays,
+          unit: dayUnit,
+          scheduleNames: basis.mode === "calendar" ? undefined : basis.scheduleNames,
+          note: basis.mode === "calendar" ? (basis.note ?? null) : null,
+        },
+        compensation: snapshotCompensation,
+        leave: {
+          unpaidDays: Number(unpaidLeaveDays.toFixed(2)),
+          segments: unpaidLeave.segments.map((seg) => ({ startDate: seg.startDate, endDate: seg.endDate, days: seg.days, leaveRequestId: seg.leaveRequestId })),
+        },
+        overtime: { claimCount: overtimeClaims.length, minutes: overtimeMinutes, total: Number(overtimePay.toFixed(2)), claimIds: overtimeClaims.map((c) => c.id) },
+        adjustments: {
+          additionalPaymentIds: consumedAdditionalPayments.map((c) => c.additionalPaymentId),
+          offCyclePaymentIds: consumedOffCyclePayments.map((c) => c.offCyclePaymentId),
+          loanIds: loanDeductions.map((l) => l.loanId),
+          retroResultIds: consumedRetro.map((c) => c.retroResultId),
+        },
+        jurisdiction: { code: jurisdiction.code, source: jurisdiction.source, locationId: jurisdiction.locationId },
+        bases: { eobiEligibleEarnings: Number(eobiEligibleEarnings.toFixed(2)), gratuityBase: Number(gratuityBase.toFixed(2)), providentFundBase: Number(providentFundBase.toFixed(2)) },
+        tax: { taxYear, taxYearStart, taxYearEnd, priorYtdTaxable, priorYtdTaxWithheld, isFinalSettlement: !!offCycleOptions?.isFinalSettlement, profile: taxContext ? { employeeTaxProfileId: taxContext.employeeTaxProfileId, profileId: taxContext.profileId, code: taxContext.profileCode, filerStatus: taxContext.filerStatus, taxResidency: taxContext.taxResidency, provincialScheme: taxContext.provincialScheme } : null },
+      } satisfies PayslipInputSnapshot,
+      // PAY-21 - unpaid leave actually deducted, as consumption links (a leave request can span runs, so these are informational)
+      consumedLeave: unpaidLeave.segments
+        .filter((seg) => seg.leaveRequestId)
+        .map((seg) => ({ leaveRequestId: seg.leaveRequestId as string, days: seg.days })),
+    };
+  }
+
+  /** What eligibility rules of a pay component look at, for one employee. */
+  private async loadEligibilityFacts(client: PoolClient, employeeId: string): Promise<{ dateOfJoining: string; employmentTypeCatalogItemId: string | null }> {
+    const r = await client.query("SELECT date_of_joining, employment_type_catalog_item_id FROM employees WHERE id = $1", [employeeId]);
+    const row = r.rows[0] ?? {};
+    return { dateOfJoining: row.date_of_joining ? toIsoDate(row.date_of_joining) : "1900-01-01", employmentTypeCatalogItemId: row.employment_type_catalog_item_id ?? null };
+  }
+
+  /** null when the employee qualifies for the component; otherwise the (human) reason they do not. */
+  private ineligibilityReason(
+    eligibility: { minServiceMonths?: number; employmentTypeCatalogItemIds?: string[] } | null,
+    facts: { dateOfJoining: string; employmentTypeCatalogItemId: string | null },
+    asOf: string
+  ): string | null {
+    if (!eligibility) return null;
+    if (typeof eligibility.minServiceMonths === "number" && eligibility.minServiceMonths > 0) {
+      const [jy, jm, jd] = facts.dateOfJoining.split("-").map(Number);
+      const [ay, am, ad] = asOf.split("-").map(Number);
+      const months = (ay - jy) * 12 + (am - jm) - (ad < jd ? 1 : 0);
+      if (months < eligibility.minServiceMonths) return `needs ${eligibility.minServiceMonths} month(s) of service, has ${Math.max(0, months)}`;
+    }
+    const types = eligibility.employmentTypeCatalogItemIds;
+    if (Array.isArray(types) && types.length > 0 && (!facts.employmentTypeCatalogItemId || !types.includes(facts.employmentTypeCatalogItemId))) {
+      return "employment type is not eligible";
+    }
+    return null;
+  }
+
+  /** Organisation facts a payslip was calculated under (ids only; the names live in their own masters). */
+  private async loadOrganisationFacts(client: PoolClient, employeeId: string): Promise<Record<string, unknown>> {
+    const emp = await client.query(
+      `SELECT payroll_area_id, org_unit_id, position_id, location_id, employee_subgroup_id, employment_status FROM employees WHERE id = $1`,
+      [employeeId]
+    );
+    const alloc = await client.query<{ cost_center_id: string; allocation_percentage: string }>(
+      `SELECT cost_center_id, allocation_percentage FROM employee_cost_allocations WHERE employee_id = $1 AND status = 'active'`,
+      [employeeId]
+    );
+    const e = emp.rows[0] ?? {};
+    return {
+      payrollAreaId: e.payroll_area_id ?? null,
+      orgUnitId: e.org_unit_id ?? null,
+      positionId: e.position_id ?? null,
+      locationId: e.location_id ?? null,
+      employeeSubgroupId: e.employee_subgroup_id ?? null,
+      employmentStatus: e.employment_status ?? null,
+      costCenters: alloc.rows.map((a) => ({ costCenterId: a.cost_center_id, percentage: Number(a.allocation_percentage) })),
     };
   }
 
@@ -2243,6 +3473,7 @@ export class PayrollService {
     formulas: ResolvedPayrollFormulas
   ): Promise<Record<string, unknown>> {
     const breakdown: PayrollCalculationStep[] = [];
+    const ledger = new ComponentLedger();
     breakdown.push({ label: "Off-cycle period", value: `${periodStart} to ${periodEnd}` });
 
     const { offCyclePayments } = this.requireCalculationCollaborators();
@@ -2255,6 +3486,16 @@ export class PayrollService {
     let deductionTotal = 0;
     const consumedOffCyclePayments: Array<{ offCyclePaymentId: string; amount: number }> = [];
     for (const payment of pending) {
+      ledger.add({
+        key: payment.paymentType === "earning" ? "offcycle_earning" : "offcycle_deduction",
+        label: payment.label,
+        category: payment.paymentType === "earning" ? "earning" : "employee_deduction",
+        affects: payment.paymentType === "earning" ? "gross" : "net",
+        amount: payment.paymentType === "earning" ? payment.amount : -payment.amount,
+        isTaxable: payment.paymentType === "earning" && payment.isTaxable,
+        sourceType: "off_cycle_payment",
+        sourceId: payment.id,
+      });
       if (payment.paymentType === "earning") {
         if (payment.isTaxable) earningsTaxable += payment.amount;
         else earningsNonTaxable += payment.amount;
@@ -2285,11 +3526,12 @@ export class PayrollService {
       `SELECT COALESCE(SUM(p.taxable_gross_this_period), 0) AS taxable, COALESCE(SUM(p.income_tax_monthly), 0) AS tax
        FROM payslips p
        JOIN payroll_runs pr ON pr.id = p.payroll_run_id
-       WHERE p.employee_id = $1 AND pr.status = 'finalized' AND pr.period_end >= $2 AND pr.period_end < $3`,
+       WHERE p.employee_id = $1 AND pr.status IN ('finalized','accounting','payment_released','reconciled','closed','reopened') AND pr.is_simulation = false AND pr.period_end >= $2 AND pr.period_end < $3`,
       [employee.id, taxYearStart, periodStart]
     );
-    const priorYtdTaxable = Number(ytdResult.rows[0].taxable);
-    const priorYtdTaxWithheld = Number(ytdResult.rows[0].tax);
+    const taxContext = await loadEmployeeTaxContext(client, employee.id, periodStart, periodEnd, taxYear);
+    const priorYtdTaxable = Number(ytdResult.rows[0].taxable) + (taxContext?.previousEmployerIncome ?? 0);
+    const priorYtdTaxWithheld = Number(ytdResult.rows[0].tax) + (taxContext?.previousEmployerTax ?? 0);
     breakdown.push({
       label: `Tax year ${taxYear} (${taxYearStart} to ${taxYearEnd}) — YTD taxable income before this payment (finalized runs only)`,
       value: Number(priorYtdTaxable.toFixed(2)),
@@ -2301,7 +3543,8 @@ export class PayrollService {
       label: "Estimated full tax-year taxable income (YTD + this off-cycle payment — nothing projected, it's one-off)",
       value: Number(estimatedAnnualTaxableIncome.toFixed(2)),
     });
-    const totalAnnualTaxEstimate = taxFromSlabs(estimatedAnnualTaxableIncome, taxSlabs);
+    const profileTax = taxContext ? computeAnnualTax(taxContext, estimatedAnnualTaxableIncome, taxFromSlabs) : null;
+    const totalAnnualTaxEstimate = profileTax ? profileTax.annualTax : taxFromSlabs(estimatedAnnualTaxableIncome, taxSlabs);
     const fractionElapsed = totalDaysInTaxYear > 0 ? daysElapsedInclusive / totalDaysInTaxYear : 1;
     const totalTaxDueToDate = totalAnnualTaxEstimate * fractionElapsed;
     breakdown.push({
@@ -2334,6 +3577,27 @@ export class PayrollService {
       taxYearFractionElapsed: fractionElapsed,
     });
     const incomeTaxMonthly = incomeTaxOverride === null ? builtInIncomeTaxMonthly : incomeTaxOverride.value;
+    ledger.add({
+      key: "income_tax",
+      label: "Income tax on this off-cycle payment",
+      category: "tax",
+      affects: "net",
+      amount: -incomeTaxMonthly,
+      basisAmount: taxableGrossThisPeriod,
+      sourceType: "tax",
+      trace: {
+        taxYear,
+        estimatedAnnualTaxableIncome,
+        priorYtdTaxable,
+        priorYtdTaxWithheld,
+        slabAnnualTax: totalAnnualTaxEstimate,
+        taxDueToDate: totalTaxDueToDate,
+        taxYearDaysElapsed: daysElapsedInclusive,
+        taxYearTotalDays: totalDaysInTaxYear,
+        formulaOverride: incomeTaxOverride === null ? null : { effectiveFrom: incomeTaxOverride.effectiveFrom, builtInAmount: Number(builtInIncomeTaxMonthly.toFixed(2)) },
+        ...(taxContext && profileTax ? { taxProfile: taxProfileTrace(taxContext, profileTax) } : {}),
+      },
+    });
     breakdown.push(
       incomeTaxOverride === null
         ? { label: "Income tax on this off-cycle payment", value: Number(incomeTaxMonthly.toFixed(2)) }
@@ -2370,6 +3634,27 @@ export class PayrollService {
       loanDeductions: [],
       consumedAdditionalPayments: [],
       consumedOffCyclePayments,
+      consumedOvertime: [],
+      employerCost: Number(grossPay.toFixed(2)),
+      components: ledger.finish(Number(grossPay.toFixed(2)), Number(netPay.toFixed(2))),
+      inputSnapshot: {
+        period: { start: periodStart, end: periodEnd, daysInPeriod: inclusiveDayCount(periodStart, periodEnd) },
+        employment: {
+          dateOfJoining: toIsoDate(employee.date_of_joining),
+          terminationDate: toIsoDateOrNull(employee.termination_date),
+          windowStart: periodStart,
+          windowEnd: periodEnd,
+          windowDays: 0,
+        },
+        organisation: await this.loadOrganisationFacts(client, employee.id),
+        workingDays: { mode: "calendar", prorationDays: 0, unit: "days", note: "off-cycle payment: nothing is prorated" },
+        compensation: [],
+        leave: { unpaidDays: 0, segments: [] },
+        overtime: { claimCount: 0, minutes: 0, total: 0, claimIds: [] },
+        adjustments: { additionalPaymentIds: [], offCyclePaymentIds: consumedOffCyclePayments.map((c) => c.offCyclePaymentId), loanIds: [] },
+        tax: { taxYear, taxYearStart, taxYearEnd, priorYtdTaxable, priorYtdTaxWithheld, isFinalSettlement: false },
+      } satisfies PayslipInputSnapshot,
+      consumedLeave: [],
     };
   }
 
@@ -2444,7 +3729,7 @@ export class PayrollService {
   private async loadTaxSlabsAsOf(client: PoolClient, claims: RequestClaims, asOfDate: string): Promise<TaxSlabView[]> {
     await this.loadOrSeedTaxSlabs(client, claims);
     const result = await client.query(
-      `SELECT * FROM tax_slabs WHERE company_id = $1 AND effective_from <= $2 AND (effective_to IS NULL OR effective_to >= $2)
+      `SELECT * FROM tax_slabs WHERE company_id = $1 AND status = 'published' AND effective_from <= $2 AND (effective_to IS NULL OR effective_to >= $2)
        ORDER BY min_annual_income ASC`,
       [claims.company_id, asOfDate]
     );
@@ -2709,35 +3994,44 @@ export class PayrollService {
    * or they're nominally `bank_transfer` but have no account number on
    * file either way.
    */
-  private async buildDisbursementRows(
+  async buildDisbursementRows(
     client: PoolClient,
-    runId: string
+    runId: string,
+    onlyPayslipIds?: string[]
   ): Promise<{
     rows: Array<Record<DisbursementFieldKey, string>>;
+    /** Parallel to `rows`: what each payment item records. */
+    entries: Array<{ payslipId: string; employeeId: string; employeeNumber: string; employeeName: string; amount: number; paymentMethod: string; bankName: string; accountTitle: string; accountNumber: string; iban: string; branchCode: string }>;
     excluded: Array<{ employeeNumber: string; employeeName: string; reason: string }>;
     totalNetPay: number;
   }> {
     const result = await client.query(
-      `SELECT p.employee_number, p.net_pay, p.bank_account_number AS legacy_bank_account_number,
+      `SELECT p.id AS payslip_id, p.employee_id, p.company_id, p.employee_number, p.net_pay, p.bank_account_number AS legacy_bank_account_number,
               e.first_name, e.last_name, e.cnic,
               pa.payment_method, pa.bank_name, pa.account_title, pa.account_number, pa.iban, pa.branch_code
        FROM payslips p
        JOIN employees e ON e.id = p.employee_id
        LEFT JOIN employee_payment_accounts pa
          ON pa.employee_id = p.employee_id AND pa.is_primary = true AND pa.status = 'active'
-       WHERE p.payroll_run_id = $1
+       WHERE p.payroll_run_id = $1 AND ($2::uuid[] IS NULL OR p.id = ANY($2::uuid[]))
        ORDER BY p.employee_number`,
-      [runId]
+      [runId, onlyPayslipIds ?? null]
     );
 
     const rows: Array<Record<DisbursementFieldKey, string>> = [];
+    const entries: Array<{ payslipId: string; employeeId: string; employeeNumber: string; employeeName: string; amount: number; paymentMethod: string; bankName: string; accountTitle: string; accountNumber: string; iban: string; branchCode: string }> = [];
     const excluded: Array<{ employeeNumber: string; employeeName: string; reason: string }> = [];
     let totalNetPay = 0;
 
     for (const r of result.rows) {
       const employeeName = `${r.first_name} ${r.last_name}`.trim();
-      const resolvedAccountNumber: string | null = r.account_number ?? r.legacy_bank_account_number ?? null;
-      const effectivePaymentMethod: string | null = r.payment_method ?? (r.legacy_bank_account_number ? "bank_transfer" : null);
+      // SEC-02: stored encrypted; the bank file is the one place the real values are needed.
+      const plainAccountNumber = sensitive.decrypt(r.company_id, r.account_number);
+      const plainLegacyAccount = sensitive.decrypt(r.company_id, r.legacy_bank_account_number);
+      const plainCnic = sensitive.decrypt(r.company_id, r.cnic);
+      const plainIban = sensitive.decrypt(r.company_id, r.iban);
+      const resolvedAccountNumber: string | null = plainAccountNumber ?? plainLegacyAccount ?? null;
+      const effectivePaymentMethod: string | null = r.payment_method ?? (plainLegacyAccount ? "bank_transfer" : null);
 
       if (!effectivePaymentMethod) {
         excluded.push({ employeeNumber: r.employee_number, employeeName, reason: "No payment account on file" });
@@ -2761,19 +4055,32 @@ export class PayrollService {
       rows.push({
         employeeNumber: r.employee_number,
         employeeName,
-        cnic: r.cnic ?? "",
+        cnic: plainCnic ?? "",
         paymentMethod: effectivePaymentMethod,
         bankName: r.bank_name ?? "",
         accountTitle: r.account_title ?? "",
         accountNumber: resolvedAccountNumber,
-        iban: r.iban ?? "",
+        iban: plainIban ?? "",
         branchCode: r.branch_code ?? "",
         bankAccountNumber: resolvedAccountNumber,
         netPay,
       });
+      entries.push({
+        payslipId: r.payslip_id,
+        employeeId: r.employee_id,
+        employeeNumber: r.employee_number,
+        employeeName,
+        amount: Number(netPay),
+        paymentMethod: effectivePaymentMethod,
+        bankName: r.bank_name ?? "",
+        accountTitle: r.account_title ?? "",
+        accountNumber: resolvedAccountNumber,
+        iban: plainIban ?? "",
+        branchCode: r.branch_code ?? "",
+      });
     }
 
-    return { rows, excluded, totalNetPay: Number(totalNetPay.toFixed(2)) };
+    return { rows, entries, excluded, totalNetPay: Number(totalNetPay.toFixed(2)) };
   }
 
   /**

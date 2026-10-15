@@ -1,4 +1,4 @@
-import { IsDateString, IsOptional, IsString, IsUUID, MaxLength, MinLength } from "class-validator";
+import { IsBoolean, IsDateString, IsOptional, IsString, IsUUID, MaxLength, MinLength } from "class-validator";
 import type { EmploymentType } from "@aihxm/shared-types";
 
 export class CreateEmployeeDto {
@@ -21,6 +21,23 @@ export class CreateEmployeeDto {
   @IsOptional()
   @IsString()
   cnic?: string;
+
+  /** EMP-02 - link the new employment to an existing person (rehire / second
+   * employment) instead of matching by CNIC. */
+  @IsOptional()
+  @IsUUID()
+  personId?: string;
+
+  /** EMP-02 - confirm a possible-duplicate warning is a different human. */
+  @IsOptional()
+  @IsBoolean()
+  confirmNotDuplicate?: boolean;
+
+  /** LIF-06 - HR override of a "not eligible for rehire" record. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  rehireOverrideReason?: string;
 
   @IsOptional()
   @IsDateString()

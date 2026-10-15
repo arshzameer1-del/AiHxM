@@ -1,11 +1,58 @@
 import { Injectable } from "@nestjs/common";
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
-import type { DataScopeType, FieldAccess } from "@aihxm/shared-types";
+import type { DataScopeAssignmentScopeType, FieldAccess } from "@aihxm/shared-types";
+import { maskValue } from "./field-masking";
 
 type FieldCondition = { field: string; equals: unknown };
 
-const ACCESS_RANK: Record<FieldAccess, number> = { hidden: 0, view: 1, edit: 2 };
+/** ACC-01: `masked` sits between hidden and view -- the caller gets the field, obscured. */
+const ACCESS_RANK: Record<FieldAccess, number> = { hidden: 0, masked: 1, view: 2, edit: 3 };
+
+/**
+ * ACC-03: a role assignment counts only inside its effective window, so a
+ * temporary or delegated grant stops working on its own. NULL bounds are open.
+ */
+const ASSIGNMENT_ACTIVE = `(ura.effective_from IS NULL OR ura.effective_from <= CURRENT_DATE)
+           AND (ura.effective_to IS NULL OR ura.effective_to >= CURRENT_DATE)`;
+/** ACC-01: a field rule applies to this tenant (or all tenants) inside its window. */
+const FIELD_RULE_ACTIVE = `(fpr.company_id IS NULL OR fpr.company_id = ura.company_id)
+           AND (fpr.effective_from IS NULL OR fpr.effective_from <= CURRENT_DATE)
+           AND (fpr.effective_to IS NULL OR fpr.effective_to >= CURRENT_DATE)`;
+
+export type FieldRuleRow = {
+  field_key: string;
+  access: FieldAccess;
+  condition: FieldCondition | null;
+  mask_rule?: string | null;
+  priority?: number;
+  deny_overrides?: boolean;
+};
+export type FieldDecision = { access: FieldAccess; maskRule: string | null };
+
+/**
+ * Combine every applicable rule for ONE field into a decision.
+ *   - grants are additive: the most permissive rule wins (hidden < masked < view < edit);
+ *   - a `deny_overrides` rule is a ceiling: no other role's grant can lift the
+ *     result above the lowest such ceiling;
+ *   - among masked results the lowest `priority` number picks the mask rule.
+ */
+export function combineFieldRules(rules: ReadonlyArray<FieldRuleRow>): FieldDecision {
+  let best: FieldAccess = "hidden";
+  let ceiling: FieldAccess | null = null;
+  let maskRule: string | null = null;
+  let maskPriority = Number.POSITIVE_INFINITY;
+  for (const r of rules) {
+    if (ACCESS_RANK[r.access] > ACCESS_RANK[best]) best = r.access;
+    if (r.deny_overrides && (ceiling === null || ACCESS_RANK[r.access] < ACCESS_RANK[ceiling])) ceiling = r.access;
+    if (r.access === "masked" && (r.priority ?? 100) < maskPriority) {
+      maskPriority = r.priority ?? 100;
+      maskRule = r.mask_rule ?? null;
+    }
+  }
+  if (ceiling !== null && ACCESS_RANK[ceiling] < ACCESS_RANK[best]) best = ceiling;
+  return { access: best, maskRule: best === "masked" ? maskRule : null };
+}
 
 /**
  * Object/record-level and field-level permission engine (plan doc Section
@@ -96,12 +143,15 @@ export class RbacService {
     if (!claims.company_id) return "hidden";
 
     const rows = await this.db.withClaims(claims, async (client) => {
-      const result = await client.query<{ access: FieldAccess; condition: FieldCondition | null }>(
-        `SELECT fpr.access, fpr.condition
+      const result = await client.query<Omit<FieldRuleRow, "field_key">>(
+        `SELECT fpr.access, fpr.condition, fpr.mask_rule, fpr.priority, fpr.deny_overrides
          FROM user_role_assignments ura
+         JOIN roles r ON r.id = ura.role_id AND r.is_active
          JOIN field_permission_rules fpr ON fpr.role_id = ura.role_id
          WHERE ura.user_account_id = $1
            AND ura.company_id = $2
+           AND ${ASSIGNMENT_ACTIVE}
+           AND ${FIELD_RULE_ACTIVE}
            AND fpr.object_key = $3
            AND fpr.field_key = $4`,
         [claims.sub, claims.company_id, objectKey, fieldKey]
@@ -109,12 +159,9 @@ export class RbacService {
       return result.rows;
     });
 
-    let best: FieldAccess = "hidden";
-    for (const row of rows) {
-      if (row.condition && !conditionMatches(row.condition, record)) continue;
-      if (ACCESS_RANK[row.access] > ACCESS_RANK[best]) best = row.access;
-    }
-    return best;
+    return combineFieldRules(
+      rows.filter((row) => !row.condition || conditionMatches(row.condition, record)).map((row) => ({ ...row, field_key: fieldKey }))
+    ).access;
   }
 
   /**
@@ -145,7 +192,7 @@ export class RbacService {
     if (!canSelf && !canAll) return null;
 
     const applicableFields = sensitiveFields.filter((key) => key in record);
-    const accessByField = await this.resolveFieldAccessBatch(claims, objectKey, applicableFields, record);
+    const decisions = await this.resolveFieldAccessBatch(claims, objectKey, applicableFields, record);
 
     const result: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(record)) {
@@ -153,7 +200,10 @@ export class RbacService {
         result[key] = value;
         continue;
       }
-      if (accessByField.get(key) !== "hidden") {
+      const decision = decisions.get(key);
+      if (decision?.access === "masked") {
+        result[key] = maskValue(value, decision.maskRule);
+      } else if (decision && decision.access !== "hidden") {
         result[key] = value;
       }
       // else: key intentionally left unset — see the doc comment above.
@@ -188,36 +238,12 @@ export class RbacService {
     objectKey: string,
     fieldKeys: readonly string[],
     record: Record<string, unknown>
-  ): Promise<Map<string, FieldAccess>> {
-    const access = new Map<string, FieldAccess>(fieldKeys.map((key) => [key, "hidden" as FieldAccess]));
-    if (!claims.company_id || fieldKeys.length === 0) return access;
-
-    const rows = await this.db.withClaims(claims, async (client) => {
-      const result = await client.query<{
-        field_key: string;
-        access: FieldAccess;
-        condition: FieldCondition | null;
-      }>(
-        `SELECT fpr.field_key, fpr.access, fpr.condition
-         FROM user_role_assignments ura
-         JOIN field_permission_rules fpr ON fpr.role_id = ura.role_id
-         WHERE ura.user_account_id = $1
-           AND ura.company_id = $2
-           AND fpr.object_key = $3
-           AND fpr.field_key = ANY($4::text[])`,
-        [claims.sub, claims.company_id, objectKey, fieldKeys]
-      );
-      return result.rows;
-    });
-
-    for (const row of rows) {
-      if (row.condition && !conditionMatches(row.condition, record)) continue;
-      const current = access.get(row.field_key) ?? "hidden";
-      if (ACCESS_RANK[row.access] > ACCESS_RANK[current]) {
-        access.set(row.field_key, row.access);
-      }
+  ): Promise<Map<string, FieldDecision>> {
+    if (!claims.company_id || fieldKeys.length === 0) {
+      return new Map(fieldKeys.map((key) => [key, { access: "hidden" as FieldAccess, maskRule: null }]));
     }
-    return access;
+    const rows = await this.loadFieldPermissionRules(claims, objectKey, fieldKeys);
+    return this.evaluateFieldDecisions(rows, fieldKeys, record);
   }
 
   /**
@@ -260,15 +286,18 @@ export class RbacService {
     claims: RequestClaims,
     objectKey: string,
     fieldKeys: readonly string[]
-  ): Promise<Array<{ field_key: string; access: FieldAccess; condition: FieldCondition | null }>> {
+  ): Promise<FieldRuleRow[]> {
     if (!claims.company_id || fieldKeys.length === 0) return [];
     return this.db.withClaims(claims, async (client) => {
-      const result = await client.query<{ field_key: string; access: FieldAccess; condition: FieldCondition | null }>(
-        `SELECT fpr.field_key, fpr.access, fpr.condition
+      const result = await client.query<FieldRuleRow>(
+        `SELECT fpr.field_key, fpr.access, fpr.condition, fpr.mask_rule, fpr.priority, fpr.deny_overrides
          FROM user_role_assignments ura
+         JOIN roles r ON r.id = ura.role_id AND r.is_active
          JOIN field_permission_rules fpr ON fpr.role_id = ura.role_id
          WHERE ura.user_account_id = $1
            AND ura.company_id = $2
+           AND ${ASSIGNMENT_ACTIVE}
+           AND ${FIELD_RULE_ACTIVE}
            AND fpr.object_key = $3
            AND fpr.field_key = ANY($4::text[])`,
         [claims.sub, claims.company_id, objectKey, fieldKeys]
@@ -296,28 +325,41 @@ export class RbacService {
    * generic (EmployeesService derives them from field sensitivity tiers).
    */
   evaluateFieldAccess(
-    rules: Array<{ field_key: string; access: FieldAccess; condition: FieldCondition | null }>,
+    rules: FieldRuleRow[],
     fieldKeys: readonly string[],
     record: Record<string, unknown>,
     unruledDefaults?: ReadonlyMap<string, FieldAccess>
   ): Map<string, FieldAccess> {
-    const access = new Map<string, FieldAccess>(fieldKeys.map((key) => [key, "hidden" as FieldAccess]));
+    const decisions = this.evaluateFieldDecisions(rules, fieldKeys, record, unruledDefaults);
+    return new Map([...decisions].map(([key, d]) => [key, d.access]));
+  }
+
+  /** As evaluateFieldAccess(), but also returns the mask rule for `masked` fields (ACC-01). */
+  evaluateFieldDecisions(
+    rules: FieldRuleRow[],
+    fieldKeys: readonly string[],
+    record: Record<string, unknown>,
+    unruledDefaults?: ReadonlyMap<string, FieldAccess>
+  ): Map<string, FieldDecision> {
+    const decisions = new Map<string, FieldDecision>();
     const ruled = new Set<string>();
+    const applicable = new Map<string, FieldRuleRow[]>();
     for (const row of rules) {
       if (!fieldKeys.includes(row.field_key)) continue;
       ruled.add(row.field_key);
       if (row.condition && !conditionMatches(row.condition, record)) continue;
-      const current = access.get(row.field_key) ?? "hidden";
-      if (ACCESS_RANK[row.access] > ACCESS_RANK[current]) {
-        access.set(row.field_key, row.access);
+      const list = applicable.get(row.field_key) ?? [];
+      list.push(row);
+      applicable.set(row.field_key, list);
+    }
+    for (const key of fieldKeys) {
+      if (unruledDefaults && !ruled.has(key)) {
+        decisions.set(key, { access: unruledDefaults.get(key) ?? "hidden", maskRule: null });
+      } else {
+        decisions.set(key, combineFieldRules(applicable.get(key) ?? []));
       }
     }
-    if (unruledDefaults) {
-      for (const key of fieldKeys) {
-        if (!ruled.has(key)) access.set(key, unruledDefaults.get(key) ?? "hidden");
-      }
-    }
-    return access;
+    return decisions;
   }
 
   /**
@@ -331,7 +373,7 @@ export class RbacService {
    */
   filterRecordFieldsWithScope<T extends Record<string, unknown>>(
     scope: { hasAll: boolean; hasSelf: boolean; hasTeam: boolean },
-    fieldRules: Array<{ field_key: string; access: FieldAccess; condition: FieldCondition | null }>,
+    fieldRules: FieldRuleRow[],
     record: T,
     sensitiveFields: readonly string[],
     ownerId: string | null,
@@ -347,7 +389,7 @@ export class RbacService {
     if (!visible) return null;
 
     const applicableFields = sensitiveFields.filter((key) => key in record);
-    const accessByField = this.evaluateFieldAccess(fieldRules, applicableFields, record, unruledDefaults);
+    const decisions = this.evaluateFieldDecisions(fieldRules, applicableFields, record, unruledDefaults);
 
     const result: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(record)) {
@@ -355,7 +397,10 @@ export class RbacService {
         result[key] = value;
         continue;
       }
-      if (accessByField.get(key) !== "hidden") {
+      const decision = decisions.get(key);
+      if (decision?.access === "masked") {
+        result[key] = maskValue(value, decision.maskRule);
+      } else if (decision && decision.access !== "hidden") {
         result[key] = value;
       }
     }
@@ -401,16 +446,57 @@ export class RbacService {
    * the separate `.all` check the calling service already makes before
    * ever reaching this method.
    */
-  async resolveDataScopeEntityIds(claims: RequestClaims, scopeType: DataScopeType): Promise<string[]> {
+  async resolveDataScopeEntityIds(claims: RequestClaims, scopeType: DataScopeAssignmentScopeType, objectKey?: string): Promise<string[]> {
+    return this.queryDataScope(claims, scopeType, true, objectKey);
+  }
+
+  /**
+   * ACC-04: assignments with `include_descendants = false` -- exactly these
+   * entities, no subtree. Kept apart from resolveDataScopeEntityIds() because
+   * every existing caller expands that result to a subtree; mixing them would
+   * silently widen access. A caller that supports exact scopes unions this set
+   * with its expanded set (OrgUnitsService and LocationsService do).
+   */
+  async resolveDataScopeExactIds(claims: RequestClaims, scopeType: DataScopeAssignmentScopeType, objectKey?: string): Promise<string[]> {
+    return this.queryDataScope(claims, scopeType, false, objectKey);
+  }
+
+  private async queryDataScope(
+    claims: RequestClaims,
+    scopeType: DataScopeAssignmentScopeType,
+    includeDescendants: boolean,
+    objectKey?: string
+  ): Promise<string[]> {
     if (!claims.company_id) return [];
     return this.db.withClaims(claims, async (client) => {
+      // Only assignments inside their window count; a role-linked assignment
+      // needs that role to be currently held and active; an object-linked
+      // assignment applies only when the caller asks for that object.
       const result = await client.query<{ scope_entity_id: string }>(
-        `SELECT scope_entity_id FROM data_scope_assignments
-         WHERE user_account_id = $1 AND company_id = $2 AND scope_type = $3`,
-        [claims.sub, claims.company_id, scopeType]
+        `SELECT dsa.scope_entity_id FROM data_scope_assignments dsa
+         WHERE dsa.user_account_id = $1 AND dsa.company_id = $2 AND dsa.scope_type = $3
+           AND dsa.include_descendants = $4
+           AND (dsa.effective_from IS NULL OR dsa.effective_from <= CURRENT_DATE)
+           AND (dsa.effective_to IS NULL OR dsa.effective_to >= CURRENT_DATE)
+           AND (dsa.object_key IS NULL OR dsa.object_key = $5)
+           AND (dsa.role_id IS NULL OR EXISTS (
+                 SELECT 1 FROM user_role_assignments ura JOIN roles r ON r.id = ura.role_id AND r.is_active
+                  WHERE ura.user_account_id = dsa.user_account_id AND ura.company_id = dsa.company_id AND ura.role_id = dsa.role_id
+                    AND ${ASSIGNMENT_ACTIVE}))`,
+        [claims.sub, claims.company_id, scopeType, includeDescendants, objectKey ?? null]
       );
       return result.rows.map((row) => row.scope_entity_id);
     });
+  }
+
+  /**
+   * Whether the caller currently holds `permissionKey` exactly as written
+   * (no .self/.team target semantics). Used to stop a role editor granting
+   * a permission the editor does not hold themselves (ACC-02).
+   */
+  async holdsPermission(claims: RequestClaims, permissionKey: string): Promise<boolean> {
+    if (!claims.company_id) return false;
+    return this.hasPermission(claims, permissionKey);
   }
 
   private async hasPermission(claims: RequestClaims, permissionKey: string): Promise<boolean> {
@@ -418,10 +504,12 @@ export class RbacService {
       const result = await client.query(
         `SELECT 1
          FROM user_role_assignments ura
+         JOIN roles r ON r.id = ura.role_id AND r.is_active
          JOIN role_permissions rp ON rp.role_id = ura.role_id
          JOIN permissions p ON p.id = rp.permission_id
          WHERE ura.user_account_id = $1
            AND ura.company_id = $2
+           AND ${ASSIGNMENT_ACTIVE}
            AND p.key = $3
          LIMIT 1`,
         [claims.sub, claims.company_id, permissionKey]

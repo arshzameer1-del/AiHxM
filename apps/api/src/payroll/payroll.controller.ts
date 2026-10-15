@@ -1,9 +1,12 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Res, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UseGuards } from "@nestjs/common";
 import type { Response } from "express";
 import { SessionGuard } from "../auth/session.guard";
 import { CurrentClaims } from "../auth/current-claims.decorator";
 import type { RequestClaims } from "../database/tenant-context";
 import { PayrollService } from "./payroll.service";
+import { PayrollRunControlService } from "./payroll-run-control.service";
+import { PayrollRetroService } from "./payroll-retro.service";
+import { ClosePayrollRunDto, DetectPayrollRetroDto, IncludePayrollRetroDto, PayrollRunReasonDto, ResolvePayrollExceptionDto, SetPayrollOverrideDto } from "./dto/payroll-run-control.dto";
 import { UpdatePayrollSettingsDto } from "./dto/update-payroll-settings.dto";
 import { SetTaxSlabsDto } from "./dto/set-tax-slabs.dto";
 import { CreatePayrollRunDto } from "./dto/create-payroll-run.dto";
@@ -23,7 +26,11 @@ import { DecideLeaveRequestDto } from "../leave/dto/decide-leave-request.dto";
 @Controller()
 @UseGuards(SessionGuard)
 export class PayrollController {
-  constructor(private readonly payroll: PayrollService) {}
+  constructor(
+    private readonly payroll: PayrollService,
+    private readonly control: PayrollRunControlService,
+    private readonly retro: PayrollRetroService
+  ) {}
 
   // Compensation moved to `employees/compensation*`
   // (EmployeeCompensationController, 2026-09-27, kumail's own architecture
@@ -83,6 +90,58 @@ export class PayrollController {
     return this.payroll.calculateRun(claims, id);
   }
 
+  // PAY-06 - background calculation, progress and the per-employee error queue.
+  @Post("payroll/runs/:id/calculate-async")
+  calculateRunAsync(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.payroll.calculateRunAsync(claims, id);
+  }
+
+  @Get("payroll/runs/:id/calculation")
+  getCalculationProgress(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.control.getCalculationProgress(claims, id);
+  }
+
+  @Get("payroll/runs/:id/exceptions")
+  listExceptions(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Query("status") status?: string) {
+    return this.control.listExceptions(claims, id, status);
+  }
+
+  @Post("payroll/runs/:id/exceptions/:exceptionId/retry")
+  retryException(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Param("exceptionId") exceptionId: string) {
+    return this.payroll.retryException(claims, id, exceptionId);
+  }
+
+  @Post("payroll/runs/:id/exceptions/:exceptionId/waive")
+  waiveException(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Param("exceptionId") exceptionId: string, @Body() dto: ResolvePayrollExceptionDto) {
+    return this.control.waiveException(claims, id, exceptionId, dto.note);
+  }
+
+  // PAY-12 - arrears / retro. Same permission and payroll-area scope as calculating the run.
+  @Post("payroll/runs/:id/retro/detect")
+  detectRetro(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: DetectPayrollRetroDto) {
+    return this.retro.detect(claims, id, dto);
+  }
+
+  @Get("payroll/runs/:id/retro")
+  listRetro(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Query("status") status?: string) {
+    return this.retro.list(claims, id, status as never);
+  }
+
+  @Post("payroll/runs/:id/retro/include")
+  includeRetro(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: IncludePayrollRetroDto) {
+    return this.retro.include(claims, id, dto);
+  }
+
+  @Post("payroll/runs/:id/retro/exclude")
+  excludeRetro(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: IncludePayrollRetroDto) {
+    return this.retro.exclude(claims, id, dto);
+  }
+
+  @Post("payroll/retro/:retroId/dismiss")
+  dismissRetro(@CurrentClaims() claims: RequestClaims, @Param("retroId") retroId: string, @Body() dto: ResolvePayrollExceptionDto) {
+    return this.retro.dismiss(claims, retroId, dto.note);
+  }
+
   @Post("payroll/runs/:id/finalize")
   finalizeRun(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
     return this.payroll.finalizeRun(claims, id);
@@ -116,9 +175,10 @@ export class PayrollController {
     @CurrentClaims() claims: RequestClaims,
     @Param("id") id: string,
     @Query("confirmRegenerate") confirmRegenerate: string | undefined,
+    @Query("formatId") formatId: string | undefined,
     @Res() res: Response
   ) {
-    const { csv, batch, excluded } = await this.payroll.generateDisbursementFile(claims, id, confirmRegenerate === "true");
+    const { csv, batch, excluded } = await this.payroll.generateDisbursementFile(claims, id, confirmRegenerate === "true", formatId || undefined);
     res.setHeader("Content-Type", "text/csv");
     res.setHeader("Content-Disposition", `attachment; filename="payroll-disbursement-${id}.csv"`);
     // Phase P5 — the browser-download endpoint can't return a JSON body
@@ -162,6 +222,73 @@ export class PayrollController {
     return this.payroll.reverseRun(claims, id, dto);
   }
 
+
+  // --- Step 9A: run lifecycle controls (PAY-01, PAY-19, PAY-23) ---------------
+  @Post("payroll/runs/:id/pre-validate")
+  preValidateRun(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.control.preValidate(claims, id);
+  }
+
+  @Post("payroll/runs/:id/validate")
+  validateRun(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.control.validate(claims, id);
+  }
+
+  @Post("payroll/runs/:id/close")
+  closeRun(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: ClosePayrollRunDto) {
+    return this.control.close(claims, id, dto.note);
+  }
+
+  @Post("payroll/runs/:id/reopen")
+  reopenRun(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: PayrollRunReasonDto) {
+    return this.control.reopen(claims, id, dto.reason);
+  }
+
+  @Post("payroll/runs/:id/cancel")
+  cancelRun(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: PayrollRunReasonDto) {
+    return this.control.cancel(claims, id, dto.reason);
+  }
+
+  @Get("payroll/runs/:id/events")
+  listRunEvents(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.control.listEvents(claims, id);
+  }
+
+  @Get("payroll/runs/:id/reversal")
+  getRunReversal(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.control.getReversal(claims, id);
+  }
+
+  @Get("payroll/runs/:id/reopens")
+  listRunReopens(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.control.listReopens(claims, id);
+  }
+
+  @Get("payroll/runs/:id/population")
+  listRunPopulation(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Query("sequence") sequence?: string) {
+    return this.control.listPopulation(claims, id, sequence ? Number(sequence) : undefined);
+  }
+
+  @Get("payroll/runs/:id/rule-snapshot")
+  getRuleSnapshot(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.control.getRuleSnapshot(claims, id);
+  }
+
+  @Get("payroll/runs/:id/overrides")
+  listOverrides(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.control.listOverrides(claims, id);
+  }
+
+  @Post("payroll/runs/:id/overrides")
+  applyOverride(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: SetPayrollOverrideDto) {
+    return this.control.applyOverride(claims, id, dto);
+  }
+
+  @Delete("payroll/runs/:id/overrides/:overrideId")
+  withdrawOverride(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Param("overrideId") overrideId: string) {
+    return this.control.withdrawOverride(claims, id, overrideId);
+  }
+
   @Get("payslips")
   listPayslips(
     @CurrentClaims() claims: RequestClaims,
@@ -169,6 +296,16 @@ export class PayrollController {
     @Query("employeeId") employeeId?: string
   ) {
     return this.payroll.listPayslips(claims, { payrollRunId, employeeId });
+  }
+
+  @Get("payslips/:id/detail")
+  getPayslipDetail(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.payroll.getPayslipDetail(claims, id);
+  }
+
+  @Get("payroll/ytd/:employeeId")
+  getYtd(@CurrentClaims() claims: RequestClaims, @Param("employeeId") employeeId: string, @Query("taxYear") taxYear?: string) {
+    return this.payroll.getYtd(claims, employeeId, taxYear ? Number(taxYear) : undefined);
   }
 
   @Get("payslips/:id")

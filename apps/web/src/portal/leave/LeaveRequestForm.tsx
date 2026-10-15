@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
-import type { EmployeeView, LeaveType, OverlapWarning, SubmitLeaveRequestResponse } from "@aihxm/shared-types";
+import type { EmployeeView, LeaveDayPart, LeaveType, LeaveTypeView, OverlapWarning, SubmitLeaveRequestResponse } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
-import { LEAVE_TYPES, LEAVE_TYPE_LABELS } from "./leaveLabels";
+import { LEAVE_TYPES, leaveTypeLabel } from "./leaveLabels";
 
 /**
  * Shared by both submit paths this task builds: an employee_self_service
@@ -23,11 +23,21 @@ export function LeaveRequestForm({
   const [employees, setEmployees] = useState<EmployeeView[]>([]);
   const [employeeId, setEmployeeId] = useState(fixedEmployeeId ?? "");
   const [leaveType, setLeaveType] = useState<LeaveType>("annual");
+  const [leaveTypes, setLeaveTypes] = useState<LeaveTypeView[]>([]);
+  const [dayPart, setDayPart] = useState<LeaveDayPart>("full");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    // TLM-01: the tenant's active leave types; the built-ins are the fallback if this fails.
+    api.listLeaveTypes().then(setLeaveTypes).catch(() => undefined);
+  }, []);
+
+  const selectedType = leaveTypes.find((t) => t.code === leaveType);
+  const halfDayAllowed = selectedType ? selectedType.halfDayAllowed : true;
 
   useEffect(() => {
     if (fixedEmployeeId) return;
@@ -41,6 +51,21 @@ export function LeaveRequestForm({
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    // Inline, visible validation: native `required` tooltips are easy to
+    // miss, and a live QA pass saw the form appear to do nothing when no
+    // employee was picked on the On-Behalf path.
+    if (!employeeId) {
+      setError("Select the employee this leave is for.");
+      return;
+    }
+    if (endDate < startDate) {
+      setError("End date can't be before the start date.");
+      return;
+    }
+    if (dayPart !== "full" && endDate !== startDate) {
+      setError("A half-day leave must start and end on the same date.");
+      return;
+    }
     setSubmitting(true);
     try {
       const result = await api.submitLeaveRequest({
@@ -49,6 +74,7 @@ export function LeaveRequestForm({
         startDate,
         endDate,
         reason: reason || undefined,
+        dayPart: dayPart === "full" ? undefined : dayPart,
       });
       onSubmitted(result);
     } catch (err) {
@@ -73,6 +99,7 @@ export function LeaveRequestForm({
             {employees.map((emp) => (
               <option key={emp.id} value={emp.id}>
                 {emp.firstName} {emp.lastName} ({emp.employeeNumber})
+                {emp.department ? ` — ${emp.department}` : ""}
               </option>
             ))}
           </select>
@@ -84,12 +111,15 @@ export function LeaveRequestForm({
           <label className="block text-sm font-medium mb-1">Leave type</label>
           <select
             value={leaveType}
-            onChange={(e) => setLeaveType(e.target.value as LeaveType)}
+            onChange={(e) => {
+              setLeaveType(e.target.value as LeaveType);
+              setDayPart("full");
+            }}
             className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
           >
-            {LEAVE_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {LEAVE_TYPE_LABELS[t]}
+            {(leaveTypes.length > 0 ? leaveTypes.map((t) => ({ code: t.code, name: t.name })) : LEAVE_TYPES.map((t) => ({ code: t, name: leaveTypeLabel(t) }))).map((t) => (
+              <option key={t.code} value={t.code}>
+                {t.name}
               </option>
             ))}
           </select>
@@ -115,6 +145,31 @@ export function LeaveRequestForm({
           />
         </div>
       </div>
+
+      {halfDayAllowed && (
+        <div>
+          <label className="block text-sm font-medium mb-1" htmlFor="leave-day-part">Duration</label>
+          <select
+            id="leave-day-part"
+            value={dayPart}
+            onChange={(e) => {
+              const next = e.target.value as LeaveDayPart;
+              setDayPart(next);
+              if (next !== "full" && startDate) setEndDate(startDate);
+            }}
+            className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+          >
+            <option value="full">Full day(s)</option>
+            <option value="first_half">First half of the day</option>
+            <option value="second_half">Second half of the day</option>
+          </select>
+        </div>
+      )}
+      {selectedType?.documentRequired && (
+        <div className="text-xs text-label-secondary">
+          {selectedType.name} {selectedType.documentRequiredAfterDays > 0 ? `over ${selectedType.documentRequiredAfterDays} day(s) ` : ""}needs a supporting document - upload it under the employee&apos;s Documents first.
+        </div>
+      )}
 
       <div>
         <label className="block text-sm font-medium mb-1">Reason (optional)</label>

@@ -50,6 +50,7 @@ const EOBI_VARIABLES = {
   employmentWindowDays: "Days of the period the employee was employed (calendar or scheduled working days, per proration basis).",
   paidDaysRatio: "paidDays / employmentWindowDays (0 when employmentWindowDays is 0).",
   grossPay: "Gross pay this period (after unpaid-leave deduction, including overtime).",
+  eobiEligibleEarnings: "Prorated earnings of components flagged 'counts toward EOBI base', before the unpaid-leave deduction.",
 } as const;
 
 // Note on what is deliberately NOT exposed: the top tax slab's

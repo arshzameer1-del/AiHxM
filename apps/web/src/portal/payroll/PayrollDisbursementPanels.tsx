@@ -4,6 +4,8 @@ import type {
   PayrollCostCenterBreakdownView,
   PayrollDisbursementSettingsView,
   PayrollPaymentBatchView,
+  PayrollPaymentItemView,
+  BankFileFormatView,
   PreviewDisbursementFileResponse,
 } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
@@ -87,6 +89,17 @@ export function DisbursementSettingsForm() {
     }
   }
 
+  async function setApproval(on: boolean) {
+    setError(null);
+    try {
+      const updated = await api.updateDisbursementSettings({ requireReleaseApproval: on });
+      setSettings(updated);
+      setSaved(on ? "Payment files now need a second person's approval before release." : "Payment files can be released without a second approval.");
+    } catch (err) {
+      setError(errorMessage(err, "Could not save the approval setting."));
+    }
+  }
+
   if (error) return <p className="text-xs text-danger">{error}</p>;
   if (!settings) return <p className="text-sm text-label-tertiary">Loading…</p>;
 
@@ -99,6 +112,13 @@ export function DisbursementSettingsForm() {
         disbursement file generated from now on.
       </p>
       {saved && !dirty && <p className="text-xs text-success">{saved}</p>}
+      <label className="flex items-start gap-2 text-sm">
+        <input type="checkbox" className="mt-1" checked={settings.requireReleaseApproval} onChange={(e) => setApproval(e.target.checked)} />
+        <span>
+          Require a second person to approve a payment file before it is released to the bank
+          <span className="block text-xs text-label-tertiary">The person who generated the file can never approve it.</span>
+        </span>
+      </label>
       <div className="bg-black/5 rounded-lg divide-y divide-black/10">
         {DISBURSEMENT_FIELD_ORDER.map((key) => {
           const included = columns.includes(key);
@@ -151,62 +171,196 @@ export function DisbursementSettingsForm() {
   );
 }
 
-/** One row of `listPaymentBatches()` — every past disbursement-file
- * generation for this run, newest first, with a Void action for the
- * active one. Voiding doesn't delete the record (same "never truly
- * delete a financial record" posture as Reverse on a run) — it just
- * marks it so the next download isn't blocked by the duplicate-payment
- * guard. */
-function PaymentBatchRow({ batch, onVoided }: { batch: PayrollPaymentBatchView; onVoided: () => void }) {
+const BATCH_STATUS_STYLE: Record<string, string> = {
+  generated: "bg-black/10 text-label-secondary",
+  approved: "bg-accent/15 text-accent",
+  released: "bg-amber-100 text-amber-800",
+  acknowledged: "bg-success/15 text-green-700",
+  rejected: "bg-danger/15 text-red-700",
+  reissued: "bg-black/10 text-label-secondary",
+  voided: "bg-danger/15 text-red-700",
+};
+const BATCH_STATUS_LABEL: Record<string, string> = {
+  generated: "Generated",
+  approved: "Approved",
+  released: "Released to bank",
+  acknowledged: "Acknowledged",
+  rejected: "Rejected by bank",
+  reissued: "Reissued",
+  voided: "Voided",
+};
+
+/**
+ * One payment file (PAY-16): its status, and the next step it allows - approve (when the tenant asks for a second
+ * person), release, record the bank's answer, reissue what was rejected, or void it before release. The payments in
+ * it can be opened and answered one by one.
+ */
+function PaymentBatchRow({ batch, onChanged }: { batch: PayrollPaymentBatchView; onChanged: () => void }) {
   const [voiding, setVoiding] = useState(false);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [items, setItems] = useState<PayrollPaymentItemView[] | null>(null);
+  const [showItems, setShowItems] = useState(false);
+  const [bankReference, setBankReference] = useState("");
+  const [rejections, setRejections] = useState<Record<string, string>>({});
 
-  async function handleVoid() {
-    if (!reason.trim()) return;
+  async function act(fn: () => Promise<unknown>, failure: string) {
     setBusy(true);
     setError(null);
     try {
-      await api.voidPaymentBatch(batch.id, reason.trim());
-      setVoiding(false);
-      setReason("");
-      onVoided();
+      await fn();
+      setItems(null);
+      onChanged();
+      if (showItems) setItems(await api.listPaymentItems(batch.id));
     } catch (err) {
-      setError(errorMessage(err, "Could not void this batch."));
+      setError(errorMessage(err, failure));
     } finally {
       setBusy(false);
     }
   }
 
+  async function toggleItems() {
+    const next = !showItems;
+    setShowItems(next);
+    if (next && !items) {
+      try {
+        setItems(await api.listPaymentItems(batch.id));
+      } catch (err) {
+        setError(errorMessage(err, "Could not load the payments."));
+      }
+    }
+  }
+
+  const waiting = items?.filter((i) => i.status === "released") ?? [];
+  const rejectedItems = items?.filter((i) => i.status === "rejected") ?? [];
+  const canVoid = ["generated", "approved", "released"].includes(batch.status);
+
+  async function answer() {
+    const named = Object.entries(rejections).filter(([, r]) => r.trim().length > 0);
+    await act(
+      () =>
+        api.acknowledgePaymentBatch(batch.id, {
+          bankReference: bankReference.trim() || undefined,
+          items: named.length > 0 ? waiting.map((i) => (rejections[i.id]?.trim() ? { itemId: i.id, status: "rejected" as const, reason: rejections[i.id].trim() } : { itemId: i.id, status: "acknowledged" as const })) : undefined,
+        }),
+      "Could not record the bank's answer."
+    );
+    setRejections({});
+    setBankReference("");
+  }
+
   return (
     <div className="bg-black/5 rounded-lg p-3 text-xs space-y-2">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <div>
           <span className="font-mono font-semibold">{batch.batchReference}</span>{" "}
-          <span
-            className={`inline-block px-2 py-0.5 rounded-full font-semibold ${
-              batch.status === "voided" ? "bg-danger/15 text-red-700" : "bg-success/15 text-green-700"
-            }`}
-          >
-            {batch.status === "voided" ? "Voided" : "Generated"}
+          <span className={`inline-block px-2 py-0.5 rounded-full font-semibold ${BATCH_STATUS_STYLE[batch.status] ?? ""}`}>
+            {BATCH_STATUS_LABEL[batch.status] ?? batch.status}
           </span>
         </div>
-        {batch.status === "generated" && !voiding && (
-          <button onClick={() => setVoiding(true)} className="font-semibold text-danger hover:underline">
-            Void
+        <div className="flex items-center gap-3 flex-wrap">
+          {batch.status === "generated" && (
+            <button disabled={busy} onClick={() => act(() => api.approvePaymentBatch(batch.id), "Could not approve this batch.")} className="font-semibold text-accent hover:underline disabled:opacity-50">
+              Approve
+            </button>
+          )}
+          {(batch.status === "generated" || batch.status === "approved") && (
+            <button disabled={busy} onClick={() => act(() => api.releasePaymentBatch(batch.id), "Could not release this batch.")} className="font-semibold text-accent hover:underline disabled:opacity-50">
+              Release to bank
+            </button>
+          )}
+          {["acknowledged", "rejected"].includes(batch.status) && (
+            <button disabled={busy} onClick={() => act(() => api.reissuePaymentItems(batch.id), "Could not reissue the rejected payments.")} className="font-semibold text-accent hover:underline disabled:opacity-50">
+              Reissue rejected
+            </button>
+          )}
+          {canVoid && !voiding && (
+            <button onClick={() => setVoiding(true)} className="font-semibold text-danger hover:underline">
+              Void
+            </button>
+          )}
+          <button onClick={toggleItems} className="font-semibold text-label-tertiary hover:text-label-primary">
+            {showItems ? "Hide payments" : "Payments"}
           </button>
-        )}
+        </div>
       </div>
       <div className="text-label-tertiary">
         {batch.rowCount} row{batch.rowCount === 1 ? "" : "s"} · net pay {pkr.format(batch.totalNetPay)}
-        {batch.excludedCount > 0 ? ` · ${batch.excludedCount} excluded` : ""} · generated{" "}
-        {new Date(batch.generatedAt).toLocaleString()}
+        {batch.excludedCount > 0 ? ` · ${batch.excludedCount} excluded` : ""} · generated {new Date(batch.generatedAt).toLocaleString()}
+        {batch.approvedAt ? ` · approved ${new Date(batch.approvedAt).toLocaleString()}` : ""}
+        {batch.releasedAt ? ` · released ${new Date(batch.releasedAt).toLocaleString()}` : ""}
+        {batch.bankReference ? ` · bank ref ${batch.bankReference}` : ""}
+        {batch.rejectionReason ? ` · ${batch.rejectionReason}` : ""}
       </div>
       {batch.status === "voided" && (
         <div className="text-label-tertiary">
           Voided {batch.voidedAt ? new Date(batch.voidedAt).toLocaleString() : ""}
           {batch.voidedReason ? `: ${batch.voidedReason}` : ""}
+        </div>
+      )}
+      {showItems && (
+        <div className="pt-1 border-t border-black/10 space-y-2">
+          {!items ? (
+            <p className="text-label-tertiary">Loading…</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead className="text-label-tertiary">
+                  <tr>
+                    <th className="pr-3 py-1 font-medium">Employee</th>
+                    <th className="pr-3 py-1 font-medium">Account</th>
+                    <th className="pr-3 py-1 font-medium text-right">Amount</th>
+                    <th className="pr-3 py-1 font-medium">Status</th>
+                    {batch.status === "released" && <th className="py-1 font-medium">Rejected? reason</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((i) => (
+                    <tr key={i.id} className="border-t border-black/5">
+                      <td className="pr-3 py-1 font-mono">{i.employeeNumber}</td>
+                      <td className="pr-3 py-1">{i.bankName ?? i.paymentMethod}{i.accountLast4 ? ` ····${i.accountLast4}` : ""}</td>
+                      <td className="pr-3 py-1 text-right tabular-nums">{pkr.format(i.amount)}</td>
+                      <td className="pr-3 py-1">
+                        {i.status}
+                        {i.rejectionReason ? ` — ${i.rejectionReason}` : ""}
+                        {i.retryCount > 0 ? ` (retry ${i.retryCount})` : ""}
+                      </td>
+                      {batch.status === "released" && (
+                        <td className="py-1">
+                          {i.status === "released" && (
+                            <input
+                              aria-label={`Rejection reason for ${i.employeeNumber}`}
+                              value={rejections[i.id] ?? ""}
+                              onChange={(e) => setRejections((cur) => ({ ...cur, [i.id]: e.target.value }))}
+                              placeholder="Leave empty if paid"
+                              className="w-40 rounded border border-black/10 px-2 py-0.5 focus:outline-none focus:ring-2 focus:ring-accent"
+                            />
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {batch.status === "released" && items && waiting.length > 0 && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <input
+                aria-label="Bank reference"
+                value={bankReference}
+                onChange={(e) => setBankReference(e.target.value)}
+                placeholder="Bank reference (optional)"
+                className="rounded-lg border border-black/10 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent"
+              />
+              <button disabled={busy} onClick={answer} className="font-semibold rounded-lg px-3 py-1 text-white bg-accent disabled:opacity-50">
+                Record bank's answer
+              </button>
+              <span className="text-label-tertiary">Payments with a reason are recorded as rejected; the rest as paid.</span>
+            </div>
+          )}
+          {rejectedItems.length > 0 && <p className="text-label-tertiary">{rejectedItems.length} rejected — use "Reissue rejected" to send them again to their current account.</p>}
         </div>
       )}
       {voiding && (
@@ -219,7 +373,7 @@ function PaymentBatchRow({ batch, onVoided }: { batch: PayrollPaymentBatchView; 
           />
           <div className="flex items-center gap-3">
             <button
-              onClick={handleVoid}
+              onClick={() => act(() => api.voidPaymentBatch(batch.id, reason.trim()).then(() => { setVoiding(false); setReason(""); }), "Could not void this batch.")}
               disabled={busy || !reason.trim()}
               className="font-semibold rounded-lg px-3 py-1 text-white bg-danger disabled:opacity-50"
             >
@@ -257,6 +411,12 @@ export function DisbursementPanel({ runId }: { runId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [lastResult, setLastResult] = useState<string | null>(null);
+  const [formats, setFormats] = useState<BankFileFormatView[]>([]);
+  const [formatId, setFormatId] = useState("");
+
+  useEffect(() => {
+    api.listBankFileFormats().then(setFormats).catch(() => undefined);
+  }, []);
 
   function loadPreview() {
     setError(null);
@@ -280,7 +440,8 @@ export function DisbursementPanel({ runId }: { runId: string }) {
     setError(null);
     setLastResult(null);
     try {
-      const { batchReference, excludedCount } = await api.downloadDisbursementFile(runId, confirmRegenerate);
+      const chosen = formats.find((f) => f.id === formatId);
+      const { batchReference, excludedCount } = await api.downloadDisbursementFile(runId, confirmRegenerate, formatId || undefined, chosen?.fileExtension ?? formats.find((f) => f.isDefault)?.fileExtension);
       setLastResult(
         `Downloaded as batch ${batchReference}${excludedCount > 0 ? ` (${excludedCount} employee(s) excluded)` : ""}.`
       );
@@ -296,7 +457,7 @@ export function DisbursementPanel({ runId }: { runId: string }) {
   if (error) return <p className="text-xs text-danger">{error}</p>;
   if (!preview) return <p className="text-xs text-label-tertiary">Loading disbursement preview…</p>;
 
-  const hasActiveBatch = preview.existingBatch !== null && preview.existingBatch.status === "generated";
+  const hasActiveBatch = preview.existingBatch !== null && ["generated", "approved", "released", "acknowledged"].includes(preview.existingBatch.status);
 
   return (
     <div className="mt-2 pt-2 border-t border-black/5 space-y-2 text-xs">
@@ -325,6 +486,18 @@ export function DisbursementPanel({ runId }: { runId: string }) {
       )}
 
       {lastResult && <p className="text-success">{lastResult}</p>}
+
+      {formats.length > 0 && (
+        <label className="flex items-center gap-2 text-label-secondary">
+          File layout
+          <select value={formatId} onChange={(e) => setFormatId(e.target.value)} className="rounded-lg border border-black/10 px-2 py-1">
+            <option value="">{formats.find((f) => f.isDefault)?.name ?? "Column settings (default)"}</option>
+            {formats.filter((f) => !f.isDefault).map((f) => (
+              <option key={f.id} value={f.id}>{f.name}</option>
+            ))}
+          </select>
+        </label>
+      )}
 
       <div className="flex items-center gap-3 flex-wrap">
         <button
@@ -357,7 +530,7 @@ export function DisbursementPanel({ runId }: { runId: string }) {
               <PaymentBatchRow
                 key={b.id}
                 batch={b}
-                onVoided={() => {
+                onChanged={() => {
                   loadBatches();
                   loadPreview();
                 }}

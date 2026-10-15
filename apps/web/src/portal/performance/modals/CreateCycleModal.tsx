@@ -57,8 +57,9 @@ export function CreateCycleModal({ onClose, onSuccess }: CreateCycleModalProps) 
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Cycle Name</label>
+            <label htmlFor="cycle-name" className="block text-sm font-medium text-gray-700 mb-1">Cycle Name</label>
             <input
+              id="cycle-name"
               type="text"
               value={formData.name}
               onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
@@ -68,8 +69,9 @@ export function CreateCycleModal({ onClose, onSuccess }: CreateCycleModalProps) 
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+            <label htmlFor="cycle-start" className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
             <input
+              id="cycle-start"
               type="date"
               value={formData.periodStart}
               onChange={(e) => setFormData((prev) => ({ ...prev, periodStart: e.target.value }))}
@@ -78,8 +80,9 @@ export function CreateCycleModal({ onClose, onSuccess }: CreateCycleModalProps) 
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+            <label htmlFor="cycle-end" className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
             <input
+              id="cycle-end"
               type="date"
               value={formData.periodEnd}
               onChange={(e) => setFormData((prev) => ({ ...prev, periodEnd: e.target.value }))}

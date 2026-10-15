@@ -5,6 +5,7 @@ import type {
   EmployeeView,
   OffCycleReason,
   PayrollAreaView,
+  PayrollPeriodView,
   PayrollRunType,
   PayrollRunView,
   PayrollSettingsView,
@@ -337,6 +338,9 @@ export function CreateRunForm({ onCreated, onCancel }: { onCreated: () => void; 
   const [runType, setRunType] = useState<PayrollRunType>("regular");
   const [offCycleReason, setOffCycleReason] = useState<OffCycleReason>("bonus");
   const [targetEmployeeId, setTargetEmployeeId] = useState("");
+  const [isSimulation, setIsSimulation] = useState(false);
+  const [payrollPeriods, setPayrollPeriods] = useState<PayrollPeriodView[]>([]);
+  const [payrollPeriodId, setPayrollPeriodId] = useState("");
   const [employees, setEmployees] = useState<EmployeeView[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -346,6 +350,10 @@ export function CreateRunForm({ onCreated, onCancel }: { onCreated: () => void; 
     // one. A failure here just leaves "Company-wide" as the only choice.
     api.listPayrollAreas().then(setAreas).catch(() => setAreas([]));
     api.listEmployees().then(setEmployees).catch(() => setEmployees([]));
+    // PAY-03 - periods a run can still be created for (open or locked); none visible = free-form dates as before
+    Promise.all([api.listPayrollPeriods({ status: "open" }), api.listPayrollPeriods({ status: "locked" })])
+      .then(([open, locked]) => setPayrollPeriods([...open, ...locked].sort((a, b) => a.periodStart.localeCompare(b.periodStart))))
+      .catch(() => setPayrollPeriods([]));
   }, []);
 
   const selectedArea = areas.find((a) => a.id === payrollAreaId);
@@ -363,9 +371,9 @@ export function CreateRunForm({ onCreated, onCancel }: { onCreated: () => void; 
     setSubmitting(true);
     try {
       await api.createPayrollRun({
-        periodStart,
-        periodEnd,
+        ...(payrollPeriodId ? { payrollPeriodId } : { periodStart, periodEnd }),
         payrollAreaId: payrollAreaId || null,
+        ...(isSimulation ? { isSimulation: true } : {}),
         ...(isOffCycle
           ? { runType, offCycleReason, ...(targetEmployeeId ? { targetEmployeeId } : {}) }
           : {}),
@@ -438,12 +446,43 @@ export function CreateRunForm({ onCreated, onCancel }: { onCreated: () => void; 
         </p>
       )}
 
+      {payrollPeriods.length > 0 && (
+        <div>
+          <label className={labelClass}>Payroll period</label>
+          <select
+            value={payrollPeriodId}
+            onChange={(e) => {
+              const p = payrollPeriods.find((x) => x.id === e.target.value);
+              setPayrollPeriodId(e.target.value);
+              setPeriodStart(p?.periodStart ?? "");
+              setPeriodEnd(p?.periodEnd ?? "");
+              if (p && payrollAreaId) {
+                const a = areas.find((x) => x.id === payrollAreaId);
+                if (a?.calendarId && a.calendarId !== p.calendarId) setPayrollAreaId("");
+              }
+            }}
+            className={inputClass}
+          >
+            <option value="">Custom dates…</option>
+            {payrollPeriods
+              .filter((p) => runType === "off_cycle" || p.status === "open")
+              .map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label} ({p.calendarCode}) · {p.periodStart} – {p.periodEnd}
+                  {p.status === "locked" ? " · locked" : ""}
+                </option>
+              ))}
+          </select>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label className={labelClass}>Period start</label>
           <input
             type="date"
             required
+            disabled={!!payrollPeriodId}
             value={periodStart}
             onChange={(e) => setPeriodStart(e.target.value)}
             className={inputClass}
@@ -454,12 +493,20 @@ export function CreateRunForm({ onCreated, onCancel }: { onCreated: () => void; 
           <input
             type="date"
             required
+            disabled={!!payrollPeriodId}
             value={periodEnd}
             onChange={(e) => setPeriodEnd(e.target.value)}
             className={inputClass}
           />
         </div>
       </div>
+
+      <label className="flex items-start gap-2 text-xs text-label-secondary" htmlFor="create-run-simulation">
+        <input id="create-run-simulation" type="checkbox" checked={isSimulation} onChange={(e) => setIsSimulation(e.target.checked)} className="mt-0.5" />
+        <span>
+          <span className="font-semibold">Simulation (what-if) run</span> — calculates payslips to preview cost, but consumes no loans or payments, never goes to approval and does not block the real run for this period.
+        </span>
+      </label>
 
       <div>
         <label className={labelClass}>Payroll area</label>
@@ -588,6 +635,8 @@ export function OffCyclePaymentsPanel({ run, canManage }: { run: PayrollRunView;
                   <div className="text-xs text-label-tertiary">
                     {emp ? `${emp.employeeNumber} — ${emp.firstName} ${emp.lastName}` : p.employeeId} · Status:{" "}
                     <span className="font-semibold">{p.status}</span>
+                    {p.approvalStatus === "pending" && <span className="ml-2 px-1.5 rounded bg-amber-100 text-amber-800">awaiting approval</span>}
+                    {p.approvalStatus === "rejected" && <span className="ml-2 px-1.5 rounded bg-red-100 text-red-800">rejected</span>}
                   </div>
                 </div>
                 <div className="flex items-center gap-3">

@@ -1,8 +1,30 @@
-import { IsIn, IsInt, IsOptional, IsString, Min, MinLength } from "class-validator";
-import type { ChecklistCategory, ChecklistResponsibleRole } from "@aihxm/shared-types";
+import { Type } from "class-transformer";
+import { ArrayMaxSize, IsArray, IsIn, IsInt, IsOptional, IsString, IsUUID, Max, Min, MinLength, ValidateNested } from "class-validator";
+import type { ChecklistCategory, ChecklistResponsibleRole, OnboardingAssigneeRule } from "@aihxm/shared-types";
 
 const CATEGORIES: ChecklistCategory[] = ["it", "hr", "finance", "facilities", "general"];
 const RESPONSIBLE_ROLES: ChecklistResponsibleRole[] = ["self", "team", "all"];
+const ASSIGNEE_RULES: OnboardingAssigneeRule[] = ["none", "employee", "manager"];
+
+export class OnboardingApplicabilityDto {
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsString({ each: true })
+  employmentTypes?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(200)
+  @IsUUID("all", { each: true })
+  orgUnitIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(200)
+  @IsUUID("all", { each: true })
+  locationIds?: string[];
+}
 
 export class CreateChecklistItemTemplateDto {
   @IsString()
@@ -19,6 +41,21 @@ export class CreateChecklistItemTemplateDto {
   @IsInt()
   @Min(0)
   sortOrder?: number;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => OnboardingApplicabilityDto)
+  applicability?: OnboardingApplicabilityDto;
+
+  @IsOptional()
+  @IsIn(ASSIGNEE_RULES)
+  assigneeRule?: OnboardingAssigneeRule;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(365)
+  dueOffsetDays?: number | null;
 }
 
 export class UpdateChecklistItemTemplateDto {
@@ -39,4 +76,19 @@ export class UpdateChecklistItemTemplateDto {
   @IsInt()
   @Min(0)
   sortOrder?: number;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => OnboardingApplicabilityDto)
+  applicability?: OnboardingApplicabilityDto;
+
+  @IsOptional()
+  @IsIn(ASSIGNEE_RULES)
+  assigneeRule?: OnboardingAssigneeRule;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(365)
+  dueOffsetDays?: number | null;
 }

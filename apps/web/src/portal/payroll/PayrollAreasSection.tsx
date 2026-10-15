@@ -7,6 +7,7 @@ import type {
   OrgUnitView,
   PayrollAreaScopeLinkView,
   PayrollAreaView,
+  PayrollCalendarView,
 } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 
@@ -157,8 +158,16 @@ function EditAreaForm({
   const [name, setName] = useState(area.name);
   const [description, setDescription] = useState(area.description ?? "");
   const [isActive, setIsActive] = useState(area.isActive);
+  const [calendarId, setCalendarId] = useState(area.calendarId ?? "");
+  const [jurisdiction, setJurisdiction] = useState(area.jurisdiction ?? "");
+  // null = the viewer cannot see calendars (no payroll_calendar permission): the attribute fields stay hidden.
+  const [calendars, setCalendars] = useState<PayrollCalendarView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    api.listPayrollCalendars().then(setCalendars).catch(() => setCalendars(null));
+  }, []);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -175,6 +184,9 @@ function EditAreaForm({
         name: name.trim(),
         description: description.trim() || null,
         isActive,
+        // only sent when changed: a scoped area manager lacks the calendar permission the server checks for these
+        ...(calendarId !== (area.calendarId ?? "") ? { calendarId: calendarId || null } : {}),
+        ...(jurisdiction.trim() !== (area.jurisdiction ?? "") ? { jurisdiction: jurisdiction.trim() || null } : {}),
       });
       onSaved(updated);
     } catch (err) {
@@ -199,6 +211,25 @@ function EditAreaForm({
           <label className={labelClass}>Description (optional)</label>
           <input value={description} onChange={(e) => setDescription(e.target.value)} className={inputClass} />
         </div>
+        {calendars && (
+          <>
+            <div className="col-span-2">
+              <label className={labelClass}>Payroll calendar</label>
+              <select value={calendarId} onChange={(e) => setCalendarId(e.target.value)} className={inputClass}>
+                <option value="">No calendar ({area.frequency.replace("_", "-")}, {area.currencyCode})</option>
+                {calendars.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} — {c.frequency.replace("_", "-")}, {c.currencyCode}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="col-span-2">
+              <label className={labelClass}>Jurisdiction (optional)</label>
+              <input value={jurisdiction} onChange={(e) => setJurisdiction(e.target.value)} maxLength={100} placeholder="e.g. PK-SD" className={inputClass} />
+            </div>
+          </>
+        )}
       </div>
       <label className="flex items-center gap-2 text-sm">
         <input
@@ -558,6 +589,10 @@ function AreaRow({
         <td className="px-4 py-3 min-w-[10rem]">
           <div className="font-medium">{area.name}</div>
           {area.description && <div className="text-xs text-label-tertiary mt-0.5">{area.description}</div>}
+          <div className="text-xs text-label-tertiary mt-0.5">
+            {area.frequency.replace("_", "-")} · {area.currencyCode}
+            {area.jurisdiction ? ` · ${area.jurisdiction}` : ""}
+          </div>
         </td>
         <td className="px-4 py-3 font-mono text-label-secondary">{area.employeeCount}</td>
         <td className="px-4 py-3">

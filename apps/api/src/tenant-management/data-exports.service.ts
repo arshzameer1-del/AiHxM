@@ -1,3 +1,5 @@
+import { fieldCrypto } from "../crypto/field-crypto";
+import { decryptRowsForExport } from "../crypto/sensitive-fields";
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { DatabaseService } from "../database/database.service";
@@ -235,7 +237,7 @@ export class DataExportsService {
         csvColumns: ["id", "employee_number", "first_name", "last_name", "employment_status", "hire_date"],
       },
       payroll: {
-        query: `SELECT p.* FROM payslips p WHERE p.company_id = $1 ORDER BY p.created_at DESC`,
+        query: `SELECT p.* FROM payslips p WHERE p.company_id = $1 AND p.payroll_run_id IN (SELECT id FROM payroll_runs WHERE is_simulation = false AND status <> 'cancelled') ORDER BY p.created_at DESC`,
         csvColumns: ["id", "employee_number", "gross_pay", "net_pay", "income_tax_monthly", "created_at"],
       },
       attendance: {
@@ -253,6 +255,7 @@ export class DataExportsService {
     };
 
     if (scope === "full" && format === "json") {
+      await fieldCrypto.warm(client, companyId);
       const [employees, admins, attendance, payslips] = [
         await client.query("SELECT * FROM employees WHERE company_id = $1", [companyId]),
         await client.query(
@@ -260,7 +263,7 @@ export class DataExportsService {
           [companyId]
         ),
         await client.query("SELECT * FROM attendance_records WHERE company_id = $1", [companyId]),
-        await client.query("SELECT * FROM payslips WHERE company_id = $1", [companyId]),
+        await client.query("SELECT * FROM payslips WHERE company_id = $1 AND payroll_run_id IN (SELECT id FROM payroll_runs WHERE is_simulation = false AND status <> 'cancelled')", [companyId]),
       ];
       const buffer = Buffer.from(
         JSON.stringify(
@@ -269,10 +272,13 @@ export class DataExportsService {
             companyId,
             scope,
             generatedAt: new Date().toISOString(),
-            employees: employees.rows,
+            // SEC-02: this is the customer's own authorised export, so
+            // sensitive columns are decrypted into it (the file itself is
+            // encrypted at rest and expires).
+            employees: decryptRowsForExport(companyId, "employees", employees.rows),
             admins: admins.rows,
             attendance: attendance.rows,
-            payslips: payslips.rows,
+            payslips: decryptRowsForExport(companyId, "payslips", payslips.rows),
           },
           null,
           2
@@ -283,7 +289,13 @@ export class DataExportsService {
     }
 
     const table = tables[scope];
+    await fieldCrypto.warm(client, companyId);
     const result = await client.query(table.query, [companyId]);
+    if (scope === "employees" || scope === "full") {
+      result.rows = decryptRowsForExport(companyId, "employees", result.rows);
+    } else if (scope === "payroll") {
+      result.rows = decryptRowsForExport(companyId, "payslips", result.rows);
+    }
 
     if (format === "csv") {
       const csv = this.importExport.toCsv(table.csvColumns, result.rows);

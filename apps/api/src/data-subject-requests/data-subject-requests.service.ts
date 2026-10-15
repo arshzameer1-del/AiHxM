@@ -85,7 +85,13 @@ export class DataSubjectRequestsService {
     private readonly entitlements: EntitlementsService,
     private readonly audit: AuditService,
     private readonly workflow: WorkflowService
-  ) {}
+  ) {
+    this.workflow?.adapters?.register({
+      objectKey: WORKFLOW_OBJECT_KEY,
+      label: "Data subject request",
+      legacyDecide: (c, id, dto) => this.decide(c, id, dto),
+    });
+  }
 
   async submit(claims: RequestClaims, input: SubmitDataSubjectRequestRequest): Promise<DataSubjectRequestView> {
     await this.requireModule(claims);

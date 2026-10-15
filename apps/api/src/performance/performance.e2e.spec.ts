@@ -28,6 +28,8 @@ describe("Performance HTTP surface (e2e)", () => {
   let hrAdminToken: string;
   let managerToken: string;
   let staffToken: string;
+  let staffEmployeeId: string;
+  let managerEmployeeIdE2e: string;
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
@@ -99,7 +101,8 @@ describe("Performance HTTP surface (e2e)", () => {
     staffToken = signSession({ sub: staffUserId, is_platform_admin: false, company_id: companyId });
 
     const managerEmployeeId = await makeEmployee({ firstName: "Mona", lastName: "Manager", userAccountId: managerUserId });
-    await makeEmployee({ firstName: "Sami", lastName: "Staff", userAccountId: staffUserId, managerId: managerEmployeeId });
+    managerEmployeeIdE2e = managerEmployeeId;
+    staffEmployeeId = await makeEmployee({ firstName: "Sami", lastName: "Staff", userAccountId: staffUserId, managerId: managerEmployeeId });
   });
 
   afterAll(async () => {
@@ -197,5 +200,57 @@ describe("Performance HTTP surface (e2e)", () => {
       .set("Authorization", `Bearer ${managerToken}`)
       .send({ managerAssessment: "x", managerRating: 9 })
       .expect(400);
+  });
+  it("Step 11B routes: goal weights, plan finalise, phases, ratings, feedback and development plans over real HTTP", async () => {
+    const http = () => request(app.getHttpServer());
+    const as = (t: string) => ({ Authorization: `Bearer ${t}` });
+    const cycle = await http().post("/review-cycles").set(as(hrAdminToken)).send({ name: "Depth 2026", periodStart: "2026-01-01", periodEnd: "2026-12-31" }).expect(201);
+    await http().post(`/review-cycles/${cycle.body.id}/launch`).set(as(hrAdminToken)).expect(201);
+
+    const g1 = await http().post("/goals").set(as(managerToken)).send({ reviewCycleId: cycle.body.id, employeeId: staffEmployeeId, title: "Ship", weight: 70, dueDate: "2026-11-30", targetValue: 10, targetUnit: "items" }).expect(201);
+    await http().post("/goals").set(as(managerToken)).send({ reviewCycleId: cycle.body.id, employeeId: staffEmployeeId, title: "Too much", weight: 31 }).expect(400);
+    await http().patch(`/goals/${g1.body.id}`).set(as(staffToken)).send({ currentValue: 4 }).expect(200);
+    const history = await http().get(`/goals/${g1.body.id}/updates`).set(as(staffToken)).expect(200);
+    expect(history.body.length).toBeGreaterThanOrEqual(2);
+    await http().post("/goals").set(as(managerToken)).send({ reviewCycleId: cycle.body.id, employeeId: staffEmployeeId, title: "Rest", weight: 30 }).expect(201);
+    await http().post("/goal-plans/finalise").set(as(managerToken)).send({ reviewCycleId: cycle.body.id, employeeId: staffEmployeeId }).expect(201);
+    const plan = await http().get(`/goal-plans?reviewCycleId=${cycle.body.id}&employeeId=${staffEmployeeId}`).set(as(staffToken)).expect(200);
+    expect(plan.body.status).toBe("finalised");
+    await http().post("/goals").set(as(staffToken)).send({ reviewCycleId: cycle.body.id, employeeId: staffEmployeeId, title: "late add" }).expect(400);
+
+    await http().put(`/review-cycles/${cycle.body.id}/phases`).set(as(staffToken)).send({ phases: [] }).expect(403);
+    const phases = await http().put(`/review-cycles/${cycle.body.id}/phases`).set(as(hrAdminToken)).send({ phases: [{ phaseKey: "self_assessment", startsOn: "2020-01-01", endsOn: "2099-01-01" }] }).expect(200);
+    expect(phases.body.phases).toHaveLength(1);
+    await http().put(`/review-cycles/${cycle.body.id}/phases`).set(as(hrAdminToken)).send({ phases: [{ phaseKey: "nonsense", startsOn: "2020-01-01", endsOn: "2020-02-01" }] }).expect(400);
+
+    const comp = await http().post("/competencies").set(as(hrAdminToken)).send({ name: "Craft e2e" }).expect(201);
+    const reviews = await http().get(`/performance-reviews?reviewCycleId=${cycle.body.id}&employeeId=${staffEmployeeId}`).set(as(hrAdminToken)).expect(200);
+    const reviewId = reviews.body[0].id;
+    await http().put(`/performance-reviews/${reviewId}/ratings`).set(as(staffToken)).send({ source: "self", ratings: [{ goalId: g1.body.id, rating: 4 }, { competencyId: comp.body.id, rating: 5 }] }).expect(200);
+    await http().put(`/performance-reviews/${reviewId}/ratings`).set(as(staffToken)).send({ source: "self", ratings: [{ goalId: g1.body.id, rating: 8 }] }).expect(400);
+    const card = await http().get(`/performance-reviews/${reviewId}/scorecard`).set(as(staffToken)).expect(200);
+    expect(card.body.goals.find((g: { goalId: string }) => g.goalId === g1.body.id).ratings.self).toBe(4);
+
+    await http().post("/feedback").set(as(managerToken)).send({ subjectEmployeeId: staffEmployeeId, body: "Nice work", feedbackType: "recognition" }).expect(201);
+    const seen = await http().get(`/feedback?subjectEmployeeId=${staffEmployeeId}`).set(as(staffToken)).expect(200);
+    expect(seen.body.items).toHaveLength(1);
+    await http().post("/feedback").set(as(managerToken)).send({ subjectEmployeeId: staffEmployeeId, body: "x", feedbackType: "peer" }).expect(400);
+    const given = await http().get("/feedback/given").set(as(managerToken)).expect(200);
+    expect(given.body).toHaveLength(1);
+
+    await http().post(`/performance-reviews/${reviewId}/feedback-requests`).set(as(managerToken)).send({ raterEmployeeIds: [managerEmployeeIdE2e], raterType: "upward" }).expect(201);
+    const mine = await http().get("/feedback-requests/mine").set(as(managerToken)).expect(200);
+    expect(mine.body).toHaveLength(1);
+    await http().post(`/feedback-requests/${mine.body[0].id}/respond`).set(as(managerToken)).send({ body: "Supportive", competencyRatings: [{ competencyId: comp.body.id, rating: 5 }] }).expect(201);
+
+    const plan2 = await http().post("/development-plans").set(as(managerToken)).send({ employeeId: staffEmployeeId, title: "Grow", items: [{ action: "Mentor a junior", itemType: "mentoring" }] }).expect(201);
+    await http().post(`/development-plans/${plan2.body.id}/items`).set(as(staffToken)).send({ action: "Read a book", itemType: "reading" }).expect(201);
+    await http().patch(`/development-plans/${plan2.body.id}`).set(as(hrAdminToken)).send({ status: "active" }).expect(200);
+    const listed = await http().get("/development-plans").set(as(staffToken)).expect(200);
+    expect(listed.body[0].items).toHaveLength(2);
+
+    await http().get("/performance/settings").set(as(staffToken)).expect(403);
+    await http().put("/performance/settings").set(as(hrAdminToken)).send({ minRatersForAnonymity: 3 }).expect(200);
+    await http().put("/performance/settings").set(as(hrAdminToken)).send({ minRatersForAnonymity: 1 }).expect(400);
   });
 });

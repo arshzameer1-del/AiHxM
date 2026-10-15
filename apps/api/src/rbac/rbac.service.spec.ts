@@ -290,11 +290,14 @@ describe("RbacService", () => {
         );
         // data_scope_assignments carries no FK on scope_entity_id (it can
         // point into org_units/locations/cost_centers depending on
-        // scope_type, see 0078's own header comment) — a bare random uuid
-        // is enough to exercise RbacService's own read path directly,
-        // independent of whether OrgUnitsService's own expansion logic
-        // (tested in org-units.service.spec.ts) is involved.
-        assignedUnitId = randomUUID();
+        // scope_type, see 0078's own header comment); 0122's validation
+        // trigger is what keeps it honest.
+        // INT-02 (migration 0122) now requires scope_entity_id to be a REAL
+        // same-company org unit, so the "assigned" one is created for real;
+        // the "other" one stays a random id (it is never stored).
+        assignedUnitId = (
+          await client.query("INSERT INTO org_units (company_id, unit_type, name) VALUES ($1, 'department', 'Scoped Unit') RETURNING id", [companyId])
+        ).rows[0].id;
         otherUnitId = randomUUID();
         await client.query(
           "INSERT INTO data_scope_assignments (user_account_id, company_id, scope_type, scope_entity_id) VALUES ($1, $2, 'org_unit', $3)",

@@ -1,3 +1,4 @@
+import { sensitive } from "../crypto/sensitive-fields";
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { DatabaseService } from "../database/database.service";
@@ -10,14 +11,19 @@ import { HrReferenceCatalogService } from "../hr-administration/hr-reference-cat
 import { LIFECYCLE_EVENT_REASON_CATALOG } from "../hr-administration/catalog-type-registry";
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
 import { OrgOccupancyService } from "../organization/occupancy/org-occupancy.service";
+import { HrBusinessPolicyService } from "../hr-administration/hr-business-policy.service";
+import { assertRehireAllowed } from "./rehire-eligibility";
 import type {
   AssignActingRoleRequest,
   ChangeEmployeeLocationRequest,
   ChangeEmployeeManagerRequest,
+  CorrectLifecycleEventRequest,
   DemoteEmployeeRequest,
   EmployeeView,
   JobHistoryEntryView,
   JobHistoryEventType,
+  LifecycleEventChannel,
+  LifecycleEventView,
   LifecycleTransactionResult,
   PromoteEmployeeRequest,
   ReactivateEmployeeRequest,
@@ -63,10 +69,10 @@ function rowToEmployee(row: any): EmployeeView {
     terminationDate: toIsoDate(row.termination_date),
     createdAt: row.created_at?.toISOString ? row.created_at.toISOString() : row.created_at,
     updatedAt: row.updated_at?.toISOString ? row.updated_at.toISOString() : row.updated_at,
-    cnic: row.cnic,
-    dateOfBirth: toIsoDate(row.date_of_birth),
+    cnic: sensitive.decrypt(row.company_id, row.cnic),
+    dateOfBirth: sensitive.readDob(row.company_id, row.date_of_birth_enc, row.date_of_birth),
     salaryBand: row.salary_band,
-    bankAccountNumber: row.bank_account_number,
+    bankAccountNumber: sensitive.decrypt(row.company_id, row.bank_account_number),
     terminationReason: row.termination_reason,
   } as EmployeeView;
 }
@@ -93,6 +99,71 @@ function toIsoDate(value: any): string | null {
   if (!value) return null;
   if (typeof value === "string") return value;
   return value.toISOString ? value.toISOString().slice(0, 10) : value;
+}
+
+/**
+ * Step 4 (LIF-01/03/04). Options an internal caller (the scheduler, a
+ * correction, offboarding, the hire process) passes to the shared
+ * execute() path; HTTP callers never set them.
+ */
+export type LifecycleExecOptions = {
+  /** Apply now even when the effective date is in the future (never set over HTTP). */
+  immediate?: boolean;
+  /** The scheduled event being applied (scheduler). */
+  eventId?: string;
+  /** Authorization already happened at scheduling time (scheduler only). */
+  skipAccess?: boolean;
+  sourceChannel?: LifecycleEventChannel;
+  /** LIF-04: this execution corrects that event. */
+  correctsEventId?: string;
+  /** Who the history row is attributed to when claims.sub is not a user (scheduler). */
+  recordedBy?: string | null;
+  workflowInstanceId?: string | null;
+};
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const todayIso = () => new Date().toISOString().slice(0, 10);
+const CORRECTABLE = new Set(["transfer", "promotion", "demotion", "manager_change", "location_change", "termination"]);
+
+/** Compact before/after picture of the columns lifecycle actions change. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function snapshotOf(row: any): Record<string, unknown> {
+  const keys = [
+    "employment_status", "employment_type", "department", "designation", "salary_band", "org_unit_id", "position_id",
+    "location_id", "manager_id", "termination_date", "termination_reason", "payroll_area_id", "employee_subgroup_id",
+  ];
+  const out: Record<string, unknown> = {};
+  for (const k of keys) {
+    const v = row?.[k];
+    out[k] = v instanceof Date ? v.toISOString().slice(0, 10) : (v ?? null);
+  }
+  return out;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function rowToEvent(row: any, correctedBy?: string | null): LifecycleEventView {
+  return {
+    id: row.id,
+    employeeId: row.employee_id,
+    employmentId: row.employment_id ?? null,
+    actionType: row.action_type,
+    reasonCode: row.reason_code ?? null,
+    effectiveDate: toIsoDate(row.effective_date) as string,
+    plannedEndDate: toIsoDate(row.planned_end_date),
+    status: row.status,
+    sourceChannel: row.source_channel,
+    workflowInstanceId: row.workflow_instance_id ?? null,
+    correctsEventId: row.corrects_event_id ?? null,
+    correctedByEventId: correctedBy ?? row.corrected_by_event_id ?? null,
+    jobHistoryId: row.job_history_id ?? null,
+    requestedByUserAccountId: row.requested_by_user_account_id ?? null,
+    beforeSnapshot: row.before_snapshot ?? null,
+    afterSnapshot: row.after_snapshot ?? null,
+    notes: row.notes ?? null,
+    failureReason: row.failure_reason ?? null,
+    appliedAt: row.applied_at ? new Date(row.applied_at).toISOString() : null,
+    createdAt: new Date(row.created_at).toISOString(),
+  };
 }
 
 /**
@@ -187,11 +258,14 @@ export class EmployeeLifecycleService {
     // Item 2 — default-instantiated and appended last, the same convention
     // HiringProcessService uses, so positional spec constructions keep
     // working; Nest's DI supplies the real OrgOccupancyModule instance.
-    private readonly occupancy: OrgOccupancyService = new OrgOccupancyService(audit, new EffectiveDatingEngine(), webhooks)
+    private readonly occupancy: OrgOccupancyService = new OrgOccupancyService(audit, new EffectiveDatingEngine(), webhooks),
+    // Step 4 (LIF-05/06) - optional like `webhooks?`: only the rehire policy
+    // lookup and the access-revocation opt-out read it.
+    private readonly businessPolicy?: HrBusinessPolicyService
   ) {}
 
-  async transfer(claims: RequestClaims, employeeId: string, input: TransferEmployeeRequest): Promise<LifecycleTransactionResult> {
-    return this.execute(claims, employeeId, "transfer", input, async (client, companyId, before) => {
+  async transfer(claims: RequestClaims, employeeId: string, input: TransferEmployeeRequest, opts: LifecycleExecOptions = {}): Promise<LifecycleTransactionResult> {
+    return this.execute(claims, employeeId, "transfer", input, opts, async (client, companyId, before) => {
       const position = input.positionId ? await this.loadTargetPosition(client, companyId, input.positionId, input.orgUnitId) : null;
       const newOrgUnitId: string | undefined = input.orgUnitId ?? position?.org_unit_id;
       const orgUnitId = newOrgUnitId ?? before.org_unit_id;
@@ -220,23 +294,23 @@ export class EmployeeLifecycleService {
     });
   }
 
-  async promote(claims: RequestClaims, employeeId: string, input: PromoteEmployeeRequest): Promise<LifecycleTransactionResult> {
+  async promote(claims: RequestClaims, employeeId: string, input: PromoteEmployeeRequest, opts: LifecycleExecOptions = {}): Promise<LifecycleTransactionResult> {
     if (!input.designation?.trim()) throw new BadRequestException("designation is required");
-    return this.execute(claims, employeeId, "promotion", input, (client, companyId, before) =>
+    return this.execute(claims, employeeId, "promotion", input, opts, (client, companyId, before) =>
       this.buildDesignationChange(client, claims, companyId, employeeId, before, input)
     );
   }
 
-  async demote(claims: RequestClaims, employeeId: string, input: DemoteEmployeeRequest): Promise<LifecycleTransactionResult> {
+  async demote(claims: RequestClaims, employeeId: string, input: DemoteEmployeeRequest, opts: LifecycleExecOptions = {}): Promise<LifecycleTransactionResult> {
     if (!input.designation?.trim()) throw new BadRequestException("designation is required");
-    return this.execute(claims, employeeId, "demotion", input, (client, companyId, before) =>
+    return this.execute(claims, employeeId, "demotion", input, opts, (client, companyId, before) =>
       this.buildDesignationChange(client, claims, companyId, employeeId, before, input)
     );
   }
 
-  async second(claims: RequestClaims, employeeId: string, input: SecondEmployeeRequest): Promise<LifecycleTransactionResult> {
+  async second(claims: RequestClaims, employeeId: string, input: SecondEmployeeRequest, opts: LifecycleExecOptions = {}): Promise<LifecycleTransactionResult> {
     if (input.endDate < input.effectiveDate) throw new BadRequestException("endDate must not be before effectiveDate");
-    return this.execute(claims, employeeId, "secondment", input, async (client, companyId, before) => {
+    return this.execute(claims, employeeId, "secondment", input, opts, async (client, companyId, before) => {
       const orgUnitId = input.orgUnitId ?? before.org_unit_id;
       const department = await this.resolveDepartment(client, companyId, input.orgUnitId, input.department ?? before.department);
       const locationId = input.locationId ?? before.location_id;
@@ -276,10 +350,10 @@ export class EmployeeLifecycleService {
     });
   }
 
-  async assignActingRole(claims: RequestClaims, employeeId: string, input: AssignActingRoleRequest): Promise<LifecycleTransactionResult> {
+  async assignActingRole(claims: RequestClaims, employeeId: string, input: AssignActingRoleRequest, opts: LifecycleExecOptions = {}): Promise<LifecycleTransactionResult> {
     if (!input.designation?.trim()) throw new BadRequestException("designation is required");
     if (input.endDate < input.effectiveDate) throw new BadRequestException("endDate must not be before effectiveDate");
-    return this.execute(claims, employeeId, "acting", input, async (client, companyId, before) => {
+    return this.execute(claims, employeeId, "acting", input, opts, async (client, companyId, before) => {
       const position = input.positionId ? await this.loadTargetPosition(client, companyId, input.positionId, input.orgUnitId, { requireVacant: false }) : null;
       const newOrgUnitId: string | undefined = input.orgUnitId ?? position?.org_unit_id;
       const orgUnitId = newOrgUnitId ?? before.org_unit_id;
@@ -316,9 +390,9 @@ export class EmployeeLifecycleService {
     });
   }
 
-  async changeManager(claims: RequestClaims, employeeId: string, input: ChangeEmployeeManagerRequest): Promise<LifecycleTransactionResult> {
+  async changeManager(claims: RequestClaims, employeeId: string, input: ChangeEmployeeManagerRequest, opts: LifecycleExecOptions = {}): Promise<LifecycleTransactionResult> {
     if (!input.managerId?.trim()) throw new BadRequestException("managerId is required");
-    return this.execute(claims, employeeId, "manager_change", input, async (client, companyId, before) => {
+    return this.execute(claims, employeeId, "manager_change", input, opts, async (client, companyId, before) => {
       if (input.managerId === employeeId) {
         throw new BadRequestException("An employee cannot be their own manager");
       }
@@ -361,9 +435,9 @@ export class EmployeeLifecycleService {
     });
   }
 
-  async changeLocation(claims: RequestClaims, employeeId: string, input: ChangeEmployeeLocationRequest): Promise<LifecycleTransactionResult> {
+  async changeLocation(claims: RequestClaims, employeeId: string, input: ChangeEmployeeLocationRequest, opts: LifecycleExecOptions = {}): Promise<LifecycleTransactionResult> {
     if (!input.locationId?.trim()) throw new BadRequestException("locationId is required");
-    return this.execute(claims, employeeId, "location_change", input, async (client, companyId, before) => {
+    return this.execute(claims, employeeId, "location_change", input, opts, async (client, companyId, before) => {
       const location = await this.resolveLocation(client, companyId, input.locationId, before.location);
       return {
         setClause: "location_id = $2, location = $3",
@@ -383,9 +457,9 @@ export class EmployeeLifecycleService {
     });
   }
 
-  async terminate(claims: RequestClaims, employeeId: string, input: TerminateEmployeeRequest): Promise<LifecycleTransactionResult> {
+  async terminate(claims: RequestClaims, employeeId: string, input: TerminateEmployeeRequest, opts: LifecycleExecOptions = {}): Promise<LifecycleTransactionResult> {
     if (!input.terminationDate) throw new BadRequestException("terminationDate is required");
-    const result = await this.execute(claims, employeeId, "termination", { ...input, effectiveDate: input.terminationDate }, async (
+    const result = await this.execute(claims, employeeId, "termination", { ...input, effectiveDate: input.terminationDate }, opts, async (
       client,
       _companyId,
       before
@@ -410,19 +484,37 @@ export class EmployeeLifecycleService {
         });
       },
     }));
+    if (result.event.status !== "applied") return result; // scheduled: nothing has happened yet
     // Backward compatibility — every existing integration listening for
     // the pre-existing `employee.terminated` event (fired until now only
     // from EmployeesService.autoRecordJobHistory()) keeps working when
     // termination instead happens through this explicit surface.
     this.webhooks?.enqueue(result.employee.companyId, "employee.terminated", { employee: result.employee }).catch(() => undefined);
+    // LIF-05: a termination that takes effect revokes the login. After the
+    // employment transaction so a failed revocation can never un-terminate;
+    // it is audited and idempotent, and the scheduler/HR can re-run it.
+    await this.revokeAccessAfterTermination(result.employee.companyId, result.employee.id, result.employee.userAccountId, input.terminationDate);
     return result;
   }
 
-  async reactivate(claims: RequestClaims, employeeId: string, input: ReactivateEmployeeRequest): Promise<LifecycleTransactionResult> {
-    return this.execute(claims, employeeId, "reactivation", input, async (_client, _companyId, before) => {
+  async reactivate(claims: RequestClaims, employeeId: string, input: ReactivateEmployeeRequest, opts: LifecycleExecOptions = {}): Promise<LifecycleTransactionResult> {
+    return this.execute(claims, employeeId, "reactivation", input, opts, async (client, companyId, before) => {
       if (before.employment_status !== "terminated") {
         throw new BadRequestException("Only a terminated employee can be reactivated");
       }
+      // LIF-06: the same eligibility and cooldown a brand-new hire of this
+      // person would face (reactivation IS a rehire onto the old record).
+      const block = await assertRehireAllowed(client, companyId, before.person_id, input.rehireOverrideReason);
+      if (block) {
+        await this.audit.record(client, claims, {
+          companyId,
+          action: "employee.rehire.eligibility_overridden",
+          target: employeeId,
+          reason: input.rehireOverrideReason ?? null,
+          metadata: { eligibility: block.eligibility, note: block.note, offboardingId: block.offboardingId },
+        });
+      }
+      await this.assertRehireCooldown(client, companyId, before, input.effectiveDate);
       return {
         setClause: "employment_status = 'active', termination_date = NULL, termination_reason = NULL",
         params: [],
@@ -435,17 +527,24 @@ export class EmployeeLifecycleService {
    * Shared shape every one of the 9 public methods above follows: gate,
    * load `before`, let the caller-supplied builder decide which columns
    * change (and validate whatever is specific to that transaction type),
-   * run one focused `UPDATE ... RETURNING *`, write the explicit
-   * `employee_job_history` row, audit, fire the generic
-   * `employee.lifecycle.changed` webhook, and return both the updated
-   * employee and the history entry so a caller never has to re-fetch
-   * either.
+   * then EITHER
+   *   - schedule the action (LIF-03) when its effective date is in the
+   *     future: nothing on the employee changes, an `employee_lifecycle_events`
+   *     row is stored 'scheduled' with the request payload, and
+   *     EmployeeLifecycleScheduler applies it on the day; OR
+   *   - apply it now: run one focused `UPDATE ... RETURNING *` (with
+   *     app.effective_date set so the history versions are dated correctly),
+   *     write the explicit `employee_job_history` row, record the applied
+   *     event with before/after snapshots (LIF-01), audit, fire the generic
+   *     `employee.lifecycle.changed` webhook, and return the employee, the
+   *     history entry and the event.
    */
   private async execute(
     claims: RequestClaims,
     employeeId: string,
     eventType: JobHistoryEventType,
     input: { effectiveDate: string; notes?: string; reasonCode?: string },
+    opts: LifecycleExecOptions,
     build: (
       client: PoolClient,
       companyId: string,
@@ -462,7 +561,7 @@ export class EmployeeLifecycleService {
       orgSync?: (source: string) => Promise<void>;
     }>
   ): Promise<LifecycleTransactionResult> {
-    const scope = await this.resolveManageAccess(claims);
+    const scope = opts.skipAccess ? null : await this.resolveManageAccess(claims);
 
     return this.db.withClaims(claims, async (client) => {
       const companyId = claims.company_id!;
@@ -482,7 +581,7 @@ export class EmployeeLifecycleService {
       // move that employee TO an org unit outside it. Closing that would
       // mean threading the proposed org unit/location out of every
       // `build*()` helper — a larger, separately-scoped refactor.
-      this.assertInManageScope(scope, before);
+      if (scope) this.assertInManageScope(scope, before);
 
       // HR Administration v2 — validate the supplied reason code (if any)
       // against this transaction type's mapped `lifecycle_reason:*`
@@ -494,7 +593,36 @@ export class EmployeeLifecycleService {
         await this.hrCatalog?.validateActiveCode(client, companyId, reasonCatalogType, input.reasonCode);
       }
 
+      const recordedBy = opts.recordedBy !== undefined ? opts.recordedBy : UUID_RE.test(claims.sub ?? "") ? claims.sub : null;
+      const channel: LifecycleEventChannel = opts.sourceChannel ?? "api";
+      const actionType = opts.correctsEventId ? "correction" : eventType;
+      const payload = opts.correctsEventId ? { ...input, actionType: eventType } : { ...input };
+      const originalNotes = input.notes ?? null;
+
       const built = await build(client, companyId, before);
+
+      // ---- LIF-03: future-dated -> schedule, change nothing yet
+      if (!opts.immediate && !opts.eventId && input.effectiveDate > todayIso()) {
+        const scheduled = await client.query(
+          `INSERT INTO employee_lifecycle_events
+             (company_id, employee_id, employment_id, action_type, reason_code, effective_date, planned_end_date, status, payload,
+              before_snapshot, source_channel, requested_by_user_account_id, corrects_event_id, workflow_instance_id, notes)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,'scheduled',$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+          [companyId, employeeId, before.employment_id ?? null, actionType, input.reasonCode ?? null, input.effectiveDate,
+           built.endDate ?? null, JSON.stringify(payload), JSON.stringify(snapshotOf(before)), channel, recordedBy,
+           opts.correctsEventId ?? null, opts.workflowInstanceId ?? null, originalNotes]
+        );
+        await this.audit.record(client, claims, {
+          companyId,
+          action: `employee.lifecycle.${eventType}.scheduled`,
+          target: employeeId,
+          metadata: { effectiveDate: input.effectiveDate, eventId: scheduled.rows[0].id, reasonCode: input.reasonCode ?? null },
+        });
+        return { employee: rowToEmployee(before), jobHistory: null, event: rowToEvent(scheduled.rows[0]) };
+      }
+
+      // dates the employee_versions / employment_versions windows
+      await client.query("SELECT set_config('app.effective_date', $1, true)", [input.effectiveDate]);
 
       let updateResult = await client.query(
         `UPDATE employees SET ${built.setClause}, updated_at = now() WHERE id = $1 RETURNING *`,
@@ -521,18 +649,47 @@ export class EmployeeLifecycleService {
           built.historyFields.department ?? null,
           built.historyFields.designation ?? null,
           built.historyFields.salaryBand ?? null,
-          input.notes ?? null,
-          claims.sub,
+          opts.correctsEventId ? `Correction of an earlier ${eventType}${originalNotes ? `: ${originalNotes}` : ""}` : originalNotes,
+          recordedBy,
           built.endDate ?? null,
           input.reasonCode ?? null,
         ]
       );
 
+      // ---- LIF-01: the event itself
+      let eventRow;
+      if (opts.eventId) {
+        const upd = await client.query(
+          `UPDATE employee_lifecycle_events
+              SET status = 'applied', before_snapshot = $2, after_snapshot = $3, job_history_id = $4, applied_at = now(),
+                  employment_id = $5, failure_reason = NULL
+            WHERE id = $1 AND status IN ('scheduled', 'failed') RETURNING *`,
+          [opts.eventId, JSON.stringify(snapshotOf(before)), JSON.stringify(snapshotOf(after)), historyResult.rows[0].id, after.employment_id ?? null]
+        );
+        if (upd.rowCount === 0) throw new BadRequestException("This scheduled lifecycle event is no longer pending");
+        eventRow = upd.rows[0];
+      } else {
+        const ins = await client.query(
+          `INSERT INTO employee_lifecycle_events
+             (company_id, employee_id, employment_id, action_type, reason_code, effective_date, planned_end_date, status, payload,
+              before_snapshot, after_snapshot, source_channel, requested_by_user_account_id, corrects_event_id, workflow_instance_id,
+              job_history_id, notes, applied_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,'applied',$8,$9,$10,$11,$12,$13,$14,$15,$16, now()) RETURNING *`,
+          [companyId, employeeId, after.employment_id ?? null, actionType, input.reasonCode ?? null, input.effectiveDate,
+           built.endDate ?? null, JSON.stringify(payload), JSON.stringify(snapshotOf(before)), JSON.stringify(snapshotOf(after)),
+           channel, recordedBy, opts.correctsEventId ?? null, opts.workflowInstanceId ?? null, historyResult.rows[0].id, originalNotes]
+        );
+        eventRow = ins.rows[0];
+      }
+
       await this.audit.record(client, claims, {
         companyId,
         action: `employee.lifecycle.${eventType}`,
         target: employeeId,
-        metadata: { effectiveDate: input.effectiveDate, notes: input.notes ?? null, reasonCode: input.reasonCode ?? null },
+        metadata: {
+          effectiveDate: input.effectiveDate, notes: input.notes ?? null, reasonCode: input.reasonCode ?? null,
+          eventId: eventRow.id, correctsEventId: opts.correctsEventId ?? null,
+        },
       });
 
       const employee = rowToEmployee(after);
@@ -542,8 +699,230 @@ export class EmployeeLifecycleService {
         ?.enqueue(companyId, "employee.lifecycle.changed", { employee, transactionType: eventType, jobHistory })
         .catch(() => undefined);
 
-      return { employee, jobHistory };
+      return { employee, jobHistory, event: rowToEvent(eventRow) };
     });
+  }
+
+  // ---------------------------------------------------------------------
+  // Step 4 (LIF-01/03/04/05/06): events, scheduling, corrections, access
+  // ---------------------------------------------------------------------
+
+  /** Events for one employee, newest first, each flagged with the correction (if any) that supersedes it. */
+  async listEvents(claims: RequestClaims, employeeId: string): Promise<LifecycleEventView[]> {
+    await this.requireViewAccess(claims);
+    return this.db.withClaims(claims, async (client) => {
+      const r = await client.query(
+        `SELECT ev.*, (SELECT c.id FROM employee_lifecycle_events c WHERE c.corrects_event_id = ev.id AND c.status = 'applied'
+                        ORDER BY c.created_at DESC LIMIT 1) AS corrected_by_event_id
+           FROM employee_lifecycle_events ev
+          WHERE ev.employee_id = $1
+          ORDER BY ev.effective_date DESC, ev.created_at DESC`,
+        [employeeId]
+      );
+      return r.rows.map((row) => rowToEvent(row));
+    });
+  }
+
+  /** Cancels a still-scheduled (or failed) event. Applied events are never cancelled - correct them instead. */
+  async cancelScheduled(claims: RequestClaims, employeeId: string, eventId: string, reason?: string): Promise<LifecycleEventView> {
+    const scope = await this.resolveManageAccess(claims);
+    return this.db.withClaims(claims, async (client) => {
+      const emp = await client.query("SELECT org_unit_id, location_id FROM employees WHERE id = $1", [employeeId]);
+      if (emp.rowCount === 0) throw new NotFoundException("Employee not found");
+      this.assertInManageScope(scope, emp.rows[0]);
+      const r = await client.query(
+        `UPDATE employee_lifecycle_events SET status = 'cancelled', failure_reason = $3
+          WHERE id = $1 AND employee_id = $2 AND status IN ('scheduled', 'failed') RETURNING *`,
+        [eventId, employeeId, reason ?? "Cancelled"]
+      );
+      if (r.rowCount === 0) throw new BadRequestException("Only a scheduled (or failed) lifecycle event can be cancelled");
+      await this.audit.record(client, claims, {
+        companyId: claims.company_id ?? null,
+        action: "employee.lifecycle.cancelled",
+        target: employeeId,
+        reason: reason ?? null,
+        metadata: { eventId },
+      });
+      return rowToEvent(r.rows[0]);
+    });
+  }
+
+  /**
+   * LIF-04: a correction is a NEW event that replays the original action with
+   * changed inputs. The original event, its job-history row and its snapshots
+   * are never touched. Only the most recent applied event of its type can be
+   * corrected (otherwise the replay could silently override a later change),
+   * and only events recorded by this step (they carry their request payload).
+   */
+  async correct(claims: RequestClaims, employeeId: string, eventId: string, input: CorrectLifecycleEventRequest): Promise<LifecycleTransactionResult> {
+    if (!input.reason?.trim()) throw new BadRequestException("A correction needs a reason");
+    await this.resolveManageAccess(claims);
+    const original = await this.db.withClaims(claims, async (client) => {
+      const r = await client.query(
+        `SELECT ev.*,
+                (SELECT count(*) FROM employee_lifecycle_events l
+                  WHERE l.employee_id = ev.employee_id AND l.status = 'applied'
+                    AND coalesce(l.payload ->> 'actionType', l.action_type) = coalesce(ev.payload ->> 'actionType', ev.action_type)
+                    AND (l.effective_date, l.created_at) > (ev.effective_date, ev.created_at)) AS later_same_type
+           FROM employee_lifecycle_events ev WHERE ev.id = $1 AND ev.employee_id = $2`,
+        [eventId, employeeId]
+      );
+      if (r.rowCount === 0) throw new NotFoundException("Lifecycle event not found");
+      return r.rows[0];
+    });
+    if (original.status !== "applied") throw new BadRequestException("Only an applied event can be corrected");
+    const baseType: string = original.payload?.actionType ?? original.action_type;
+    if (!CORRECTABLE.has(baseType)) throw new BadRequestException(`Corrections are not supported for "${baseType}" events; record a new action instead`);
+    if (!original.payload || Object.keys(original.payload).length === 0 || original.source_channel === "backfill") {
+      throw new BadRequestException("This event predates event recording and cannot be replayed; record a new action instead");
+    }
+    if (Number(original.later_same_type) > 0) {
+      throw new BadRequestException("Only the latest event of this type can be corrected; a later one already exists");
+    }
+    const merged = { ...original.payload, ...input.changes };
+    delete (merged as Record<string, unknown>).actionType;
+    merged.effectiveDate = input.effectiveDate ?? merged.effectiveDate ?? toIsoDate(original.effective_date);
+    merged.notes = input.reason;
+    return this.dispatch(claims, employeeId, baseType, merged, { immediate: true, correctsEventId: original.id, sourceChannel: "api" });
+  }
+
+  /** Re-enters the right public method from a stored payload (corrections and the scheduler). */
+  private dispatch(claims: RequestClaims, employeeId: string, actionType: string, payload: any, opts: LifecycleExecOptions): Promise<LifecycleTransactionResult> { // eslint-disable-line @typescript-eslint/no-explicit-any
+    switch (actionType) {
+      case "transfer": return this.transfer(claims, employeeId, payload, opts);
+      case "promotion": return this.promote(claims, employeeId, payload, opts);
+      case "demotion": return this.demote(claims, employeeId, payload, opts);
+      case "secondment": return this.second(claims, employeeId, payload, opts);
+      case "acting": return this.assignActingRole(claims, employeeId, payload, opts);
+      case "manager_change": return this.changeManager(claims, employeeId, payload, opts);
+      case "location_change": return this.changeLocation(claims, employeeId, payload, opts);
+      case "termination": return this.terminate(claims, employeeId, payload, opts);
+      case "reactivation": return this.reactivate(claims, employeeId, payload, opts);
+      default: throw new BadRequestException(`Unknown lifecycle action "${actionType}"`);
+    }
+  }
+
+  /**
+   * LIF-03: the effective-date sweep (same shape as OrgChangesService.
+   * executeDueChanges). Authorization happened when the action was
+   * scheduled, so each event runs as a company-scoped service identity
+   * attributed to the user who scheduled it. A failure marks that one event
+   * 'failed' (visible to HR, retryable by cancelling and re-recording) and
+   * never blocks the others.
+   */
+  async executeDueEvents(limit = 200): Promise<number> {
+    const sweeper: RequestClaims = { is_platform_admin: false, is_service: true, sub: "system", company_id: null } as RequestClaims;
+    const due = await this.db.withClaims(sweeper, async (client) => {
+      const r = await client.query(
+        `SELECT id, company_id, employee_id, action_type, payload, requested_by_user_account_id
+           FROM employee_lifecycle_events
+          WHERE status = 'scheduled' AND effective_date <= CURRENT_DATE
+          ORDER BY effective_date, created_at LIMIT $1`,
+        [limit]
+      );
+      return r.rows;
+    });
+    let applied = 0;
+    for (const ev of due) {
+      const claims = { is_platform_admin: false, is_service: true, sub: "system", company_id: ev.company_id } as RequestClaims;
+      try {
+        const baseType: string = ev.payload?.actionType ?? ev.action_type;
+        const payload = { ...ev.payload };
+        delete payload.actionType;
+        await this.dispatch(claims, ev.employee_id, baseType, payload, {
+          immediate: true,
+          eventId: ev.id,
+          skipAccess: true,
+          sourceChannel: "scheduler",
+          recordedBy: ev.requested_by_user_account_id ?? null,
+        });
+        applied += 1;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        await this.db
+          .withClaims(claims, (client) =>
+            client.query(
+              "UPDATE employee_lifecycle_events SET status = 'failed', failure_reason = $2 WHERE id = $1 AND status = 'scheduled'",
+              [ev.id, message.slice(0, 1000)]
+            )
+          )
+          .catch(() => undefined);
+      }
+    }
+    return applied;
+  }
+
+  /**
+   * LIF-05: when a termination takes effect the employee's login for THIS
+   * company is closed - role assignments end, this company's sessions are
+   * revoked, and the account is locked only if it has no other active
+   * assignment anywhere. Opt-out: the termination_exit policy rule
+   * `revokeAccessOnTermination: false`. Runs as a company-scoped service
+   * identity (user_accounts/user_sessions are not writable by tenant users).
+   */
+  private async revokeAccessAfterTermination(companyId: string, employeeId: string, userAccountId: string | null, effectiveDate: string): Promise<void> {
+    if (!userAccountId) return;
+    const svc = { is_platform_admin: false, is_service: true, sub: "system", company_id: companyId } as RequestClaims;
+    await this.db.withClaims(svc, async (client) => {
+      if (this.businessPolicy) {
+        const rules = await this.businessPolicy.resolveEffectivePolicy(client, companyId, "termination_exit", { employeeId });
+        if (rules && rules.revokeAccessOnTermination === false) return;
+      }
+      const ended = await client.query(
+        `UPDATE user_role_assignments SET effective_to = LEAST(COALESCE(effective_to, $3::date), $3::date), reason = COALESCE(reason, 'Employment terminated')
+          WHERE user_account_id = $1 AND company_id = $2 AND (effective_to IS NULL OR effective_to > $3::date)`,
+        [userAccountId, companyId, effectiveDate]
+      );
+      const sessions = await client.query(
+        `UPDATE user_sessions SET revoked_at = now(), revoked_by = 'employee-termination'
+          WHERE user_account_id = $1 AND company_id = $2 AND revoked_at IS NULL`,
+        [userAccountId, companyId]
+      );
+      const remaining = await client.query(
+        // this company's assignments were just ended (effective_to is inclusive, so one ending
+        // today would still count) - only access elsewhere keeps the account open
+        `SELECT 1 FROM user_role_assignments
+          WHERE user_account_id = $1 AND company_id IS DISTINCT FROM $2 AND (effective_to IS NULL OR effective_to >= CURRENT_DATE) LIMIT 1`,
+        [userAccountId, companyId]
+      );
+      let locked = false;
+      if (remaining.rowCount === 0) {
+        await client.query("UPDATE user_accounts SET status = 'locked', updated_at = now() WHERE id = $1", [userAccountId]);
+        locked = true;
+      }
+      await this.audit.record(client, svc, {
+        companyId,
+        action: "employee.access_revoked",
+        target: employeeId,
+        metadata: { userAccountId, effectiveDate, roleAssignmentsEnded: ended.rowCount ?? 0, sessionsRevoked: sessions.rowCount ?? 0, accountLocked: locked },
+      });
+    });
+  }
+
+  /** LIF-06: the Rehire Policy's cooldown, applied to reactivation of a terminated record. */
+  private async assertRehireCooldown(client: PoolClient, companyId: string, before: { id: string; org_unit_id: string | null; location_id: string | null; termination_date: Date | string | null }, effectiveDate: string): Promise<void> {
+    if (!this.businessPolicy || !before.termination_date) return;
+    const rules = await this.businessPolicy.resolveEffectivePolicy(client, companyId, "rehire", {
+      employeeId: before.id,
+      orgUnitId: before.org_unit_id,
+      locationId: before.location_id,
+    });
+    const cooldownDays = typeof rules?.cooldownDays === "number" ? rules.cooldownDays : 0;
+    if (cooldownDays <= 0) return;
+    const eligibleFrom = new Date(toIsoDate(before.termination_date) as string);
+    eligibleFrom.setUTCDate(eligibleFrom.getUTCDate() + cooldownDays);
+    if (new Date(effectiveDate) < eligibleFrom) {
+      throw new BadRequestException(
+        `This person's last employment ended too recently to be reactivated yet - this company's Rehire Policy requires a ${cooldownDays}-day wait, so they become eligible on ${eligibleFrom.toISOString().slice(0, 10)}.`
+      );
+    }
+  }
+
+  private async requireViewAccess(claims: RequestClaims): Promise<void> {
+    if (!claims.company_id) throw new ForbiddenException();
+    if (!(await this.entitlements.isModuleEnabled(claims, MODULE_KEY))) throw new NotFoundException();
+    const [view, manage] = await Promise.all([this.rbac.can(claims, "employee.view.all"), this.rbac.can(claims, MANAGE_PERMISSION)]);
+    if (!view && !manage) throw new ForbiddenException("Not permitted to view lifecycle events");
   }
 
   /**

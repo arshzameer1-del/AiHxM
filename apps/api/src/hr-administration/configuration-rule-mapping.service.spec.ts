@@ -26,6 +26,9 @@ describe("ConfigurationRuleMappingService", () => {
   let mappings: ConfigurationRuleMappingService;
   let policies: HrBusinessPolicyService;
   let companyId: string;
+  // INT-02 (migration 0122): location/employee scope values must be real same-company ids.
+  let fixtureLocationId: string;
+  let fixtureEmployeeId: string;
   let hrAdminClaims: RequestClaims;
   let noPermissionClaims: RequestClaims;
 
@@ -82,6 +85,18 @@ describe("ConfigurationRuleMappingService", () => {
       return result.rows[0].id as string;
     });
     noPermissionClaims = { is_platform_admin: false, company_id: companyId, sub: outsiderUserId };
+
+    await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+      fixtureLocationId = (
+        await client.query("INSERT INTO locations (company_id, location_type, name) VALUES ($1, 'site', 'Karachi HQ') RETURNING id", [companyId])
+      ).rows[0].id;
+      fixtureEmployeeId = (
+        await client.query(
+          "INSERT INTO employees (company_id, employee_number, first_name, last_name) VALUES ($1, 'MAP-1', 'Map', 'Fixture') RETURNING id",
+          [companyId]
+        )
+      ).rows[0].id;
+    });
 
     await db.withClaims(hrAdminClaims, async (client) => {
       const bu = await client.query(
@@ -199,34 +214,34 @@ describe("ConfigurationRuleMappingService", () => {
       configDomain: "hr_business_policy",
       configKey: "rehire",
       scopeType: "location",
-      scopeValue: "karachi-hq",
+      scopeValue: fixtureLocationId,
       ruleValue: { cooldownDays: 30 },
     });
     await mappings.create(hrAdminClaims, {
       configDomain: "hr_business_policy",
       configKey: "rehire",
       scopeType: "employee",
-      scopeValue: "emp-123",
+      scopeValue: fixtureEmployeeId,
       ruleValue: { cooldownDays: 0 },
     });
 
     const employeeWins = await db.withClaims(hrAdminClaims, (client) =>
       mappings.resolveOverride(client, companyId, "hr_business_policy", "rehire", {
-        employeeId: "emp-123",
-        locationId: "karachi-hq",
+        employeeId: fixtureEmployeeId,
+        locationId: fixtureLocationId,
         orgUnitId: departmentId,
       })
     );
-    expect(employeeWins).toEqual({ scopeType: "employee", scopeValue: "emp-123", ruleValue: { cooldownDays: 0 } });
+    expect(employeeWins).toEqual({ scopeType: "employee", scopeValue: fixtureEmployeeId, ruleValue: { cooldownDays: 0 } });
 
     const locationWins = await db.withClaims(hrAdminClaims, (client) =>
       mappings.resolveOverride(client, companyId, "hr_business_policy", "rehire", {
         employeeId: "someone-else",
-        locationId: "karachi-hq",
+        locationId: fixtureLocationId,
         orgUnitId: departmentId,
       })
     );
-    expect(locationWins).toEqual({ scopeType: "location", scopeValue: "karachi-hq", ruleValue: { cooldownDays: 30 } });
+    expect(locationWins).toEqual({ scopeType: "location", scopeValue: fixtureLocationId, ruleValue: { cooldownDays: 30 } });
   });
 
   it("HrBusinessPolicyService.resolveEffectivePolicy merges an org_unit override over the plain company-wide default", async () => {

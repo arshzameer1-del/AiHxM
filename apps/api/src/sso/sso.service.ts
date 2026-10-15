@@ -1,3 +1,4 @@
+import { decryptIntegrationConfig } from "../crypto/integration-secrets";
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomBytes, randomUUID } from "crypto";
 import { SAML, ValidateInResponseTo, type Profile } from "@node-saml/node-saml";
@@ -144,7 +145,8 @@ export class SsoService {
     if (result.rowCount === 0) {
       throw new NotFoundException("Single sign-on is not enabled for this company");
     }
-    const config = result.rows[0].config as SsoIntegrationConfig;
+    // SEC-03: clientSecret is stored encrypted.
+    const config = (await decryptIntegrationConfig(client, result.rows[0].company_id, "sso", result.rows[0].config ?? {})) as unknown as SsoIntegrationConfig;
     if (config.protocol === "oidc") {
       if (!config.issuerUrl || !config.clientId || !config.clientSecret) {
         throw new BadRequestException("This company's single sign-on configuration is incomplete");

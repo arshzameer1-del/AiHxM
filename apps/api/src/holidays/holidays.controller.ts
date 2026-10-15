@@ -1,4 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
+import { HolidayCalendarsService } from "./holiday-calendars.service";
+import { CreateHolidayCalendarDto, RollHolidaysForwardDto, UpdateHolidayCalendarDto } from "./dto/holiday-calendar.dto";
 import { SessionGuard } from "../auth/session.guard";
 import { CurrentClaims } from "../auth/current-claims.decorator";
 import type { RequestClaims } from "../database/tenant-context";
@@ -14,7 +16,10 @@ import { UpdateHolidayDto } from "./dto/update-holiday.dto";
 @Controller()
 @UseGuards(SessionGuard)
 export class HolidaysController {
-  constructor(private readonly holidays: HolidaysService) {}
+  constructor(
+    private readonly holidays: HolidaysService,
+    private readonly calendars: HolidayCalendarsService
+  ) {}
 
   @Post("holidays")
   create(@CurrentClaims() claims: RequestClaims, @Body() dto: CreateHolidayDto) {
@@ -22,8 +27,28 @@ export class HolidaysController {
   }
 
   @Get("holidays")
-  list(@CurrentClaims() claims: RequestClaims, @Query("year") year?: string) {
-    return this.holidays.listHolidays(claims, year);
+  list(@CurrentClaims() claims: RequestClaims, @Query("year") year?: string, @Query("calendarId") calendarId?: string) {
+    return this.holidays.listHolidays(claims, year, calendarId);
+  }
+
+  @Post("holidays/roll-forward")
+  rollForward(@CurrentClaims() claims: RequestClaims, @Body() dto: RollHolidaysForwardDto) {
+    return this.holidays.rollForward(claims, dto);
+  }
+
+  @Get("holiday-calendars")
+  listCalendars(@CurrentClaims() claims: RequestClaims, @Query("includeArchived") includeArchived?: string) {
+    return this.calendars.list(claims, includeArchived === "true");
+  }
+
+  @Post("holiday-calendars")
+  createCalendar(@CurrentClaims() claims: RequestClaims, @Body() dto: CreateHolidayCalendarDto) {
+    return this.calendars.create(claims, dto);
+  }
+
+  @Patch("holiday-calendars/:id")
+  updateCalendar(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: UpdateHolidayCalendarDto) {
+    return this.calendars.update(claims, id, dto);
   }
 
   @Patch("holidays/:id")

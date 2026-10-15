@@ -57,4 +57,10 @@ export class OrgChangesController {
   execute(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
     return this.orgChanges.execute(claims, id);
   }
+
+  /** ORG-07: re-run a failed batch from its first unapplied item. */
+  @Post(":id/resume")
+  resume(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.orgChanges.resume(claims, id);
+  }
 }

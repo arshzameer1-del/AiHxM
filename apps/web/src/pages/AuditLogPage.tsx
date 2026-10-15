@@ -225,7 +225,9 @@ export function AuditLogPage() {
                 </td>
                 <td className="px-4 py-3">{entry.companyName ?? "—"}</td>
                 <td className="px-4 py-3 font-mono text-xs">{entry.action}</td>
-                <td className="px-4 py-3 text-xs">{entry.actor}</td>
+                <td className="px-4 py-3 text-xs" title={entry.actor}>
+                  {entry.actorLabel ?? entry.actor}
+                </td>
                 <td className="px-4 py-3 text-xs text-label-tertiary">{entry.target ?? "—"}</td>
               </tr>
             ))}

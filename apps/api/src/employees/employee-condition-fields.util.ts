@@ -22,4 +22,21 @@ export const EMPLOYEE_CONDITION_FIELD_TO_COLUMN: Record<string, string> = {
   designation: "designation",
   employmentType: "employment_type",
   employmentStatus: "employment_status",
+  // CAT-05: canonical-ID conditions (jobId is derived through the employee's
+  // position and is supplied by the caller, so it has no column here)
+  orgUnitId: "org_unit_id",
+  locationId: "location_id",
+  positionId: "position_id",
+  subgroupId: "employee_subgroup_id",
+};
+
+/** The original text-attribute fields only. Consumers whose own tables still
+ * constrain `field` to these five (Work Schedule assignment rules) use this
+ * so the CAT-05 canonical-ID fields don't silently become "allowed" there. */
+export const EMPLOYEE_TEXT_CONDITION_FIELD_TO_COLUMN: Record<string, string> = {
+  department: "department",
+  location: "location",
+  designation: "designation",
+  employmentType: "employment_type",
+  employmentStatus: "employment_status",
 };

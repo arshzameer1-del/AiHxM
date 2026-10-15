@@ -218,6 +218,61 @@ describe("HrBusinessPolicyService", () => {
     expect(rules).toBeNull();
   });
 
+  describe("effective dating and versioning (CAT-07)", () => {
+    it("bumps version only when rules actually change; stores applicability and a window", async () => {
+      const p = await policies.create(hrAdminClaims, {
+        policyType: "document",
+        code: "cat07-doc",
+        name: "CAT-07 documents",
+        rules: { requiredDocumentTypes: ["cnic"] },
+        applicability: { employmentTypes: ["permanent"] },
+        effectiveFrom: "2020-01-01",
+      });
+      expect(p.version).toBe(1);
+      expect(p.effectiveFrom).toBe("2020-01-01");
+      expect(p.applicability).toEqual({ employmentTypes: ["permanent"] });
+      const same = await policies.update(hrAdminClaims, p.id, { rules: { requiredDocumentTypes: ["cnic"] }, name: "Renamed" });
+      expect(same.version).toBe(1);
+      const changed = await policies.update(hrAdminClaims, p.id, { rules: { requiredDocumentTypes: ["cnic", "passport"] } });
+      expect(changed.version).toBe(2);
+      await expect(policies.update(hrAdminClaims, p.id, { effectiveTo: "2019-01-01" })).rejects.toThrow(BadRequestException);
+    });
+
+    it("a scheduled successor default ends the current one the day before and takes over on its date", async () => {
+      const current = await policies.create(hrAdminClaims, { policyType: "retention", code: "ret-now", name: "Retention now", rules: { years: 5 }, isDefault: true });
+      const successor = await policies.create(hrAdminClaims, {
+        policyType: "retention",
+        code: "ret-next",
+        name: "Retention next",
+        rules: { years: 7 },
+        isDefault: true,
+        effectiveFrom: "2999-01-01",
+      });
+      const reread = (await policies.listPolicies(hrAdminClaims, "retention", true)).find((x) => x.id === current.id)!;
+      expect(reread.isDefault).toBe(true); // still the default today
+      expect(reread.effectiveTo).toBe("2998-12-31");
+      expect(successor.effectiveFrom).toBe("2999-01-01");
+      const today = await db.withClaims(hrAdminClaims, (client) => policies.resolveDefaultPolicy(client, companyId, "retention"));
+      expect(today).toEqual({ years: 5 });
+    });
+
+    it("the database refuses two default policies whose windows overlap", async () => {
+      await policies.create(hrAdminClaims, { policyType: "transfer", code: "tr-a", name: "A", isDefault: true });
+      await expect(
+        db.withClaims(FIXTURE_CLAIMS, (client) =>
+          client.query("INSERT INTO hr_business_policies (company_id, policy_type, code, name, is_default) VALUES ($1,'transfer','tr-b','B',true)", [companyId])
+        )
+      ).rejects.toThrow(/hr_business_policies_one_default_per_window/);
+    });
+
+    it("a policy not yet in effect is not returned as the default", async () => {
+      const future = await policies.create(hrAdminClaims, { policyType: "correction", code: "cor-future", name: "Future", rules: { editableWindowDays: 1 }, isDefault: true, effectiveFrom: "2999-06-01" });
+      expect(future.isDefault).toBe(true);
+      const rules = await db.withClaims(hrAdminClaims, (client) => policies.resolveDefaultPolicy(client, companyId, "correction"));
+      expect(rules).not.toEqual({ editableWindowDays: 1 });
+    });
+  });
+
   it("denies a login without hr_business_policy permissions", async () => {
     await expect(policies.listPolicyTypes(noPermissionClaims)).rejects.toThrow(ForbiddenException);
     await expect(

@@ -1,9 +1,15 @@
+import { WorkflowModule } from "../workflow/workflow.module";
 import { Module } from "@nestjs/common";
 import { EmployeesController } from "./employees.controller";
 import { EmployeesService } from "./employees.service";
 import { PersonsService } from "./persons.service";
+import { PersonDirectoryService } from "./person-directory.service";
+import { PersonsController } from "./persons.controller";
+import { EmployeeNumberingController } from "./employee-numbering.controller";
+import { EmployeeNumberingService } from "./employee-numbering.service";
 import { HiringController, HiringConfigurationController } from "./hiring/hiring.controller";
 import { HiringProcessService } from "./hiring/hiring-process.service";
+import { HireDraftHygieneScheduler } from "./hiring/hire-draft-hygiene.scheduler";
 import { CardFieldConfigService } from "./hiring/card-field-config.service";
 import { EmployeeContactsController } from "./employee-contacts.controller";
 import { EmployeeContactsService } from "./employee-contacts.service";
@@ -25,6 +31,7 @@ import { EmployeeAssetsController } from "./employee-assets.controller";
 import { EmployeeAssetsService } from "./employee-assets.service";
 import { EmployeeLifecycleController } from "./employee-lifecycle.controller";
 import { EmployeeLifecycleService } from "./employee-lifecycle.service";
+import { EmployeeLifecycleScheduler } from "./employee-lifecycle.scheduler";
 import { EmployeeAnalyticsController } from "./employee-analytics.controller";
 import { EmployeeAnalyticsService } from "./employee-analytics.service";
 import { EmployeeCompensationController } from "./employee-compensation.controller";
@@ -35,6 +42,9 @@ import { EmployeeAdditionalPaymentsController } from "./employee-additional-paym
 import { EmployeeAdditionalPaymentsService } from "./employee-additional-payments.service";
 import { EmployeeOffCyclePaymentsController } from "./employee-offcycle-payments.controller";
 import { EmployeeOffCyclePaymentsService } from "./employee-offcycle-payments.service";
+import { EmployeeImportController } from "./import/employee-import.controller";
+import { EmployeeImportService } from "./import/employee-import.service";
+import { EmployeeImportWorker } from "./import/employee-import.worker";
 import { RbacModule } from "../rbac/rbac.module";
 import { EntitlementsModule } from "../entitlements/entitlements.module";
 import { AuditModule } from "../audit/audit.module";
@@ -95,6 +105,7 @@ import { OrgOccupancyModule } from "../organization/occupancy/org-occupancy.modu
     HrAdministrationModule,
     CustomFieldsModule,
     OrgOccupancyModule,
+    WorkflowModule,
   ],
   // Core Employee Enterprise Phase 2/3 — HiringController (the hire
   // process engine) and HiringConfigurationController (Phase 3's scoped
@@ -109,6 +120,9 @@ import { OrgOccupancyModule } from "../organization/occupancy/org-occupancy.modu
   // established for EmployeesService.
   controllers: [
     EmployeesController,
+    PersonsController,
+    EmployeeNumberingController,
+    EmployeeImportController,
     HiringController,
     HiringConfigurationController,
     EmployeeContactsController,
@@ -133,7 +147,12 @@ import { OrgOccupancyModule } from "../organization/occupancy/org-occupancy.modu
   providers: [
     EmployeesService,
     PersonsService,
+    PersonDirectoryService,
+    EmployeeNumberingService,
+    EmployeeImportService,
+    EmployeeImportWorker,
     HiringProcessService,
+    HireDraftHygieneScheduler,
     CardFieldConfigService,
     EmployeeContactsService,
     EmployeeAddressesService,
@@ -145,6 +164,7 @@ import { OrgOccupancyModule } from "../organization/occupancy/org-occupancy.modu
     EmployeeQualificationsService,
     EmployeeAssetsService,
     EmployeeLifecycleService,
+    EmployeeLifecycleScheduler,
     EmployeeAnalyticsService,
     EmployeeCompensationService,
     EmployeeLoansService,
@@ -153,7 +173,9 @@ import { OrgOccupancyModule } from "../organization/occupancy/org-occupancy.modu
   ],
   exports: [
     EmployeesService,
+    EmployeeNumberingService,
     PersonsService,
+    PersonDirectoryService,
     HiringProcessService,
     EmployeeContactsService,
     EmployeeAddressesService,

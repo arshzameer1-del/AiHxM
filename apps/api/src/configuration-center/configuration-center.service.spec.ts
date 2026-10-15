@@ -313,6 +313,13 @@ describe("ConfigurationCenterService", () => {
       expect(domainKeys).not.toContain("position");
     });
 
+    it("CFG-06: registry rows flagged show_in_center = false never reach the Configuration Center", async () => {
+      const hidden = await db.withClaims(FIXTURE_CLAIMS, (c) => c.query("SELECT domain_key FROM configuration_registry WHERE show_in_center = false"));
+      expect(hidden.rows.length).toBeGreaterThan(0);
+      const keys = (await configurationCenter.getSummary(hrAdminClaims)).map((r) => r.domainKey);
+      for (const h of hidden.rows) expect(keys).not.toContain(h.domain_key);
+    });
+
     it("every returned summary row carries a real admin route and label from the registry", async () => {
       const summary = await configurationCenter.getSummary(hrAdminClaims);
       for (const row of summary) {

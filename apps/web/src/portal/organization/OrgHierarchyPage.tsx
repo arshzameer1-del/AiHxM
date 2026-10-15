@@ -27,6 +27,8 @@ const POSITION_STATUS_LABELS: Record<PositionStatus, string> = {
   filled: "Filled",
   frozen: "Frozen",
   abolished: "Abolished",
+  pending_approval: "Pending approval",
+  rejected: "Rejected",
 };
 
 function positionStatusBadgeClass(status: PositionStatus): string {
@@ -39,6 +41,10 @@ function positionStatusBadgeClass(status: PositionStatus): string {
       return "bg-yellow-500/15 text-yellow-700";
     case "abolished":
       return "bg-black/10 text-label-tertiary";
+    case "pending_approval":
+      return "bg-amber-100 text-amber-800";
+    case "rejected":
+      return "bg-danger/15 text-red-700";
   }
 }
 
@@ -237,6 +243,40 @@ type UnitFormValue = {
   code: string;
 };
 
+/** Pure, immutable tree helpers used to patch the hierarchy from a
+ * mutation's own response instead of re-fetching the whole tree — a live
+ * QA pass on production showed an immediate GET /organization/units/tree
+ * right after a successful create can still come back without the new
+ * unit for a few seconds (POST 201, refetch 200 but stale, correct only on
+ * a later reload). Every unit mutation below already returns the updated
+ * OrgUnitView, so patching from that response sidesteps the lag. */
+function updateUnitInTree(
+  nodes: OrgUnitTreeNode[],
+  updated: OrgUnitView
+): OrgUnitTreeNode[] {
+  return nodes.map((n) =>
+    n.id === updated.id
+      ? { ...n, ...updated, children: n.children }
+      : n.children.length === 0
+        ? n
+        : { ...n, children: updateUnitInTree(n.children, updated) }
+  );
+}
+
+function insertUnitInTree(nodes: OrgUnitTreeNode[], created: OrgUnitView): OrgUnitTreeNode[] {
+  const fresh: OrgUnitTreeNode = { ...created, children: [] };
+  if (!created.parentId) return [...nodes, fresh];
+  const insert = (list: OrgUnitTreeNode[]): OrgUnitTreeNode[] =>
+    list.map((n) =>
+      n.id === created.parentId
+        ? { ...n, children: [...n.children, fresh] }
+        : n.children.length === 0
+          ? n
+          : { ...n, children: insert(n.children) }
+    );
+  return insert(nodes);
+}
+
 /** Renames/retypes/recodes an EXISTING unit in place — creation (root or
  * child) is `ChildCreateForm` below, kept as a separate component since
  * "edit" and "create under a parent" have different enough field defaults
@@ -249,7 +289,7 @@ function UnitForm({
 }: {
   initial: OrgUnitView;
   onCancel: () => void;
-  onSaved: () => void;
+  onSaved: (updated: OrgUnitView) => void;
 }) {
   const [value, setValue] = useState<UnitFormValue>({
     name: initial.name,
@@ -264,8 +304,12 @@ function UnitForm({
     setError(null);
     setSubmitting(true);
     try {
-      await api.updateOrgUnit(initial.id, { name: value.name, unitType: value.unitType, code: value.code || undefined });
-      onSaved();
+      const updated = await api.updateOrgUnit(initial.id, {
+        name: value.name,
+        unitType: value.unitType,
+        code: value.code || undefined,
+      });
+      onSaved(updated);
     } catch (err) {
       setError(describeError(err));
     } finally {
@@ -394,6 +438,8 @@ function UnitRow({
   expanded,
   onToggleExpand,
   onChanged,
+  onUnitUpdated,
+  onUnitCreated,
   positionsByOrgUnit,
   employeeByPositionId,
   employeeById,
@@ -408,7 +454,12 @@ function UnitRow({
   canManage: boolean;
   expanded: Set<string>;
   onToggleExpand: (id: string) => void;
+  /** Full refetch — still used for Move (reparenting restructures the tree). */
   onChanged: () => void;
+  /** Patch one unit in place from a mutation's own response. */
+  onUnitUpdated: (unit: OrgUnitView) => void;
+  /** Insert a just-created unit from the create response. */
+  onUnitCreated: (unit: OrgUnitView) => void;
   positionsByOrgUnit: Map<string, PositionView[]>;
   employeeByPositionId: Map<string, EmployeeView>;
   employeeById: Map<string, EmployeeView>;
@@ -443,12 +494,9 @@ function UnitRow({
     setBusy(true);
     setError(null);
     try {
-      if (node.status === "active") {
-        await api.archiveOrgUnit(node.id);
-      } else {
-        await api.activateOrgUnit(node.id);
-      }
-      onChanged();
+      const updated =
+        node.status === "active" ? await api.archiveOrgUnit(node.id) : await api.activateOrgUnit(node.id);
+      onUnitUpdated(updated);
     } catch (err) {
       setError(describeError(err));
     } finally {
@@ -577,9 +625,9 @@ function UnitRow({
           <UnitForm
             initial={node}
             onCancel={() => setMode("none")}
-            onSaved={() => {
+            onSaved={(updated) => {
               setMode("none");
-              onChanged();
+              onUnitUpdated(updated);
             }}
           />
         </div>
@@ -605,9 +653,12 @@ function UnitRow({
             parentId={node.id}
             parentName={node.name}
             onCancel={() => setMode("none")}
-            onSaved={() => {
+            onSaved={(created) => {
               setMode("none");
-              onChanged();
+              onUnitCreated(created);
+              // Make sure the new sub-unit is visible, not hidden under a
+              // collapsed parent.
+              if (!expanded.has(node.id)) onToggleExpand(node.id);
             }}
           />
         </div>
@@ -643,6 +694,8 @@ function UnitRow({
             expanded={expanded}
             onToggleExpand={onToggleExpand}
             onChanged={onChanged}
+            onUnitUpdated={onUnitUpdated}
+            onUnitCreated={onUnitCreated}
             positionsByOrgUnit={positionsByOrgUnit}
             employeeByPositionId={employeeByPositionId}
             employeeById={employeeById}
@@ -670,7 +723,7 @@ function ChildCreateForm({
   parentId: string | null;
   parentName: string;
   onCancel: () => void;
-  onSaved: () => void;
+  onSaved: (created: OrgUnitView) => void;
 }) {
   const [value, setValue] = useState<UnitFormValue>({ name: "", unitType: "department", code: "" });
   const [error, setError] = useState<string | null>(null);
@@ -681,13 +734,13 @@ function ChildCreateForm({
     setError(null);
     setSubmitting(true);
     try {
-      await api.createOrgUnit({
+      const created = await api.createOrgUnit({
         name: value.name,
         unitType: value.unitType,
         code: value.code || undefined,
         parentId: parentId ?? undefined,
       });
-      onSaved();
+      onSaved(created);
     } catch (err) {
       setError(describeError(err));
     } finally {
@@ -1008,9 +1061,9 @@ export function OrgHierarchyPage() {
             parentId={null}
             parentName=""
             onCancel={() => setCreatingRoot(false)}
-            onSaved={() => {
+            onSaved={(created) => {
               setCreatingRoot(false);
-              load();
+              setTree((t) => (t ? insertUnitInTree(t, created) : t));
             }}
           />
         </div>
@@ -1034,6 +1087,8 @@ export function OrgHierarchyPage() {
               expanded={expanded}
               onToggleExpand={toggleExpand}
               onChanged={load}
+              onUnitUpdated={(u) => setTree((t) => (t ? updateUnitInTree(t, u) : t))}
+              onUnitCreated={(u) => setTree((t) => (t ? insertUnitInTree(t, u) : t))}
               positionsByOrgUnit={positionsByOrgUnit}
               employeeByPositionId={employeeByPositionId}
               employeeById={employeeById}

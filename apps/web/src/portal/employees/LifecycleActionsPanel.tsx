@@ -307,7 +307,14 @@ function ActionForm({
           break;
       }
       onChanged(result.employee);
-      onDone(`${ACTIONS.find((a) => a.key === actionKey)?.label} recorded — ${result.jobHistory.eventType.replace("_", " ")} effective ${result.jobHistory.effectiveDate}.`);
+      const label = ACTIONS.find((a) => a.key === actionKey)?.label;
+      // LIF-03: a future-dated action is only scheduled - nothing on the
+      // employee changes until its effective date.
+      onDone(
+        result.event.status === "scheduled" || !result.jobHistory
+          ? `${label} scheduled — it will take effect on ${result.event.effectiveDate}.`
+          : `${label} recorded — ${result.jobHistory.eventType.replace("_", " ")} effective ${result.jobHistory.effectiveDate}.`
+      );
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not complete this action.");
     } finally {

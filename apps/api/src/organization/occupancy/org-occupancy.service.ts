@@ -13,6 +13,9 @@ import type {
   PositionView,
 } from "@aihxm/shared-types";
 
+/** Tolerance when comparing FTE sums (numeric(5,2) values, so 0.005 is ample). */
+const FTE_EPSILON = 0.005;
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toIso(value: any): string {
   return value?.toISOString ? value.toISOString() : value;
@@ -229,6 +232,8 @@ export class OrgOccupancyService {
     if (input.expectedOrgUnitId && position.org_unit_id !== input.expectedOrgUnitId) {
       throw new BadRequestException("Selected position belongs to a different organization unit than the one selected");
     }
+    // ORG-02: `vacant` means "has open capacity" — a position with a
+    // headcount above 1 FTE stays vacant until its FTE is used up.
     if (position.status !== "vacant") {
       throw new ConflictException(`Position is ${position.status}, not vacant — it cannot be assigned`);
     }
@@ -240,8 +245,20 @@ export class OrgOccupancyService {
     if (employeeResult.rowCount === 0) throw new NotFoundException("Employee not found");
     const employee = employeeResult.rows[0];
 
-    if (employee.position_id && employee.position_id !== input.positionId) {
-      await this.vacateRow(client, claims, employee.position_id, input.effectiveFrom);
+    if (employee.position_id === input.positionId) {
+      throw new ConflictException("Employee already occupies this position");
+    }
+    if (employee.position_id) {
+      // An employee holds at most one seat (`employees.position_id` is a
+      // single FK): leaving the old one frees only THIS employee's slot.
+      await this.vacateEmployeeRow(client, claims, employee.position_id, input.employeeId, input.effectiveFrom);
+    }
+
+    const headcount = Number(position.headcount_fte);
+    const used = await this.getUsedFte(client, companyId, input.positionId);
+    const fte = Math.min(1, headcount - used);
+    if (fte <= FTE_EPSILON) {
+      throw new ConflictException("Position has no remaining headcount capacity");
     }
 
     await client.query("UPDATE employees SET position_id = $2, updated_at = now() WHERE id = $1 AND company_id = $3", [
@@ -249,14 +266,23 @@ export class OrgOccupancyService {
       input.positionId,
       companyId,
     ]);
+    await client.query(
+      `INSERT INTO position_incumbents (company_id, position_id, employee_id, fte, effective_from)
+       VALUES ($1, $2, $3, $4, COALESCE($5::date, CURRENT_DATE))`,
+      [companyId, input.positionId, input.employeeId, fte, input.effectiveFrom ?? null]
+    );
 
-    const updated = await this.applyPositionVersion(client, claims, position, "filled", input.effectiveFrom);
+    const nextStatus = used + fte >= headcount - FTE_EPSILON ? "filled" : "vacant";
+    const updated =
+      nextStatus === position.status
+        ? ((await client.query("SELECT * FROM positions WHERE id = $1", [input.positionId])).rows[0] as Record<string, unknown>)
+        : await this.applyPositionVersion(client, claims, position, nextStatus, input.effectiveFrom);
 
     await this.audit.record(client, claims, {
       companyId,
       action: "position.assign",
       target: input.positionId,
-      metadata: { employeeId: input.employeeId, source: input.source ?? null },
+      metadata: { employeeId: input.employeeId, fte, source: input.source ?? null },
     });
 
     const view = rowToPosition(updated);
@@ -278,7 +304,10 @@ export class OrgOccupancyService {
   ): Promise<PositionView> {
     const companyId = claims.company_id!;
     const position = await this.lockPosition(client, companyId, input.positionId);
-    if (position.status !== "filled") return rowToPosition(position);
+    // Whole-seat vacate: ends EVERY incumbent. A no-op when nobody holds it.
+    if (position.status !== "filled" && (await this.getUsedFte(client, companyId, input.positionId)) <= FTE_EPSILON) {
+      return rowToPosition(position);
+    }
 
     const updated = await this.vacateRow(client, claims, input.positionId, input.effectiveFrom);
     await this.audit.record(client, claims, {
@@ -293,7 +322,41 @@ export class OrgOccupancyService {
     return view;
   }
 
-  /** Vacate whatever seat this employee currently occupies, if any. */
+  /**
+   * ORG-02: end ONE employee's slot in a (possibly multi-incumbent) position
+   * and leave the other incumbents untouched. The seat flips back to `vacant`
+   * (open capacity) when it was `filled`. A no-op when the employee does not
+   * hold the position.
+   */
+  async vacateEmployeeFromPositionWithinTransaction(
+    client: PoolClient,
+    claims: RequestClaims,
+    input: { positionId: string; employeeId: string; effectiveFrom?: string; source?: OccupancySource }
+  ): Promise<PositionView> {
+    const companyId = claims.company_id!;
+    const position = await this.lockPosition(client, companyId, input.positionId);
+    const holds = await client.query(
+      `SELECT 1 FROM employees WHERE id = $1 AND company_id = $2 AND position_id = $3
+       UNION ALL
+       SELECT 1 FROM position_incumbents WHERE position_id = $3 AND employee_id = $1 AND status = 'active'`,
+      [input.employeeId, companyId, input.positionId]
+    );
+    if ((holds.rowCount ?? 0) === 0) return rowToPosition(position);
+
+    const updated = await this.vacateEmployeeRow(client, claims, input.positionId, input.employeeId, input.effectiveFrom);
+    await this.audit.record(client, claims, {
+      companyId,
+      action: "position.unassign",
+      target: input.positionId,
+      metadata: { employeeId: input.employeeId, source: input.source ?? null },
+    });
+    const view = rowToPosition(updated);
+    this.publish(claims, "org.position.changed", "position.unassign", "position", view);
+    return view;
+  }
+
+  /** Vacate whatever seat this employee currently occupies (only THEIR slot
+   * when the position has other incumbents), if any. */
   async vacateEmployeePositionWithinTransaction(
     client: PoolClient,
     claims: RequestClaims,
@@ -305,7 +368,26 @@ export class OrgOccupancyService {
     );
     const positionId = result.rows[0]?.position_id;
     if (!positionId) return null;
-    return this.vacatePositionWithinTransaction(client, claims, { positionId, effectiveFrom: input.effectiveFrom, source: input.source });
+    return this.vacateEmployeeFromPositionWithinTransaction(client, claims, {
+      positionId,
+      employeeId: input.employeeId,
+      effectiveFrom: input.effectiveFrom,
+      source: input.source,
+    });
+  }
+
+  /**
+   * FTE currently consumed on a position: the larger of the active
+   * `position_incumbents` total and the number of employees pointing at it
+   * (rows written before 0138 or by a legacy path may lack an incumbent row).
+   */
+  async getUsedFte(client: PoolClient, companyId: string, positionId: string): Promise<number> {
+    const r = await client.query<{ inc: string; emps: string }>(
+      `SELECT COALESCE((SELECT SUM(fte) FROM position_incumbents WHERE position_id = $1 AND status = 'active'), 0) AS inc,
+              (SELECT count(*) FROM employees WHERE position_id = $1 AND company_id = $2) AS emps`,
+      [positionId, companyId]
+    );
+    return Math.max(Number(r.rows[0].inc), Number(r.rows[0].emps));
   }
 
   // ---------------------------------------------------------------------
@@ -801,8 +883,40 @@ export class OrgOccupancyService {
       positionId,
       claims.company_id,
     ]);
+    await this.endIncumbents(client, positionId, null, effectiveFrom);
     const before = await this.lockPosition(client, claims.company_id!, positionId);
     return this.applyPositionVersion(client, claims, before, "vacant", effectiveFrom);
+  }
+
+  /** One employee leaves a position; the seat is `vacant` again whenever
+   * capacity opens up (and it was `filled`). */
+  private async vacateEmployeeRow(
+    client: PoolClient,
+    claims: RequestClaims,
+    positionId: string,
+    employeeId: string,
+    effectiveFrom?: string
+  ): Promise<Record<string, unknown>> {
+    await client.query(
+      "UPDATE employees SET position_id = NULL, updated_at = now() WHERE id = $1 AND position_id = $2 AND company_id = $3",
+      [employeeId, positionId, claims.company_id]
+    );
+    await this.endIncumbents(client, positionId, employeeId, effectiveFrom);
+    const before = await this.lockPosition(client, claims.company_id!, positionId);
+    if (before.status !== "filled" && before.status !== "vacant") return before as unknown as Record<string, unknown>;
+    const used = await this.getUsedFte(client, claims.company_id!, positionId);
+    const next = used >= Number(before.headcount_fte) - FTE_EPSILON && used > FTE_EPSILON ? "filled" : "vacant";
+    if (next === before.status) return before as unknown as Record<string, unknown>;
+    return this.applyPositionVersion(client, claims, before, next, effectiveFrom);
+  }
+
+  private async endIncumbents(client: PoolClient, positionId: string, employeeId: string | null, effectiveFrom?: string): Promise<void> {
+    await client.query(
+      `UPDATE position_incumbents
+          SET status = 'ended', effective_to = GREATEST(effective_from, COALESCE($3::date, CURRENT_DATE)), updated_at = now()
+        WHERE position_id = $1 AND status = 'active' AND ($2::uuid IS NULL OR employee_id = $2)`,
+      [positionId, employeeId, effectiveFrom ?? null]
+    );
   }
 
   /** PositionsService.applyVersionAndSync()'s exact SQL shape, for a

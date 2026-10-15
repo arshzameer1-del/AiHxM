@@ -114,7 +114,14 @@ export class ExpenseClaimsService {
     private readonly audit: AuditService,
     private readonly workflow: WorkflowService,
     @Inject(FILE_STORAGE) private readonly fileStorage: FileStorageService
-  ) {}
+  ) {
+    // WFL-01: one approval center - My Inbox decides through this module so its effect is applied.
+    this.workflow?.adapters?.register({
+      objectKey: WORKFLOW_OBJECT_KEY,
+      label: "Expense claim",
+      legacyDecide: (c, id, dto) => this.decide(c, id, dto),
+    });
+  }
 
   /**
    * Creates the claim row in `draft` and immediately submits it into the

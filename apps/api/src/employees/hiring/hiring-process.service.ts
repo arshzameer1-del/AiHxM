@@ -1,3 +1,5 @@
+import { assertValidCnic, assertValidIban } from "../../crypto/identifier-validation";
+import { decryptDraftData, encryptDraftData, scrubHireProcessDrafts } from "./draft-sensitive-data";
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { DatabaseService } from "../../database/database.service";
@@ -24,6 +26,10 @@ import { CardFieldConfigService } from "./card-field-config.service";
 import { OrgOccupancyService } from "../../organization/occupancy/org-occupancy.service";
 import { HrReferenceCatalogService } from "../../hr-administration/hr-reference-catalog.service";
 import { CARD_CATALOG } from "./card-catalog";
+import { EmployeeNumberingService } from "../employee-numbering.service";
+import { HrBusinessPolicyService } from "../../hr-administration/hr-business-policy.service";
+import { WorkflowService } from "../../workflow/workflow.service";
+import { decideInEngine, submitToEngineIfConfigured } from "../../workflow/engine-routing";
 import { validateOrganizationAssignmentCard } from "./organization-assignment-validator";
 import type {
   EmployeeAddressType,
@@ -38,13 +44,30 @@ import type {
   EmploymentType,
   HireProcessCardDataView,
   HireProcessCardView,
+  HireProcessStatus,
+  HireProcessStatusHistoryEntry,
+  HireProcessValidationResult,
   HireProcessView,
+  HireValidationState,
   SaveHireProcessCardRequest,
+  StartHireProcessRequest,
   UpdateCardDefinitionRequest,
 } from "@aihxm/shared-types";
 
+type ReservationRow = { id: string; company_id: string; reserved_employee_number?: string | null };
+
+/** A request that cannot be completed yet for a reason that is not a failure of the hire (wrong state, approval missing). */
+class HirePreconditionError extends BadRequestException {}
+
+/** 'YYYY-MM-DD' if the value is a plain ISO date string, else null. */
+function dealWithDate(value: unknown): string | null {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+}
+
 const MODULE_KEY = "employee" as const;
 const MANAGE_PERMISSION = "employee.manage.all";
+const HIRE_WORKFLOW_OBJECT_KEY = "hire_process";
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function rowToDefinition(row: any): CardDefinitionView {
@@ -56,7 +79,30 @@ function rowToDefinition(row: any): CardDefinitionView {
     displayOrder: row.display_order,
     isEnabled: row.is_enabled,
     isRequired: row.is_required,
+    applicabilityRule: row.applicability_rule ?? null,
+    workflowTemplateKey: row.workflow_template_key ?? null,
+    isEffectiveDated: row.is_effective_dated ?? false,
+    attachmentRequirement: row.attachment_requirement ?? "none",
+    editableAfterSave: row.editable_after_save ?? true,
+    isCompletionGate: row.is_completion_gate ?? true,
+    visibilityRule: row.visibility_rule ?? null,
+    validationRuleKeys: row.validation_rule_keys ?? [],
+    defaultRuleKeys: row.default_rule_keys ?? [],
+    displayNameI18n: row.display_name_i18n ?? {},
+    configStatus: row.config_status ?? "published",
+    configVersion: row.config_version ?? 1,
   };
+}
+
+/** States in which a hire can still be edited / abandoned (no employee yet, not waiting on a decision). */
+const OPEN_EDITABLE_STATES = ["draft", "in_progress", "validation_required", "ready_for_completion", "rejected", "failed"] as const;
+/** States complete() may start from. */
+const COMPLETABLE_STATES = ["ready_for_completion", "approved", "failed"] as const;
+const DEFAULT_DRAFT_RETENTION_DAYS = 30;
+
+function draftRetentionDays(): number {
+  const n = Number(process.env.HIRE_DRAFT_RETENTION_DAYS ?? DEFAULT_DRAFT_RETENTION_DAYS);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_DRAFT_RETENTION_DAYS;
 }
 
 /**
@@ -199,8 +245,42 @@ export class HiringProcessService {
       entitlements,
       audit,
       new CustomFieldsService(db, rbac)
-    )
-  ) {}
+    ),
+    // CFG-13 / CFG-08 (Step 5): number reservation timing and the optional
+    // approval step. Default-instantiated / optional and appended LAST so the
+    // spec files that construct this service positionally keep working.
+    private readonly numbering: EmployeeNumberingService = new EmployeeNumberingService(db, rbac, entitlements, audit),
+    private readonly businessPolicy?: HrBusinessPolicyService,
+    // WFL-01 (Step 6): when the tenant has an active "hire_process" workflow template the
+    // submitted hire is approved through the engine (My Inbox) instead of the built-in
+    // maker-checker. Optional + appended last so positional spec constructions keep working.
+    private readonly workflow?: WorkflowService
+  ) {
+    this.registerWorkflowAdapter();
+  }
+
+  /** Registers the hire approval with the workflow engine / My Inbox (no-op without a WorkflowService). */
+  private registerWorkflowAdapter(): void {
+    this.workflow?.adapters?.register({
+      objectKey: HIRE_WORKFLOW_OBJECT_KEY,
+      label: "Hire",
+      describe: async (client, recordId) => {
+        const r = await client.query("SELECT status FROM hire_processes WHERE id = $1", [recordId]);
+        if (!r.rowCount) return null;
+        return { title: "Hire approval", summary: `Hiring process (${r.rows[0].status})`, deepLink: `/employees/hire/${recordId}` };
+      },
+      onOutcome: async (ctx) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const row = (await ctx.client.query("SELECT * FROM hire_processes WHERE id = $1 FOR UPDATE", [ctx.recordId])).rows[0] as Record<string, any> | undefined;
+        if (!row || row.status !== "submitted") return;
+        if (ctx.event === "approved") await this.applyApproval(ctx.client, ctx.claims, row);
+        else if (ctx.event === "rejected" || ctx.event === "cancelled" || ctx.event === "returned") {
+          const reason = ctx.comment?.trim() || (ctx.event === "rejected" ? "rejected" : "withdrawn from approval");
+          await this.applyRejection(ctx.client, ctx.claims, row, reason);
+        }
+      },
+    });
+  }
 
   private async requireAccess(claims: RequestClaims): Promise<void> {
     if (!(await this.entitlements.isModuleEnabled(claims, MODULE_KEY))) {
@@ -256,6 +336,9 @@ export class HiringProcessService {
           cardKey: definition.cardKey,
           status: (cardRow?.status ?? "pending") as HireProcessCardView["status"],
           savedAt: cardRow?.saved_at?.toISOString ? cardRow.saved_at.toISOString() : cardRow?.saved_at ?? null,
+          validationState: (cardRow?.validation_state ?? "unvalidated") as HireValidationState,
+          validationErrors: Array.isArray(cardRow?.validation_errors) ? (cardRow.validation_errors as string[]) : [],
+          completedAt: cardRow?.completed_at ? toIso(cardRow.completed_at) : null,
           definition,
         };
       });
@@ -272,28 +355,98 @@ export class HiringProcessService {
       updatedAt: toIso(processRow.updated_at),
       completedAt: processRow.completed_at ? toIso(processRow.completed_at) : null,
       cancelledAt: processRow.cancelled_at ? toIso(processRow.cancelled_at) : null,
+      ownerUserAccountId: (processRow.owner_user_account_id as string | null) ?? null,
+      delegateUserAccountId: (processRow.delegate_user_account_id as string | null) ?? null,
+      expiresAt: processRow.expires_at ? toIso(processRow.expires_at) : null,
+      lastValidatedAt: processRow.last_validated_at ? toIso(processRow.last_validated_at) : null,
+      validationState: (processRow.validation_state ?? "unvalidated") as HireValidationState,
+      hireReasonCode: (processRow.hire_reason_code as string | null) ?? null,
+      effectiveHireDate: processRow.effective_hire_date ? dateOnly(processRow.effective_hire_date) : null,
+      plannedEndDate: processRow.planned_end_date ? dateOnly(processRow.planned_end_date) : null,
+      reservedEmployeeNumber: (processRow.reserved_employee_number as string | null) ?? null,
+      failureReason: (processRow.failure_reason as string | null) ?? null,
+      submittedAt: processRow.submitted_at ? toIso(processRow.submitted_at) : null,
+      decidedAt: processRow.decided_at ? toIso(processRow.decided_at) : null,
+      decisionReason: (processRow.decision_reason as string | null) ?? null,
+      configurationVersionId: (processRow.configuration_version_id as string | null) ?? null,
       cards,
     };
   }
 
-  async start(claims: RequestClaims): Promise<HireProcessView> {
+  async start(claims: RequestClaims, input: StartHireProcessRequest = {}, idempotencyKey?: string): Promise<HireProcessView> {
     await this.requireAccess(claims);
     if (!claims.company_id) throw new ForbiddenException();
     const companyId = claims.company_id;
+    if (input.effectiveHireDate && input.plannedEndDate && input.plannedEndDate < input.effectiveHireDate) {
+      throw new BadRequestException("plannedEndDate cannot be before effectiveHireDate");
+    }
 
     return this.db.withClaims(claims, async (client) => {
+      // CFG-08: a retried start with the same Idempotency-Key returns the process it already created.
+      if (idempotencyKey) {
+        const prior = await client.query("SELECT * FROM hire_processes WHERE company_id = $1 AND idempotency_key = $2", [companyId, idempotencyKey]);
+        if (prior.rowCount) return this.buildView(client, companyId, prior.rows[0]);
+      }
+
       await this.ensureCardDefinitions(client, companyId);
+      await this.cardFieldConfig.ensureDefaultFieldDefinitions(client, companyId);
+      await this.cardFieldConfig.syncFieldMetadata(client, companyId);
       const definitions = await this.loadDefinitions(client, companyId);
       const ordered = Array.from(definitions.values()).sort((a, b) => a.displayOrder - b.displayOrder);
       const firstEnabled = ordered.find((d) => d.isEnabled) ?? null;
 
-      const inserted = await client.query(
-        `INSERT INTO hire_processes (company_id, status, current_card_key, created_by_user_account_id)
-         VALUES ($1, 'draft', $2, $3)
-         RETURNING *`,
-        [companyId, firstEnabled?.cardKey ?? null, claims.sub]
+      // CFG-09: pin the configuration the process starts under, so later admin edits
+      // cannot change the shape of a hire already in flight.
+      const fieldRows = await client.query(
+        `SELECT card_key, field_key, is_enabled, is_required, field_type, sensitivity_class
+           FROM core_employee_card_field_definitions WHERE company_id = $1 ORDER BY card_key, sort_order, field_key`,
+        [companyId]
       );
-      const processRow = inserted.rows[0];
+      const snapshot = {
+        capturedAt: new Date().toISOString(),
+        cards: ordered.map((d) => ({ cardKey: d.cardKey, isEnabled: d.isEnabled, isRequired: d.isRequired, displayOrder: d.displayOrder, configVersion: d.configVersion })),
+        fields: fieldRows.rows,
+      };
+      const published = await client.query(
+        `SELECT id FROM configuration_versions
+          WHERE company_id = $1 AND domain = 'core_employee_hiring' AND status = 'published'
+            AND (effective_from IS NULL OR effective_from <= CURRENT_DATE) AND (effective_to IS NULL OR effective_to >= CURRENT_DATE)
+          ORDER BY version_no DESC LIMIT 1`,
+        [companyId]
+      );
+
+      const inserted = await client.query(
+        `INSERT INTO hire_processes
+           (company_id, status, current_card_key, created_by_user_account_id, owner_user_account_id, expires_at, idempotency_key,
+            hire_reason_code, effective_hire_date, planned_end_date, config_snapshot, configuration_version_id)
+         VALUES ($1, 'draft', $2, $3, $3, now() + ($4 || ' days')::interval, $5, $6, $7::date, $8::date, $9::jsonb, $10)
+         ON CONFLICT (company_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
+         RETURNING *`,
+        [
+          companyId,
+          firstEnabled?.cardKey ?? null,
+          claims.sub,
+          String(draftRetentionDays()),
+          idempotencyKey ?? null,
+          input.hireReasonCode ?? null,
+          input.effectiveHireDate ?? null,
+          input.plannedEndDate ?? null,
+          JSON.stringify(snapshot),
+          published.rows[0]?.id ?? null,
+        ]
+      );
+      if (inserted.rowCount === 0) {
+        const winner = await client.query("SELECT * FROM hire_processes WHERE company_id = $1 AND idempotency_key = $2", [companyId, idempotencyKey]);
+        return this.buildView(client, companyId, winner.rows[0]);
+      }
+      let processRow = inserted.rows[0];
+      if (input.hireReasonCode && !processRow.hire_reason_catalog_item_id) {
+        const known = await client.query(
+          "SELECT 1 FROM hr_reference_catalog_items WHERE company_id = $1 AND catalog_type = 'lifecycle_reason:hire' LIMIT 1",
+          [companyId]
+        );
+        if ((known.rowCount ?? 0) > 0) throw new BadRequestException(`Unknown hire reason "${input.hireReasonCode}"`);
+      }
 
       for (const definition of ordered.filter((d) => d.isEnabled)) {
         await client.query(
@@ -302,10 +455,16 @@ export class HiringProcessService {
         );
       }
 
+      // CFG-13: numbering timing 'draft' reserves the number at the start of the hire.
+      if ((await this.numbering.loadPolicy(client, companyId)).generationTiming === "draft") {
+        processRow = { ...processRow, reserved_employee_number: await this.numbering.reserveForHireProcess(client, claims, processRow as ReservationRow) };
+      }
+
       await this.audit.record(client, claims, {
         companyId,
         action: "hire_process.started",
         target: processRow.id,
+        metadata: { configurationVersionId: processRow.configuration_version_id ?? null },
       });
       this.webhooks?.enqueue(companyId, "employee.hire.started", { hireProcessId: processRow.id }).catch(() => undefined);
 
@@ -345,7 +504,7 @@ export class HiringProcessService {
       );
       if (result.rowCount === 0) return null;
       const row = result.rows[0];
-      return { cardKey: row.card_key, data: row.data, revision: row.revision, updatedAt: toIso(row.updated_at) };
+      return { cardKey: row.card_key, data: decryptDraftData(row.company_id, row.data), revision: row.revision, updatedAt: toIso(row.updated_at) };
     });
   }
 
@@ -387,7 +546,7 @@ export class HiringProcessService {
 
     return this.db.withClaims(claims, async (client) => {
       const processRow = await this.loadProcessOrThrow(client, hireProcessId);
-      if (processRow.status === "hired" || processRow.status === "cancelled") {
+      if (["hired", "cancelled", "submitted", "approved"].includes(processRow.status)) {
         throw new BadRequestException(`Cannot save a card on a ${processRow.status} hiring process`);
       }
       const definitions = await this.loadDefinitions(client, processRow.company_id);
@@ -415,6 +574,9 @@ export class HiringProcessService {
       // `organization_assignment` immediately above. `review_completion`
       // has no built-in fields in `CARD_FIELD_CATALOG` (see that file's
       // own header comment), so this is a safe no-op for it.
+      // EMP-20: reject a malformed CNIC / IBAN at the card it is typed on, not only at completion.
+      if (cardKey === "personal_identity") assertValidCnic(input.data?.cnic as string | undefined, "cnic");
+      if (cardKey === "payment_bank") assertValidIban(input.data?.iban as string | undefined, "iban");
       const dataWithDefaults = await this.cardFieldConfig.applyFieldConfigRules(client, processRow.company_id, cardKey, input.data);
 
       const existing = await client.query("SELECT revision FROM hire_process_card_data WHERE hire_process_id = $1 AND card_key = $2", [
@@ -431,7 +593,8 @@ export class HiringProcessService {
          VALUES ($1, $2, $3, $4::jsonb, 1, $5, now())
          ON CONFLICT (hire_process_id, card_key) DO UPDATE SET
            data = $4::jsonb, revision = hire_process_card_data.revision + 1, saved_by_user_account_id = $5, updated_at = now()`,
-        [hireProcessId, processRow.company_id, cardKey, JSON.stringify(dataWithDefaults), claims.sub]
+        // SEC-04: sensitive answers are encrypted inside the jsonb before they touch the table.
+        [hireProcessId, processRow.company_id, cardKey, JSON.stringify(encryptDraftData(processRow.company_id, dataWithDefaults)), claims.sub]
       );
 
       // A required card is "complete" once it holds real data; an
@@ -441,18 +604,45 @@ export class HiringProcessService {
       // own doc comment already gives.
       const isComplete = definition.isRequired ? Object.keys(dataWithDefaults).length > 0 : true;
       const cardStatus = isComplete ? "complete" : "saved";
+      // CFG-10: the save itself validated the card (applyFieldConfigRules threw otherwise).
       await client.query(
-        `UPDATE hire_process_cards SET status = $3, saved_at = now() WHERE hire_process_id = $1 AND card_key = $2`,
-        [hireProcessId, cardKey, cardStatus]
+        `UPDATE hire_process_cards SET status = $3, saved_at = now(), validation_state = 'valid', validation_errors = NULL,
+                completed_at = CASE WHEN $3 = 'complete' THEN now() ELSE NULL END,
+                completed_by_user_account_id = CASE WHEN $3 = 'complete' THEN $4::uuid ELSE NULL END
+          WHERE hire_process_id = $1 AND card_key = $2`,
+        [hireProcessId, cardKey, cardStatus, UUID_RE.test(claims.sub ?? "") ? claims.sub : null]
       );
 
-      if (processRow.status === "draft") {
-        await client.query("UPDATE hire_processes SET status = 'in_progress', updated_at = now() WHERE id = $1", [hireProcessId]);
+      // Any save re-opens the process: draft/rejected/failed go to in_progress; the draft clock restarts.
+      if (["draft", "rejected", "failed"].includes(processRow.status)) {
+        await this.moveTo(client, claims, processRow, "in_progress", "card saved");
+      }
+      await client.query(
+        `UPDATE hire_processes SET updated_at = now(), expires_at = now() + ($2 || ' days')::interval,
+                validation_state = 'unvalidated', failure_reason = NULL
+          WHERE id = $1`,
+        [hireProcessId, String(draftRetentionDays())]
+      );
+      if (cardKey === "employment") {
+        const joining = dealWithDate(dataWithDefaults.dateOfJoining);
+        if (joining) await client.query("UPDATE hire_processes SET effective_hire_date = $2::date WHERE id = $1", [hireProcessId, joining]);
+      }
+      // CFG-13: numbering timing 'save' reserves the number at the first card save.
+      if ((await this.numbering.loadPolicy(client, processRow.company_id)).generationTiming === "save") {
+        await this.numbering.reserveForHireProcess(client, claims, processRow as ReservationRow);
       }
 
       await this.audit.record(client, claims, { companyId: processRow.company_id, action: "hire_process.card_saved", target: hireProcessId, metadata: { cardKey } });
 
-      return { cardKey, status: cardStatus, savedAt: new Date().toISOString(), definition };
+      return {
+        cardKey,
+        status: cardStatus,
+        savedAt: new Date().toISOString(),
+        validationState: "valid",
+        validationErrors: [],
+        completedAt: cardStatus === "complete" ? new Date().toISOString() : null,
+        definition,
+      };
     });
   }
 
@@ -488,7 +678,7 @@ export class HiringProcessService {
     await this.requireAccess(claims);
     return this.db.withClaims(claims, async (client) => {
       const processRow = await this.loadProcessOrThrow(client, hireProcessId);
-      if (processRow.status === "hired" || processRow.status === "cancelled") {
+      if (["hired", "cancelled", "submitted", "approved"].includes(processRow.status)) {
         throw new BadRequestException(`Cannot advance a ${processRow.status} hiring process`);
       }
       if (processRow.revision !== expectedRevision) {
@@ -522,6 +712,10 @@ export class HiringProcessService {
         nextStatus = "ready_for_completion";
       }
 
+      let working = processRow;
+      if (working.status === "rejected" && nextStatus === "ready_for_completion") {
+        working = await this.moveTo(client, claims, working, "in_progress", "reopened after rejection");
+      }
       const updated = await client.query(
         `UPDATE hire_processes SET status = $2, current_card_key = $3, revision = revision + 1, updated_at = now()
          WHERE id = $1 RETURNING *`,
@@ -540,11 +734,18 @@ export class HiringProcessService {
       if (processRow.revision !== expectedRevision) {
         throw new ConflictException("This hiring process was changed by someone else in the meantime — reload and try again");
       }
+      if (processRow.workflow_instance_id && this.workflow) {
+        await this.workflow.withdrawInstanceInTx(client, claims, processRow.workflow_instance_id, "The hiring process was cancelled");
+      }
+      await client.query("SELECT set_config('app.hire_status_reason', 'cancelled by user', true)");
       const updated = await client.query(
         `UPDATE hire_processes SET status = 'cancelled', cancelled_at = now(), revision = revision + 1, updated_at = now()
          WHERE id = $1 RETURNING *`,
         [hireProcessId]
       );
+      // SEC-04: a cancelled draft keeps no sensitive answers.
+      await scrubHireProcessDrafts(client, hireProcessId);
+      await this.numbering.voidForHireProcess(client, claims, hireProcessId, "hire process cancelled");
       await this.audit.record(client, claims, { companyId: processRow.company_id, action: "hire_process.cancelled", target: hireProcessId });
       return this.buildView(client, processRow.company_id, updated.rows[0]);
     });
@@ -603,7 +804,34 @@ export class HiringProcessService {
   async complete(claims: RequestClaims, hireProcessId: string): Promise<HireProcessView> {
     await this.requireAccess(claims);
     if (!claims.company_id) throw new ForbiddenException();
+    try {
+      return await this.completeInner(claims, hireProcessId);
+    } catch (err) {
+      // CFG-08: a completion that rolled back is recorded as 'failed' (with the reason) in its own
+      // transaction so HR sees it and can retry; a precondition problem (wrong state, approval
+      // missing) is not a failure of the hire itself.
+      if (!(err instanceof HirePreconditionError)) {
+        await this.recordFailure(claims, hireProcessId, err instanceof Error ? err.message : "Unknown error").catch(() => undefined);
+      }
+      throw err;
+    }
+  }
 
+  private async recordFailure(claims: RequestClaims, hireProcessId: string, message: string): Promise<void> {
+    await this.db.withClaims(claims, async (client) => {
+      await client.query("SELECT set_config('app.hire_status_reason', $1, true)", [message.slice(0, 500)]);
+      const r = await client.query(
+        `UPDATE hire_processes SET status = 'failed', failure_reason = $2, failed_at = now(), updated_at = now()
+          WHERE id = $1 AND status IN ('ready_for_completion', 'approved', 'failed') RETURNING company_id`,
+        [hireProcessId, message.slice(0, 1000)]
+      );
+      if (r.rowCount) {
+        await this.audit.record(client, claims, { companyId: r.rows[0].company_id, action: "hire_process.failed", target: hireProcessId, reason: message.slice(0, 500) });
+      }
+    });
+  }
+
+  private async completeInner(claims: RequestClaims, hireProcessId: string): Promise<HireProcessView> {
     return this.db.withClaims(claims, async (client) => {
       // Item 1 (2026-10-01) — row-lock the process FIRST. Completion now
       // also locks and fills a Position; without this, two concurrent
@@ -617,9 +845,17 @@ export class HiringProcessService {
       if (processRow.status === "hired") {
         return this.buildView(client, processRow.company_id, processRow);
       }
-      if (processRow.status !== "ready_for_completion") {
-        throw new BadRequestException(`Cannot complete a hiring process in status "${processRow.status}"`);
+      if (!(COMPLETABLE_STATES as readonly string[]).includes(processRow.status)) {
+        throw new HirePreconditionError(`Cannot complete a hiring process in status "${processRow.status}"`);
       }
+      // CFG-08/LIF-08: when the company's `hiring` policy requires approval, a hire is completed only
+      // after it was submitted and approved (a retry of an approved hire that failed is still approved).
+      const approvalSatisfied = processRow.status === "approved" || (processRow.status === "failed" && processRow.decided_at);
+      if (!approvalSatisfied && (await this.requiresApproval(client, processRow.company_id))) {
+        throw new HirePreconditionError("This company requires approval before a hire is completed - submit the hiring process for approval first");
+      }
+      // The employees trigger lets a reserved number through only for the process that reserved it.
+      await client.query("SELECT set_config('app.hire_process_id', $1, true)", [hireProcessId]);
 
       // Fetches every card's data, not a fixed whitelist — needed so any
       // card's `data.__customFields` (Hiring Card Field Configuration,
@@ -627,7 +863,9 @@ export class HiringProcessService {
       // card (e.g. `documents`, `benefits`) that has no dedicated
       // projection of its own below.
       const cardData = await client.query("SELECT card_key, data FROM hire_process_card_data WHERE hire_process_id = $1", [hireProcessId]);
-      const dataByCard = new Map(cardData.rows.map((r) => [r.card_key as string, r.data as Record<string, unknown>]));
+      const dataByCard = new Map(
+        cardData.rows.map((r) => [r.card_key as string, decryptDraftData(processRow.company_id, r.data as Record<string, unknown>)])
+      );
       const personal = dataByCard.get("personal_identity") ?? {};
       const employment = dataByCard.get("employment") ?? {};
       const orgAssignment = dataByCard.get("organization_assignment") ?? {};
@@ -655,8 +893,9 @@ export class HiringProcessService {
         dateOfBirth: personal.dateOfBirth as string | undefined,
         gender: personal.gender as string | undefined,
         maritalStatus: personal.maritalStatus as string | undefined,
+        employeeNumber: processRow.reserved_employee_number ?? undefined,
         employmentType: employment.employmentType as EmploymentType | undefined,
-        dateOfJoining: employment.dateOfJoining as string | undefined,
+        dateOfJoining: (employment.dateOfJoining as string | undefined) ?? (processRow.effective_hire_date ? dateOnly(processRow.effective_hire_date) : undefined),
         designation: employment.designation as string | undefined,
         orgUnitId: cardOrgUnitId,
         locationId: orgAssignment.locationId as string | undefined,
@@ -795,7 +1034,7 @@ export class HiringProcessService {
           iban: paymentBank.iban as string | undefined,
           branchCode: paymentBank.branchCode as string | undefined,
           isPrimary: true,
-        });
+        }, { bootstrap: true });
       }
 
       // Phase 8 — Cost Allocation: the card's own `allocations` array,
@@ -906,8 +1145,8 @@ export class HiringProcessService {
       }
 
       const updated = await client.query(
-        `UPDATE hire_processes SET status = 'hired', employee_id = $2, completed_at = now(), revision = revision + 1, updated_at = now()
-         WHERE id = $1 AND status = 'ready_for_completion'
+        `UPDATE hire_processes SET status = 'hired', employee_id = $2, completed_at = now(), failure_reason = NULL, revision = revision + 1, updated_at = now()
+         WHERE id = $1 AND status IN ('ready_for_completion', 'approved', 'failed')
          RETURNING *`,
         [hireProcessId, employee.id]
       );
@@ -920,6 +1159,26 @@ export class HiringProcessService {
         return this.buildView(client, processRow.company_id, winner.rows[0]);
       }
 
+      // Step 4 (LIF-01 / LIF-08): the hire is a lifecycle event of its own,
+      // linked to this hire process, and the offer that led to it (matched by
+      // the hired employee id the recruitment flow already stores) points back
+      // at the process. Same transaction, so all three commit or none do.
+      await client.query(
+        `INSERT INTO employee_lifecycle_events
+           (company_id, employee_id, employment_id, action_type, effective_date, status, payload, after_snapshot, source_channel,
+            requested_by_user_account_id, applied_at, workflow_instance_id, reason_code)
+         SELECT e.company_id, e.id, e.employment_id, 'hire', e.date_of_joining, 'applied',
+                jsonb_build_object('hireProcessId', $2::text), jsonb_build_object('employment_status', e.employment_status,
+                  'org_unit_id', e.org_unit_id, 'position_id', e.position_id, 'location_id', e.location_id, 'manager_id', e.manager_id,
+                  'designation', e.designation, 'employment_type', e.employment_type),
+                'hire_process', $3, now(), $4, $5
+           FROM employees e WHERE e.id = $1`,
+        [employee.id, hireProcessId, UUID_RE.test(claims.sub ?? "") ? claims.sub : null, processRow.workflow_instance_id ?? null, processRow.hire_reason_code ?? null]
+      );
+      await client.query("UPDATE offers SET hire_process_id = $2 WHERE hired_employee_id = $1 AND hire_process_id IS NULL", [employee.id, hireProcessId]);
+
+      // SEC-04: the values now live on the employee record; drop the draft copies.
+      await scrubHireProcessDrafts(client, hireProcessId);
       await this.audit.record(client, claims, {
         companyId: processRow.company_id,
         action: "hire_process.completed",
@@ -930,6 +1189,299 @@ export class HiringProcessService {
 
       return this.buildView(client, processRow.company_id, updated.rows[0]);
     });
+  }
+
+  // ------------------------------------------------------------------
+  // CFG-08/09/10 (Step 5): explicit state machine, validation, approval,
+  // ownership, retention. The database trigger trg_hire_process_status is
+  // the final authority on which transitions exist and writes the history.
+  // ------------------------------------------------------------------
+
+  /** One audited status transition inside the caller's transaction. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async moveTo(client: PoolClient, claims: RequestClaims, processRow: Record<string, any>, to: HireProcessStatus, reason?: string): Promise<Record<string, any>> {
+    if (processRow.status === to) return processRow;
+    await client.query("SELECT set_config('app.hire_status_reason', $1, true)", [reason ?? ""]);
+    const reopen = processRow.status === "rejected" && to === "in_progress";
+    const updated = await client.query(
+      `UPDATE hire_processes SET status = $2, updated_at = now()
+              ${reopen ? ", decided_at = NULL, decided_by_user_account_id = NULL, decision_reason = NULL, submitted_at = NULL, submitted_by_user_account_id = NULL, workflow_instance_id = NULL" : ""}
+        WHERE id = $1 RETURNING *`,
+      [processRow.id, to]
+    );
+    await this.audit.record(client, claims, {
+      companyId: processRow.company_id,
+      action: "hire_process.status_changed",
+      target: processRow.id,
+      reason: reason ?? null,
+      metadata: { from: processRow.status, to },
+    });
+    return updated.rows[0];
+  }
+
+  private async requiresApproval(client: PoolClient, companyId: string): Promise<boolean> {
+    if (!this.businessPolicy) return false;
+    const rules = await this.businessPolicy.resolveEffectivePolicy(client, companyId, "hiring", {});
+    return rules?.requireApproval === true;
+  }
+
+  async getStatusHistory(claims: RequestClaims, hireProcessId: string): Promise<HireProcessStatusHistoryEntry[]> {
+    await this.requireAccess(claims);
+    return this.db.withClaims(claims, async (client) => {
+      await this.loadProcessOrThrow(client, hireProcessId);
+      const r = await client.query("SELECT * FROM hire_process_status_history WHERE hire_process_id = $1 ORDER BY created_at, id", [hireProcessId]);
+      return r.rows.map((row) => ({
+        id: row.id,
+        fromStatus: row.from_status,
+        toStatus: row.to_status,
+        actorUserAccountId: row.actor_user_account_id,
+        reason: row.reason,
+        createdAt: toIso(row.created_at),
+      }));
+    });
+  }
+
+  /**
+   * Re-validates every saved card against the CURRENT rules (field configuration, CNIC / IBAN
+   * format, organization assignment) and stores the outcome per card. Invalid -> the process
+   * is held in `validation_required`; valid with every required card complete -> it moves
+   * on to `ready_for_completion`.
+   */
+  async validate(claims: RequestClaims, hireProcessId: string): Promise<HireProcessValidationResult> {
+    await this.requireAccess(claims);
+    return this.db.withClaims(claims, async (client) => {
+      let processRow = await this.loadProcessOrThrow(client, hireProcessId);
+      if (["hired", "cancelled", "submitted", "approved"].includes(processRow.status)) {
+        throw new BadRequestException(`Cannot validate a ${processRow.status} hiring process`);
+      }
+      const definitions = await this.loadDefinitions(client, processRow.company_id);
+      const enabled = Array.from(definitions.values()).filter((d) => d.isEnabled).sort((a, b) => a.displayOrder - b.displayOrder);
+      const cardRows = await client.query("SELECT card_key, status FROM hire_process_cards WHERE hire_process_id = $1", [hireProcessId]);
+      const statusByKey = new Map(cardRows.rows.map((r) => [r.card_key as string, r.status as string]));
+      const dataRows = await client.query("SELECT card_key, data FROM hire_process_card_data WHERE hire_process_id = $1", [hireProcessId]);
+      const dataByKey = new Map(dataRows.rows.map((r) => [r.card_key as string, decryptDraftData(processRow.company_id, r.data as Record<string, unknown>)]));
+
+      const results: HireProcessValidationResult["cards"] = [];
+      for (const definition of enabled) {
+        const errors: string[] = [];
+        const data = dataByKey.get(definition.cardKey);
+        const cardStatus = statusByKey.get(definition.cardKey) ?? "pending";
+        // A required card that is simply not finished yet is reported, but is not a rule violation.
+        const incompleteNote = definition.isRequired && cardStatus !== "complete" ? `"${definition.label}" is required but not complete` : null;
+        if (data) {
+          try {
+            if (definition.cardKey === "organization_assignment") {
+              await validateOrganizationAssignmentCard(client, processRow.company_id, data, dataByKey.get("employment"));
+            }
+            if (definition.cardKey === "personal_identity") assertValidCnic(data.cnic as string | undefined, "cnic");
+            if (definition.cardKey === "payment_bank") assertValidIban(data.iban as string | undefined, "iban");
+            await this.cardFieldConfig.applyFieldConfigRules(client, processRow.company_id, definition.cardKey, data);
+          } catch (err) {
+            errors.push(err instanceof Error ? err.message : "Invalid");
+          }
+        }
+        const state: HireValidationState = errors.length ? "invalid" : cardStatus === "pending" ? "unvalidated" : "valid";
+        const reported = incompleteNote ? [...errors, incompleteNote] : errors;
+        await client.query(
+          "UPDATE hire_process_cards SET validation_state = $3, validation_errors = $4::jsonb WHERE hire_process_id = $1 AND card_key = $2",
+          [hireProcessId, definition.cardKey, state, reported.length ? JSON.stringify(reported) : null]
+        );
+        results.push({ cardKey: definition.cardKey, validationState: state, errors: reported });
+      }
+      const invalid = results.some((r) => r.validationState === "invalid");
+      const processState: HireValidationState = invalid ? "invalid" : "valid";
+      await client.query("UPDATE hire_processes SET validation_state = $2, last_validated_at = now() WHERE id = $1", [hireProcessId, processState]);
+
+      processRow = (await client.query("SELECT * FROM hire_processes WHERE id = $1", [hireProcessId])).rows[0];
+      if (invalid && ["draft", "in_progress", "ready_for_completion"].includes(processRow.status)) {
+        await this.moveTo(client, claims, processRow, "validation_required", "validation found problems");
+      } else if (!invalid && processRow.status === "validation_required") {
+        const incomplete = enabled.filter((d) => d.isRequired && statusByKey.get(d.cardKey) !== "complete");
+        await this.moveTo(client, claims, processRow, incomplete.length ? "in_progress" : "ready_for_completion", "validation passed");
+      }
+      await this.audit.record(client, claims, {
+        companyId: processRow.company_id,
+        action: "hire_process.validated",
+        target: hireProcessId,
+        metadata: { state: processState, invalidCards: results.filter((r) => r.validationState === "invalid").map((r) => r.cardKey) },
+      });
+      return { hireProcessId, validationState: processState, validatedAt: new Date().toISOString(), cards: results };
+    });
+  }
+
+  /** ready_for_completion -> submitted. The decision is taken by someone else (approve / reject). */
+  async submit(claims: RequestClaims, hireProcessId: string): Promise<HireProcessView> {
+    await this.requireAccess(claims);
+    return this.db.withClaims(claims, async (client) => {
+      const processRow = await this.loadProcessOrThrow(client, hireProcessId);
+      if (processRow.status !== "ready_for_completion") {
+        throw new BadRequestException(`Only a hiring process that is ready for completion can be submitted (now "${processRow.status}")`);
+      }
+      await client.query("UPDATE hire_processes SET submitted_at = now(), submitted_by_user_account_id = $2 WHERE id = $1", [
+        hireProcessId,
+        UUID_RE.test(claims.sub ?? "") ? claims.sub : null,
+      ]);
+      let moved = await this.moveTo(client, claims, { ...processRow }, "submitted", "submitted for approval");
+      // WFL-01: a configured workflow template routes the approval through the engine / My Inbox
+      const instanceId = await submitToEngineIfConfigured(this.workflow, client, claims, {
+        objectKey: HIRE_WORKFLOW_OBJECT_KEY,
+        table: "hire_processes",
+        recordId: hireProcessId,
+        record: { hireProcessId, status: "submitted" },
+        title: "Hire approval",
+      });
+      if (instanceId) moved = (await client.query("SELECT * FROM hire_processes WHERE id = $1", [hireProcessId])).rows[0];
+      this.webhooks?.enqueue(processRow.company_id, "employee.hire.submitted", { hireProcessId }).catch(() => undefined);
+      return this.buildView(client, processRow.company_id, moved);
+    });
+  }
+
+  /** submitted -> approved (maker-checker: not the person who submitted). With numbering timing 'approval', the number is reserved here. */
+  async approve(claims: RequestClaims, hireProcessId: string): Promise<HireProcessView> {
+    await this.requireAccess(claims);
+    return this.db.withClaims(claims, async (client) => {
+      const processRow = await this.loadProcessOrThrow(client, hireProcessId);
+      if (processRow.status !== "submitted") throw new BadRequestException(`Only a submitted hiring process can be approved (now "${processRow.status}")`);
+      if (processRow.workflow_instance_id && this.workflow) {
+        // approval is governed by the configured workflow; the engine's outcome adapter applies it
+        await decideInEngine(this.workflow, client, claims, processRow.workflow_instance_id, { decision: "approved" });
+        return this.buildView(client, processRow.company_id, (await client.query("SELECT * FROM hire_processes WHERE id = $1", [hireProcessId])).rows[0]);
+      }
+      if (processRow.submitted_by_user_account_id && processRow.submitted_by_user_account_id === claims.sub) {
+        throw new ForbiddenException("The person who submitted a hire cannot approve it");
+      }
+      const moved = await this.applyApproval(client, claims, processRow);
+      return this.buildView(client, processRow.company_id, moved);
+    });
+  }
+
+  /** The approval effect, shared by the built-in maker-checker and the workflow engine. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async applyApproval(client: PoolClient, claims: RequestClaims, processRow: Record<string, any>): Promise<Record<string, any>> {
+    await client.query("UPDATE hire_processes SET decided_at = now(), decided_by_user_account_id = $2, decision_reason = NULL WHERE id = $1", [
+      processRow.id,
+      UUID_RE.test(claims.sub ?? "") ? claims.sub : null,
+    ]);
+    let moved = await this.moveTo(client, claims, { ...processRow }, "approved", "approved");
+    if ((await this.numbering.loadPolicy(client, processRow.company_id)).generationTiming === "approval") {
+      await this.numbering.reserveForHireProcess(client, claims, moved as ReservationRow);
+      moved = (await client.query("SELECT * FROM hire_processes WHERE id = $1", [processRow.id])).rows[0];
+    }
+    this.webhooks?.enqueue(processRow.company_id, "employee.hire.approved", { hireProcessId: processRow.id }).catch(() => undefined);
+    return moved;
+  }
+
+  /** The rejection effect, shared by the built-in path and the workflow engine. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async applyRejection(client: PoolClient, claims: RequestClaims, processRow: Record<string, any>, reason: string): Promise<Record<string, any>> {
+    await client.query("UPDATE hire_processes SET decided_at = now(), decided_by_user_account_id = $2, decision_reason = $3 WHERE id = $1", [
+      processRow.id,
+      UUID_RE.test(claims.sub ?? "") ? claims.sub : null,
+      reason,
+    ]);
+    const moved = await this.moveTo(client, claims, { ...processRow }, "rejected", reason);
+    this.webhooks?.enqueue(processRow.company_id, "employee.hire.rejected", { hireProcessId: processRow.id }).catch(() => undefined);
+    return moved;
+  }
+
+  /** submitted -> rejected, with a mandatory reason. The owner can edit and resubmit. */
+  async reject(claims: RequestClaims, hireProcessId: string, reason: string): Promise<HireProcessView> {
+    await this.requireAccess(claims);
+    if (!reason || !reason.trim()) throw new BadRequestException("A reason is required to reject a hire");
+    return this.db.withClaims(claims, async (client) => {
+      const processRow = await this.loadProcessOrThrow(client, hireProcessId);
+      if (processRow.status !== "submitted") throw new BadRequestException(`Only a submitted hiring process can be rejected (now "${processRow.status}")`);
+      if (processRow.workflow_instance_id && this.workflow) {
+        await decideInEngine(this.workflow, client, claims, processRow.workflow_instance_id, { decision: "rejected", comment: reason.trim() });
+        return this.buildView(client, processRow.company_id, (await client.query("SELECT * FROM hire_processes WHERE id = $1", [hireProcessId])).rows[0]);
+      }
+      const moved = await this.applyRejection(client, claims, processRow, reason.trim());
+      return this.buildView(client, processRow.company_id, moved);
+    });
+  }
+
+  /** CFG-09: hand a draft to another user of the same company (e.g. when its owner leaves). */
+  async transferOwnership(claims: RequestClaims, hireProcessId: string, newOwnerUserAccountId: string, reason?: string): Promise<HireProcessView> {
+    await this.requireAccess(claims);
+    if (!UUID_RE.test(newOwnerUserAccountId)) throw new BadRequestException("ownerUserAccountId must be a user id");
+    return this.db.withClaims(claims, async (client) => {
+      const processRow = await this.loadProcessOrThrow(client, hireProcessId);
+      if (["hired", "cancelled"].includes(processRow.status)) throw new BadRequestException(`Cannot transfer a ${processRow.status} hiring process`);
+      await this.assertCompanyUser(client, processRow.company_id, newOwnerUserAccountId);
+      const updated = await client.query("UPDATE hire_processes SET owner_user_account_id = $2, updated_at = now() WHERE id = $1 RETURNING *", [hireProcessId, newOwnerUserAccountId]);
+      await this.audit.record(client, claims, {
+        companyId: processRow.company_id,
+        action: "hire_process.ownership_transferred",
+        target: hireProcessId,
+        reason: reason ?? null,
+        metadata: { from: processRow.owner_user_account_id, to: newOwnerUserAccountId },
+      });
+      return this.buildView(client, processRow.company_id, updated.rows[0]);
+    });
+  }
+
+  async setDelegate(claims: RequestClaims, hireProcessId: string, delegateUserAccountId: string | null): Promise<HireProcessView> {
+    await this.requireAccess(claims);
+    return this.db.withClaims(claims, async (client) => {
+      const processRow = await this.loadProcessOrThrow(client, hireProcessId);
+      if (["hired", "cancelled"].includes(processRow.status)) throw new BadRequestException(`Cannot change a ${processRow.status} hiring process`);
+      if (delegateUserAccountId) {
+        if (!UUID_RE.test(delegateUserAccountId)) throw new BadRequestException("delegateUserAccountId must be a user id");
+        await this.assertCompanyUser(client, processRow.company_id, delegateUserAccountId);
+      }
+      const updated = await client.query("UPDATE hire_processes SET delegate_user_account_id = $2, updated_at = now() WHERE id = $1 RETURNING *", [hireProcessId, delegateUserAccountId]);
+      await this.audit.record(client, claims, {
+        companyId: processRow.company_id,
+        action: "hire_process.delegate_set",
+        target: hireProcessId,
+        metadata: { delegate: delegateUserAccountId },
+      });
+      return this.buildView(client, processRow.company_id, updated.rows[0]);
+    });
+  }
+
+  private async assertCompanyUser(client: PoolClient, companyId: string, userAccountId: string): Promise<void> {
+    const r = await client.query(
+      `SELECT 1 FROM user_role_assignments WHERE user_account_id = $1 AND company_id = $2 AND (effective_to IS NULL OR effective_to >= CURRENT_DATE) LIMIT 1`,
+      [userAccountId, companyId]
+    );
+    if ((r.rowCount ?? 0) === 0) throw new BadRequestException("That user has no active access in this company");
+  }
+
+  /**
+   * Draft retention (CFG-09): a hire nobody touched before `expires_at` is cancelled, its sensitive
+   * answers scrubbed and its reserved employee number voided. Runs daily from HireDraftHygieneScheduler
+   * as a company-scoped service identity per process.
+   */
+  async expireStaleDrafts(limit = 200): Promise<number> {
+    const sweeper = { is_platform_admin: false, is_service: true, sub: "hire-draft-expiry", company_id: null } as RequestClaims;
+    const due = await this.db.withClaims(sweeper, async (client) => {
+      const r = await client.query(
+        `SELECT id, company_id FROM hire_processes
+          WHERE expires_at IS NOT NULL AND expires_at < now() AND status IN ('draft', 'in_progress', 'validation_required', 'rejected')
+          ORDER BY expires_at LIMIT $1`,
+        [limit]
+      );
+      return r.rows;
+    });
+    let n = 0;
+    for (const p of due) {
+      const claims = { is_platform_admin: false, is_service: true, sub: "hire-draft-expiry", company_id: p.company_id } as RequestClaims;
+      await this.db.withClaims(claims, async (client) => {
+        await client.query("SELECT set_config('app.hire_status_reason', 'draft expired', true)");
+        const upd = await client.query(
+          `UPDATE hire_processes SET status = 'cancelled', cancelled_at = now(), revision = revision + 1, updated_at = now()
+            WHERE id = $1 AND status IN ('draft', 'in_progress', 'validation_required', 'rejected') RETURNING id`,
+          [p.id]
+        );
+        if (!upd.rowCount) return;
+        await scrubHireProcessDrafts(client, p.id);
+        await this.numbering.voidForHireProcess(client, claims, p.id, "hire draft expired");
+        await this.audit.record(client, claims, { companyId: p.company_id, action: "hire_process.expired", target: p.id });
+        n += 1;
+      });
+    }
+    return n;
   }
 
   /**
@@ -954,15 +1506,65 @@ export class HiringProcessService {
     if (!claims.company_id) throw new ForbiddenException();
     return this.db.withClaims(claims, async (client) => {
       await this.ensureCardDefinitions(client, claims.company_id!);
+      // CFG-11 metadata: every key present in the patch is written (null clears); whitelist, never user-built SQL.
+      const meta: Record<string, { column: string; kind: "text" | "jsonb" | "bool" | "enum" | "textarray"; allowed?: readonly string[] }> = {
+        applicabilityRule: { column: "applicability_rule", kind: "jsonb" },
+        workflowTemplateKey: { column: "workflow_template_key", kind: "text" },
+        isEffectiveDated: { column: "is_effective_dated", kind: "bool" },
+        attachmentRequirement: { column: "attachment_requirement", kind: "enum", allowed: ["none", "optional", "required"] },
+        editableAfterSave: { column: "editable_after_save", kind: "bool" },
+        isCompletionGate: { column: "is_completion_gate", kind: "bool" },
+        visibilityRule: { column: "visibility_rule", kind: "jsonb" },
+        validationRuleKeys: { column: "validation_rule_keys", kind: "textarray" },
+        defaultRuleKeys: { column: "default_rule_keys", kind: "textarray" },
+        displayNameI18n: { column: "display_name_i18n", kind: "jsonb" },
+        configStatus: { column: "config_status", kind: "enum", allowed: ["draft", "validated", "published", "retired"] },
+      };
+      const sets: string[] = [];
+      const params: unknown[] = [claims.company_id, cardKey, patch.isEnabled ?? null, patch.isRequired ?? null, patch.displayOrder ?? null];
+      let metaChanged = false;
+      for (const [key, spec] of Object.entries(meta)) {
+        if (!Object.prototype.hasOwnProperty.call(patch, key)) continue;
+        const value = (patch as Record<string, unknown>)[key];
+        if (spec.kind === "enum" && !spec.allowed!.includes(String(value))) throw new BadRequestException(`${key} must be one of ${spec.allowed!.join(", ")}`);
+        if (spec.kind === "bool" && typeof value !== "boolean") throw new BadRequestException(`${key} must be true or false`);
+        if (spec.kind === "textarray") {
+          if (!Array.isArray(value) || value.some((v) => typeof v !== "string")) throw new BadRequestException(`${key} must be a list of rule keys`);
+          if (value.length) {
+            const found = await client.query("SELECT rule_key FROM rule_definitions WHERE company_id = $1 AND rule_key = ANY($2) AND is_active", [claims.company_id, value]);
+            const known = new Set(found.rows.map((r) => r.rule_key as string));
+            const missing = (value as string[]).filter((v) => !known.has(v));
+            if (missing.length) throw new BadRequestException(`${key} references unknown or inactive rules: ${missing.join(", ")}`);
+          }
+        }
+        if ((key === "applicabilityRule" || key === "visibilityRule") && value !== null) {
+          if (typeof value !== "object" || Array.isArray(value)) throw new BadRequestException(`${key} must be an object or null`);
+          const v = value as Record<string, unknown>;
+          if ("ref" in v) {
+            const found = await client.query("SELECT 1 FROM rule_definitions WHERE company_id = $1 AND rule_key = $2 AND is_active", [claims.company_id, v.ref]);
+            if ((found.rowCount ?? 0) === 0) throw new BadRequestException(`${key} references unknown or inactive rule "${String(v.ref)}"`);
+          } else if (typeof v.fieldKey !== "string" || !["equals", "notEquals"].includes(String(v.operator)) || typeof v.value !== "string") {
+            throw new BadRequestException(`${key} must be {fieldKey, operator, value} or {ref}`);
+          }
+        }
+        if (key === "displayNameI18n" && (value === null || typeof value !== "object" || Array.isArray(value))) {
+          throw new BadRequestException("displayNameI18n must be an object of locale -> text");
+        }
+        metaChanged = true;
+        params.push(spec.kind === "jsonb" ? (value === null ? null : JSON.stringify(value)) : value);
+        sets.push(`${spec.column} = $${params.length}${spec.kind === "jsonb" ? "::jsonb" : ""}`);
+      }
       const result = await client.query(
         `UPDATE core_employee_card_definitions SET
            is_enabled = COALESCE($3, is_enabled),
            is_required = COALESCE($4, is_required),
            display_order = COALESCE($5, display_order),
+           ${sets.length ? sets.join(", ") + "," : ""}
+           config_version = config_version + ${metaChanged || patch.isEnabled !== undefined || patch.isRequired !== undefined ? 1 : 0},
            updated_at = now()
          WHERE company_id = $1 AND card_key = $2
          RETURNING *`,
-        [claims.company_id, cardKey, patch.isEnabled ?? null, patch.isRequired ?? null, patch.displayOrder ?? null]
+        params
       );
       if (result.rowCount === 0) throw new NotFoundException("Card not found");
       await this.audit.record(client, claims, { companyId: claims.company_id!, action: "hiring_card_definition.updated", target: cardKey, metadata: patch });
@@ -981,4 +1583,14 @@ export class HiringProcessService {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toIso(value: any): string {
   return value?.toISOString ? value.toISOString() : value;
+}
+
+/** pg returns `date` as a local-midnight Date: read local components so the calendar day never shifts. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function dateOnly(value: any): string {
+  if (value instanceof Date) {
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
+  }
+  return String(value).slice(0, 10);
 }

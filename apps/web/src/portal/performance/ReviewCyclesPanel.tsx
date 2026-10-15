@@ -3,6 +3,8 @@ import type { ReviewCycleView } from "@aihxm/shared-types";
 import { api } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { CreateCycleModal } from "./modals/CreateCycleModal";
+import { PhasesModal } from "./PhasesModal";
+import { formatDate } from "./perfUi";
 
 export function ReviewCyclesPanel() {
   const { identity } = useAuth();
@@ -12,6 +14,7 @@ export function ReviewCyclesPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [phasesFor, setPhasesFor] = useState<ReviewCycleView | null>(null);
 
   const canCreateCycle = roleKeys.includes("hr_admin");
 
@@ -93,6 +96,7 @@ export function ReviewCyclesPanel() {
       )}
 
       {showCreateModal && <CreateCycleModal onClose={() => setShowCreateModal(false)} onSuccess={loadCycles} />}
+      {phasesFor && <PhasesModal cycle={phasesFor} onClose={() => setPhasesFor(null)} onSaved={loadCycles} />}
 
       {cycles.length === 0 ? (
         <div className="text-label-tertiary text-sm">No review cycles yet</div>
@@ -104,6 +108,7 @@ export function ReviewCyclesPanel() {
                 <th className="text-left py-2 px-4 font-semibold">Name</th>
                 <th className="text-left py-2 px-4 font-semibold">Period</th>
                 <th className="text-left py-2 px-4 font-semibold">Status</th>
+                <th className="text-left py-2 px-4 font-semibold">Current phase</th>
                 <th className="text-left py-2 px-4 font-semibold">Actions</th>
               </tr>
             </thead>
@@ -115,8 +120,27 @@ export function ReviewCyclesPanel() {
                     {new Date(cycle.periodStart).toLocaleDateString()} — {new Date(cycle.periodEnd).toLocaleDateString()}
                   </td>
                   <td className="py-3 px-4">{getStatusBadge(cycle.status)}</td>
+                  <td className="py-3 px-4 text-xs text-label-secondary">
+                    {cycle.phases && cycle.phases.length > 0 ? (
+                      <>
+                        <div className="font-medium capitalize">{cycle.currentPhase ? cycle.currentPhase.replace(/_/g, " ") : "Not started"}</div>
+                        {cycle.phases.map((p) => (
+                          <div key={p.phaseKey}>
+                            {p.phaseKey.replace(/_/g, " ")}: {formatDate(p.startsOn)} – {formatDate(p.endsOn)}
+                          </div>
+                        ))}
+                      </>
+                    ) : (
+                      "No deadlines set"
+                    )}
+                  </td>
                   <td className="py-3 px-4">
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 flex-wrap">
+                      {canCreateCycle && cycle.status !== "closed" && (
+                        <button onClick={() => setPhasesFor(cycle)} className="px-2 py-1 border border-black/10 text-xs rounded">
+                          Phases
+                        </button>
+                      )}
                       {canCreateCycle && cycle.status === "draft" && (
                         <button
                           onClick={() => handleLaunch(cycle.id)}

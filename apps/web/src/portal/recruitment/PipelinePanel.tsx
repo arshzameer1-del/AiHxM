@@ -7,7 +7,8 @@ import type {
   OfferView,
 } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
-import { PIPELINE_STAGES, STAGE_LABELS } from "./requisitionLabels";
+import { ReasonModal } from "../../components/ReasonModal";
+import { OFFER_STATUS_LABELS, PIPELINE_STAGES, STAGE_LABELS } from "./requisitionLabels";
 
 function describeError(err: unknown): string {
   if (err instanceof ApiError) {
@@ -44,7 +45,7 @@ function AddCandidateControl({
   requisitionId: string;
   candidates: CandidateView[];
   existingCandidateIds: Set<string>;
-  onAdded: () => void;
+  onAdded: (application: ApplicationView) => void;
 }) {
   const [candidateId, setCandidateId] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -58,9 +59,12 @@ function AddCandidateControl({
     setError(null);
     setSubmitting(true);
     try {
-      await api.createApplication({ requisitionId, candidateId });
+      // Pass the POST's own response up rather than only triggering a
+      // refetch — see PipelinePanel's loadApplications/onMoved comment
+      // for why a refetch alone isn't trusted here anymore.
+      const application = await api.createApplication({ requisitionId, candidateId });
       setCandidateId("");
-      onAdded();
+      onAdded(application);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not add this candidate to the pipeline.");
     } finally {
@@ -159,34 +163,10 @@ function OfferControls({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  if (!offer) {
-    // The application is in the "offer" stage but this session never
-    // extended one for it (e.g. the page was reloaded). There is no
-    // GET /offers or GET /offers?applicationId= endpoint in the API —
-    // RecruitmentController only exposes POST offers / :id/rescind /
-    // :id/decision — so an already-extended offer's id, salary and
-    // status genuinely cannot be re-fetched from here. Flagged in
-    // KNOWN_ISSUES.md rather than faked with a placeholder control.
-    return (
-      <p className="text-xs text-label-tertiary italic mt-2">
-        An offer may already be pending for this application — its details can't be retrieved after a reload
-        (no GET /offers endpoint exists yet). Extend a new one only if you're sure none is outstanding.
-      </p>
-    );
-  }
+  const [rescinding, setRescinding] = useState(false);
 
-  async function handleRescind() {
-    setError(null);
-    setBusy(true);
-    try {
-      const updated = await api.rescindOffer(offer!.id);
-      onOfferChanged(updated);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not rescind this offer.");
-    } finally {
-      setBusy(false);
-    }
-  }
+  if (!offer) return null;
+
 
   async function handleDecide(decision: "accepted" | "declined") {
     setError(null);
@@ -207,7 +187,19 @@ function OfferControls({
       <div className="font-mono">
         PKR {offer.salary.toLocaleString()}/mo · starts {offer.startDate}
       </div>
-      <div className="font-semibold capitalize">{offer.status}</div>
+      <div className="font-semibold">
+        {OFFER_STATUS_LABELS[offer.status]}
+        {offer.expiresAt ? <span className="font-normal text-label-tertiary"> · valid until {offer.expiresAt.slice(0, 10)}</span> : null}
+      </div>
+      {offer.components.length > 0 && (
+        <ul className="text-label-secondary">
+          {offer.components.map((c) => (
+            <li key={c.componentId}>{c.componentName}: {c.amount.toLocaleString()}</li>
+          ))}
+        </ul>
+      )}
+      {offer.status === "pending_approval" && <p className="text-label-tertiary">Waiting for approval before it can be sent to the candidate.</p>}
+      {(offer.declineReason || offer.rescindReason) && <p className="text-label-tertiary">Reason: {offer.declineReason ?? offer.rescindReason}</p>}
       {offer.status === "pending" && (
         <div className="flex gap-3">
           <button onClick={() => handleDecide("accepted")} disabled={busy} className="font-semibold text-success hover:underline">
@@ -216,10 +208,23 @@ function OfferControls({
           <button onClick={() => handleDecide("declined")} disabled={busy} className="font-semibold text-label-tertiary hover:underline">
             Candidate declined
           </button>
-          <button onClick={handleRescind} disabled={busy} className="font-semibold text-danger hover:underline">
+          <button onClick={() => setRescinding(true)} disabled={busy} className="font-semibold text-danger hover:underline">
             Rescind
           </button>
         </div>
+      )}
+      {rescinding && (
+        <ReasonModal
+          title="Rescind this offer"
+          description="The candidate will no longer be able to accept it."
+          confirmLabel="Rescind offer"
+          danger
+          onCancel={() => setRescinding(false)}
+          onConfirm={async (reason) => {
+            onOfferChanged(await api.rescindOffer(offer.id, reason));
+            setRescinding(false);
+          }}
+        />
       )}
       {error && <p className="text-danger">{error}</p>}
     </div>
@@ -239,19 +244,24 @@ function ApplicationCard({
   candidateName: string;
   offer: OfferView | undefined;
   hiredNote: string | undefined;
-  onMoved: () => void;
+  onMoved: (application: ApplicationView) => void;
   onOfferChanged: (offer: OfferView) => void;
   onHired: (employeeNumber: string) => void;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  async function handleMove(stage: ApplicationStage) {
+  const [rejecting, setRejecting] = useState(false);
+
+  async function handleMove(stage: ApplicationStage, reason?: string) {
     setError(null);
     setBusy(true);
     try {
-      await api.moveApplicationStage(application.id, stage);
-      onMoved();
+      // Pass the PATCH's own response up — see loadApplications/onMoved's
+      // comment on PipelinePanel for why a bare refetch isn't trusted
+      // alone here.
+      const updated = await api.moveApplicationStage(application.id, stage, reason);
+      onMoved(updated);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not move this application.");
     } finally {
@@ -264,7 +274,7 @@ function ApplicationCard({
       <div className="font-semibold text-sm">{candidateName}</div>
 
       {application.stage === "offer" && <OfferControls offer={offer} onOfferChanged={onOfferChanged} onHired={onHired} />}
-      {application.stage === "offer" && !offer && <ExtendOfferForm applicationId={application.id} onExtended={onOfferChanged} />}
+      {application.stage === "offer" && (!offer || ["rescinded", "expired", "approval_rejected", "declined"].includes(offer.status)) && <ExtendOfferForm applicationId={application.id} onExtended={onOfferChanged} />}
 
       {/* Lifted to PipelinePanel's own state (keyed by applicationId)
           rather than local state here — decideOffer("accepted") triggers
@@ -282,7 +292,7 @@ function ApplicationCard({
           {nextStageOptions(application.stage).map((stage) => (
             <button
               key={stage}
-              onClick={() => handleMove(stage)}
+              onClick={() => (stage === "rejected" ? setRejecting(true) : handleMove(stage))}
               disabled={busy}
               className={`text-xs font-semibold hover:underline disabled:opacity-50 ${
                 stage === "rejected" ? "text-danger" : "text-accent"
@@ -292,6 +302,20 @@ function ApplicationCard({
             </button>
           ))}
         </div>
+      )}
+
+      {rejecting && (
+        <ReasonModal
+          title={`Reject ${candidateName}`}
+          description="The reason is kept with the application and shown in the candidate's history."
+          confirmLabel="Reject candidate"
+          danger
+          onCancel={() => setRejecting(false)}
+          onConfirm={async (reason) => {
+            await handleMove("rejected", reason);
+            setRejecting(false);
+          }}
+        />
       )}
 
       {error && <p className="text-xs text-danger mt-1">{error}</p>}
@@ -332,7 +356,7 @@ export function PipelinePanel() {
       .then(([reqs, cands]) => {
         setRequisitions(reqs);
         setCandidates(cands);
-        const approved = reqs.find((r) => r.status === "approved");
+        const approved = reqs.find((r) => r.status === "approved" || r.status === "open");
         if (approved) setSelectedRequisitionId(approved.id);
       })
       .catch((err) => setError(describeError(err)));
@@ -344,6 +368,35 @@ export function PipelinePanel() {
       return;
     }
     api.listApplications(requisitionId).then(setApplications).catch((err) => setError(describeError(err)));
+    // GET /offers exists now, so an offer extended earlier (or in another session) is shown after a reload too.
+    api
+      .listOffers()
+      .then((list) => {
+        const latest: Record<string, OfferView> = {};
+        for (const o of list) {
+          const prev = latest[o.applicationId];
+          if (!prev || prev.createdAt < o.createdAt) latest[o.applicationId] = o;
+        }
+        setOffersByApplication((current) => ({ ...latest, ...current }));
+      })
+      .catch(() => undefined);
+  }
+
+  // Inserts or replaces one application from a mutation's own response —
+  // a live QA pass found that an immediate GET /applications right after
+  // a stage-move or candidate-add can still come back without reflecting
+  // it for a few seconds (confirmed via network-log inspection: the
+  // mutation returns 200/201, the very next refetch still shows the old
+  // state, only a later reload is correct) — a backend/infra
+  // read-after-write lag, not a bug in the mutation itself. Every
+  // mutation here already returns the full ApplicationView, so patching
+  // local state from that response sidesteps the lag entirely.
+  function upsertApplication(updated: ApplicationView) {
+    setApplications((apps) => {
+      if (!apps) return apps;
+      const exists = apps.some((a) => a.id === updated.id);
+      return exists ? apps.map((a) => (a.id === updated.id ? updated : a)) : [...apps, updated];
+    });
   }
 
   // No react-hooks/exhaustive-deps rule is configured in this project's
@@ -356,7 +409,7 @@ export function PipelinePanel() {
   }, [selectedRequisitionId]);
 
   const approvedRequisitions = useMemo(
-    () => (requisitions ?? []).filter((r) => r.status === "approved"),
+    () => (requisitions ?? []).filter((r) => r.status === "approved" || r.status === "open"),
     [requisitions]
   );
 
@@ -401,7 +454,7 @@ export function PipelinePanel() {
           requisitionId={selectedRequisitionId}
           candidates={candidates}
           existingCandidateIds={existingCandidateIds}
-          onAdded={() => loadApplications(selectedRequisitionId)}
+          onAdded={upsertApplication}
         />
       )}
 
@@ -424,12 +477,27 @@ export function PipelinePanel() {
                       candidateName={candidateName(a.candidateId)}
                       offer={offersByApplication[a.id]}
                       hiredNote={hiredNotes[a.id]}
-                      onMoved={() => loadApplications(selectedRequisitionId)}
+                      onMoved={upsertApplication}
                       onOfferChanged={(offer) => {
+                        // extend/rescind/decline never change the
+                        // application's own stage (only decideOffer's
+                        // "accepted" path does, via onHired below —
+                        // confirmed against RecruitmentService.decideOffer,
+                        // which only issues the stage='hired' UPDATE in
+                        // that one branch), so no application patch is
+                        // needed here.
                         setOffersByApplication((m) => ({ ...m, [a.id]: offer }));
-                        loadApplications(selectedRequisitionId);
                       }}
-                      onHired={(num) => setHiredNotes((m) => ({ ...m, [a.id]: `Hired as Employee #${num}` }))}
+                      onHired={(num) => {
+                        setHiredNotes((m) => ({ ...m, [a.id]: `Hired as Employee #${num}` }));
+                        // decideOffer's response doesn't carry the updated
+                        // ApplicationView (only {offer, employee} — see
+                        // DecideOfferResponse), but "accepted" is the only
+                        // decision that moves stage, and it always moves
+                        // to exactly "hired" — so this is a safe, precise
+                        // local patch rather than a refetch.
+                        upsertApplication({ ...a, stage: "hired" });
+                      }}
                     />
                   ))}
               </div>

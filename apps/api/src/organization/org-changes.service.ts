@@ -13,6 +13,7 @@ import { OrgOccupancyService } from "./occupancy/org-occupancy.service";
 import type {
   CreateOrgChangeRequest,
   OrgChangeCascadeAction,
+  OrgChangeEntityType,
   OrgChangeImpactSummary,
   OrgChangeItemAction,
   OrgChangeItemView,
@@ -35,6 +36,23 @@ const VALID_UNIT_TYPES = new Set<OrgUnitType>(["department", "division", "busine
 // Every non-terminal status a change can be in while it still "owns" the
 // org units it targets — used by validate()'s overlap check below.
 const OPEN_STATUSES: OrgChangeStatus[] = ["draft", "validated", "pending_approval", "approved"];
+
+/** Which item actions belong to which entity type (ORG-07). */
+const ENTITY_ACTIONS: Record<OrgChangeEntityType, Set<OrgChangeItemAction>> = {
+  org_unit: new Set<OrgChangeItemAction>(["move", "rename", "retype", "archive", "activate"]),
+  position: new Set<OrgChangeItemAction>(["position_freeze", "position_unfreeze", "position_abolish", "position_reactivate", "position_rename", "position_move"]),
+  location: new Set<OrgChangeItemAction>(["location_rename", "location_archive", "location_activate"]),
+  cost_center: new Set<OrgChangeItemAction>(["cost_center_rename", "cost_center_archive", "cost_center_activate"]),
+  profit_center: new Set<OrgChangeItemAction>(["profit_center_rename", "profit_center_archive", "profit_center_activate"]),
+  assignment: new Set<OrgChangeItemAction>(["assignment_transfer"]),
+};
+
+/** Tables for the "simple versioned master data" entities a reorganization may rename / archive / activate. */
+const SIMPLE_ENTITIES: Record<"location" | "cost_center" | "profit_center", { table: string; versions: string; fk: string; columns: string[] }> = {
+  location: { table: "locations", versions: "location_versions", fk: "location_id", columns: ["parent_id", "location_type", "code", "name", "address", "status"] },
+  cost_center: { table: "cost_centers", versions: "cost_center_versions", fk: "cost_center_id", columns: ["code", "name", "org_unit_id", "status"] },
+  profit_center: { table: "profit_centers", versions: "profit_center_versions", fk: "profit_center_id", columns: ["code", "name", "org_unit_id", "status"] },
+};
 
 type OrgChangeRow = {
   id: string;
@@ -60,7 +78,10 @@ type OrgChangeItemRow = {
   id: string;
   org_change_id: string;
   sequence: number;
-  org_unit_id: string;
+  org_unit_id: string | null;
+  entity_type: OrgChangeEntityType;
+  entity_id: string | null;
+  payload: Record<string, unknown> | null;
   action: OrgChangeItemAction;
   new_parent_id: string | null;
   new_name: string | null;
@@ -81,6 +102,9 @@ function rowToItem(row: OrgChangeItemRow): OrgChangeItemView {
     orgChangeId: row.org_change_id,
     sequence: row.sequence,
     orgUnitId: row.org_unit_id,
+    entityType: row.entity_type ?? "org_unit",
+    entityId: row.entity_id ?? row.org_unit_id,
+    payload: row.payload ?? {},
     action: row.action,
     newParentId: row.new_parent_id,
     newName: row.new_name,
@@ -173,7 +197,13 @@ export class OrgChangesService {
     // cascades through (see applyItem()). Default-instantiated, appended
     // last, so positional spec constructions keep working.
     private readonly occupancy: OrgOccupancyService = new OrgOccupancyService(audit, effectiveDating, webhooks)
-  ) {}
+  ) {
+    this.workflow?.adapters?.register({
+      objectKey: WORKFLOW_OBJECT_KEY,
+      label: "Organization change",
+      legacyDecide: (c, id, dto) => this.decide(c, id, dto),
+    });
+  }
 
   async create(claims: RequestClaims, input: CreateOrgChangeRequest): Promise<OrgChangeView> {
     await this.requireManage(claims);
@@ -188,18 +218,32 @@ export class OrgChangesService {
 
       let sequence = 1;
       for (const item of input.items) {
+        const entityType: OrgChangeEntityType = item.entityType ?? "org_unit";
+        if (!ENTITY_ACTIONS[entityType].has(item.action)) {
+          throw new BadRequestException(`Item ${sequence}: action "${item.action}" does not apply to a ${entityType}`);
+        }
+        if (entityType === "org_unit" && !item.orgUnitId) {
+          throw new BadRequestException(`Item ${sequence}: orgUnitId is required for an org unit item`);
+        }
+        if (entityType !== "org_unit" && !item.entityId) {
+          throw new BadRequestException(`Item ${sequence}: entityId is required for a ${entityType} item`);
+        }
         await client.query(
-          `INSERT INTO org_change_items (org_change_id, sequence, org_unit_id, action, new_parent_id, new_name, new_unit_type, cascade_action)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          `INSERT INTO org_change_items
+             (org_change_id, sequence, org_unit_id, action, new_parent_id, new_name, new_unit_type, cascade_action, entity_type, entity_id, payload)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)`,
           [
             changeId,
             sequence++,
-            item.orgUnitId,
+            entityType === "org_unit" ? item.orgUnitId : null,
             item.action,
             item.newParentId ?? null,
             item.newName ?? null,
             item.newUnitType ?? null,
             item.cascadeAction ?? "require_vacant",
+            entityType,
+            entityType === "org_unit" ? item.orgUnitId : item.entityId,
+            JSON.stringify(item.payload ?? {}),
           ]
         );
       }
@@ -268,9 +312,13 @@ export class OrgChangesService {
       if (change.status !== "draft") {
         throw new BadRequestException(`Cannot validate a change that is already ${change.status}`);
       }
-      const items = await this.loadItemRows(client, id);
+      const allItems = await this.loadItemRows(client, id);
+      // ORG-07: org-unit items keep the batch-aware structural checks below;
+      // every other entity type is checked item by item in validateEntityItems().
+      const items = allItems.filter((i) => (i.entity_type ?? "org_unit") === "org_unit") as Array<OrgChangeItemRow & { org_unit_id: string }>;
       const errors: string[] = [];
       const warnings: string[] = [];
+      await this.validateEntityItems(client, claims.company_id!, allItems.filter((i) => (i.entity_type ?? "org_unit") !== "org_unit"), errors, warnings);
 
       const unitIds = [...new Set(items.map((i) => i.org_unit_id))];
       const existingUnits = await client.query<{ id: string; parent_id: string | null }>(
@@ -439,7 +487,9 @@ export class OrgChangesService {
       if (change.status !== "validated" && change.status !== "pending_approval" && change.status !== "approved") {
         throw new BadRequestException("Validate this change before analyzing its impact");
       }
-      const items = await this.loadItemRows(client, id);
+      const allItems = await this.loadItemRows(client, id);
+      const items = allItems.filter((i) => (i.entity_type ?? "org_unit") === "org_unit") as Array<OrgChangeItemRow & { org_unit_id: string }>;
+      const otherItems = allItems.length - items.length;
       const rootIds = [...new Set(items.map((i) => i.org_unit_id))];
 
       const affected = await client.query<{ id: string }>(
@@ -511,6 +561,9 @@ export class OrgChangesService {
         warnings.push(
           `${filledPositionsInArchivedUnitsCount} filled position(s) sit in unit(s) this change archives — they will be vacated ("auto_unassign") or block execution ("require_vacant").`
         );
+      }
+      if (otherItems > 0) {
+        warnings.push(`${otherItems} item(s) change positions, locations, cost / profit centers or assignments directly; their effects are not counted above.`);
       }
       if (affectedIds.length > 25) {
         warnings.push(`This change affects a large subtree (${affectedIds.length} org units) — review carefully before approving.`);
@@ -680,6 +733,8 @@ export class OrgChangesService {
     const items = await this.db.withClaims(claims, (client) => this.loadItemRows(client, id));
 
     for (const item of items) {
+      // ORG-07: a resumed batch skips what already applied.
+      if (item.applied_at) continue;
       try {
         await this.db.withClaims(claims, (client) => this.applyItem(client, claims, item, effectiveFrom));
         await this.db.withClaims(claims, (client) =>
@@ -690,7 +745,7 @@ export class OrgChangesService {
         await this.db.withClaims(claims, (client) =>
           client.query(
             `UPDATE org_changes SET status = 'failed', failure_reason = $2, executed_at = now(), updated_at = now() WHERE id = $1`,
-            [id, `Item ${item.sequence} (${item.action} on org unit ${item.org_unit_id}): ${message}`]
+            [id, `Item ${item.sequence} (${item.action} on ${(item.entity_type ?? "org_unit").replace("_", " ")} ${item.entity_id ?? item.org_unit_id}): ${message}`]
           )
         );
         const view = await this.db.withClaims(claims, (client) => this.loadChange(client, id));
@@ -760,6 +815,9 @@ export class OrgChangesService {
     item: OrgChangeItemRow,
     effectiveFrom: string
   ): Promise<void> {
+    if ((item.entity_type ?? "org_unit") !== "org_unit") {
+      return this.applyEntityItem(client, claims, item, effectiveFrom);
+    }
     const before = await client.query(`SELECT * FROM org_units WHERE id = $1 AND company_id = $2`, [
       item.org_unit_id,
       claims.company_id,
@@ -812,7 +870,7 @@ export class OrgChangesService {
 
     await this.effectiveDating.applyVersionedRow(client, {
       table: "org_unit_versions",
-      scope: { org_unit_id: item.org_unit_id },
+      scope: { org_unit_id: item.org_unit_id! },
       extraInsertColumns: { company_id: claims.company_id },
       data: next,
       effectiveFrom,
@@ -868,7 +926,7 @@ export class OrgChangesService {
       await this.occupancy.vacatePositionWithinTransaction(client, claims, { positionId: position.id, effectiveFrom, source });
     }
     const ended = await this.occupancy.endAssignmentsWithinTransaction(client, claims, {
-      orgUnitId: item.org_unit_id,
+      orgUnitId: item.org_unit_id!,
       effectiveFrom,
       source,
     });
@@ -887,6 +945,237 @@ export class OrgChangesService {
       [companyId, orgUnitId]
     );
     return { filled: Number(result.rows[0].filled), openAssignments: Number(result.rows[0].open_assignments) };
+  }
+
+  /**
+   * ORG-07 - resume a `failed` batch. Items that already applied (they carry
+   * `applied_at`) are skipped, so a transient failure or a data problem fixed
+   * in the meantime does not force the whole reorganization to be recreated.
+   * The change goes back to `approved` (it already was approved) and runs
+   * again from the first unapplied item; the effective date is unchanged.
+   */
+  async resume(claims: RequestClaims, id: string): Promise<OrgChangeView> {
+    await this.requireManage(claims);
+    const change = await this.db.withClaims(claims, (client) => this.mustExistChange(client, id));
+    if (change.status !== "failed") {
+      throw new BadRequestException(`Only a failed change can be resumed (this one is ${change.status})`);
+    }
+    await this.db.withClaims(claims, async (client) => {
+      await client.query(`UPDATE org_changes SET status = 'approved', failure_reason = NULL, updated_at = now() WHERE id = $1`, [id]);
+      await this.audit.record(client, claims, {
+        companyId: change.company_id,
+        action: "org_change.resume",
+        target: id,
+        metadata: { previousFailure: change.failure_reason },
+      });
+    });
+    return this.executeInternal(claims, id);
+  }
+
+  /**
+   * ORG-07 - per-item checks for positions, locations, cost / profit centers
+   * and assignments (the org-unit items keep their batch-aware validation in
+   * `validate()`). Re-checked again, under locks, when the item is applied.
+   */
+  private async validateEntityItems(
+    client: PoolClient,
+    companyId: string,
+    items: OrgChangeItemRow[],
+    errors: string[],
+    warnings: string[]
+  ): Promise<void> {
+    for (const item of items) {
+      const label = `Item ${item.sequence}`;
+      const type = item.entity_type;
+      if (!ENTITY_ACTIONS[type]?.has(item.action)) {
+        errors.push(`${label}: action "${item.action}" does not apply to a ${type}`);
+        continue;
+      }
+      if (type === "position") {
+        const p = await client.query<{ status: string }>("SELECT status FROM positions WHERE id = $1 AND company_id = $2", [item.entity_id, companyId]);
+        if (p.rowCount === 0) {
+          errors.push(`${label}: position ${item.entity_id} not found`);
+          continue;
+        }
+        const status = p.rows[0].status;
+        const allowedFrom: Record<string, string[]> = {
+          position_freeze: ["vacant"],
+          position_unfreeze: ["frozen"],
+          position_abolish: ["vacant", "frozen"],
+          position_reactivate: ["abolished"],
+        };
+        if (allowedFrom[item.action] && !allowedFrom[item.action].includes(status)) {
+          warnings.push(`${label}: position is currently ${status}; "${item.action}" will fail at execution unless an earlier item changes that`);
+        }
+        if (item.action === "position_rename" && !item.new_name) errors.push(`${label}: "position_rename" requires a newName`);
+        if (item.action === "position_move") {
+          const target = typeof item.payload?.orgUnitId === "string" ? (item.payload.orgUnitId as string) : null;
+          if (!target) errors.push(`${label}: "position_move" requires payload.orgUnitId`);
+          else if ((await client.query("SELECT 1 FROM org_units WHERE id = $1 AND company_id = $2 AND status <> 'archived'", [target, companyId])).rowCount === 0) {
+            errors.push(`${label}: target org unit ${target} not found or archived`);
+          }
+        }
+      } else if (type === "assignment") {
+        const target = typeof item.payload?.orgUnitId === "string" ? (item.payload.orgUnitId as string) : null;
+        if (!target) errors.push(`${label}: "assignment_transfer" requires payload.orgUnitId`);
+        else if ((await client.query("SELECT 1 FROM org_units WHERE id = $1 AND company_id = $2 AND status <> 'archived'", [target, companyId])).rowCount === 0) {
+          errors.push(`${label}: target org unit ${target} not found or archived`);
+        }
+        if ((await client.query("SELECT 1 FROM employees WHERE id = $1 AND company_id = $2", [item.entity_id, companyId])).rowCount === 0) {
+          errors.push(`${label}: employee ${item.entity_id} not found`);
+        }
+      } else {
+        const cfg = SIMPLE_ENTITIES[type as keyof typeof SIMPLE_ENTITIES];
+        const exists = await client.query(`SELECT 1 FROM ${cfg.table} WHERE id = $1 AND company_id = $2`, [item.entity_id, companyId]);
+        if (exists.rowCount === 0) errors.push(`${label}: ${type.replace("_", " ")} ${item.entity_id} not found`);
+        if (item.action.endsWith("_rename") && !item.new_name) errors.push(`${label}: "${item.action}" requires a newName`);
+      }
+    }
+  }
+
+  /** Applies one non-org-unit item (ORG-07): raw, versioned SQL like `applyItem()`, for the same RBAC reason. */
+  private async applyEntityItem(client: PoolClient, claims: RequestClaims, item: OrgChangeItemRow, effectiveFrom: string): Promise<void> {
+    const companyId = claims.company_id!;
+    const source = `org_change:${item.org_change_id}`;
+    const type = item.entity_type;
+
+    if (type === "position") {
+      const row = (
+        await client.query("SELECT * FROM positions WHERE id = $1 AND company_id = $2 FOR UPDATE", [item.entity_id, companyId])
+      ).rows[0];
+      if (!row) throw new Error(`Position ${item.entity_id} not found`);
+      const next = {
+        org_unit_id: row.org_unit_id as string,
+        job_id: row.job_id as string | null,
+        position_code: row.position_code as string | null,
+        position_title: row.position_title as string,
+        headcount_fte: Number(row.headcount_fte),
+        status: row.status as string,
+        cost_center_id: row.cost_center_id as string | null,
+        profit_center_id: row.profit_center_id as string | null,
+      };
+      const used = await this.occupancy.getUsedFte(client, companyId, item.entity_id!);
+      switch (item.action) {
+        case "position_freeze":
+          if (next.status !== "vacant" || used > 0.005) throw new Error(`Only a vacant, unoccupied position can be frozen (it is ${next.status})`);
+          next.status = "frozen";
+          break;
+        case "position_unfreeze":
+          if (next.status !== "frozen") throw new Error(`Only a frozen position can be unfrozen (it is ${next.status})`);
+          next.status = "vacant";
+          break;
+        case "position_abolish":
+          if (!["vacant", "frozen"].includes(next.status) || used > 0.005) throw new Error(`Only a vacant or frozen, unoccupied position can be abolished (it is ${next.status})`);
+          next.status = "abolished";
+          break;
+        case "position_reactivate":
+          if (next.status !== "abolished") throw new Error(`Only an abolished position can be reactivated (it is ${next.status})`);
+          next.status = "vacant";
+          break;
+        case "position_rename":
+          if (!item.new_name) throw new Error("Missing newName for a position_rename item");
+          next.position_title = item.new_name;
+          break;
+        case "position_move": {
+          const target = item.payload?.orgUnitId as string | undefined;
+          if (!target) throw new Error("Missing payload.orgUnitId for a position_move item");
+          if (used > 0.005) throw new Error("A position with incumbents cannot be moved to another org unit - vacate it first");
+          const unit = await client.query("SELECT 1 FROM org_units WHERE id = $1 AND company_id = $2 AND status <> 'archived'", [target, companyId]);
+          if (unit.rowCount === 0) throw new Error(`Target org unit ${target} not found or archived`);
+          next.org_unit_id = target;
+          break;
+        }
+        default:
+          throw new Error(`Unsupported position action ${item.action}`);
+      }
+      await this.effectiveDating.applyVersionedRow(client, {
+        table: "position_versions",
+        scope: { position_id: item.entity_id! },
+        extraInsertColumns: { company_id: companyId },
+        data: next,
+        effectiveFrom,
+      });
+      await client.query(
+        `UPDATE positions SET org_unit_id = $2, position_title = $3, status = $4, updated_at = now() WHERE id = $1`,
+        [item.entity_id, next.org_unit_id, next.position_title, next.status]
+      );
+      await this.audit.record(client, claims, {
+        companyId,
+        action: `position.${item.action.replace("position_", "")}`,
+        target: item.entity_id,
+        metadata: { viaOrgChangeItemId: item.id, orgChangeId: item.org_change_id, source },
+      });
+      return;
+    }
+
+    if (type === "assignment") {
+      const target = item.payload?.orgUnitId as string | undefined;
+      if (!target) throw new Error("Missing payload.orgUnitId for an assignment_transfer item");
+      const emp = (
+        await client.query("SELECT id, position_id, location_id FROM employees WHERE id = $1 AND company_id = $2 FOR UPDATE", [item.entity_id, companyId])
+      ).rows[0];
+      if (!emp) throw new Error(`Employee ${item.entity_id} not found`);
+      const unit = await client.query<{ name: string }>("SELECT name FROM org_units WHERE id = $1 AND company_id = $2 AND status <> 'archived'", [target, companyId]);
+      if (unit.rowCount === 0) throw new Error(`Target org unit ${target} not found or archived`);
+      if (emp.position_id) {
+        const seat = await client.query("SELECT org_unit_id FROM positions WHERE id = $1", [emp.position_id]);
+        if (seat.rows[0]?.org_unit_id !== target) {
+          throw new Error("The employee holds a position in another org unit - move or vacate the position first (position_move / unassign)");
+        }
+      }
+      const locationId = (item.payload?.locationId as string | undefined) ?? (emp.location_id as string | null);
+      await client.query("UPDATE employees SET org_unit_id = $2, department = $3, location_id = $4, updated_at = now() WHERE id = $1", [
+        item.entity_id,
+        target,
+        unit.rows[0].name,
+        locationId,
+      ]);
+      await this.occupancy.syncPrimaryAssignmentWithinTransaction(client, claims, item.entity_id!, {
+        orgUnitId: target,
+        locationId,
+        effectiveFrom,
+        source,
+      });
+      await this.audit.record(client, claims, {
+        companyId,
+        action: "employee_org_assignment.transfer",
+        target: item.entity_id,
+        metadata: { viaOrgChangeItemId: item.id, orgChangeId: item.org_change_id, orgUnitId: target, source },
+      });
+      return;
+    }
+
+    const cfg = SIMPLE_ENTITIES[type as keyof typeof SIMPLE_ENTITIES];
+    if (!cfg) throw new Error(`Unsupported entity type ${type}`);
+    const row = (await client.query(`SELECT * FROM ${cfg.table} WHERE id = $1 AND company_id = $2 FOR UPDATE`, [item.entity_id, companyId])).rows[0];
+    if (!row) throw new Error(`${type.replace("_", " ")} ${item.entity_id} not found`);
+    const next: Record<string, unknown> = {};
+    for (const col of cfg.columns) next[col] = row[col];
+    if (item.action.endsWith("_rename")) {
+      if (!item.new_name) throw new Error(`Missing newName for a ${item.action} item`);
+      next.name = item.new_name;
+    } else if (item.action.endsWith("_archive")) {
+      next.status = "archived";
+    } else if (item.action.endsWith("_activate")) {
+      next.status = "active";
+    } else {
+      throw new Error(`Unsupported action ${item.action}`);
+    }
+    await this.effectiveDating.applyVersionedRow(client, {
+      table: cfg.versions,
+      scope: { [cfg.fk]: item.entity_id! },
+      extraInsertColumns: { company_id: companyId },
+      data: next,
+      effectiveFrom,
+    });
+    const sets = cfg.columns.map((c, i) => `${c} = $${i + 2}`).join(", ");
+    await client.query(`UPDATE ${cfg.table} SET ${sets}, updated_at = now() WHERE id = $1`, [item.entity_id, ...cfg.columns.map((c) => next[c])]);
+    await this.audit.record(client, claims, {
+      companyId,
+      action: `${type}.${item.action.replace(`${type}_`, "")}`,
+      target: item.entity_id,
+      metadata: { viaOrgChangeItemId: item.id, orgChangeId: item.org_change_id, source },
+    });
   }
 
   /**

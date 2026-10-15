@@ -8,7 +8,7 @@ import { AuditService } from "../audit/audit.service";
 import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engine";
 import { RulesEngine, RuleEvaluationError } from "../rules-engine/rules-engine.engine";
 import type { RuleExpression } from "../rules-engine/rules-engine.engine";
-import { EMPLOYEE_CONDITION_FIELD_TO_COLUMN } from "../employees/employee-condition-fields.util";
+import { EMPLOYEE_TEXT_CONDITION_FIELD_TO_COLUMN as EMPLOYEE_CONDITION_FIELD_TO_COLUMN } from "../employees/employee-condition-fields.util";
 import type {
   AssignShiftRequest,
   AttendanceStatus,

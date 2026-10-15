@@ -20,4 +20,9 @@ export const CONDITION_FIELD_LABELS: Record<EmployeeGroupConditionField, string>
   designation: "Designation",
   employmentType: "Employment type",
   employmentStatus: "Employment status",
+  orgUnitId: "Org unit",
+  locationId: "Location",
+  positionId: "Position",
+  jobId: "Job",
+  subgroupId: "Subgroup",
 };

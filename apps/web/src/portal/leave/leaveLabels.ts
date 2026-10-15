@@ -1,22 +1,23 @@
 import type { AttendanceCorrectionStatus, AttendanceStatus, LeaveRequestStatus, LeaveType } from "@aihxm/shared-types";
 
 /**
- * Matches SubmitLeaveRequestDto's own
- * `@IsIn(["annual", "casual", "sick", "unpaid"])` — kept as an explicit
- * literal list rather than deriving from `LeaveType` so this file still
- * fails to compile (via `LEAVE_TYPE_LABELS`'s `Record<LeaveType, ...>`
- * below) the day the backend's allowed set changes again, the same
- * "don't let the UI silently drift from the DTO" discipline
- * EMPLOYMENT_TYPES/CONDITION_FIELDS already follow in this portal.
+ * TLM-01: leave types are tenant-configured (`GET /leave-types`), so this is only the
+ * FALLBACK vocabulary for the four built-ins; `leaveTypeLabel()` humanises any other code.
  */
 export const LEAVE_TYPES: LeaveType[] = ["annual", "casual", "sick", "unpaid"];
 
-export const LEAVE_TYPE_LABELS: Record<LeaveType, string> = {
+export const LEAVE_TYPE_LABELS: Record<string, string> = {
   annual: "Annual",
   casual: "Casual",
   sick: "Sick",
   unpaid: "Unpaid",
 };
+
+export function leaveTypeLabel(code: string): string {
+  if (LEAVE_TYPE_LABELS[code]) return LEAVE_TYPE_LABELS[code];
+  const words = code.replace(/_/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
 
 export const STATUS_STYLES: Record<LeaveRequestStatus, string> = {
   pending: "bg-amber-100 text-amber-800",
@@ -66,10 +67,14 @@ export const CORRECTION_STATUS_STYLES: Record<AttendanceCorrectionStatus, string
   pending: "bg-amber-100 text-amber-800",
   approved: "bg-success/15 text-green-700",
   rejected: "bg-danger/15 text-red-700",
+  returned: "bg-amber-100 text-amber-800",
+  cancelled: "bg-slate-100 text-slate-600",
 };
 
 export const CORRECTION_STATUS_LABELS: Record<AttendanceCorrectionStatus, string> = {
   pending: "Pending",
   approved: "Approved",
   rejected: "Rejected",
+  returned: "Sent back",
+  cancelled: "Cancelled",
 };

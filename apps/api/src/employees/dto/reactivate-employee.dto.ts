@@ -19,4 +19,9 @@ export class ReactivateEmployeeDto {
   @IsString()
   @MaxLength(2000)
   notes?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  rehireOverrideReason?: string;
 }

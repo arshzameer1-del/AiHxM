@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import type {
+  ConfigurationRuleMappingScopeType,
   ConfigurationRuleMappingView,
   HrBusinessPolicyTypeSummary,
   HrBusinessPolicyView,
@@ -141,8 +142,16 @@ function PolicyForm({
   );
 }
 
-type ScopeType = "org_unit" | "location" | "employee";
-const SCOPE_TYPE_LABELS: Record<ScopeType, string> = { org_unit: "Org unit", location: "Location", employee: "Employee" };
+type ScopeType = ConfigurationRuleMappingScopeType;
+const SCOPE_TYPE_LABELS: Record<ScopeType, string> = {
+  org_unit: "Org unit",
+  location: "Location",
+  employee: "Employee",
+  tenant: "Whole company",
+  employee_group: "Employee group",
+  position: "Position",
+  job: "Job",
+};
 
 function describeOverrideError(err: unknown): string {
   if (err instanceof ApiError) {

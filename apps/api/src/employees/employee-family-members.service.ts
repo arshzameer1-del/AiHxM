@@ -1,3 +1,5 @@
+import { assertValidCnic } from "../crypto/identifier-validation";
+import { sensitive } from "../crypto/sensitive-fields";
 import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { DatabaseService } from "../database/database.service";
@@ -29,8 +31,8 @@ function rowToView(row: any): EmployeeFamilyMemberView {
     employeeId: row.employee_id,
     relationship: row.relationship,
     fullName: row.full_name,
-    dateOfBirth: row.date_of_birth instanceof Date ? row.date_of_birth.toISOString().slice(0, 10) : row.date_of_birth,
-    cnic: row.cnic,
+    dateOfBirth: sensitive.readDob(row.company_id, row.date_of_birth_enc, row.date_of_birth),
+    cnic: sensitive.decrypt(row.company_id, row.cnic),
     isDependent: row.is_dependent,
     isBeneficiary: row.is_beneficiary,
     status: row.status,
@@ -76,19 +78,22 @@ export class EmployeeFamilyMembersService {
     // `validateEmploymentType()`.
     await this.hrCatalog.validateActiveCode(client, claims.company_id!, "family_relationship_type", input.relationship);
 
+    assertValidCnic(input.cnic);
     const inserted = await client.query(
       `INSERT INTO employee_family_members
-         (company_id, employee_id, relationship, full_name, date_of_birth, cnic, is_dependent, is_beneficiary)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+         (company_id, employee_id, relationship, full_name, date_of_birth, cnic, is_dependent, is_beneficiary,
+          date_of_birth_enc, cnic_bidx)
+       VALUES ($1, $2, $3, $4, NULL, $6, $7, $8, $5, $9) RETURNING *`,
       [
         claims.company_id,
         input.employeeId,
         input.relationship,
         input.fullName,
-        input.dateOfBirth ?? null,
-        input.cnic ?? null,
+        sensitive.encryptDob(claims.company_id!, input.dateOfBirth),
+        sensitive.encrypt(claims.company_id!, input.cnic),
         input.isDependent ?? true,
         input.isBeneficiary ?? false,
+        sensitive.cnicIndex(claims.company_id!, input.cnic),
       ]
     );
     const view = rowToView(inserted.rows[0]);
@@ -121,12 +126,15 @@ export class EmployeeFamilyMembersService {
       if (patch.relationship) {
         await this.hrCatalog.validateActiveCode(client, claims.company_id!, "family_relationship_type", patch.relationship);
       }
+      assertValidCnic(patch.cnic);
       const result = await client.query(
         `UPDATE employee_family_members SET
            relationship = COALESCE($2, relationship),
            full_name = COALESCE($3, full_name),
-           date_of_birth = COALESCE($4, date_of_birth),
+           date_of_birth = CASE WHEN $4::text IS NOT NULL THEN NULL ELSE date_of_birth END,
+           date_of_birth_enc = COALESCE($4, date_of_birth_enc),
            cnic = COALESCE($5, cnic),
+           cnic_bidx = COALESCE($8, cnic_bidx),
            is_dependent = COALESCE($6, is_dependent),
            is_beneficiary = COALESCE($7, is_beneficiary),
            updated_at = now()
@@ -135,10 +143,11 @@ export class EmployeeFamilyMembersService {
           id,
           patch.relationship ?? null,
           patch.fullName ?? null,
-          patch.dateOfBirth ?? null,
-          patch.cnic ?? null,
+          sensitive.encryptDob(claims.company_id!, patch.dateOfBirth),
+          sensitive.encrypt(claims.company_id!, patch.cnic),
           patch.isDependent ?? null,
           patch.isBeneficiary ?? null,
+          sensitive.cnicIndex(claims.company_id!, patch.cnic),
         ]
       );
       await this.audit.record(client, claims, {

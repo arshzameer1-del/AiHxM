@@ -1,3 +1,6 @@
+import { sensitive } from "../crypto/sensitive-fields";
+import { fieldCrypto } from "../crypto/field-crypto";
+import { encryptIntegrationConfig } from "../crypto/integration-secrets";
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomBytes } from "crypto";
 import { DatabaseService } from "../database/database.service";
@@ -137,7 +140,9 @@ export class IntegrationsService {
         [companyId, providerKey]
       );
       const currentConfig = existing.rowCount ? existing.rows[0].config ?? {} : {};
-      const nextConfig = { ...currentConfig, ...(patch.config ?? {}) };
+      // SEC-03: secret fields are stored encrypted (already-encrypted values pass through).
+      await fieldCrypto.warm(client, companyId); // platform-admin callers carry no company in claims
+      const nextConfig = encryptIntegrationConfig(companyId, providerKey, { ...currentConfig, ...(patch.config ?? {}) });
       const nextEnabled = patch.enabled ?? (existing.rowCount ? existing.rows[0].enabled : false);
 
       const result = await client.query(
@@ -211,7 +216,8 @@ export class IntegrationsService {
       const currentConfig = existing.rows[0].config ?? {};
       const currentSecretValue: string | undefined = currentConfig[secretField];
       const newSecretValue = randomBytes(24).toString("hex");
-      const nextConfig = { ...currentConfig, [secretField]: newSecretValue };
+      await fieldCrypto.warm(client, companyId);
+      const nextConfig = encryptIntegrationConfig(companyId, providerKey, { ...currentConfig, [secretField]: newSecretValue });
 
       const result = await client.query(
         `UPDATE tenant_integrations
@@ -222,7 +228,7 @@ export class IntegrationsService {
              updated_at = now()
          WHERE company_id = $1 AND provider_key = $2
          RETURNING *`,
-        [companyId, providerKey, JSON.stringify(nextConfig), currentSecretValue ?? null, ROTATION_GRACE_DAYS, claims.sub]
+        [companyId, providerKey, JSON.stringify(nextConfig), sensitive.encrypt(companyId, currentSecretValue), ROTATION_GRACE_DAYS, claims.sub]
       );
 
       await this.audit.record(client, claims, {

@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import type { EmployeeAdditionalPaymentView } from "@aihxm/shared-types";
+import type { CompensationComponentView, EmployeeAdditionalPaymentView, HrReferenceCatalogItemView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 
 const inputClass =
@@ -88,7 +88,11 @@ export function EmployeeAdditionalPaymentsPanel({ employeeId, canManage }: { emp
                 </div>
                 <div className="text-xs text-label-tertiary">
                   {p.effectiveDate} · Status: <span className="font-semibold">{p.status}</span>
+                  {p.approvalStatus === "pending" && <span className="ml-2 px-1.5 rounded bg-amber-100 text-amber-800">awaiting approval</span>}
+                  {p.approvalStatus === "approved" && <span className="ml-2 px-1.5 rounded bg-green-100 text-green-800">approved</span>}
+                  {p.approvalStatus === "rejected" && <span className="ml-2 px-1.5 rounded bg-red-100 text-red-800">rejected</span>}
                 </div>
+                {p.reasonNote && <div className="text-xs text-label-secondary">{p.reasonNote}</div>}
               </div>
               <div className="flex items-center gap-3">
                 <span className={`font-mono font-semibold ${p.paymentType === "deduction" ? "text-danger" : ""}`}>
@@ -115,8 +119,23 @@ function NewPaymentForm({ employeeId, onCreated, onCancel }: { employeeId: strin
   const [amount, setAmount] = useState("");
   const [isTaxable, setIsTaxable] = useState(true);
   const [effectiveDate, setEffectiveDate] = useState("");
+  const [componentId, setComponentId] = useState("");
+  const [reasonId, setReasonId] = useState("");
+  const [reasonNote, setReasonNote] = useState("");
+  const [components, setComponents] = useState<CompensationComponentView[]>([]);
+  const [reasons, setReasons] = useState<HrReferenceCatalogItemView[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    api.listCompensationComponents().then(setComponents).catch(() => setComponents([]));
+    api.listHrCatalogItems("payroll_adjustment_reason").then(setReasons).catch(() => setReasons([]));
+  }, []);
+
+  // only components that can be paid once: earnings and reimbursements for an earning, deductions for a deduction
+  const choices = components.filter(
+    (c) => c.isActive && (paymentType === "deduction" ? c.componentType === "deduction" : ["earning", "reimbursement", "arrears", "retro", "shift_premium"].includes(c.componentType))
+  );
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -126,7 +145,10 @@ function NewPaymentForm({ employeeId, onCreated, onCancel }: { employeeId: strin
       await api.createEmployeeAdditionalPayment({
         employeeId,
         paymentType,
-        label: label.trim(),
+        ...(label.trim() ? { label: label.trim() } : {}),
+        ...(componentId ? { componentId } : {}),
+        ...(reasonId ? { reasonCatalogItemId: reasonId } : {}),
+        ...(reasonNote.trim() ? { reasonNote: reasonNote.trim() } : {}),
         amount: Number(amount),
         isTaxable: paymentType === "deduction" ? undefined : isTaxable,
         effectiveDate,
@@ -154,9 +176,33 @@ function NewPaymentForm({ employeeId, onCreated, onCancel }: { employeeId: strin
           <input type="date" required value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} className={inputClass} />
         </div>
       </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className={labelClass} htmlFor="adj-component">Pay component</label>
+          <select id="adj-component" value={componentId} onChange={(e) => setComponentId(e.target.value)} className={inputClass}>
+            <option value="">None - use a label</option>
+            {choices.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className={labelClass} htmlFor="adj-reason">Reason</label>
+          <select id="adj-reason" value={reasonId} onChange={(e) => setReasonId(e.target.value)} className={inputClass}>
+            <option value="">Not specified</option>
+            {reasons.map((r) => (
+              <option key={r.id} value={r.id}>{r.label}</option>
+            ))}
+          </select>
+        </div>
+      </div>
       <div>
-        <label className={labelClass}>Label</label>
-        <input required value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Eid Bonus" className={inputClass} />
+        <label className={labelClass} htmlFor="adj-label">Label{componentId ? " (optional)" : ""}</label>
+        <input id="adj-label" required={!componentId} value={label} onChange={(e) => setLabel(e.target.value)} placeholder={componentId ? "Defaults to the component's name" : "e.g. Eid Bonus"} className={inputClass} />
+      </div>
+      <div>
+        <label className={labelClass} htmlFor="adj-note">Note</label>
+        <input id="adj-note" value={reasonNote} onChange={(e) => setReasonNote(e.target.value)} placeholder="Why is this being paid?" className={inputClass} />
       </div>
       <div className="grid grid-cols-2 gap-3 items-end">
         <div>

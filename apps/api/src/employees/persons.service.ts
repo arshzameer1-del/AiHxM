@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
 import type { PoolClient } from "pg";
+import { sensitive } from "../crypto/sensitive-fields";
 
 type PersonIdentity = {
   firstName: string;
@@ -7,7 +8,24 @@ type PersonIdentity = {
   cnic: string | null | undefined;
   dateOfBirth: string | null | undefined;
   gender: string | null | undefined;
+  maritalStatus?: string | null;
+  /** EMP-02: link to this existing person instead of matching/creating one. */
+  personId?: string | null;
+  /** EMP-02: the caller confirms a possible-duplicate warning is a different human. */
+  confirmNotDuplicate?: boolean;
 };
+
+export type PersonDuplicateCandidate = {
+  personId: string;
+  fullName: string;
+  matchedOn: "cnic" | "date_of_birth_and_name";
+  employeeNumbers: string[];
+  hasActiveEmployment: boolean;
+};
+
+function normalizeName(n: string): string {
+  return n.toLowerCase().replace(/[^a-z0-9\u0600-\u06ff]+/g, " ").trim();
+}
 
 /**
  * Core Employee Enterprise, Phase 1 (0081_person_identity.sql) — the
@@ -55,29 +73,111 @@ export class PersonsService {
    * match them to an existing one.
    */
   async findOrCreateForHire(client: PoolClient, companyId: string, identity: PersonIdentity): Promise<string> {
+    if (identity.personId) {
+      const linked = await client.query<{ id: string }>("SELECT id FROM persons WHERE id = $1 AND company_id = $2", [identity.personId, companyId]);
+      if (linked.rowCount === 0) throw new BadRequestException("personId does not belong to this company");
+      return linked.rows[0].id;
+    }
     if (identity.cnic) {
-      const existing = await client.query<{ id: string }>(
-        "SELECT id FROM persons WHERE company_id = $1 AND cnic = $2",
-        [companyId, identity.cnic]
+      // SEC-02: match on the blind index; `OR cnic = $3` keeps legacy
+      // plaintext rows (not yet backfilled) matchable during the transition.
+      const existing = await client.query<{ id: string; date_of_birth_enc: string | null; date_of_birth: Date | string | null }>(
+        "SELECT id, date_of_birth_enc, date_of_birth FROM persons WHERE company_id = $1 AND (cnic_bidx = $2 OR cnic = $3)",
+        [companyId, sensitive.cnicIndex(companyId, identity.cnic), identity.cnic]
       );
       if (existing.rowCount && existing.rowCount > 0) {
+        // EMP-02: a CNIC match is a rehire of that person - but a DIFFERENT
+        // date of birth on the same CNIC is an identity conflict that HR must
+        // resolve explicitly, never something a hire form overwrites silently.
+        const onFile = sensitive.readDob(companyId, existing.rows[0].date_of_birth_enc, existing.rows[0].date_of_birth);
+        if (onFile && identity.dateOfBirth && onFile !== String(identity.dateOfBirth).slice(0, 10) && !identity.confirmNotDuplicate) {
+          throw new BadRequestException(
+            "This CNIC is already on file for a person with a different date of birth. Correct the date of birth or resolve the person record before hiring."
+          );
+        }
         // Deliberately does NOT overwrite the existing person's
-        // name/DOB/gender from this new hire's data: the person record
-        // already reflects whichever employment last synced it, and a
-        // stale or mistyped re-entry on a brand-new hire form shouldn't
-        // silently clobber it. A genuine correction is a Person-record
-        // edit, not a hire-time side effect — out of scope until a real
-        // Person UI exists.
+        // name/DOB/gender from this new hire's data: a genuine correction is
+        // a Person-record edit (PersonDirectoryService.update), not a
+        // hire-time side effect.
         return existing.rows[0].id;
       }
+    } else if (identity.dateOfBirth && !identity.confirmNotDuplicate) {
+      // No CNIC: block an obvious duplicate (same DOB blind index + same name).
+      const candidates = await this.findDuplicateCandidates(client, companyId, {
+        firstName: identity.firstName,
+        lastName: identity.lastName,
+        cnic: null,
+        dateOfBirth: identity.dateOfBirth,
+      });
+      if (candidates.length > 0) {
+        throw new BadRequestException(
+          "A person with the same name and date of birth already exists in this company. If this is the same person, hire them with that person's id (personId); if not, confirm they are a different person (confirmNotDuplicate)."
+        );
+      }
     }
+    const dob = identity.dateOfBirth ? String(identity.dateOfBirth).slice(0, 10) : null;
     const inserted = await client.query<{ id: string }>(
-      `INSERT INTO persons (company_id, full_name, cnic, date_of_birth, gender)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO persons (company_id, full_name, first_name, last_name, cnic, cnic_bidx, date_of_birth, date_of_birth_enc, date_of_birth_bidx, gender, marital_status)
+       VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, $8, $9, $10)
        RETURNING id`,
-      [companyId, `${identity.firstName} ${identity.lastName}`, identity.cnic ?? null, identity.dateOfBirth ?? null, identity.gender ?? null]
+      [
+        companyId,
+        `${identity.firstName} ${identity.lastName}`,
+        identity.firstName,
+        identity.lastName,
+        sensitive.encrypt(companyId, identity.cnic),
+        sensitive.cnicIndex(companyId, identity.cnic),
+        sensitive.encryptDob(companyId, dob),
+        sensitive.dobIndex(companyId, dob),
+        identity.gender ?? null,
+        identity.maritalStatus ?? null,
+      ]
     );
     return inserted.rows[0].id;
+  }
+
+  /**
+   * EMP-02 duplicate candidates. CNIC (blind index) is an exact match;
+   * date of birth (blind index) + a normalised full-name match is a
+   * "possible duplicate". Never matches on name alone.
+   */
+  async findDuplicateCandidates(
+    client: PoolClient,
+    companyId: string,
+    probe: { firstName?: string | null; lastName?: string | null; cnic?: string | null; dateOfBirth?: string | null },
+    excludePersonId?: string
+  ): Promise<PersonDuplicateCandidate[]> {
+    const found = new Map<string, PersonDuplicateCandidate>();
+    const add = async (row: { id: string; full_name: string }, matchedOn: PersonDuplicateCandidate["matchedOn"]) => {
+      if (found.has(row.id) || row.id === excludePersonId) return;
+      const emps = await client.query<{ employee_number: string; employment_status: string }>(
+        "SELECT employee_number, employment_status FROM employees WHERE person_id = $1 ORDER BY date_of_joining",
+        [row.id]
+      );
+      found.set(row.id, {
+        personId: row.id,
+        fullName: row.full_name,
+        matchedOn,
+        employeeNumbers: emps.rows.map((e) => e.employee_number),
+        hasActiveEmployment: emps.rows.some((e) => e.employment_status !== "terminated"),
+      });
+    };
+    if (probe.cnic) {
+      const r = await client.query<{ id: string; full_name: string }>(
+        "SELECT id, full_name FROM persons WHERE company_id = $1 AND (cnic_bidx = $2 OR cnic = $3)",
+        [companyId, sensitive.cnicIndex(companyId, probe.cnic), probe.cnic]
+      );
+      for (const row of r.rows) await add(row, "cnic");
+    }
+    if (probe.dateOfBirth && (probe.firstName || probe.lastName)) {
+      const wanted = normalizeName(`${probe.firstName ?? ""} ${probe.lastName ?? ""}`);
+      const r = await client.query<{ id: string; full_name: string }>(
+        "SELECT id, full_name FROM persons WHERE company_id = $1 AND date_of_birth_bidx = $2",
+        [companyId, sensitive.dobIndex(companyId, probe.dateOfBirth)]
+      );
+      for (const row of r.rows) if (normalizeName(row.full_name) === wanted) await add(row, "date_of_birth_and_name");
+    }
+    return [...found.values()];
   }
 
   /**
@@ -102,17 +202,28 @@ export class PersonsService {
   async syncFromEmployee(client: PoolClient, companyId: string, personId: string, identity: PersonIdentity): Promise<void> {
     if (identity.cnic) {
       const conflict = await client.query<{ id: string }>(
-        "SELECT id FROM persons WHERE company_id = $1 AND cnic = $2 AND id <> $3",
-        [companyId, identity.cnic, personId]
+        "SELECT id FROM persons WHERE company_id = $1 AND (cnic_bidx = $2 OR cnic = $3) AND id <> $4",
+        [companyId, sensitive.cnicIndex(companyId, identity.cnic), identity.cnic, personId]
       );
       if (conflict.rowCount && conflict.rowCount > 0) {
         throw new BadRequestException("This CNIC is already on file for a different employee");
       }
     }
     await client.query(
-      `UPDATE persons SET full_name = $2, cnic = $3, date_of_birth = $4, gender = $5, updated_at = now()
+      `UPDATE persons SET full_name = $2, first_name = $7, last_name = $8, cnic = $3, cnic_bidx = $4, date_of_birth = NULL,
+              date_of_birth_enc = $5, date_of_birth_bidx = $9, gender = $6, updated_at = now()
        WHERE id = $1`,
-      [personId, `${identity.firstName} ${identity.lastName}`, identity.cnic ?? null, identity.dateOfBirth ?? null, identity.gender ?? null]
+      [
+        personId,
+        `${identity.firstName} ${identity.lastName}`,
+        sensitive.encrypt(companyId, identity.cnic),
+        sensitive.cnicIndex(companyId, identity.cnic),
+        sensitive.encryptDob(companyId, identity.dateOfBirth),
+        identity.gender ?? null,
+        identity.firstName,
+        identity.lastName,
+        sensitive.dobIndex(companyId, identity.dateOfBirth),
+      ]
     );
   }
 }

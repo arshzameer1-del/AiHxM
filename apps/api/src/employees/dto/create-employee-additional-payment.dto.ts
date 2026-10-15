@@ -1,4 +1,4 @@
-import { IsBoolean, IsDateString, IsIn, IsNumber, IsOptional, IsString, IsUUID, Min, MinLength } from "class-validator";
+import { IsBoolean, IsDateString, IsIn, IsNumber, IsOptional, IsString, IsUUID, MaxLength, Min, MinLength } from "class-validator";
 
 export class CreateEmployeeAdditionalPaymentDto {
   @IsUUID()
@@ -7,9 +7,23 @@ export class CreateEmployeeAdditionalPaymentDto {
   @IsIn(["earning", "deduction"])
   paymentType!: "earning" | "deduction";
 
+  @IsOptional()
   @IsString()
   @MinLength(1)
-  label!: string;
+  label?: string;
+
+  @IsOptional()
+  @IsUUID()
+  componentId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  reasonCatalogItemId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  reasonNote?: string;
 
   @IsNumber()
   @Min(0.01)

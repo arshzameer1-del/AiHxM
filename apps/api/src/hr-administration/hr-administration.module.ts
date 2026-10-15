@@ -7,6 +7,11 @@ import { ConfigurationRuleMappingController } from "./configuration-rule-mapping
 import { ConfigurationRuleMappingService } from "./configuration-rule-mapping.service";
 import { ConfigurationChangeRequestController } from "./configuration-change-request.controller";
 import { ConfigurationChangeRequestService } from "./configuration-change-request.service";
+import { ConfigurationVersionController } from "./configuration-version.controller";
+import { ConfigurationVersionService } from "./configuration-version.service";
+import { RuleRegistryController } from "./rule-registry.controller";
+import { RuleRegistryService } from "./rule-registry.service";
+import { RulesEngineModule } from "../rules-engine/rules-engine.module";
 import { RbacModule } from "../rbac/rbac.module";
 import { EntitlementsModule } from "../entitlements/entitlements.module";
 import { AuditModule } from "../audit/audit.module";
@@ -48,14 +53,16 @@ import { AuditModule } from "../audit/audit.module";
  * so it needs no new provider wiring beyond itself.
  */
 @Module({
-  imports: [RbacModule, EntitlementsModule, AuditModule],
+  imports: [RbacModule, EntitlementsModule, AuditModule, RulesEngineModule],
   controllers: [
     HrReferenceCatalogController,
     HrBusinessPolicyController,
     ConfigurationRuleMappingController,
     ConfigurationChangeRequestController,
+    ConfigurationVersionController,
+    RuleRegistryController,
   ],
-  providers: [HrReferenceCatalogService, HrBusinessPolicyService, ConfigurationRuleMappingService, ConfigurationChangeRequestService],
-  exports: [HrReferenceCatalogService, HrBusinessPolicyService, ConfigurationRuleMappingService, ConfigurationChangeRequestService],
+  providers: [HrReferenceCatalogService, HrBusinessPolicyService, ConfigurationRuleMappingService, ConfigurationChangeRequestService, ConfigurationVersionService, RuleRegistryService],
+  exports: [HrReferenceCatalogService, HrBusinessPolicyService, ConfigurationRuleMappingService, ConfigurationChangeRequestService, ConfigurationVersionService, RuleRegistryService],
 })
 export class HrAdministrationModule {}

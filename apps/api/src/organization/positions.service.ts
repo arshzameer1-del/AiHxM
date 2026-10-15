@@ -9,6 +9,7 @@ import { EffectiveDatingEngine } from "../effective-dating/effective-dating.engi
 import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
 import { buildOrgEventPayload } from "../webhooks/org-event-payload.util";
 import { OrgOccupancyService } from "./occupancy/org-occupancy.service";
+import { WorkflowService } from "../workflow/workflow.service";
 import type {
   CreatePositionRequest,
   PositionStatus,
@@ -37,6 +38,9 @@ const SCOPED_VIEW_PERMISSION_BASE = "position.view";
 // unassign instead of list/get. See `resolveManageAccess()`'s own doc
 // comment.
 const SCOPED_MANAGE_PERMISSION_BASE = "position.manage";
+// ORG-02: creating a position can be routed through the workflow engine when
+// the tenant activates a template for this object key (no template = direct).
+const WORKFLOW_OBJECT_KEY = "position";
 
 type PositionRow = {
   id: string;
@@ -159,9 +163,52 @@ export class PositionsService {
     // "optional-with-default" convention HiringProcessService uses, so the
     // many spec files that hand-construct `PositionsService` positionally
     // keep working unchanged.
-    occupancy?: OrgOccupancyService
+    occupancy?: OrgOccupancyService,
+    // ORG-02: optional so the many positional spec constructions keep working.
+    private readonly workflow?: WorkflowService
   ) {
     this.occupancy = occupancy ?? new OrgOccupancyService(audit, effectiveDating, webhooks);
+    this.workflow?.adapters?.register({
+      objectKey: WORKFLOW_OBJECT_KEY,
+      label: "Position request",
+      describe: async (client, recordId) => {
+        const r = await client.query("SELECT position_title, headcount_fte FROM positions WHERE id = $1", [recordId]);
+        if (!r.rowCount) return null;
+        return {
+          title: `Position: ${r.rows[0].position_title}`,
+          summary: `${Number(r.rows[0].headcount_fte)} FTE`,
+          deepLink: `/organization/positions/${recordId}`,
+        };
+      },
+      onOutcome: async (ctx) => {
+        const row = await ctx.client.query<PositionRow>("SELECT * FROM positions WHERE id = $1 AND company_id = $2 FOR UPDATE", [
+          ctx.recordId,
+          ctx.claims.company_id,
+        ]);
+        if (!row.rowCount) return;
+        const before = row.rows[0];
+        const next =
+          ctx.event === "approved" ? "vacant" : ctx.event === "resubmitted" ? "pending_approval" : "rejected";
+        if (before.status === next || (before.status !== "pending_approval" && before.status !== "rejected")) return;
+        await this.applyVersionAndSync(ctx.client, ctx.claims, ctx.recordId, {
+          org_unit_id: before.org_unit_id,
+          job_id: before.job_id,
+          position_code: before.position_code,
+          position_title: before.position_title,
+          headcount_fte: Number(before.headcount_fte),
+          status: next,
+          cost_center_id: before.cost_center_id,
+          profit_center_id: before.profit_center_id,
+        });
+        await this.audit.record(ctx.client, ctx.claims, {
+          companyId: ctx.claims.company_id ?? null,
+          action: `position.workflow_${ctx.event}`,
+          target: ctx.recordId,
+          metadata: { comment: ctx.comment },
+        });
+        this.publishChanged(ctx.claims, `workflow.${ctx.event}`, rowToPosition({ ...before, status: next }));
+      },
+    });
   }
 
   private readonly occupancy: OrgOccupancyService;
@@ -208,9 +255,21 @@ export class PositionsService {
       }
 
       const headcountFte = input.headcountFte ?? 1.0;
+      // ORG-02: when the tenant activated a "position" workflow template the
+      // new seat starts pending_approval and only becomes assignable (vacant)
+      // once the engine approves it; no template = the previous direct path.
+      const templateKey = this.workflow
+        ? await this.workflow.resolveTemplateKey(client, claims.company_id!, WORKFLOW_OBJECT_KEY, {
+            orgUnitId: input.orgUnitId,
+            jobId: input.jobId ?? null,
+            headcountFte,
+            costCenterId: input.costCenterId ?? null,
+          })
+        : null;
+      const initialStatus = templateKey ? "pending_approval" : "vacant";
       const inserted = await client.query(
         `INSERT INTO positions (company_id, org_unit_id, job_id, position_code, position_title, headcount_fte, status, cost_center_id, profit_center_id)
-         VALUES ($1, $2, $3, $4, $5, $6, 'vacant', $7, $8) RETURNING *`,
+         VALUES ($1, $2, $3, $4, $5, $6, $9, $7, $8) RETURNING *`,
         [
           claims.company_id,
           input.orgUnitId,
@@ -220,9 +279,10 @@ export class PositionsService {
           headcountFte,
           input.costCenterId ?? null,
           input.profitCenterId ?? null,
+          initialStatus,
         ]
       );
-      const position = inserted.rows[0];
+      let position = inserted.rows[0];
 
       await this.effectiveDating.applyVersionedRow(client, {
         table: "position_versions",
@@ -245,8 +305,20 @@ export class PositionsService {
         companyId: claims.company_id ?? null,
         action: "position.create",
         target: position.id,
-        metadata: { orgUnitId: input.orgUnitId, jobId: input.jobId ?? null, positionTitle: title },
+        metadata: { orgUnitId: input.orgUnitId, jobId: input.jobId ?? null, positionTitle: title, status: initialStatus },
       });
+
+      if (templateKey && this.workflow) {
+        const instance = await this.workflow.submitForApprovalInTx(client, claims, {
+          templateKey,
+          objectKey: WORKFLOW_OBJECT_KEY,
+          recordId: position.id,
+          record: { orgUnitId: input.orgUnitId, jobId: input.jobId ?? null, headcountFte },
+          title: `Position: ${title}`,
+        });
+        const linked = await client.query("UPDATE positions SET workflow_instance_id = $2 WHERE id = $1 RETURNING *", [position.id, instance.id]);
+        position = linked.rows[0];
+      }
 
       const view = rowToPosition(position);
       this.publishChanged(claims, "create", view);
@@ -341,6 +413,9 @@ export class PositionsService {
         await this.mustExistProfitCenter(client, claims.company_id!, patch.profitCenterId);
       }
 
+      if (before.status === "pending_approval") {
+        throw new BadRequestException("This position is awaiting approval and cannot be edited until it is decided");
+      }
       const next = {
         org_unit_id: patch.orgUnitId ?? before.org_unit_id,
         // `jobId === null` explicitly clears the link; `undefined` (field
@@ -361,6 +436,12 @@ export class PositionsService {
       // to touch the position in its CURRENT (in-scope) location.
       this.assertInManageScope(scope, { org_unit_id: next.org_unit_id, cost_center_id: next.cost_center_id });
 
+      // ORG-02: changing the approved FTE of a vacant/filled seat can open or
+      // close capacity - recompute the status from the FTE actually in use.
+      if (patch.headcountFte !== undefined && (before.status === "vacant" || before.status === "filled")) {
+        const used = await this.occupancy.getUsedFte(client, claims.company_id!, id);
+        next.status = used > 0.005 && used >= next.headcount_fte - 0.005 ? "filled" : "vacant";
+      }
       const position = await this.applyVersionAndSync(client, claims, id, next, patch.effectiveFrom);
 
       await this.audit.record(client, claims, {
@@ -388,12 +469,18 @@ export class PositionsService {
    * later refinement once real usage shows it's needed.
    */
   async freeze(claims: RequestClaims, id: string): Promise<PositionView> {
-    return this.transitionStatus(claims, id, "position.freeze", (status) => {
-      if (status !== "vacant") {
-        throw new BadRequestException("Only a vacant position can be frozen — unassign it first");
-      }
-      return "frozen";
-    });
+    return this.transitionStatus(
+      claims,
+      id,
+      "position.freeze",
+      (status) => {
+        if (status !== "vacant") {
+          throw new BadRequestException("Only a vacant position can be frozen — unassign it first");
+        }
+        return "frozen";
+      },
+      true
+    );
   }
 
   async unfreeze(claims: RequestClaims, id: string): Promise<PositionView> {
@@ -410,12 +497,18 @@ export class PositionsService {
    * like org units). Only valid from `vacant` or `frozen` — a `filled`
    * position must be unassigned first, same reasoning as `freeze()`. */
   async abolish(claims: RequestClaims, id: string): Promise<PositionView> {
-    return this.transitionStatus(claims, id, "position.abolish", (status) => {
-      if (status !== "vacant" && status !== "frozen") {
-        throw new BadRequestException("Only a vacant or frozen position can be abolished — unassign it first");
-      }
-      return "abolished";
-    });
+    return this.transitionStatus(
+      claims,
+      id,
+      "position.abolish",
+      (status) => {
+        if (status !== "vacant" && status !== "frozen" && status !== "rejected") {
+          throw new BadRequestException("Only a vacant, frozen or rejected position can be abolished — unassign it first");
+        }
+        return "abolished";
+      },
+      true
+    );
   }
 
   async reactivate(claims: RequestClaims, id: string): Promise<PositionView> {
@@ -431,13 +524,19 @@ export class PositionsService {
     claims: RequestClaims,
     id: string,
     action: string,
-    next: (current: PositionStatus) => PositionStatus
+    next: (current: PositionStatus) => PositionStatus,
+    requireNoIncumbents = false
   ): Promise<PositionView> {
     const scope = await this.resolveManageAccess(claims);
     return this.db.withClaims(claims, async (client) => {
       const before = await this.mustExist(client, id);
       this.assertInManageScope(scope, before);
       const nextStatus = next(before.status as PositionStatus);
+      // ORG-02: a multi-incumbent position is `vacant` while it has open
+      // capacity, so "vacant" no longer implies "nobody sits in it".
+      if (requireNoIncumbents && (await this.occupancy.getUsedFte(client, claims.company_id!, id)) > 0.005) {
+        throw new BadRequestException("This position still has incumbents — unassign them first");
+      }
 
       const data = {
         org_unit_id: before.org_unit_id,
@@ -565,20 +664,29 @@ export class PositionsService {
    * `OrgOccupancyService` for the same reason `assignEmployee()` does,
    * including the follow-up org-side sync: the former occupant's open
    * `primary` assignment stops naming this seat (org unit/location kept). */
-  async unassignEmployee(claims: RequestClaims, positionId: string, effectiveFrom?: string): Promise<PositionView> {
+  async unassignEmployee(claims: RequestClaims, positionId: string, effectiveFrom?: string, employeeId?: string): Promise<PositionView> {
     const scope = await this.resolveManageAccess(claims);
     return this.db.withClaims(claims, async (client) => {
       const position = await this.mustExist(client, positionId);
       this.assertInManageScope(scope, position);
-      const occupants = await client.query<{ id: string }>("SELECT id FROM employees WHERE position_id = $1 AND company_id = $2", [
-        positionId,
-        claims.company_id,
-      ]);
-      const view = await this.occupancy.vacatePositionWithinTransaction(client, claims, {
-        positionId,
-        effectiveFrom,
-        source: "position_workbench",
-      });
+      const occupants = await client.query<{ id: string }>(
+        "SELECT id FROM employees WHERE position_id = $1 AND company_id = $2 AND ($3::uuid IS NULL OR id = $3)",
+        [positionId, claims.company_id, employeeId ?? null]
+      );
+      // ORG-02: with an employeeId only that incumbent's slot ends; without
+      // one every incumbent does (the original whole-seat behavior).
+      const view = employeeId
+        ? await this.occupancy.vacateEmployeeFromPositionWithinTransaction(client, claims, {
+            positionId,
+            employeeId,
+            effectiveFrom,
+            source: "position_workbench",
+          })
+        : await this.occupancy.vacatePositionWithinTransaction(client, claims, {
+            positionId,
+            effectiveFrom,
+            source: "position_workbench",
+          });
       for (const occupant of occupants.rows) {
         await this.occupancy.syncEmployeeOrgSideToSeatWithinTransaction(client, claims, {
           employeeId: occupant.id,
@@ -651,6 +759,20 @@ export class PositionsService {
       ]
     );
     return result.rows[0];
+  }
+
+  /** ORG-02 planning endpoints: same view / manage scope rules as the position
+   * itself (a scoped caller only reaches positions inside their data scope). */
+  async assertCanViewPosition(claims: RequestClaims, positionId: string): Promise<void> {
+    await this.get(claims, positionId);
+  }
+
+  async assertCanManagePosition(claims: RequestClaims, positionId: string): Promise<void> {
+    const scope = await this.resolveManageAccess(claims);
+    await this.db.withClaims(claims, async (client) => {
+      const row = await this.mustExist(client, positionId);
+      this.assertInManageScope(scope, row);
+    });
   }
 
   private async mustExist(client: PoolClient, id: string): Promise<PositionRow> {

@@ -204,6 +204,39 @@ function MoveControl({
   );
 }
 
+/** PAY-28: which province / jurisdiction a place falls under for provincial social security. Sub-locations inherit it. */
+function JurisdictionForm({ location, onCancel, onSaved }: { location: LocationTreeNode; onCancel: () => void; onSaved: () => void }) {
+  const [value, setValue] = useState(location.statutoryJurisdiction ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await api.setLocationStatutoryJurisdiction(location.id, value.trim() === "" ? null : value.trim());
+      onSaved();
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={save} className="flex flex-wrap items-end gap-3 bg-black/5 rounded-lg p-3">
+      <div>
+        <label htmlFor={`jur-${location.id}`} className="block text-xs font-medium mb-1">Statutory jurisdiction (lower-case code, e.g. the province)</label>
+        <input id={`jur-${location.id}`} value={value} onChange={(e) => setValue(e.target.value)} placeholder="leave empty to inherit" className="rounded-lg border border-black/10 px-3 py-2 text-sm" />
+      </div>
+      <button type="submit" disabled={busy} className="bg-accent text-white rounded-lg px-3 py-2 text-xs font-semibold disabled:opacity-50">Save</button>
+      <button type="button" onClick={onCancel} className="text-xs font-medium text-label-secondary">Cancel</button>
+      {error && <span className="text-xs text-danger">{error}</span>}
+    </form>
+  );
+}
+
 function statusBadgeClass(status: LocationView["status"]): string {
   return status === "archived" ? "bg-black/10 text-label-tertiary" : "bg-success/15 text-green-700";
 }
@@ -225,7 +258,7 @@ function LocationRow({
   onToggleExpand: (id: string) => void;
   onChanged: () => void;
 }) {
-  const [mode, setMode] = useState<"none" | "edit" | "move" | "add-child">("none");
+  const [mode, setMode] = useState<"none" | "edit" | "move" | "add-child" | "jurisdiction">("none");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const isExpanded = expanded.has(node.id);
@@ -270,6 +303,11 @@ function LocationRow({
         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusBadgeClass(node.status)}`}>
           {node.status}
         </span>
+        {node.statutoryJurisdiction && (
+          <span className="text-xs px-2 py-0.5 rounded-full bg-accent/10 text-accent" title="Jurisdiction for provincial social security">
+            {node.statutoryJurisdiction}
+          </span>
+        )}
 
         {canManage && (
           <div className="ml-auto flex gap-3 shrink-0 text-xs">
@@ -281,6 +319,9 @@ function LocationRow({
             </button>
             <button onClick={() => setMode(mode === "move" ? "none" : "move")} className="font-medium text-label-secondary hover:underline">
               Move
+            </button>
+            <button onClick={() => setMode(mode === "jurisdiction" ? "none" : "jurisdiction")} className="font-medium text-label-secondary hover:underline">
+              Jurisdiction
             </button>
             <button onClick={handleToggleStatus} disabled={busy} className="font-medium text-label-tertiary hover:text-danger disabled:opacity-50">
               {node.status === "active" ? "Archive" : "Activate"}
@@ -309,6 +350,19 @@ function LocationRow({
           <MoveControl
             location={node}
             allLocations={allLocations}
+            onCancel={() => setMode("none")}
+            onSaved={() => {
+              setMode("none");
+              onChanged();
+            }}
+          />
+        </div>
+      )}
+
+      {mode === "jurisdiction" && (
+        <div style={{ paddingLeft: depth * 20 + 24 }} className="py-2">
+          <JurisdictionForm
+            location={node}
             onCancel={() => setMode("none")}
             onSaved={() => {
               setMode("none");

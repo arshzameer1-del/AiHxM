@@ -6,6 +6,8 @@ import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
 import { EmployeesService } from "../employees/employees.service";
+import { EmployeeLifecycleService } from "../employees/employee-lifecycle.service";
+import { HrBusinessPolicyService } from "../hr-administration/hr-business-policy.service";
 import { requireItemCompletionAccess, requireScopedEmployeeAccess } from "./checklist-access.util";
 import type {
   CreateOffboardingItemTemplateRequest,
@@ -14,6 +16,7 @@ import type {
   OffboardingChecklistItemView,
   OffboardingItemTemplateView,
   UpdateChecklistItemRequest,
+  UpdateOffboardingExitRequest,
   UpdateOffboardingItemTemplateRequest,
 } from "@aihxm/shared-types";
 
@@ -79,7 +82,12 @@ export class OffboardingService {
     private readonly rbac: RbacService,
     private readonly entitlements: EntitlementsService,
     private readonly audit: AuditService,
-    private readonly employees: EmployeesService
+    private readonly employees: EmployeesService,
+    // Step 4 (LIF-05) - optional, appended last so positional spec
+    // constructions keep working. Without the lifecycle service completion
+    // falls back to the pre-Step-4 EmployeesService.update() path.
+    private readonly lifecycle?: EmployeeLifecycleService,
+    private readonly businessPolicy?: HrBusinessPolicyService
   ) {}
 
   private async requireManage(claims: RequestClaims): Promise<void> {
@@ -204,11 +212,22 @@ export class OffboardingService {
         throw new ConflictException("This employee already has an offboarding in progress");
       }
 
+      // LIF-05: the notice period defaults from the Termination / Exit policy.
+      let noticeDays: number | null = input.noticePeriodDays ?? null;
+      if (noticeDays === null && this.businessPolicy) {
+        const rules = await this.businessPolicy.resolveEffectivePolicy(client, claims.company_id!, "termination_exit", { employeeId });
+        if (typeof rules?.noticeDays === "number") noticeDays = rules.noticeDays;
+      }
       const offboarding = await client.query(
         `INSERT INTO employee_offboarding
-           (company_id, employee_id, reason, last_working_day, notes, initiated_by_user_account_id)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-        [claims.company_id, employeeId, input.reason, input.lastWorkingDay, input.notes ?? null, claims.sub]
+           (company_id, employee_id, reason, last_working_day, notes, initiated_by_user_account_id,
+            reason_code, notice_period_days, notice_start_date, exit_interview_status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+        [
+          claims.company_id, employeeId, input.reason, input.lastWorkingDay, input.notes ?? null, claims.sub,
+          input.reasonCode ?? null, noticeDays, input.noticeStartDate ?? null,
+          input.exitInterviewRequired ? "pending" : "not_required",
+        ]
       );
       const offboardingId = offboarding.rows[0].id;
 
@@ -353,6 +372,9 @@ export class OffboardingService {
           `${pending.rows[0].count} checklist item(s) are still pending — complete or skip them before finalizing`
         );
       }
+      if (row.exit_interview_status === "pending") {
+        throw new BadRequestException("The exit interview is still pending - record it as completed or declined (or not required) before finalizing");
+      }
       return row.id as string;
     });
 
@@ -366,24 +388,84 @@ export class OffboardingService {
     );
     const row = offboarding.rows[0];
 
-    await this.employees.update(claims, employeeId, {
-      employmentStatus: "terminated",
-      terminationDate: toIsoDate(row.last_working_day),
-      terminationReason: row.reason,
-    });
+    // LIF-05: terminate through the lifecycle service so the exit produces a
+    // real termination event (applied now, or SCHEDULED when the last working
+    // day is still ahead - the employee stays employed until then), revokes
+    // access on the day it takes effect and links back to this offboarding.
+    let terminationEventId: string | null = null;
+    if (this.lifecycle) {
+      const result = await this.lifecycle.terminate(
+        claims,
+        employeeId,
+        {
+          terminationDate: toIsoDate(row.last_working_day),
+          terminationReason: row.reason,
+          reasonCode: row.reason_code ?? undefined,
+          notes: row.notes ?? undefined,
+        },
+        { sourceChannel: "offboarding" }
+      );
+      terminationEventId = result.event.id;
+    } else {
+      await this.employees.update(claims, employeeId, {
+        employmentStatus: "terminated",
+        terminationDate: toIsoDate(row.last_working_day),
+        terminationReason: row.reason,
+      });
+    }
 
     return this.db.withClaims(claims, async (client) => {
       await client.query(
-        "UPDATE employee_offboarding SET status = 'completed', completed_at = now() WHERE id = $1",
-        [offboardingId]
+        "UPDATE employee_offboarding SET status = 'completed', completed_at = now(), termination_event_id = $2 WHERE id = $1",
+        [offboardingId, terminationEventId]
       );
       await this.audit.record(client, claims, {
         companyId: claims.company_id ?? null,
         action: "offboarding.complete",
         target: offboardingId,
-        metadata: { employeeId },
+        metadata: { employeeId, terminationEventId },
       });
       return this.loadView(client, offboardingId);
+    });
+  }
+
+  /** LIF-05 / LIF-06: notice period, rehire eligibility and exit interview, recorded while (or after) the exit is handled. */
+  async updateExitDetails(claims: RequestClaims, employeeId: string, input: UpdateOffboardingExitRequest): Promise<EmployeeOffboardingView> {
+    await this.requireManage(claims);
+    return this.db.withClaims(claims, async (client) => {
+      const current = await client.query(
+        "SELECT * FROM employee_offboarding WHERE employee_id = $1 ORDER BY started_at DESC LIMIT 1",
+        [employeeId]
+      );
+      if (current.rowCount === 0) throw new NotFoundException("This employee has no offboarding record");
+      const row = current.rows[0];
+      const has = (k: keyof UpdateOffboardingExitRequest) => Object.prototype.hasOwnProperty.call(input, k);
+      const interview = input.exitInterviewStatus ?? row.exit_interview_status;
+      const result = await client.query(
+        `UPDATE employee_offboarding SET
+            rehire_eligibility = $2, rehire_eligibility_note = $3, exit_interview_status = $4,
+            exit_interview_notes = $5,
+            exit_interview_completed_at = CASE WHEN $4 IN ('completed', 'declined') AND exit_interview_completed_at IS NULL THEN now()
+                                               WHEN $4 NOT IN ('completed', 'declined') THEN NULL ELSE exit_interview_completed_at END,
+            notice_period_days = $6, notice_start_date = $7::date
+          WHERE id = $1 RETURNING *`,
+        [
+          row.id,
+          has("rehireEligibility") ? input.rehireEligibility : row.rehire_eligibility,
+          has("rehireEligibilityNote") ? input.rehireEligibilityNote : row.rehire_eligibility_note,
+          interview,
+          has("exitInterviewNotes") ? input.exitInterviewNotes : row.exit_interview_notes,
+          has("noticePeriodDays") ? input.noticePeriodDays : row.notice_period_days,
+          has("noticeStartDate") ? input.noticeStartDate : row.notice_start_date ? toIsoDate(row.notice_start_date) : null,
+        ]
+      );
+      await this.audit.record(client, claims, {
+        companyId: claims.company_id ?? null,
+        action: "offboarding.exit_details.update",
+        target: row.id,
+        metadata: { employeeId, rehireEligibility: result.rows[0].rehire_eligibility, exitInterviewStatus: interview },
+      });
+      return this.loadView(client, row.id);
     });
   }
 
@@ -412,6 +494,15 @@ export class OffboardingService {
       startedAt: new Date(row.started_at).toISOString(),
       completedAt: row.completed_at ? new Date(row.completed_at).toISOString() : null,
       items: items.rows.map(rowToItem),
+      reasonCode: row.reason_code ?? null,
+      noticePeriodDays: row.notice_period_days ?? null,
+      noticeStartDate: row.notice_start_date ? toIsoDate(row.notice_start_date) : null,
+      rehireEligibility: row.rehire_eligibility ?? null,
+      rehireEligibilityNote: row.rehire_eligibility_note ?? null,
+      exitInterviewStatus: row.exit_interview_status ?? "not_required",
+      exitInterviewCompletedAt: row.exit_interview_completed_at ? new Date(row.exit_interview_completed_at).toISOString() : null,
+      exitInterviewNotes: row.exit_interview_notes ?? null,
+      terminationEventId: row.termination_event_id ?? null,
     };
   }
 }

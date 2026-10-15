@@ -5,6 +5,8 @@ import type { RequestClaims } from "../database/tenant-context";
 import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
+import { WorkflowService } from "../workflow/workflow.service";
+import { decideInEngine, statusForOutcome, submitToEngineIfConfigured } from "../workflow/engine-routing";
 import type {
   AttendanceCorrectionRequestView,
   DecideAttendanceCorrectionRequest,
@@ -12,6 +14,7 @@ import type {
 } from "@aihxm/shared-types";
 
 const LEAVE_MODULE_KEY = "leave" as const;
+const WORKFLOW_OBJECT_KEY = "attendance_correction";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toIso(value: any): string | null {
@@ -67,8 +70,92 @@ export class AttendanceCorrectionsService {
     private readonly db: DatabaseService,
     private readonly rbac: RbacService,
     private readonly entitlements: EntitlementsService,
-    private readonly audit: AuditService
-  ) {}
+    private readonly audit: AuditService,
+    // WFL-01 (Step 6): optional + appended so positional spec constructions keep working.
+    private readonly workflow?: WorkflowService
+  ) {
+    this.workflow?.adapters?.register({
+      objectKey: WORKFLOW_OBJECT_KEY,
+      label: "Attendance correction",
+      canSendBack: true,
+      describe: async (client, recordId) => {
+        const r = await client.query(
+          `SELECT a.requested_date, a.reason, e.first_name, e.last_name
+             FROM attendance_correction_requests a JOIN employees e ON e.id = a.employee_id WHERE a.id = $1`,
+          [recordId]
+        );
+        if (!r.rowCount) return null;
+        const x = r.rows[0];
+        return { title: `Attendance correction: ${x.first_name} ${x.last_name}`, summary: `${toIsoDate(x.requested_date)} - ${x.reason}`, deepLink: "/attendance/corrections" };
+      },
+      onOutcome: async (ctx) => {
+        const row = (await ctx.client.query("SELECT * FROM attendance_correction_requests WHERE id = $1 FOR UPDATE", [ctx.recordId])).rows[0];
+        if (!row) return;
+        const status = statusForOutcome(ctx.event);
+        const decided = status === "approved" || status === "rejected";
+        if (status === "approved") await this.applyApprovedCorrection(ctx.client, row);
+        await ctx.client.query(
+          `UPDATE attendance_correction_requests
+              SET status = $2, updated_at = now(),
+                  decided_by_user_account_id = CASE WHEN $3 THEN $4::uuid ELSE decided_by_user_account_id END,
+                  decision_comment = CASE WHEN $3 THEN $5 ELSE decision_comment END,
+                  decided_at = CASE WHEN $3 THEN now() ELSE decided_at END
+            WHERE id = $1`,
+          [ctx.recordId, status, decided, ctx.claims.sub, ctx.comment]
+        );
+        await this.audit.record(ctx.client, ctx.claims, {
+          companyId: ctx.claims.company_id ?? null,
+          action: `attendance_correction.${ctx.event}`,
+          target: ctx.recordId,
+          metadata: { employeeId: row.employee_id, viaWorkflow: ctx.instanceId },
+        });
+      },
+    });
+  }
+
+  /**
+   * Applies an approved correction to attendance_records (shared by the direct and the
+   * workflow path). Returns the correction row, with attendance_record_id filled in
+   * when the approval created a new record.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async applyApprovedCorrection(client: PoolClient, row: any): Promise<any> {
+    if (row.attendance_record_id) {
+      // attendance_records has its own CHECK (clock_out_at IS NULL OR clock_out_at >= clock_in_at).
+      // A one-sided correction can still violate it once combined with the untouched side, so
+      // resolve and validate the final pair here: a clear 409, not a raw constraint error.
+      const existing = await client.query<{ clock_in_at: Date; clock_out_at: Date | null }>(
+        "SELECT clock_in_at, clock_out_at FROM attendance_records WHERE id = $1",
+        [row.attendance_record_id]
+      );
+      if (existing.rowCount === 0) {
+        throw new NotFoundException("The attendance record this correction referenced no longer exists");
+      }
+      const resolvedClockIn = row.requested_clock_in ?? existing.rows[0].clock_in_at;
+      const resolvedClockOut = row.requested_clock_out ?? existing.rows[0].clock_out_at;
+      if (resolvedClockOut && new Date(resolvedClockOut) < new Date(resolvedClockIn)) {
+        throw new ConflictException("Approving this would leave the clock-out time before the clock-in time — correct both times together");
+      }
+      await client.query(`UPDATE attendance_records SET clock_in_at = $2, clock_out_at = $3 WHERE id = $1`, [
+        row.attendance_record_id,
+        resolvedClockIn,
+        resolvedClockOut,
+      ]);
+      return row;
+    }
+    const emp = await client.query("SELECT employee_number, company_id FROM employees WHERE id = $1", [row.employee_id]);
+    const created = await client.query(
+      `INSERT INTO attendance_records (company_id, employee_id, employee_number, source, clock_in_at, clock_out_at)
+       VALUES ($1, $2, $3, 'manual', $4, $5)
+       RETURNING id`,
+      [emp.rows[0].company_id, row.employee_id, emp.rows[0].employee_number, row.requested_clock_in, row.requested_clock_out]
+    );
+    const linked = await client.query(`UPDATE attendance_correction_requests SET attendance_record_id = $2 WHERE id = $1 RETURNING *`, [
+      row.id,
+      created.rows[0].id,
+    ]);
+    return linked.rows[0];
+  }
 
   private async loadEmployee(client: PoolClient, employeeId: string): Promise<EmployeeRow> {
     const result = await client.query<EmployeeRow>(
@@ -129,7 +216,7 @@ export class AttendanceCorrectionsService {
         }
       }
 
-      const result = await client.query(
+      let result = await client.query(
         `INSERT INTO attendance_correction_requests
            (company_id, employee_id, attendance_record_id, requested_date, requested_clock_in,
             requested_clock_out, reason, submitted_by_user_account_id)
@@ -146,6 +233,17 @@ export class AttendanceCorrectionsService {
           claims.sub,
         ]
       );
+
+      // WFL-01: when the tenant has an active template the correction is approved through the engine.
+      const instanceId = await submitToEngineIfConfigured(this.workflow, client, claims, {
+        objectKey: WORKFLOW_OBJECT_KEY,
+        table: "attendance_correction_requests",
+        recordId: result.rows[0].id,
+        record: { employeeId: employee.id, requestedDate: input.requestedDate, existingRecord: !!input.attendanceRecordId, reason: input.reason },
+        subjectUserAccountId: employee.user_account_id,
+        title: `Attendance correction: ${employee.first_name} ${employee.last_name}`,
+      });
+      if (instanceId) result = await client.query("SELECT * FROM attendance_correction_requests WHERE id = $1", [result.rows[0].id]);
 
       await this.audit.record(client, claims, {
         companyId: employee.company_id,
@@ -216,7 +314,7 @@ export class AttendanceCorrectionsService {
          FROM attendance_correction_requests acr
          JOIN employees e ON e.id = acr.employee_id
          LEFT JOIN employees m ON m.id = e.manager_id
-         WHERE acr.company_id = $1 AND acr.status = 'pending'
+         WHERE acr.company_id = $1 AND acr.status = 'pending' AND acr.workflow_instance_id IS NULL
          ORDER BY acr.created_at ASC`,
         [claims.company_id]
       );
@@ -252,6 +350,16 @@ export class AttendanceCorrectionsService {
         throw new ConflictException("This request has already been decided");
       }
 
+      if (row.workflow_instance_id && this.workflow) {
+        // routed through the workflow engine: the configured approvers decide; onOutcome applies the effect
+        await decideInEngine(this.workflow, client, claims, row.workflow_instance_id, { decision: input.decision, comment: input.comment });
+        const fresh = await client.query("SELECT * FROM attendance_correction_requests WHERE id = $1", [id]);
+        return rowToView(
+          { ...fresh.rows[0], employee_number: row.employee_number, first_name: row.first_name, last_name: row.last_name },
+          row.employee_user_account_id
+        );
+      }
+
       const canAll = await this.rbac.can(claims, "attendance_correction.decide.all");
       const teamOwnerId = await this.managerUserAccountId(client, row.manager_id);
       const canTeam = await this.rbac.can(claims, "attendance_correction.decide.team", { teamOwnerId });
@@ -269,51 +377,8 @@ export class AttendanceCorrectionsService {
       let finalRow = updated.rows[0];
 
       if (input.decision === "approved") {
-        if (row.attendance_record_id) {
-          // attendance_records has its own CHECK (clock_out_at IS NULL OR
-          // clock_out_at >= clock_in_at). A correction that only touches
-          // ONE side (e.g. "the clock-in was wrong, clock-out was fine")
-          // can still violate it once combined with the side that's NOT
-          // being corrected — e.g. correcting clock-in to later than the
-          // existing, unchanged clock-out. Resolve and validate the final
-          // pair here so that case surfaces as a clear 409, not a raw
-          // unhandled DB constraint error (caught via live HTTP
-          // verification, not by this service's own tests — every
-          // existing test happened to pick values that never crossed the
-          // boundary).
-          const existing = await client.query<{ clock_in_at: Date; clock_out_at: Date | null }>(
-            "SELECT clock_in_at, clock_out_at FROM attendance_records WHERE id = $1",
-            [row.attendance_record_id]
-          );
-          if (existing.rowCount === 0) {
-            throw new NotFoundException("The attendance record this correction referenced no longer exists");
-          }
-          const resolvedClockIn = row.requested_clock_in ?? existing.rows[0].clock_in_at;
-          const resolvedClockOut = row.requested_clock_out ?? existing.rows[0].clock_out_at;
-          if (resolvedClockOut && new Date(resolvedClockOut) < new Date(resolvedClockIn)) {
-            throw new ConflictException(
-              "Approving this would leave the clock-out time before the clock-in time — correct both times together"
-            );
-          }
-
-          await client.query(`UPDATE attendance_records SET clock_in_at = $2, clock_out_at = $3 WHERE id = $1`, [
-            row.attendance_record_id,
-            resolvedClockIn,
-            resolvedClockOut,
-          ]);
-        } else {
-          const created = await client.query(
-            `INSERT INTO attendance_records (company_id, employee_id, employee_number, source, clock_in_at, clock_out_at)
-             VALUES ($1, $2, $3, 'manual', $4, $5)
-             RETURNING id`,
-            [row.employee_company_id, row.employee_id, row.employee_number, row.requested_clock_in, row.requested_clock_out]
-          );
-          const linked = await client.query(
-            `UPDATE attendance_correction_requests SET attendance_record_id = $2 WHERE id = $1 RETURNING *`,
-            [id, created.rows[0].id]
-          );
-          finalRow = linked.rows[0];
-        }
+        const applied = await this.applyApprovedCorrection(client, row);
+        finalRow = { ...finalRow, attendance_record_id: applied.attendance_record_id };
       }
 
       await this.audit.record(client, claims, {

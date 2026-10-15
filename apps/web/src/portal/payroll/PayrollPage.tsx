@@ -13,8 +13,21 @@ import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { CreateRunForm, OFF_CYCLE_REASON_LABELS, OffCyclePaymentsPanel, PayrollSettingsForm, TaxSlabsForm } from "./PayrollAdminForms";
 import { CostCenterBreakdownPanel, DisbursementPanel, DisbursementSettingsForm } from "./PayrollDisbursementPanels";
+import { BankFileFormatsPanel, ReconciliationPanel } from "./PayrollPaymentSupportPanels";
+import { FinalSettlementsSection, SchemesAndSettlementSettingsPanel } from "./PayrollSettlementPanels";
+import { GlMappingsPanel, RunAccountingPanel } from "./PayrollAccountingPanels";
+import { MyPayrollDocumentsCard, PayrollDocumentsPanel } from "./PayrollDocumentsPanels";
+import { BenefitsPanel } from "./PayrollBenefitsPanel";
+import { PayrollDashboardPanel, PayrollEventCatalogPanel, PayrollInputImportPanel } from "./PayrollOperationsPanels";
 import { PayrollAreasSection } from "./PayrollAreasSection";
-import { RUN_STATUS_LABELS, RUN_STATUS_STYLES, pkr } from "./payrollLabels";
+import { PayrollCalendarsSection } from "./PayrollCalendarsSection";
+import { RUN_STATUS_LABELS, RUN_STATUS_STYLES, isEndedRunStatus, isPostFinalRunStatus, pkr } from "./payrollLabels";
+import { PayrollRunControlPanel } from "./PayrollRunControlPanel";
+import { PayrollCalculationPanel } from "./PayrollCalculationPanel";
+import { PayrollRetroPanel } from "./PayrollRetroPanel";
+import { TaxProfilesPanel } from "./TaxProfilesPanel";
+import { LoanTypesPanel } from "./LoanTypesPanel";
+import { PayslipComponentsPanel } from "./PayslipComponentsPanel";
 
 function describeError(err: unknown): string {
   if (err instanceof ApiError) {
@@ -52,6 +65,7 @@ function PayslipDetail({ payslip }: { payslip: PayslipView }) {
         <span>Net pay</span>
         <span className="font-mono">{pkr.format(payslip.netPay)}</span>
       </div>
+      <PayslipComponentsPanel payslip={payslip} />
     </div>
   );
 }
@@ -97,7 +111,7 @@ function RunCard({
   targetEmployee,
   canPrepare,
   canApprove,
-  onChanged,
+  onRunChanged,
 }: {
   run: PayrollRunView;
   /** Payroll Areas: the area this run targets, if any — `undefined` with
@@ -111,7 +125,22 @@ function RunCard({
   targetEmployee: EmployeeView | undefined;
   canPrepare: boolean;
   canApprove: boolean;
-  onChanged: () => void;
+  /**
+   * Patches this one run's row from a mutation's own response. A live QA
+   * pass found that bumping RunsSection's refreshKey (its old behavior —
+   * see RunsSection's own history) to re-fetch the whole run list right
+   * after a successful calculate/submit/decide/finalize/reverse can come
+   * back still showing the pre-mutation status for a few seconds
+   * (confirmed via network-log inspection on production: the mutation's
+   * own POST/PATCH returns 200/201, the very next GET /payroll/runs still
+   * reports the old status, and only a later reload is correct) — a
+   * backend/infra read-after-write lag, not a logic bug in any of these
+   * actions. Every one of them already returns the updated PayrollRunView
+   * (calculate via its `.run` field), so using that response directly
+   * sidesteps the lag entirely instead of trusting a refetch that may not
+   * have caught up yet.
+   */
+  onRunChanged: (updated: PayrollRunView) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [payslips, setPayslips] = useState<PayslipView[] | null>(null);
@@ -166,9 +195,24 @@ function RunCard({
         const refreshed = await api.listPayslips({ payrollRunId: run.id });
         setPayslips(refreshed);
       }
-      onChanged();
+      onRunChanged(result.run);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not calculate this run.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleCalculateInBackground() {
+    setBusy(true);
+    setError(null);
+    setCalcSummary(null);
+    try {
+      const started = await api.calculatePayrollRunInBackground(run.id);
+      setCalcSummary("Calculation started in the background. You can leave this page; progress is shown below.");
+      onRunChanged(started.run);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not start the calculation.");
     } finally {
       setBusy(false);
     }
@@ -179,8 +223,8 @@ function RunCard({
     setBusy(true);
     setError(null);
     try {
-      await api.finalizePayrollRun(run.id);
-      onChanged();
+      const updated = await api.finalizePayrollRun(run.id);
+      onRunChanged(updated);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not finalize this run.");
     } finally {
@@ -192,8 +236,8 @@ function RunCard({
     setBusy(true);
     setError(null);
     try {
-      await api.submitPayrollRunForApproval(run.id);
-      onChanged();
+      const updated = await api.submitPayrollRunForApproval(run.id);
+      onRunChanged(updated);
     } catch (err) {
       // A 404 here means no "Payroll run approval" workflow template has
       // been configured yet for this tenant (System Admin > Configuration
@@ -209,10 +253,10 @@ function RunCard({
     setBusy(true);
     setError(null);
     try {
-      await api.decidePayrollRunApproval(run.id, { decision, comment: comment || undefined });
+      const updated = await api.decidePayrollRunApproval(run.id, { decision, comment: comment || undefined });
       setDeciding(null);
       setComment("");
-      onChanged();
+      onRunChanged(updated);
     } catch (err) {
       // A real 403 here ("not permitted to approve payroll runs" or "not a
       // resolved approver on this step") is the honest answer if this
@@ -230,10 +274,10 @@ function RunCard({
     setBusy(true);
     setError(null);
     try {
-      await api.reversePayrollRun(run.id, { reason: reversalReason.trim() });
+      const updated = await api.reversePayrollRun(run.id, { reason: reversalReason.trim() });
       setReversing(false);
       setReversalReason("");
-      onChanged();
+      onRunChanged(updated);
     } catch (err) {
       // A real 403 here means this login is missing one of the two
       // permissions reversal requires (payroll.finalize.all AND
@@ -256,6 +300,9 @@ function RunCard({
             {/* Payroll Areas — which slice of the company this run pays, so
                 two runs for the same period (one per area) are never
                 ambiguous in this list. */}
+            {run.isSimulation && (
+              <span className="text-xs font-normal px-2 py-0.5 rounded-full bg-accent/10 text-accent">Simulation</span>
+            )}
             <span className="text-xs font-normal px-2 py-0.5 rounded-full bg-black/5 text-label-secondary">
               {run.payrollAreaId ? (area ? `${area.name} (${area.code})` : "Payroll area") : "Company-wide"}
             </span>
@@ -271,7 +318,7 @@ function RunCard({
             )}
           </div>
           <div className="text-xs text-label-tertiary mt-0.5">
-            {run.finalizedAt ? `Finalized ${new Date(run.finalizedAt).toLocaleDateString()}` : "Not yet finalized"}
+            {run.cancelledAt ? `Cancelled ${new Date(run.cancelledAt).toLocaleDateString()}${run.cancelReason ? `: ${run.cancelReason}` : ""}` : run.finalizedAt ? `Finalized ${new Date(run.finalizedAt).toLocaleDateString()}` : "Not yet finalized"}
           </div>
           {/* Always visible — not gated behind expanding — so a Payroll
               Approver sees the actual scale of what they're deciding on
@@ -297,16 +344,26 @@ function RunCard({
           <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold ${RUN_STATUS_STYLES[run.status]}`}>
             {RUN_STATUS_LABELS[run.status]}
           </span>
-          {canPrepare && (run.status === "draft" || run.status === "calculated") && (
+          {canPrepare && (run.status === "draft" || run.status === "pre_validated" || run.status === "calculated" || run.status === "validated") && (
             <button
               onClick={handleCalculate}
               disabled={busy}
               className="text-xs font-semibold text-accent hover:underline disabled:opacity-50"
             >
-              {run.status === "draft" ? "Calculate" : "Recalculate"}
+              {run.status === "draft" || run.status === "pre_validated" ? "Calculate" : "Recalculate"}
             </button>
           )}
-          {canPrepare && run.status === "calculated" && (
+          {canPrepare && (run.status === "draft" || run.status === "pre_validated" || run.status === "calculated" || run.status === "validated") && (
+            <button
+              onClick={handleCalculateInBackground}
+              disabled={busy}
+              className="text-xs font-semibold text-accent hover:underline disabled:opacity-50"
+              title="For large runs: calculates in the background so you can keep working"
+            >
+              In background
+            </button>
+          )}
+          {canPrepare && !run.isSimulation && (run.status === "calculated" || run.status === "validated") && (
             <button
               onClick={handleSubmitForApproval}
               disabled={busy}
@@ -434,12 +491,16 @@ function RunCard({
       {calcSummary && <p className="text-xs text-label-secondary mt-2">{calcSummary}</p>}
       {error && <p className="text-xs text-danger mt-2">{error}</p>}
 
+      <PayrollCalculationPanel run={run} canPrepare={canPrepare} onRunChanged={onRunChanged} />
+      <PayrollRetroPanel run={run} canPrepare={canPrepare} onRunChanged={onRunChanged} />
+      <PayrollRunControlPanel run={run} canPrepare={canPrepare} onRunChanged={onRunChanged} />
+
       {/* Phase P4 — the queue HR builds up before calculating a
           bonus/arrears/final-settlement run. Server-side
           (`EmployeeOffCyclePaymentsService.create`) already refuses a new
           line once the run is `finalized`/`reversed`, so this mirrors that
           same cutoff rather than inventing a stricter one. */}
-      {run.runType === "off_cycle" && run.status !== "finalized" && run.status !== "reversed" && (
+      {run.runType === "off_cycle" && !isPostFinalRunStatus(run.status) && !isEndedRunStatus(run.status) && (
         <OffCyclePaymentsPanel run={run} canManage={canPrepare} />
       )}
 
@@ -449,8 +510,9 @@ function RunCard({
           see this card's numbers may as well see broken down. Both only
           make sense once a run is finalized — before that there's no
           settled payslip set to disburse or cost out. */}
-      {run.status === "finalized" && canPrepare && <DisbursementPanel runId={run.id} />}
-      {run.status === "finalized" && <CostCenterBreakdownPanel runId={run.id} />}
+      {isPostFinalRunStatus(run.status) && run.status !== "closed" && canPrepare && <DisbursementPanel runId={run.id} />}
+      {isPostFinalRunStatus(run.status) && <CostCenterBreakdownPanel runId={run.id} />}
+      {isPostFinalRunStatus(run.status) && canPrepare && <ReconciliationPanel runId={run.id} />}
 
       {expanded && (
         <div className="mt-4 pt-4 border-t border-black/5 space-y-2">
@@ -503,6 +565,14 @@ function RunsSection({
       .catch(() => undefined);
   }, [refreshKey]);
 
+  // See RunCard's onRunChanged doc comment — patches one row in place
+  // from a mutation's own response instead of re-fetching the whole
+  // list, which production traffic showed can lag behind its own just-
+  // committed write for a few seconds.
+  function patchRun(updated: PayrollRunView) {
+    setRuns((rs) => rs?.map((r) => (r.id === updated.id ? updated : r)) ?? rs);
+  }
+
   if (error) return <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-secondary">{error}</div>;
 
   return (
@@ -542,7 +612,7 @@ function RunsSection({
               targetEmployee={r.targetEmployeeId ? employeesById.get(r.targetEmployeeId) : undefined}
               canPrepare={canPrepare}
               canApprove={canApprove}
-              onChanged={onChanged}
+              onRunChanged={patchRun}
             />
           ))}
         </div>
@@ -716,6 +786,14 @@ function SettingsAndSlabsSection() {
           />
         )}
       </div>
+      <div>
+        <h3 className="text-sm font-semibold mb-2">Tax years &amp; tax profiles</h3>
+        <TaxProfilesPanel />
+      </div>
+      <div>
+        <h3 className="text-sm font-semibold mb-2">Loans &amp; working hours</h3>
+        <LoanTypesPanel />
+      </div>
     </div>
   );
 }
@@ -816,9 +894,14 @@ export function PayrollPage() {
       </p>
 
       {isSelfService && <MyPayslipsCard refreshKey={refreshKey} />}
+      {isSelfService && <MyPayrollDocumentsCard />}
 
       {(isHrAdmin || isPayrollApprover) && (
         <div className="space-y-6">
+          <CollapsibleSection title="Payroll Dashboard" defaultOpen forceOpen={focusSection === "payroll-dashboard"} sectionId="payroll-dashboard">
+            <PayrollDashboardPanel />
+          </CollapsibleSection>
+
           <RunsSection refreshKey={refreshKey} canPrepare={isHrAdmin} canApprove={isPayrollApprover} onChanged={bump} />
 
           {isHrAdmin && focusSection === "compensation" && (
@@ -845,6 +928,11 @@ export function PayrollPage() {
             <PayrollAreasSection canManage={isHrAdmin} onChanged={bump} />
           </CollapsibleSection>
 
+          {/* PAY-03 - calendars and periods. Any payroll staff can read them; hr_admin holds payroll_calendar.manage.all. */}
+          <CollapsibleSection title="Calendars & Periods" forceOpen={focusSection === "payroll-periods"} sectionId="payroll-periods">
+            <PayrollCalendarsSection canManage={isHrAdmin} />
+          </CollapsibleSection>
+
           {isHrAdmin && (
             <CollapsibleSection title="Settings & Tax Slabs" forceOpen={focusSection === "tax-slabs"} sectionId="tax-slabs">
               <SettingsAndSlabsSection />
@@ -862,6 +950,54 @@ export function PayrollPage() {
               sectionId="disbursement-settings"
             >
               <DisbursementSettingsForm />
+            </CollapsibleSection>
+          )}
+
+          {(isHrAdmin || isPayrollApprover) && (
+            <CollapsibleSection title="Final Settlements" forceOpen={focusSection === "final-settlements"} sectionId="final-settlements">
+              <FinalSettlementsSection canPrepare={isHrAdmin} canApprove={isPayrollApprover} />
+            </CollapsibleSection>
+          )}
+
+          {isHrAdmin && (
+            <CollapsibleSection title="Schemes & Settlement Settings" forceOpen={focusSection === "schemes"} sectionId="schemes">
+              <SchemesAndSettlementSettingsPanel />
+            </CollapsibleSection>
+          )}
+
+          <CollapsibleSection title="Accounting & Costing" forceOpen={focusSection === "accounting"} sectionId="accounting">
+            <RunAccountingPanel canPost={isHrAdmin} />
+          </CollapsibleSection>
+
+          {isHrAdmin && (
+            <CollapsibleSection title="GL Account Mapping" forceOpen={focusSection === "gl-mappings"} sectionId="gl-mappings">
+              <GlMappingsPanel canManage={isHrAdmin} />
+            </CollapsibleSection>
+          )}
+
+          <CollapsibleSection title="Payslips & Certificates" forceOpen={focusSection === "payroll-documents"} sectionId="payroll-documents">
+            <PayrollDocumentsPanel canIssue={isHrAdmin} />
+          </CollapsibleSection>
+
+          <CollapsibleSection title="Benefits" forceOpen={focusSection === "benefits"} sectionId="benefits">
+            <BenefitsPanel canManage={isHrAdmin} />
+          </CollapsibleSection>
+
+          {isHrAdmin && (
+            <CollapsibleSection title="Bulk Pay Inputs" forceOpen={focusSection === "input-imports"} sectionId="input-imports">
+              <PayrollInputImportPanel />
+            </CollapsibleSection>
+          )}
+
+          {isHrAdmin && (
+            <CollapsibleSection title="Payroll Events" forceOpen={focusSection === "event-catalog"} sectionId="event-catalog">
+              <PayrollEventCatalogPanel />
+            </CollapsibleSection>
+          )}
+
+          {isHrAdmin && (
+            <CollapsibleSection title="Payment File Layouts" forceOpen={focusSection === "bank-file-formats"} sectionId="bank-file-formats">
+              <BankFileFormatsPanel />
             </CollapsibleSection>
           )}
         </div>

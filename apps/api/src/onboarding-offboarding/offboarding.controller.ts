@@ -5,7 +5,7 @@ import type { RequestClaims } from "../database/tenant-context";
 import { OffboardingService } from "./offboarding.service";
 import { CreateChecklistItemTemplateDto, UpdateChecklistItemTemplateDto } from "./dto/checklist-item-template.dto";
 import { UpdateChecklistItemDto } from "./dto/update-checklist-item.dto";
-import { InitiateOffboardingDto } from "./dto/initiate-offboarding.dto";
+import { InitiateOffboardingDto, UpdateOffboardingExitDto } from "./dto/initiate-offboarding.dto";
 
 @Controller()
 @UseGuards(SessionGuard)
@@ -58,6 +58,15 @@ export class OffboardingController {
   @Patch("offboarding-items/:itemId")
   updateItem(@CurrentClaims() claims: RequestClaims, @Param("itemId") itemId: string, @Body() dto: UpdateChecklistItemDto) {
     return this.offboarding.updateItem(claims, itemId, dto);
+  }
+
+  @Patch("employees/:employeeId/offboarding/exit-details")
+  updateExitDetails(
+    @CurrentClaims() claims: RequestClaims,
+    @Param("employeeId") employeeId: string,
+    @Body() dto: UpdateOffboardingExitDto
+  ) {
+    return this.offboarding.updateExitDetails(claims, employeeId, dto);
   }
 
   @Post("employees/:employeeId/offboarding/complete")

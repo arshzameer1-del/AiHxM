@@ -26,7 +26,7 @@ import type {
 } from "@aihxm/shared-types";
 import { useAuth } from "../auth/AuthContext";
 import { api } from "../api/client";
-import { LEAVE_TYPE_LABELS, STATUS_LABELS, STATUS_STYLES } from "./leave/leaveLabels";
+import { leaveTypeLabel, STATUS_LABELS, STATUS_STYLES } from "./leave/leaveLabels";
 
 const ROLE_LABELS: Record<string, string> = {
   hr_admin: "HR Admin",
@@ -286,7 +286,7 @@ function UpcomingAndRecentLeave({ requests }: { requests: LeaveRequestView[] | n
             {upcoming.map((r) => (
               <div key={r.id} className="flex items-center justify-between gap-3 text-sm">
                 <span className="text-label-secondary">
-                  {LEAVE_TYPE_LABELS[r.leaveType]} · {r.startDate} – {r.endDate}
+                  {leaveTypeLabel(r.leaveType)} · {r.startDate} – {r.endDate}
                 </span>
                 <span className="font-mono text-xs text-label-tertiary shrink-0">
                   {r.daysRequested} day{r.daysRequested === 1 ? "" : "s"}
@@ -303,7 +303,7 @@ function UpcomingAndRecentLeave({ requests }: { requests: LeaveRequestView[] | n
           {recent.map((r) => (
             <div key={r.id} className="flex items-center justify-between gap-3 text-sm">
               <span className="text-label-secondary truncate">
-                {LEAVE_TYPE_LABELS[r.leaveType]} · {r.startDate}
+                {leaveTypeLabel(r.leaveType)} · {r.startDate}
               </span>
               <span className={`shrink-0 inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${STATUS_STYLES[r.status]}`}>
                 {STATUS_LABELS[r.status]}

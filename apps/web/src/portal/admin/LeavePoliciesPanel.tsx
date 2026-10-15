@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import type { LeavePolicyVersionView, LeavePolicyView } from "@aihxm/shared-types";
+import type { LeaveEntitlementInput, LeavePolicyVersionView, LeavePolicyView, LeaveTypeView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 
 function formatDate(iso: string): string {
@@ -67,6 +67,14 @@ function PolicyForm({
   onSaved: (policy: LeavePolicyView) => void;
 }) {
   const [value, setValue] = useState<PolicyFormValue>(() => emptyForm(initial));
+  // TLM-01: days for every other active leave type (maternity, Hajj, tenant-defined ...).
+  const [otherTypes, setOtherTypes] = useState<LeaveTypeView[]>([]);
+  const [otherDays, setOtherDays] = useState<Record<string, string>>(() =>
+    Object.fromEntries((initial?.entitlements ?? []).filter((e) => !["annual", "casual", "sick"].includes(e.leaveType)).map((e) => [e.leaveType, String(e.days)]))
+  );
+  useEffect(() => {
+    api.listLeaveTypes().then((all) => setOtherTypes(all.filter((t) => t.tracksBalance && !["annual", "casual", "sick"].includes(t.code)))).catch(() => undefined);
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -81,6 +89,9 @@ function PolicyForm({
         casualLeaveDays: Number(value.casualLeaveDays) || 0,
         sickLeaveDays: Number(value.sickLeaveDays) || 0,
         isDefault: value.isDefault,
+        entitlements: Object.entries(otherDays)
+          .filter(([, days]) => days !== "")
+          .map(([leaveType, days]): LeaveEntitlementInput => ({ leaveType, days: Number(days) || 0 })),
       };
       const saved = initial ? await api.updateLeavePolicy(initial.id, payload) : await api.createLeavePolicy(payload);
       onSaved(saved);
@@ -120,6 +131,29 @@ function PolicyForm({
           onChange={(v) => setValue((s) => ({ ...s, sickLeaveDays: v }))}
         />
       </div>
+
+      {otherTypes.length > 0 && (
+        <div>
+          <div className="text-sm font-medium mb-1">Other leave types (days per year)</div>
+          <div className="grid grid-cols-3 gap-4">
+            {otherTypes.map((t) => (
+              <div key={t.code}>
+                <label htmlFor={`ent-${t.code}`} className="block text-xs text-label-secondary mb-1">{t.name}</label>
+                <input
+                  id={`ent-${t.code}`}
+                  type="number"
+                  min={0}
+                  step="0.5"
+                  value={otherDays[t.code] ?? ""}
+                  onChange={(e) => setOtherDays((d) => ({ ...d, [t.code]: e.target.value }))}
+                  placeholder="not granted"
+                  className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-accent"
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <label className="flex items-center gap-2 text-sm">
         <input

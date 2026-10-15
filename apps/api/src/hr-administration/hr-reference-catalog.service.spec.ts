@@ -98,8 +98,13 @@ describe("HrReferenceCatalogService", () => {
     expect(terminationReasons?.activeCount).toBe(1);
     // A catalog type with no seeded rows for THIS company still appears,
     // at zero — the registry drives the listing, not the data.
+    // (salary_band is tenant-defined and never seeded.)
+    const salaryBands = types.find((t) => t.catalogType === "salary_band");
+    expect(salaryBands?.activeCount).toBe(0);
+    // Types the company had no rows for are seeded per type (CAT-02), while a
+    // type it already had keeps exactly the rows it has.
     const hireReasons = types.find((t) => t.catalogType === "lifecycle_reason:hire");
-    expect(hireReasons?.activeCount).toBe(0);
+    expect(hireReasons?.activeCount).toBe(4);
   });
 
   it("rejects a request for a catalog type that isn't registered", async () => {
@@ -162,6 +167,77 @@ describe("HrReferenceCatalogService", () => {
         BadRequestException
       );
     });
+  });
+
+  it("stores effective dates, applicability and localized labels (CAT-01) and rejects an inverted range", async () => {
+    const created = await catalog.create(hrAdminClaims, {
+      catalogType: "employment_type",
+      code: "fixed_term",
+      label: "Fixed term",
+      effectiveFrom: "2026-01-01",
+      effectiveTo: "2026-12-31",
+      applicability: { employmentTypes: ["contract"] },
+      labels: { ur: "مقررہ مدت" },
+    });
+    expect(created.effectiveFrom).toBe("2026-01-01");
+    expect(created.effectiveTo).toBe("2026-12-31");
+    expect(created.applicability).toEqual({ employmentTypes: ["contract"] });
+    expect(created.labels).toEqual({ ur: "مقررہ مدت" });
+
+    await expect(catalog.update(hrAdminClaims, created.id, { effectiveTo: "2025-01-01" })).rejects.toThrow(BadRequestException);
+    await expect(catalog.update(hrAdminClaims, created.id, { labels: { "not a locale": "x" } })).rejects.toThrow(BadRequestException);
+    const cleared = await catalog.update(hrAdminClaims, created.id, { effectiveTo: null });
+    expect(cleared.effectiveTo).toBeNull();
+    expect(cleared.effectiveFrom).toBe("2026-01-01");
+  });
+
+  it("an item outside its effective window is not a valid value for new data (CAT-01)", async () => {
+    const future = await catalog.create(hrAdminClaims, {
+      catalogType: "employment_type",
+      code: "future_only",
+      label: "Future only",
+      effectiveFrom: "2099-01-01",
+    });
+    const expired = await catalog.create(hrAdminClaims, {
+      catalogType: "employment_type",
+      code: "expired_only",
+      label: "Expired only",
+      effectiveFrom: "2000-01-01",
+      effectiveTo: "2000-12-31",
+    });
+    expect(future.isActive).toBe(true);
+    await db.withClaims(hrAdminClaims, async (client) => {
+      await expect(catalog.validateActiveCode(client, companyId, "employment_type", "future_only")).rejects.toThrow(BadRequestException);
+      await expect(catalog.validateActiveCode(client, companyId, "employment_type", "expired_only")).rejects.toThrow(BadRequestException);
+    });
+    expect(expired.effectiveTo).toBe("2000-12-31");
+  });
+
+  it("reports usage, stamps retired_at on deactivation and clears it on reactivation (CAT-01)", async () => {
+    const item = (await catalog.listItems(hrAdminClaims, "employment_type")).find((i) => i.code === "permanent")!;
+    await db.withClaims(FIXTURE_CLAIMS, (client) =>
+      client.query("INSERT INTO employees (company_id, employee_number, first_name, last_name, employment_type) VALUES ($1, 'CATU-1', 'Cat', 'User', 'permanent')", [companyId])
+    );
+    const usage = await catalog.getUsage(hrAdminClaims, item.id);
+    expect(usage.usageCount).toBeGreaterThanOrEqual(1);
+    expect(usage.canRemove).toBe(false);
+
+    const retired = await catalog.update(hrAdminClaims, item.id, { isActive: false });
+    expect(retired.retiredAt).not.toBeNull();
+    // history still resolves: the employee keeps the link to the retired item
+    const link = await db.withClaims(FIXTURE_CLAIMS, (client) =>
+      client.query("SELECT employment_type_catalog_item_id AS id FROM employees WHERE company_id = $1 AND employee_number = 'CATU-1'", [companyId])
+    );
+    expect(link.rows[0].id).toBe(item.id);
+    const back = await catalog.update(hrAdminClaims, item.id, { isActive: true });
+    expect(back.retiredAt).toBeNull();
+  });
+
+  it("seeds newly added catalog types (gender, worker_type, asset_type) for a company that already had other items (CAT-02)", async () => {
+    const genders = await catalog.listItems(hrAdminClaims, "gender");
+    expect(genders.map((g) => g.code).sort()).toEqual(["female", "male", "other"]);
+    expect((await catalog.listItems(hrAdminClaims, "asset_type")).length).toBeGreaterThan(0);
+    expect(await catalog.listItems(hrAdminClaims, "salary_band")).toEqual([]); // tenant-defined, never seeded
   });
 
   it("denies a login without hr_reference_catalog permissions", async () => {

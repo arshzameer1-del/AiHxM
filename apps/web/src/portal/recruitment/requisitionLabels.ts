@@ -6,6 +6,10 @@ export const REQUISITION_STATUS_STYLES: Record<RequisitionStatus, string> = {
   approved: "bg-success/15 text-green-700",
   rejected: "bg-danger/15 text-red-700",
   closed: "bg-black/5 text-label-tertiary",
+  open: "bg-success/15 text-green-700",
+  on_hold: "bg-amber-100 text-amber-800",
+  filled: "bg-accent/15 text-accent",
+  cancelled: "bg-black/5 text-label-tertiary",
 };
 
 export const REQUISITION_STATUS_LABELS: Record<RequisitionStatus, string> = {
@@ -14,6 +18,10 @@ export const REQUISITION_STATUS_LABELS: Record<RequisitionStatus, string> = {
   approved: "Approved",
   rejected: "Rejected",
   closed: "Closed",
+  open: "Open",
+  on_hold: "On hold",
+  filled: "Filled",
+  cancelled: "Cancelled",
 };
 
 /**
@@ -36,14 +44,20 @@ export const STAGE_LABELS: Record<ApplicationStage, string> = {
 
 export const OFFER_STATUS_STYLES: Record<OfferStatus, string> = {
   pending: "bg-amber-100 text-amber-800",
+  pending_approval: "bg-amber-100 text-amber-800",
+  approval_rejected: "bg-danger/15 text-red-700",
   accepted: "bg-success/15 text-green-700",
   declined: "bg-danger/15 text-red-700",
   rescinded: "bg-black/5 text-label-tertiary",
+  expired: "bg-black/5 text-label-tertiary",
 };
 
 export const OFFER_STATUS_LABELS: Record<OfferStatus, string> = {
   pending: "Pending",
+  pending_approval: "Awaiting approval",
+  approval_rejected: "Approval rejected",
   accepted: "Accepted",
   declined: "Declined",
   rescinded: "Rescinded",
+  expired: "Expired",
 };

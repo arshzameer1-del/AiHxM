@@ -20,6 +20,19 @@ const MANAGE_PERMISSION = "hr_business_policy.manage.all";
 const VIEW_PERMISSION = "hr_business_policy.view.all";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+function toDay(value: any): string | null {
+  if (!value) return null;
+  if (typeof value === "string") return value.slice(0, 10);
+  return value.toISOString ? value.toISOString().slice(0, 10) : null;
+}
+
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+function assertWindow(from?: string | null, to?: string | null): void {
+  if ((from && !ISO_DAY.test(from)) || (to && !ISO_DAY.test(to))) throw new BadRequestException("Dates must be YYYY-MM-DD");
+  if (from && to && to < from) throw new BadRequestException("effectiveTo cannot be before effectiveFrom");
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function rowToView(row: any): HrBusinessPolicyView {
   return {
     id: row.id,
@@ -32,6 +45,10 @@ function rowToView(row: any): HrBusinessPolicyView {
     isDefault: row.is_default,
     sortOrder: row.sort_order,
     isActive: row.is_active,
+    effectiveFrom: toDay(row.effective_from),
+    effectiveTo: toDay(row.effective_to),
+    applicability: row.applicability ?? {},
+    version: row.version ?? 1,
     createdAt: row.created_at?.toISOString ? row.created_at.toISOString() : row.created_at,
     updatedAt: row.updated_at?.toISOString ? row.updated_at.toISOString() : row.updated_at,
   };
@@ -146,6 +163,7 @@ export class HrBusinessPolicyService {
     this.assertRegistered(input.policyType);
     if (!input.code?.trim()) throw new BadRequestException("code is required");
     if (!input.name?.trim()) throw new BadRequestException("name is required");
+    assertWindow(input.effectiveFrom, input.effectiveTo);
     await this.requireManage(claims);
     return this.db.withClaims(claims, async (client) => {
       await this.ensureDefaultPolicies(client, claims.company_id!);
@@ -157,15 +175,16 @@ export class HrBusinessPolicyService {
         throw new BadRequestException(`A "${input.policyType}" policy with code "${input.code}" already exists`);
       }
       if (input.isDefault) {
-        await this.unsetExistingDefault(client, claims.company_id!, input.policyType);
+        await this.supersedeExistingDefault(client, claims.company_id!, input.policyType, undefined, input.effectiveFrom ?? null);
       }
       const maxOrder = await client.query<{ next: number }>(
         "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM hr_business_policies WHERE company_id = $1 AND policy_type = $2",
         [claims.company_id, input.policyType]
       );
       const inserted = await client.query(
-        `INSERT INTO hr_business_policies (company_id, policy_type, code, name, description, rules, is_default, sort_order)
-         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8) RETURNING *`,
+        `INSERT INTO hr_business_policies
+           (company_id, policy_type, code, name, description, rules, is_default, sort_order, effective_from, effective_to, applicability)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11::jsonb) RETURNING *`,
         [
           claims.company_id,
           input.policyType,
@@ -175,6 +194,9 @@ export class HrBusinessPolicyService {
           JSON.stringify(input.rules ?? {}),
           input.isDefault ?? false,
           maxOrder.rows[0].next,
+          input.effectiveFrom ?? null,
+          input.effectiveTo ?? null,
+          JSON.stringify(input.applicability ?? {}),
         ]
       );
       const view = rowToView(inserted.rows[0]);
@@ -189,12 +211,19 @@ export class HrBusinessPolicyService {
   }
 
   async update(claims: RequestClaims, id: string, patch: UpdateHrBusinessPolicyRequest): Promise<HrBusinessPolicyView> {
+    assertWindow(patch.effectiveFrom, patch.effectiveTo);
     await this.requireManage(claims);
     return this.db.withClaims(claims, async (client) => {
       const before = await this.mustExist(client, id);
+      const fromGiven = patch.effectiveFrom !== undefined;
+      const toGiven = patch.effectiveTo !== undefined;
+      const newFrom = fromGiven ? patch.effectiveFrom ?? null : toDay(before.effective_from);
+      const newTo = toGiven ? patch.effectiveTo ?? null : toDay(before.effective_to);
+      assertWindow(newFrom, newTo);
       if (patch.isDefault === true) {
-        await this.unsetExistingDefault(client, before.company_id, before.policy_type, id);
+        await this.supersedeExistingDefault(client, before.company_id, before.policy_type, id, newFrom);
       }
+      const rulesChanged = patch.rules !== undefined && JSON.stringify(patch.rules) !== JSON.stringify(before.rules ?? {});
       const result = await client.query(
         `UPDATE hr_business_policies SET
            name = COALESCE($2, name),
@@ -202,6 +231,10 @@ export class HrBusinessPolicyService {
            rules = COALESCE($4::jsonb, rules),
            is_default = COALESCE($5, is_default),
            is_active = COALESCE($6, is_active),
+           effective_from = CASE WHEN $7::boolean THEN $8::date ELSE effective_from END,
+           effective_to = CASE WHEN $9::boolean THEN $10::date ELSE effective_to END,
+           applicability = COALESCE($11::jsonb, applicability),
+           version = CASE WHEN $12::boolean THEN version + 1 ELSE version END,
            updated_at = now()
          WHERE id = $1 RETURNING *`,
         [
@@ -211,6 +244,12 @@ export class HrBusinessPolicyService {
           patch.rules !== undefined ? JSON.stringify(patch.rules) : null,
           patch.isDefault ?? null,
           patch.isActive ?? null,
+          fromGiven,
+          patch.effectiveFrom ?? null,
+          toGiven,
+          patch.effectiveTo ?? null,
+          patch.applicability ? JSON.stringify(patch.applicability) : null,
+          rulesChanged,
         ]
       );
       await this.audit.record(client, claims, {
@@ -262,7 +301,11 @@ export class HrBusinessPolicyService {
   async resolveDefaultPolicy(client: PoolClient, companyId: string, policyType: string): Promise<Record<string, unknown> | null> {
     await this.ensureDefaultPolicies(client, companyId);
     const result = await client.query(
-      "SELECT rules FROM hr_business_policies WHERE company_id = $1 AND policy_type = $2 AND is_default = true AND is_active = true LIMIT 1",
+      `SELECT rules FROM hr_business_policies
+        WHERE company_id = $1 AND policy_type = $2 AND is_default = true AND is_active = true
+          AND (effective_from IS NULL OR effective_from <= CURRENT_DATE)
+          AND (effective_to IS NULL OR effective_to >= CURRENT_DATE)
+        LIMIT 1`,
       [companyId, policyType]
     );
     if (result.rowCount === 0) return null;
@@ -301,6 +344,35 @@ export class HrBusinessPolicyService {
     const override = await this.configRuleMapping.resolveOverride(client, companyId, "hr_business_policy", policyType, context);
     if (!override) return defaultRules;
     return { ...(defaultRules ?? {}), ...override.ruleValue };
+  }
+
+  /**
+   * Makes room for a new default. With no start date (or one that is not in
+   * the future) the old default is simply demoted, as before. With a FUTURE
+   * start date the current default stays in force until the day before, so
+   * a successor can be scheduled without a gap (CAT-07).
+   */
+  private async supersedeExistingDefault(
+    client: PoolClient,
+    companyId: string,
+    policyType: string,
+    exceptId: string | undefined,
+    newFrom: string | null
+  ): Promise<void> {
+    const today = new Date().toISOString().slice(0, 10);
+    if (newFrom && newFrom > today) {
+      await client.query(
+        `UPDATE hr_business_policies
+            SET effective_to = ($4::date - 1), updated_at = now()
+          WHERE company_id = $1 AND policy_type = $2 AND is_default = true AND is_active = true
+            AND ($3::uuid IS NULL OR id <> $3)
+            AND (effective_from IS NULL OR effective_from < $4::date)
+            AND (effective_to IS NULL OR effective_to >= $4::date)`,
+        [companyId, policyType, exceptId ?? null, newFrom]
+      );
+      return;
+    }
+    await this.unsetExistingDefault(client, companyId, policyType, exceptId);
   }
 
   private async unsetExistingDefault(client: PoolClient, companyId: string, policyType: string, exceptId?: string): Promise<void> {

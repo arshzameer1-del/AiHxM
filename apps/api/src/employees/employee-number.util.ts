@@ -8,9 +8,10 @@ import type { EmployeeNumberFormat } from "@aihxm/shared-types";
  * — these are pure formatting/parsing helpers, no DB access, so they're
  * unit-testable without Postgres).
  */
-export function formatEmployeeNumber(format: EmployeeNumberFormat, sequence: number): string {
+export function formatEmployeeNumber(format: EmployeeNumberFormat, sequence: number, seriesYear?: string): string {
   const padded = String(sequence).padStart(format.padding, "0");
-  return format.prefix ? `${format.prefix}-${padded}` : padded;
+  const head = [format.prefix, seriesYear].filter(Boolean).join("-");
+  return head ? `${head}-${padded}` : padded;
 }
 
 /**

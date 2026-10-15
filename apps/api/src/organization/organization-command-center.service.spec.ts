@@ -322,6 +322,11 @@ describe("OrganizationCommandCenterService", () => {
       const unitA = await orgUnits.create(claims, { name: "Unit A", unitType: "department" });
       const unitB = await orgUnits.create(claims, { name: "Unit B", unitType: "department" });
       const employee = await employees.create(claims, { firstName: "Drifted", lastName: "Employee", orgUnitId: unitA.id });
+      // create() now opens a primary assignment in unit A (ORG-03); drift is
+      // produced the way it arises in practice: the assignment moves on while
+      // the legacy employees.org_unit_id column is left behind.
+      const open = await assignments.list(claims, { employeeId: employee.id });
+      await assignments.end(claims, open.find((a) => a.assignmentType === "primary" && a.status === "active")!.id);
       await assignments.create(claims, { employeeId: employee.id, assignmentType: "primary", orgUnitId: unitB.id });
 
       const summary = await commandCenter.getSummary(claims);
@@ -378,11 +383,17 @@ describe("OrganizationCommandCenterService", () => {
       await employees.create(claims, { firstName: "Legacy", lastName: "Department", department: "Old Dept Text" });
       await employees.create(claims, { firstName: "Legacy", lastName: "Location", location: "Old City Text" });
       const managerForLegacy = await employees.create(claims, { firstName: "Legacy", lastName: "ManagerTarget" });
-      await employees.create(claims, {
-        firstName: "Legacy",
-        lastName: "ManagerField",
-        managerId: managerForLegacy.id,
-      });
+      const managerFieldEmployee = await employees.create(claims, { firstName: "Legacy", lastName: "ManagerField" });
+      // Cross-module integration follow-up (2026-10-01): EmployeesService
+      // .create() now opens the canonical `direct` org_relationships row
+      // itself when `managerId` is given, so creating through it here
+      // would no longer reproduce the "legacy manager_id with no
+      // canonical relationship" case this warning exists to catch (see
+      // legacy-reconciliation.service.spec.ts's identical fixture fix).
+      // Raw SQL simulates data that reached the column some other way.
+      await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query("UPDATE employees SET manager_id = $2 WHERE id = $1", [managerFieldEmployee.id, managerForLegacy.id])
+      );
 
       const summary = await commandCenter.getSummary(claims);
       expect(warningCount(summary.integrityWarnings, "legacy_records_not_mapped")).toBe(3);

@@ -5,6 +5,9 @@ import type {
   EmployeeView,
   JobView,
   OrgUnitView,
+  PositionBudgetView,
+  PositionIncumbentView,
+  PositionRelationshipView,
   PositionStatus,
   PositionVersionView,
   PositionView,
@@ -16,6 +19,8 @@ const STATUS_LABELS: Record<PositionStatus, string> = {
   filled: "Filled",
   frozen: "Frozen",
   abolished: "Abolished",
+  pending_approval: "Pending approval",
+  rejected: "Rejected",
 };
 
 function statusBadgeClass(status: PositionStatus): string {
@@ -28,10 +33,14 @@ function statusBadgeClass(status: PositionStatus): string {
       return "bg-yellow-500/15 text-yellow-700";
     case "abolished":
       return "bg-black/10 text-label-tertiary";
+    case "pending_approval":
+      return "bg-amber-100 text-amber-800";
+    case "rejected":
+      return "bg-danger/15 text-red-700";
   }
 }
 
-const TABS = ["Overview", "Assignment History", "History"] as const;
+const TABS = ["Overview", "Planning", "Assignment History", "History"] as const;
 type Tab = (typeof TABS)[number];
 
 function describeError(err: unknown): string {
@@ -69,6 +78,19 @@ export function PositionDetailPage() {
   const [history, setHistory] = useState<PositionVersionView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("Overview");
+  // ORG-02: multi-incumbent roster, fiscal-year budgets and position-to-position lines.
+  const [incumbents, setIncumbents] = useState<PositionIncumbentView[] | null>(null);
+  const [budgets, setBudgets] = useState<PositionBudgetView[] | null>(null);
+  const [relationships, setRelationships] = useState<PositionRelationshipView[] | null>(null);
+  const [budgetYear, setBudgetYear] = useState(String(new Date().getFullYear()));
+  const [budgetHeadcount, setBudgetHeadcount] = useState("1");
+  const [planningError, setPlanningError] = useState<string | null>(null);
+
+  function loadPlanning(positionId: string) {
+    api.listPositionIncumbents(positionId).then(setIncumbents).catch(() => setIncumbents([]));
+    api.listPositionBudgets(positionId).then(setBudgets).catch(() => setBudgets([]));
+    api.listPositionRelationships(positionId).then(setRelationships).catch(() => setRelationships([]));
+  }
 
   useEffect(() => {
     if (!id) return;
@@ -80,7 +102,30 @@ export function PositionDetailPage() {
     api.listEmployees().then(setEmployees).catch(() => undefined);
     api.listEmployeeOrgAssignments({ positionId: id }).then(setAssignmentHistory).catch(() => undefined);
     api.getPositionHistory(id).then(setHistory).catch(() => undefined);
+    loadPlanning(id);
   }, [id]);
+
+  async function endIncumbent(employeeId: string) {
+    if (!id) return;
+    setPlanningError(null);
+    try {
+      setPosition(await api.unassignPositionIncumbent(id, employeeId));
+      loadPlanning(id);
+    } catch (err) {
+      setPlanningError(describeError(err));
+    }
+  }
+
+  async function saveBudget() {
+    if (!id) return;
+    setPlanningError(null);
+    try {
+      await api.upsertPositionBudget(id, Number(budgetYear), { plannedHeadcount: Number(budgetHeadcount) });
+      loadPlanning(id);
+    } catch (err) {
+      setPlanningError(describeError(err));
+    }
+  }
 
   const orgUnit = useMemo(() => orgUnits.find((u) => u.id === position?.orgUnitId), [orgUnits, position]);
   const job = useMemo(() => jobs.find((j) => j.id === position?.jobId), [jobs, position]);
@@ -162,6 +207,57 @@ export function PositionDetailPage() {
               <div className="text-xs uppercase tracking-wide text-label-tertiary mb-1">Current occupant</div>
               <div>{occupant ? `${occupant.firstName} ${occupant.lastName}` : "— vacant —"}</div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {tab === "Planning" && (
+        <div className="space-y-4">
+          {planningError && <div className="text-danger text-sm">{planningError}</div>}
+          <div className="bg-card rounded-card p-5 shadow-sm">
+            <h2 className="text-sm font-semibold mb-2">Incumbents ({position.headcountFte} FTE approved)</h2>
+            {incumbents === null && <div className="text-sm text-label-tertiary">Loading…</div>}
+            {incumbents && incumbents.length === 0 && <div className="text-sm text-label-tertiary">Nobody holds this position.</div>}
+            {incumbents?.map((i) => (
+              <div key={i.id} className="flex items-center gap-3 py-2 border-b border-black/5 last:border-0 text-sm">
+                <span className="font-medium">{i.employeeName ?? i.employeeId}</span>
+                <span className="text-xs text-label-tertiary">{i.fte} FTE · since {i.effectiveFrom}</span>
+                <button onClick={() => endIncumbent(i.employeeId)} className="ml-auto text-xs font-semibold text-danger hover:underline">
+                  End slot
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="bg-card rounded-card p-5 shadow-sm">
+            <h2 className="text-sm font-semibold mb-2">Headcount budget by fiscal year</h2>
+            {budgets?.map((b) => (
+              <div key={b.id} className="text-sm py-1">
+                {b.fiscalYear}: {b.plannedHeadcount} planned{b.budgetAmount !== null ? ` · ${b.currency} ${b.budgetAmount.toLocaleString()}` : ""}
+              </div>
+            ))}
+            {budgets && budgets.length === 0 && <div className="text-sm text-label-tertiary mb-2">No budget set.</div>}
+            <div className="flex items-end gap-3 mt-3">
+              <label className="text-xs">
+                Year
+                <input id="position-budget-year" value={budgetYear} onChange={(e) => setBudgetYear(e.target.value)} className="block w-24 rounded-lg border border-black/10 px-2 py-1 text-sm font-mono" />
+              </label>
+              <label className="text-xs">
+                Planned headcount
+                <input id="position-budget-headcount" value={budgetHeadcount} onChange={(e) => setBudgetHeadcount(e.target.value)} className="block w-28 rounded-lg border border-black/10 px-2 py-1 text-sm font-mono" />
+              </label>
+              <button onClick={saveBudget} className="bg-accent text-white rounded-lg px-3 py-1.5 text-xs font-semibold">
+                Save budget
+              </button>
+            </div>
+          </div>
+          <div className="bg-card rounded-card p-5 shadow-sm">
+            <h2 className="text-sm font-semibold mb-2">Reporting lines</h2>
+            {relationships && relationships.length === 0 && <div className="text-sm text-label-tertiary">No position reporting lines.</div>}
+            {relationships?.map((r) => (
+              <div key={r.id} className="text-sm py-1">
+                {r.relationshipType === "reports_to" ? "Reports to" : "Dotted line to"} {r.relatedPositionTitle ?? r.relatedPositionId}
+              </div>
+            ))}
           </div>
         </div>
       )}

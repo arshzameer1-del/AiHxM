@@ -308,6 +308,9 @@ describe("EmployeeOrgAssignmentsService", () => {
       it("ending a primary assignment does not touch employees.orgUnitId/positionId (documented scope boundary)", async () => {
         const target = await employees.create(hrAdminClaims, { firstName: "Scope", lastName: "Boundary", orgUnitId: engineeringUnitId });
         const before = await employees.get(hrAdminClaims, target.id);
+        // create() opens the initial primary assignment (ORG-03); end it so a manual one can be created.
+        const initial = (await assignments.list(hrAdminClaims, { employeeId: target.id })).find((a) => a.assignmentType === "primary" && a.status === "active");
+        await assignments.end(hrAdminClaims, initial!.id);
         const assignment = await assignments.create(hrAdminClaims, { employeeId: target.id, assignmentType: "primary", orgUnitId: salesUnitId });
         await assignments.end(hrAdminClaims, assignment.id);
 

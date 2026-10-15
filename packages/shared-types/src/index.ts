@@ -393,6 +393,15 @@ export type AuditLogEntry = {
   companyId: string | null;
   companyName?: string | null;
   actor: string;
+  /** Human-readable actor (name/email) resolved server-side from the raw
+   * `actor` id; null when the id is a service identity or no longer resolves. */
+  actorLabel?: string | null;
+  /** SEC-06 structured fields (null on rows written before migration 0118). */
+  actorId?: string | null;
+  actorType?: "user" | "platform_admin" | "service" | null;
+  correlationId?: string | null;
+  sourceChannel?: string | null;
+  reason?: string | null;
   action: string;
   target: string | null;
   metadata: Record<string, unknown>;
@@ -521,6 +530,10 @@ export type TenantConfigurationVersion = {
   newValue: unknown;
   changedBy: string;
   changedAt: string;
+  /** CFG-03: 'applied' (in force / was in force), 'scheduled' (future), 'cancelled'. */
+  status?: "applied" | "scheduled" | "cancelled";
+  effectiveFrom?: string | null;
+  changeReason?: string | null;
 };
 
 // --- Tenant Management: Modules & Feature Entitlements (TM-021–024) -------
@@ -1181,13 +1194,66 @@ export type SetPlatformAdminAccessRequest = {
 // assignment data they read, plus the dummy_records proof-of-concept
 // object used to test them until Employee Core (Phase 7) provides a real one.
 
-export type FieldAccess = "view" | "edit" | "hidden";
+/** `masked` (ACC-01): the field is returned, but its value is obscured by the rule's mask_rule. */
+export type FieldAccess = "view" | "edit" | "hidden" | "masked";
 
 export type Role = {
   id: string;
   key: string;
   name: string;
   description: string | null;
+  /** ACC-02: null = platform role. */
+  companyId?: string | null;
+  isSystem?: boolean;
+  isActive?: boolean;
+};
+
+export type FieldMaskRule = "full" | "last4" | "first1" | "email";
+
+export type FieldPermissionRuleView = {
+  id: string;
+  roleId: string;
+  companyId: string | null;
+  objectKey: string;
+  fieldKey: string;
+  access: FieldAccess;
+  maskRule: FieldMaskRule | null;
+  priority: number;
+  denyOverrides: boolean;
+  sensitivityClass: "public" | "internal" | "confidential" | "restricted" | null;
+  effectiveFrom: string | null;
+  effectiveTo: string | null;
+  condition: { field: string; equals: unknown } | null;
+};
+
+export type CreateFieldPermissionRuleRequest = {
+  roleId: string;
+  objectKey: string;
+  fieldKey: string;
+  access: FieldAccess;
+  maskRule?: FieldMaskRule;
+  priority?: number;
+  denyOverrides?: boolean;
+  sensitivityClass?: "public" | "internal" | "confidential" | "restricted";
+  effectiveFrom?: string;
+  effectiveTo?: string;
+  condition?: { field: string; equals: unknown };
+};
+
+export type PermissionView = {
+  id: string;
+  key: string;
+  description: string | null;
+  objectKey: string | null;
+  action: string | null;
+  scope: string | null;
+};
+
+export type CreateCustomRoleRequest = {
+  key: string;
+  name: string;
+  description?: string;
+  permissionKeys?: string[];
 };
 
 export type Permission = {
@@ -1196,6 +1262,8 @@ export type Permission = {
   description: string | null;
 };
 
+export type RoleAssignmentSource = "manual" | "scim" | "sso" | "workflow" | "delegation" | "system";
+
 export type UserRoleAssignment = {
   id: string;
   userAccountId: string;
@@ -1203,12 +1271,24 @@ export type UserRoleAssignment = {
   roleId: string;
   roleKey: string;
   createdAt: string;
+  /** ACC-03: the grant counts only from effectiveFrom to effectiveTo (inclusive); null = open. */
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
+  source?: RoleAssignmentSource;
+  grantedBy?: string | null;
+  reason?: string | null;
+  /** True when today falls inside the window. */
+  isActive?: boolean;
 };
 
 export type AssignRoleRequest = {
   userAccountId: string;
   companyId: string;
   roleKey: string;
+  effectiveFrom?: string;
+  effectiveTo?: string;
+  source?: RoleAssignmentSource;
+  reason?: string;
 };
 
 /**
@@ -1225,21 +1305,38 @@ export type AssignRoleRequest = {
  * table is, rather than three near-identical tables/types.
  */
 export type DataScopeType = "org_unit" | "location" | "cost_center";
+/** ACC-04: scope types an assignment can carry; payroll_area is direct (no subtree). */
+export type DataScopeAssignmentScopeType = DataScopeType | "payroll_area";
 
 export type DataScopeAssignmentView = {
   id: string;
   userAccountId: string;
   companyId: string;
-  scopeType: DataScopeType;
+  scopeType: DataScopeAssignmentScopeType;
   scopeEntityId: string;
   createdAt: string;
+  /** ACC-04 */
+  includeDescendants?: boolean;
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
+  grantedBy?: string | null;
+  reason?: string | null;
+  roleId?: string | null;
+  objectKey?: string | null;
+  isActive?: boolean;
 };
 
 export type AssignDataScopeRequest = {
   userAccountId: string;
   companyId: string;
-  scopeType: DataScopeType;
+  scopeType: DataScopeAssignmentScopeType;
   scopeEntityId: string;
+  includeDescendants?: boolean;
+  effectiveFrom?: string;
+  effectiveTo?: string;
+  reason?: string;
+  roleId?: string;
+  objectKey?: string;
 };
 
 /**
@@ -1377,7 +1474,15 @@ export type DummyRecordView = {
 // `role` or `specific_user`, enforced by the DTO independently of this
 // shared type.
 
-export type ApproverType = "role" | "specific_user" | "manager_of_submitter";
+export type ApproverType =
+  | "role"
+  | "specific_user"
+  | "manager_of_submitter"
+  // WFL-04
+  | "org_unit_head"
+  | "dotted_line_manager"
+  | "position"
+  | "group";
 
 export type EscalationApproverType = "role" | "specific_user";
 
@@ -1385,17 +1490,46 @@ export type WorkflowApproverConfig = {
   approverType: ApproverType;
   roleId?: string;
   userAccountId?: string;
+  /** WFL-04: `position` approver - whoever currently occupies this position. */
+  positionId?: string;
+  /** WFL-04: `group` approver - any current member of this employee group. */
+  employeeGroupId?: string;
+  /** WFL-04: `org_unit_head` approver - head of this unit; omit for the submitter's own unit. */
+  orgUnitId?: string;
   escalationApproverType?: EscalationApproverType;
   escalationRoleId?: string;
   escalationUserAccountId?: string;
 };
 
-export type WorkflowFieldCondition = { field: string; equals: unknown };
+/**
+ * Step / start condition. `{field, equals}` is the original form. WFL-04 adds
+ * comparison operators for amount-threshold routing, e.g.
+ * `{field: "amount", op: "gte", value: 100000}`, and `all` / `any` groups.
+ */
+export type WorkflowFieldCondition =
+  | { field: string; equals: unknown }
+  | { field: string; op: "eq" | "ne" | "gt" | "gte" | "lt" | "lte"; value: unknown }
+  | { field: string; op: "in" | "not_in"; value: unknown[] }
+  | { field: string; op: "between"; value: [number, number] }
+  | { all: WorkflowFieldCondition[] }
+  | { any: WorkflowFieldCondition[] };
+
+export type WorkflowApprovalMode = "all" | "any" | "quorum";
+export type WorkflowPriority = "low" | "normal" | "high" | "urgent";
 
 export type WorkflowStepConfig = {
   stepOrder: number;
   name: string;
   condition?: WorkflowFieldCondition | null;
+  /** WFL-05: all lines must approve (default), any one line, or `quorumCount` lines. */
+  approvalMode?: WorkflowApprovalMode;
+  quorumCount?: number;
+  /** WFL-05: steps sharing a group name (and adjacent) run in parallel. */
+  parallelGroup?: string | null;
+  /** WFL-05: remind pending approvers every N hours. */
+  reminderHours?: number;
+  /** WFL-05: a rejection must carry a comment. */
+  requireCommentOnReject?: boolean;
   /** Hours until a pending approval on this step is escalated. Omit for no SLA. */
   slaHours?: number;
   /** One entry per required approval line — more than one means every line must approve ("parallel"). */
@@ -1411,18 +1545,28 @@ export type WorkflowTemplate = {
   isActive: boolean;
   steps: WorkflowStepConfig[];
   createdAt: string;
+  /** WFL-02: the version new submissions are pinned to. */
+  currentVersionNo?: number;
+  description?: string | null;
+  /** WFL-05 */
+  triggerEvent?: string | null;
+  startCondition?: WorkflowFieldCondition | null;
 };
 
 export type CreateWorkflowTemplateRequest = {
   key: string;
   name: string;
   objectKey: string;
+  description?: string;
+  triggerEvent?: string;
+  startCondition?: WorkflowFieldCondition | null;
   steps: WorkflowStepConfig[];
 };
 
-export type WorkflowInstanceStatus = "in_progress" | "approved" | "rejected" | "cancelled";
-export type WorkflowStepStatus = "pending" | "skipped" | "approved" | "rejected";
-export type WorkflowApprovalStatus = "pending" | "escalated" | "approved" | "rejected";
+export type WorkflowInstanceStatus = "in_progress" | "approved" | "rejected" | "cancelled" | "returned" | "on_hold";
+export type WorkflowStepStatus = "pending" | "skipped" | "approved" | "rejected" | "returned";
+export type WorkflowApprovalStatus = "pending" | "escalated" | "approved" | "rejected" | "returned" | "withdrawn";
+export type WorkflowDecision = "approved" | "rejected" | "send_back";
 
 export type WorkflowStepApprovalView = {
   id: string;
@@ -1434,8 +1578,11 @@ export type WorkflowStepApprovalView = {
   escalatedAt: string | null;
   escalatedToUserAccountId: string | null;
   decidedByUserAccountId: string | null;
-  decision: "approved" | "rejected" | null;
+  decision: WorkflowDecision | null;
   comment: string | null;
+  /** ACC-06 */
+  delegatedToUserAccountId?: string | null;
+  delegatedFromUserAccountId?: string | null;
 };
 
 export type WorkflowStepInstanceView = {
@@ -1444,6 +1591,10 @@ export type WorkflowStepInstanceView = {
   name: string;
   status: WorkflowStepStatus;
   approvals: WorkflowStepApprovalView[];
+  approvalMode?: WorkflowApprovalMode;
+  quorumCount?: number | null;
+  parallelGroup?: string | null;
+  requireCommentOnReject?: boolean;
 };
 
 export type WorkflowInstanceView = {
@@ -1462,6 +1613,12 @@ export type WorkflowInstanceView = {
   steps: WorkflowStepInstanceView[];
   createdAt: string;
   updatedAt: string;
+  /** WFL-02 / WFL-07 */
+  templateVersionNo?: number | null;
+  title?: string | null;
+  priority?: WorkflowPriority;
+  dueAt?: string | null;
+  holdReason?: string | null;
 };
 
 export type SubmitForApprovalRequest = {
@@ -1478,11 +1635,105 @@ export type SubmitForApprovalRequest = {
   /** See WorkflowInstanceView.subjectUserAccountId. Omit for an ordinary
    * self-submission; set for an On-Behalf submission. */
   subjectUserAccountId?: string;
+  /** WFL-07: shown in My Inbox; defaults to the template name. */
+  title?: string;
+  priority?: WorkflowPriority;
+  /** WFL-07: explicit deadline; otherwise derived from the step SLAs. */
+  dueAt?: string;
 };
 
 export type ApprovalDecisionRequest = {
-  decision: "approved" | "rejected";
+  decision: WorkflowDecision;
   comment?: string;
+};
+
+// --- Step 6 (WFL-03, WFL-06, WFL-07, ACC-06): My Inbox, comments, delegation ---
+
+export type WorkflowCommentKind =
+  | "comment" | "info_request" | "info_response" | "send_back" | "resubmit" | "delegation" | "decision" | "reminder" | "system";
+
+export type WorkflowCommentView = {
+  id: string;
+  workflowInstanceId: string;
+  stepInstanceId: string | null;
+  authorUserAccountId: string | null;
+  kind: WorkflowCommentKind;
+  body: string;
+  visibility: "participants" | "approvers";
+  createdAt: string;
+};
+
+export type WorkflowAttachmentView = {
+  id: string;
+  workflowInstanceId: string;
+  commentId: string | null;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  visibility: "participants" | "approvers";
+  uploadedByUserAccountId: string;
+  createdAt: string;
+};
+
+export type InboxSlaState = "none" | "on_track" | "due_soon" | "overdue";
+
+export type InboxItemView = {
+  instanceId: string;
+  stepInstanceId: string | null;
+  objectKey: string;
+  objectLabel: string;
+  recordId: string;
+  title: string;
+  status: WorkflowInstanceStatus;
+  priority: WorkflowPriority;
+  stepName: string | null;
+  submittedByUserAccountId: string;
+  submittedAt: string;
+  dueAt: string | null;
+  slaState: InboxSlaState;
+  /** the caller can act directly, or only on behalf of this delegator */
+  actingFor: string | null;
+  /** why the item is in this inbox */
+  reason: "approver" | "delegate" | "escalation" | "submitter_returned" | "submitter_on_hold" | "task";
+  canSendBack: boolean;
+  summary?: string | null;
+  deepLink?: string | null;
+};
+
+export type InboxCountsView = {
+  toApprove: number;
+  overdue: number;
+  returnedToMe: number;
+  waitingOnMe: number;
+};
+
+export type InboxDecisionRequest = {
+  decision: WorkflowDecision | "request_info" | "delegate";
+  comment?: string;
+  delegateToUserAccountId?: string;
+};
+
+export type DelegationView = {
+  id: string;
+  delegatorUserAccountId: string;
+  delegateUserAccountId: string;
+  scopeObjectKeys: string[] | null;
+  validFrom: string;
+  validTo: string;
+  reason: string;
+  status: "active" | "revoked";
+  createdByUserAccountId: string;
+  createdAt: string;
+};
+
+export type CreateDelegationRequest = {
+  delegateUserAccountId: string;
+  /** omit to delegate every approval; HR may set it to create a delegation on someone's behalf */
+  delegatorUserAccountId?: string;
+  scopeObjectKeys?: string[];
+  validFrom?: string;
+  validTo: string;
+  reason: string;
 };
 
 // --- Phase 6: WRICEF Framework Skeleton — Enhancements (custom fields) ---
@@ -1554,6 +1805,11 @@ export type FieldConditionalOn = {
   value: string;
 };
 
+export type CardFieldType = "text" | "textarea" | "number" | "date" | "boolean" | "select" | "catalog" | "reference" | "file" | "email" | "phone";
+export type CardFieldAuditPolicy = "none" | "changes" | "reads_and_changes";
+/** A rule slot holds either the inline JSON condition used so far or a reference into the central rule registry (CFG-14). */
+export type CardRuleSlot = FieldConditionalOn | { ref: string } | null;
+
 export type CardFieldDefinitionView = {
   cardKey: string;
   fieldKey: string;
@@ -1564,6 +1820,22 @@ export type CardFieldDefinitionView = {
   defaultValue: string | null;
   validationRules: FieldValidationRules | null;
   conditionalOn: FieldConditionalOn | null;
+  /** CFG-12 metadata. fieldType is null until classified. */
+  fieldType: CardFieldType | null;
+  helpText: string | null;
+  placeholder: string | null;
+  optionValues: string[] | null;
+  referenceCatalogType: string | null;
+  referenceObject: string | null;
+  sensitivityClass: FieldSensitivityTier | null;
+  visibilityRule: CardRuleSlot;
+  editabilityRule: CardRuleSlot;
+  dataScopeRule: CardRuleSlot;
+  workflowRule: CardRuleSlot;
+  auditPolicy: CardFieldAuditPolicy;
+  isEffectiveDated: boolean;
+  labelI18n: Record<string, string>;
+  helpI18n: Record<string, string>;
 };
 
 /** What one card's field-configuration screen (and the live Hiring Wizard) needs: this card's built-in fields plus whatever custom fields have been added to it. */
@@ -1579,6 +1851,22 @@ export type UpdateCardFieldConfigRequest = {
   defaultValue?: string | null;
   validationRules?: FieldValidationRules | null;
   conditionalOn?: FieldConditionalOn | null;
+  fieldType?: CardFieldType | null;
+  label?: string | null;
+  helpText?: string | null;
+  placeholder?: string | null;
+  optionValues?: string[] | null;
+  referenceCatalogType?: string | null;
+  referenceObject?: string | null;
+  sensitivityClass?: FieldSensitivityTier | null;
+  visibilityRule?: CardRuleSlot;
+  editabilityRule?: CardRuleSlot;
+  dataScopeRule?: CardRuleSlot;
+  workflowRule?: CardRuleSlot;
+  auditPolicy?: CardFieldAuditPolicy;
+  isEffectiveDated?: boolean;
+  labelI18n?: Record<string, string>;
+  helpI18n?: Record<string, string>;
 };
 
 export type AddCardCustomFieldRequest = {
@@ -1668,7 +1956,8 @@ export type CsvImportResult<T> = {
 // sensitive field below is typed optional, not nullable — `"cnic" in
 // employee` is the real presence check, not `employee.cnic != null`.
 
-export type EmploymentStatus = "active" | "on_leave" | "terminated";
+/** EMP-06: system states plus catalog-defined states (employment_status catalog). */
+export type EmploymentStatus = "active" | "on_leave" | "terminated" | "suspended" | "notice_period" | (string & {});
 
 // Phase 8 addition (plan doc Section 12's own canonical example names both
 // "location" and "employment type" as attributes a tenant would group
@@ -1795,6 +2084,12 @@ export type CreateEmployeeRequest = {
   email?: string;
   phone?: string;
   cnic?: string;
+  /** EMP-02 - link to an existing person (rehire / second employment). */
+  personId?: string;
+  /** EMP-02 - confirm a possible-duplicate warning is a different human. */
+  confirmNotDuplicate?: boolean;
+  /** LIF-06 - HR override of a "not eligible for rehire" record; recorded in the audit log. */
+  rehireOverrideReason?: string;
   dateOfBirth?: string;
   gender?: string;
   maritalStatus?: string;
@@ -1872,7 +2167,40 @@ export type CreateEmployeeLoginResponse = {
 // state machine (Section 10 of the spec, minus the approval branch —
 // deferred until a later phase wires real per-card Workflow approval).
 
-export type HireProcessStatus = "draft" | "in_progress" | "ready_for_completion" | "hired" | "cancelled";
+export type HireProcessStatus =
+  | "draft"
+  | "in_progress"
+  | "validation_required"
+  | "ready_for_completion"
+  | "submitted"
+  | "approved"
+  | "rejected"
+  | "hired"
+  | "failed"
+  | "cancelled";
+export type HireValidationState = "unvalidated" | "valid" | "invalid";
+export type HireProcessStatusHistoryEntry = {
+  id: string;
+  fromStatus: HireProcessStatus | null;
+  toStatus: HireProcessStatus;
+  actorUserAccountId: string | null;
+  reason: string | null;
+  createdAt: string;
+};
+export type StartHireProcessRequest = {
+  hireReasonCode?: string;
+  effectiveHireDate?: string;
+  plannedEndDate?: string;
+};
+export type RejectHireProcessRequest = { reason: string };
+export type TransferHireOwnershipRequest = { ownerUserAccountId: string; reason?: string };
+export type SetHireDelegateRequest = { delegateUserAccountId: string | null };
+export type HireProcessValidationResult = {
+  hireProcessId: string;
+  validationState: HireValidationState;
+  validatedAt: string;
+  cards: { cardKey: string; validationState: HireValidationState; errors: string[] }[];
+};
 
 export type CardDefinitionView = {
   cardKey: string;
@@ -1882,6 +2210,19 @@ export type CardDefinitionView = {
   displayOrder: number;
   isEnabled: boolean;
   isRequired: boolean;
+  /** CFG-11 metadata */
+  applicabilityRule: CardRuleSlot;
+  workflowTemplateKey: string | null;
+  isEffectiveDated: boolean;
+  attachmentRequirement: "none" | "optional" | "required";
+  editableAfterSave: boolean;
+  isCompletionGate: boolean;
+  visibilityRule: CardRuleSlot;
+  validationRuleKeys: string[];
+  defaultRuleKeys: string[];
+  displayNameI18n: Record<string, string>;
+  configStatus: "draft" | "validated" | "published" | "retired";
+  configVersion: number;
 };
 
 export type HireProcessCardView = {
@@ -1889,6 +2230,9 @@ export type HireProcessCardView = {
   /** "pending" (untouched) | "saved" (data persisted) | "complete" (satisfies this phase's completion rule — see HiringProcessService). */
   status: "pending" | "saved" | "complete";
   savedAt: string | null;
+  validationState: HireValidationState;
+  validationErrors: string[];
+  completedAt: string | null;
   definition: CardDefinitionView;
 };
 
@@ -1904,6 +2248,21 @@ export type HireProcessView = {
   updatedAt: string;
   completedAt: string | null;
   cancelledAt: string | null;
+  ownerUserAccountId: string | null;
+  delegateUserAccountId: string | null;
+  expiresAt: string | null;
+  lastValidatedAt: string | null;
+  validationState: HireValidationState;
+  hireReasonCode: string | null;
+  effectiveHireDate: string | null;
+  plannedEndDate: string | null;
+  reservedEmployeeNumber: string | null;
+  failureReason: string | null;
+  submittedAt: string | null;
+  decidedAt: string | null;
+  decisionReason: string | null;
+  /** the published configuration version the process was started under, if one existed */
+  configurationVersionId: string | null;
   cards: HireProcessCardView[];
 };
 
@@ -1929,6 +2288,17 @@ export type UpdateCardDefinitionRequest = {
   isEnabled?: boolean;
   isRequired?: boolean;
   displayOrder?: number;
+  applicabilityRule?: CardRuleSlot;
+  workflowTemplateKey?: string | null;
+  isEffectiveDated?: boolean;
+  attachmentRequirement?: "none" | "optional" | "required";
+  editableAfterSave?: boolean;
+  isCompletionGate?: boolean;
+  visibilityRule?: CardRuleSlot;
+  validationRuleKeys?: string[];
+  defaultRuleKeys?: string[];
+  displayNameI18n?: Record<string, string>;
+  configStatus?: "draft" | "validated" | "published" | "retired";
 };
 
 /** Phase 6 — Contact card (0084_core_employee_contact_address.sql). */
@@ -2035,9 +2405,29 @@ export type EmployeePaymentAccountView = {
   branchCode: string | null;
   isPrimary: boolean;
   status: "active" | "ended";
+  /** EMP-08 */
+  validFrom: string;
+  validTo: string | null;
+  priority: number;
+  splitPercent: number | null;
+  currency: string;
+  bankKey: string | null;
+  bankCountry: string;
+  verificationStatus: EmployeePaymentVerificationStatus;
+  verifiedAt: string | null;
+  approvalStatus: EmployeePaymentApprovalStatus;
+  submittedByUserAccountId: string | null;
+  approvedByUserAccountId: string | null;
+  approvedAt: string | null;
+  rejectionReason: string | null;
+  /** set on a pending replacement: the primary account it will supersede once approved */
+  replacesAccountId: string | null;
   createdAt: string;
   updatedAt: string;
 };
+
+export type EmployeePaymentVerificationStatus = "unverified" | "verified" | "failed";
+export type EmployeePaymentApprovalStatus = "pending" | "approved" | "rejected";
 
 export type CreateEmployeePaymentAccountRequest = {
   employeeId: string;
@@ -2048,7 +2438,18 @@ export type CreateEmployeePaymentAccountRequest = {
   iban?: string;
   branchCode?: string;
   isPrimary?: boolean;
+  validFrom?: string;
+  validTo?: string;
+  priority?: number;
+  /** 0 < n <= 100; live splits of one employee may not exceed 100 in total */
+  splitPercent?: number;
+  currency?: string;
+  bankKey?: string;
+  bankCountry?: string;
 };
+
+export type RejectEmployeePaymentAccountRequest = { reason: string };
+export type VerifyEmployeePaymentAccountRequest = { status: EmployeePaymentVerificationStatus };
 
 export type UpdateEmployeePaymentAccountRequest = Partial<Omit<CreateEmployeePaymentAccountRequest, "employeeId">>;
 
@@ -2373,12 +2774,55 @@ export type ReactivateEmployeeRequest = {
   effectiveDate: string;
   reasonCode?: string;
   notes?: string;
+  /** LIF-06 - HR override of a "not eligible for rehire" record; recorded in the audit log. */
+  rehireOverrideReason?: string;
+};
+
+export type LifecycleEventStatus = "scheduled" | "applied" | "failed" | "cancelled";
+export type LifecycleEventChannel = "ui" | "api" | "hire_process" | "offboarding" | "scheduler" | "bulk_import" | "system" | "backfill";
+
+/** LIF-01: one lifecycle action as recorded. Applied/cancelled events are immutable. */
+export type LifecycleEventView = {
+  id: string;
+  employeeId: string;
+  employmentId: string | null;
+  /** Job-history event types plus "correction". */
+  actionType: string;
+  reasonCode: string | null;
+  effectiveDate: string;
+  plannedEndDate: string | null;
+  status: LifecycleEventStatus;
+  sourceChannel: LifecycleEventChannel;
+  workflowInstanceId: string | null;
+  /** LIF-04: the event this one corrects (the original is never rewritten). */
+  correctsEventId: string | null;
+  /** LIF-04: set when a later applied correction supersedes this event. */
+  correctedByEventId: string | null;
+  jobHistoryId: string | null;
+  requestedByUserAccountId: string | null;
+  beforeSnapshot: Record<string, unknown> | null;
+  afterSnapshot: Record<string, unknown> | null;
+  notes: string | null;
+  failureReason: string | null;
+  appliedAt: string | null;
+  createdAt: string;
 };
 
 export type LifecycleTransactionResult = {
   employee: EmployeeView;
-  jobHistory: JobHistoryEntryView;
+  /** null while the action is only scheduled (future effective date). */
+  jobHistory: JobHistoryEntryView | null;
+  event: LifecycleEventView;
 };
+
+export type CorrectLifecycleEventRequest = {
+  /** Fields of the original request to change (e.g. designation, orgUnitId). */
+  changes: Record<string, unknown>;
+  effectiveDate?: string;
+  reason: string;
+};
+
+export type CancelLifecycleEventRequest = { reason?: string };
 
 // --- HR Administration Reference Catalog (Core Employee Configuration/
 // HR-Admin v2, 2026-09-27) ------------------------------------------------
@@ -2398,9 +2842,19 @@ export type HrReferenceCatalogItemView = {
   description: string | null;
   sortOrder: number;
   isActive: boolean;
+  /** CAT-01: first/last date the item may be chosen (null = unbounded). */
+  effectiveFrom: string | null;
+  effectiveTo: string | null;
+  /** CAT-01: free-form scope rules, e.g. { employmentTypes: ["permanent"] }. */
+  applicability: Record<string, unknown>;
+  /** CAT-01: localized labels keyed by locale, e.g. { ur: "..." }. */
+  labels: Record<string, string>;
+  retiredAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
+
+export type HrReferenceCatalogItemUsage = { itemId: string; usageCount: number; canRemove: boolean };
 
 export type HrReferenceCatalogTypeSummary = {
   catalogType: string;
@@ -2415,12 +2869,20 @@ export type CreateHrReferenceCatalogItemRequest = {
   code: string;
   label: string;
   description?: string;
+  effectiveFrom?: string;
+  effectiveTo?: string;
+  applicability?: Record<string, unknown>;
+  labels?: Record<string, string>;
 };
 
 export type UpdateHrReferenceCatalogItemRequest = {
   label?: string;
   description?: string;
   isActive?: boolean;
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
+  applicability?: Record<string, unknown>;
+  labels?: Record<string, string>;
 };
 
 export type ReorderHrReferenceCatalogItemsRequest = {
@@ -2442,6 +2904,13 @@ export type HrBusinessPolicyView = {
   isDefault: boolean;
   sortOrder: number;
   isActive: boolean;
+  /** CAT-07: window in which this policy applies (null = unbounded). */
+  effectiveFrom: string | null;
+  effectiveTo: string | null;
+  /** CAT-07: who the policy applies to, e.g. { employmentTypes: ["probation"] }. */
+  applicability: Record<string, unknown>;
+  /** CAT-07: bumped each time `rules` changes. */
+  version: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -2463,6 +2932,9 @@ export type CreateHrBusinessPolicyRequest = {
   description?: string;
   rules?: Record<string, unknown>;
   isDefault?: boolean;
+  effectiveFrom?: string;
+  effectiveTo?: string;
+  applicability?: Record<string, unknown>;
 };
 
 export type UpdateHrBusinessPolicyRequest = {
@@ -2471,6 +2943,9 @@ export type UpdateHrBusinessPolicyRequest = {
   rules?: Record<string, unknown>;
   isDefault?: boolean;
   isActive?: boolean;
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
+  applicability?: Record<string, unknown>;
 };
 
 export type ReorderHrBusinessPoliciesRequest = {
@@ -2483,7 +2958,15 @@ export type ReorderHrBusinessPoliciesRequest = {
 // doc comment, and 0109_configuration_rule_mappings.sql's header
 // comment, for the full design rationale and the deliberate scope-level
 // bounding (org_unit/location/employee only).
-export type ConfigurationRuleMappingScopeType = "org_unit" | "location" | "employee";
+export type ConfigurationRuleMappingScopeType =
+  | "org_unit"
+  | "location"
+  | "employee"
+  // CFG-05
+  | "tenant"
+  | "employee_group"
+  | "position"
+  | "job";
 
 export type ConfigurationRuleMappingView = {
   id: string;
@@ -2493,8 +2976,21 @@ export type ConfigurationRuleMappingView = {
   scopeType: ConfigurationRuleMappingScopeType;
   scopeValue: string;
   ruleValue: Record<string, unknown>;
-  priority: number | null;
+  /** Lower number wins among overrides of the same specificity. Default 100. */
+  priority: number;
   isActive: boolean;
+  /** CFG-04 */
+  scopeId: string | null;
+  objectType: string | null;
+  objectId: string | null;
+  fieldKey: string | null;
+  ruleType: string | null;
+  ruleReference: string | null;
+  effectiveFrom: string | null;
+  effectiveTo: string | null;
+  configurationVersion: number | null;
+  status: "draft" | "active" | "retired";
+  changeReason: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -2506,12 +3002,57 @@ export type CreateConfigurationRuleMappingRequest = {
   scopeValue: string;
   ruleValue?: Record<string, unknown>;
   priority?: number;
+  objectType?: string;
+  objectId?: string;
+  fieldKey?: string;
+  ruleType?: string;
+  ruleReference?: string;
+  effectiveFrom?: string;
+  effectiveTo?: string;
+  changeReason?: string;
 };
 
 export type UpdateConfigurationRuleMappingRequest = {
   ruleValue?: Record<string, unknown>;
-  priority?: number | null;
+  priority?: number;
   isActive?: boolean;
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
+  changeReason?: string;
+};
+
+/** What the resolver is told about the subject (CFG-05). Anything omitted that can be derived from employeeId is. */
+export type ConfigurationResolutionContext = {
+  employeeId?: string | null;
+  locationId?: string | null;
+  orgUnitId?: string | null;
+  positionId?: string | null;
+  jobId?: string | null;
+  employeeGroupIds?: string[];
+  /** YYYY-MM-DD; defaults to today. */
+  asOf?: string;
+};
+
+/** One layer considered while resolving (CFG-05 provenance). */
+export type ConfigurationProvenanceEntry = {
+  layer: ConfigurationRuleMappingScopeType | "default";
+  scopeValue: string | null;
+  ruleId: string | null;
+  ruleValue: Record<string, unknown>;
+  priority: number | null;
+  effectiveFrom: string | null;
+  effectiveTo: string | null;
+  /** true for every matching layer except the one that won */
+  shadowed: boolean;
+};
+
+export type ResolvedConfiguration = {
+  /** baseValue with the winning override's keys laid over it */
+  value: Record<string, unknown>;
+  winner: ConfigurationProvenanceEntry | null;
+  /** most specific first; ends with the default layer */
+  chain: ConfigurationProvenanceEntry[];
+  asOf: string;
 };
 
 // The resolution primitive's return shape — the single most specific
@@ -2560,6 +3101,11 @@ export type ConfigurationChangeRequestView = {
   approvedAt: string | null;
   publishedAt: string | null;
   retiredAt: string | null;
+  /** CFG-07: what publishing would touch; approval needs this to exist. */
+  impactSummary: string[] | null;
+  affectedCounts: Record<string, number> | null;
+  riskLevel: "low" | "medium" | "high" | null;
+  impactComputedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -2645,7 +3191,19 @@ export type EmployeeAnalyticsSummary = {
  * on — matches the CHECK constraint on employee_group_conditions.field.
  * Deliberately not "any employee field" (typo-ing a field name here would
  * otherwise silently produce a condition that can never match). */
-export type EmployeeGroupConditionField = "department" | "location" | "designation" | "employmentType" | "employmentStatus";
+/** The first five match the employee's text attributes (kept working unchanged);
+ * the last five (CAT-05) match canonical IDs and survive a rename. */
+export type EmployeeGroupConditionField =
+  | "department"
+  | "location"
+  | "designation"
+  | "employmentType"
+  | "employmentStatus"
+  | "orgUnitId"
+  | "locationId"
+  | "positionId"
+  | "jobId"
+  | "subgroupId";
 
 export type EmployeeGroupCondition = {
   field: EmployeeGroupConditionField;
@@ -2684,7 +3242,52 @@ export type UpdateEmployeeGroupRequest = Partial<CreateEmployeeGroupRequest>;
 /** Only "leave" exists yet (Phase 8 builds exactly one concrete policy
  * type to prove the mechanism) — more can be added later without any
  * schema change to employee_groups/employee_group_conditions themselves. */
-export type PolicyType = "leave";
+export type PolicyType =
+  | "leave"
+  // CAT-06: any HR business policy type can be assigned to a group
+  | "probation"
+  | "confirmation"
+  | "document"
+  | "correction"
+  | "transfer"
+  | "rehire"
+  | "termination_exit"
+  | "retention"
+  | "required_info";
+
+export type EmployeeSubgroupView = {
+  id: string;
+  companyId: string;
+  groupId: string;
+  code: string;
+  name: string;
+  description: string | null;
+  sortOrder: number;
+  isActive: boolean;
+  effectiveFrom: string | null;
+  effectiveTo: string | null;
+};
+
+export type CreateEmployeeSubgroupRequest = {
+  code: string;
+  name: string;
+  description?: string;
+  effectiveFrom?: string;
+  effectiveTo?: string;
+};
+
+export type UpdateEmployeeSubgroupRequest = Partial<Omit<CreateEmployeeSubgroupRequest, "code">> & { isActive?: boolean };
+
+export type EmployeeGroupMembershipView = {
+  id: string;
+  groupId: string;
+  employeeId: string;
+  source: "rule" | "manual";
+  effectiveFrom: string;
+  effectiveTo: string | null;
+};
+
+export type RefreshGroupMembershipsResult = { added: number; closed: number; currentCount: number };
 
 // annualLeaveDays/casualLeaveDays/sickLeaveDays live on this view for API
 // stability, but as of 0033_effective_dating_leave_tax.sql they're sourced
@@ -2698,6 +3301,8 @@ export type LeavePolicyView = {
   annualLeaveDays: number;
   casualLeaveDays: number;
   sickLeaveDays: number;
+  /** TLM-01: every per-leave-type entitlement of the CURRENT version (includes annual / casual / sick). */
+  entitlements: LeaveEntitlementView[];
   /** At most one leave policy per tenant may have this set — the
    * safe-deny fallback target when no employee group matches. */
   isDefault: boolean;
@@ -2712,6 +3317,8 @@ export type CreateLeavePolicyRequest = {
   annualLeaveDays?: number;
   casualLeaveDays?: number;
   sickLeaveDays?: number;
+  /** TLM-01: entitlements for any leave type (annual / casual / sick here win over the three legacy fields). */
+  entitlements?: LeaveEntitlementInput[];
   isDefault?: boolean;
 };
 
@@ -2725,6 +3332,7 @@ export type LeavePolicyVersionView = {
   annualLeaveDays: number;
   casualLeaveDays: number;
   sickLeaveDays: number;
+  entitlements?: LeaveEntitlementView[];
   effectiveFrom: string;
   effectiveTo: string | null;
   createdAt: string;
@@ -2735,12 +3343,17 @@ export type EmployeeGroupPolicyAssignmentView = {
   groupId: string;
   policyType: PolicyType;
   policyId: string;
+  /** CAT-06: optional window; resolution ignores the assignment outside it. */
+  effectiveFrom: string | null;
+  effectiveTo: string | null;
   createdAt: string;
 };
 
 export type AssignGroupPolicyRequest = {
   policyType: PolicyType;
   policyId: string;
+  effectiveFrom?: string;
+  effectiveTo?: string;
 };
 
 /** The resolver's own return shape — `groupId: null` and `isDefault: true`
@@ -2769,19 +3382,131 @@ export type ResolvedPolicyView = {
  * resolution and balance checking entirely for it), unlike the other
  * three types.
  */
-export type LeaveType = "annual" | "casual" | "sick" | "unpaid";
+/**
+ * TLM-01: a leave type is a tenant-configurable code (see `LeaveTypeView`), no longer a closed
+ * union. The four built-ins are always present for every tenant.
+ */
+export type LeaveType = string;
+export type BuiltInLeaveType = "annual" | "casual" | "sick" | "unpaid";
+
+export type AccrualMethod = "upfront" | "monthly" | "none";
+export type LeaveGenderRestriction = "any" | "male" | "female";
+export type LeaveDayPart = "full" | "first_half" | "second_half";
+
+export type LeaveTypeView = {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  isPaid: boolean;
+  /** false = no entitlement / balance (unpaid): always requestable, never decremented. */
+  tracksBalance: boolean;
+  accrualMethod: AccrualMethod;
+  carryForwardAllowed: boolean;
+  carryForwardCapDays: number | null;
+  carryForwardExpiryMonths: number | null;
+  encashable: boolean;
+  documentRequired: boolean;
+  /** The document is required only when the request is longer than this many days (0 = always). */
+  documentRequiredAfterDays: number;
+  genderRestriction: LeaveGenderRestriction;
+  minServiceMonths: number;
+  halfDayAllowed: boolean;
+  maxConsecutiveDays: number | null;
+  isSystem: boolean;
+  isActive: boolean;
+  sortOrder: number;
+};
+
+export type CreateLeaveTypeRequest = {
+  code: string;
+  name: string;
+  description?: string | null;
+  isPaid?: boolean;
+  tracksBalance?: boolean;
+  accrualMethod?: AccrualMethod;
+  carryForwardAllowed?: boolean;
+  carryForwardCapDays?: number | null;
+  carryForwardExpiryMonths?: number | null;
+  encashable?: boolean;
+  documentRequired?: boolean;
+  documentRequiredAfterDays?: number;
+  genderRestriction?: LeaveGenderRestriction;
+  minServiceMonths?: number;
+  halfDayAllowed?: boolean;
+  maxConsecutiveDays?: number | null;
+  isActive?: boolean;
+  sortOrder?: number;
+};
+
+/** `code` and `isSystem` are immutable. */
+export type UpdateLeaveTypeRequest = Partial<Omit<CreateLeaveTypeRequest, "code">>;
+
+export type LeaveEntitlementView = {
+  leaveType: string;
+  days: number;
+  /** null = inherit the leave type's accrual method. */
+  accrualMethod: AccrualMethod | null;
+  carryForwardCapDays: number | null;
+  expiresAfterMonths: number | null;
+};
+
+export type LeaveEntitlementInput = {
+  leaveType: string;
+  days: number;
+  accrualMethod?: AccrualMethod | null;
+  carryForwardCapDays?: number | null;
+  expiresAfterMonths?: number | null;
+};
+
+export type LeaveLedgerEntryType = "opening" | "accrual" | "deduction" | "reversal" | "carry_forward" | "adjustment" | "encashment" | "expiry";
+
+export type LeaveLedgerEntryView = {
+  id: string;
+  employeeId: string;
+  leaveType: string;
+  year: number;
+  entryType: LeaveLedgerEntryType;
+  /** Signed: grants / reversals positive, deductions / encashments / expiries negative. */
+  days: number;
+  effectiveDate: string;
+  expiresOn: string | null;
+  sourceType: string;
+  sourceId: string | null;
+  reversesEntryId: string | null;
+  reason: string | null;
+  createdAt: string;
+};
+
+export type AdjustLeaveBalanceRequest = {
+  employeeId: string;
+  leaveType: string;
+  year?: number;
+  /** Signed number of days. */
+  days: number;
+  reason: string;
+};
 
 export type LeaveBalanceView = {
   id: string;
   employeeId: string;
   leaveType: LeaveType;
+  leaveTypeName?: string;
   year: number;
   entitledDays: number;
   usedDays: number;
   remainingDays: number;
+  /** TLM-02 components of `entitledDays`. */
+  openingDays?: number;
+  accruedDays?: number;
+  carriedForwardDays?: number;
+  adjustedDays?: number;
+  encashedDays?: number;
+  expiredDays?: number;
 };
 
 export type LeaveRequestStatus = "pending" | "approved" | "rejected" | "cancelled";
+export type LeaveCancellationStatus = "requested" | "approved" | "declined";
 
 export type OverlapWarning = {
   employeeId: string;
@@ -2808,6 +3533,18 @@ export type LeaveRequestView = {
    * separately stored. */
   isOnBehalf: boolean;
   workflowInstanceId: string | null;
+  /** TLM-03 */
+  dayPart: LeaveDayPart;
+  attachmentDocumentId: string | null;
+  rejectionReason: string | null;
+  /** First day the employee is expected back (first-half leave: the same day). */
+  returnDate: string | null;
+  delegateEmployeeId: string | null;
+  cancellationStatus: LeaveCancellationStatus | null;
+  cancellationReason: string | null;
+  cancellationRequestedAt: string | null;
+  /** true when the leave type is unpaid, i.e. payroll deducts for it. */
+  payrollImpact: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -2818,7 +3555,14 @@ export type SubmitLeaveRequestRequest = {
   startDate: string;
   endDate: string;
   reason?: string;
+  /** Half-day leave: start and end must be the same date. */
+  dayPart?: LeaveDayPart;
+  attachmentDocumentId?: string;
+  delegateEmployeeId?: string;
 };
+
+export type RequestLeaveCancellationRequest = { reason: string };
+export type DecideLeaveCancellationRequest = { decision: "approved" | "declined"; comment?: string };
 
 export type SubmitLeaveRequestResponse = {
   request: LeaveRequestView;
@@ -2970,6 +3714,246 @@ export type AttendanceSource = "biometric" | "gps" | "manual";
 // day off as "late." Adding union members is additive/non-breaking for
 // any existing caller matching on the other four values.
 export type AttendanceStatus = "on_time" | "late" | "early_departure" | "no_shift_assigned" | "rest_day" | "holiday";
+
+// --- Step 8B: TLM-04 / TLM-05 / TLM-06 ------------------------------------
+
+export type AttendanceDailyStatus =
+  | "present"
+  | "absent"
+  | "late"
+  | "early_departure"
+  | "late_and_early"
+  | "half_day"
+  | "on_leave"
+  | "on_duty"
+  | "holiday"
+  | "rest_day"
+  | "no_schedule";
+
+/** One processed attendance day (the time-evaluation job's output). */
+export type AttendanceDailyResultView = {
+  id: string;
+  employeeId: string;
+  workDate: string;
+  shiftId: string | null;
+  scheduleName: string | null;
+  status: AttendanceDailyStatus;
+  scheduledMinutes: number;
+  workedMinutes: number;
+  lateMinutes: number;
+  earlyLeaveMinutes: number;
+  firstInAt: string | null;
+  lastOutAt: string | null;
+  punchCount: number;
+  leaveRequestId: string | null;
+  onDutyRequestId: string | null;
+  exceptions: string[];
+  isOverridden: boolean;
+  overrideReason: string | null;
+  evaluatedAt: string;
+};
+
+export type AttendancePeriodSummary = {
+  employeeId: string;
+  from: string;
+  to: string;
+  days: number;
+  byStatus: Record<string, number>;
+  scheduledMinutes: number;
+  workedMinutes: number;
+  lateMinutes: number;
+  earlyLeaveMinutes: number;
+};
+
+export type OverrideAttendanceDayRequest = { employeeId: string; workDate: string; status: AttendanceDailyStatus; reason: string };
+
+export type EvaluateAttendanceRequest = { from: string; to: string; employeeId?: string };
+
+export type AttendanceDeviceType = "biometric" | "face" | "card" | "mobile" | "kiosk";
+
+export type AttendanceDeviceView = {
+  id: string;
+  name: string;
+  deviceType: AttendanceDeviceType;
+  vendor: string | null;
+  serialNumber: string | null;
+  locationId: string | null;
+  timezone: string;
+  isActive: boolean;
+  hasApiKey: boolean;
+  apiKeyPrefix: string | null;
+  lastSeenAt: string | null;
+  enrolledCount: number;
+};
+
+export type CreateAttendanceDeviceRequest = {
+  name: string;
+  deviceType?: AttendanceDeviceType;
+  vendor?: string;
+  serialNumber?: string;
+  locationId?: string;
+  timezone?: string;
+};
+export type UpdateAttendanceDeviceRequest = Partial<CreateAttendanceDeviceRequest> & { isActive?: boolean };
+
+/** Returned once, when a device is created or its key is rotated; only a hash is stored. */
+export type AttendanceDeviceWithKey = AttendanceDeviceView & { apiKey: string };
+
+export type DeviceEnrollmentView = {
+  id: string;
+  deviceId: string;
+  employeeId: string;
+  employeeName: string;
+  deviceUserId: string;
+  status: "active" | "revoked";
+  enrolledAt: string;
+};
+export type EnrollDeviceUserRequest = { employeeId: string; deviceUserId: string };
+
+export type DevicePunchInput = {
+  deviceUserId: string;
+  /** ISO timestamp the device recorded. */
+  punchedAt: string;
+  direction?: "in" | "out";
+  /** The device's own event id, when it has one (strongest de-duplication). */
+  externalId?: string;
+};
+export type IngestPunchesRequest = { punches: DevicePunchInput[] };
+export type IngestPunchesResult = { received: number; processed: number; duplicates: number; unmatched: number; rejected: number };
+
+export type RawPunchView = {
+  id: string;
+  deviceId: string;
+  deviceUserId: string;
+  employeeId: string | null;
+  punchedAt: string;
+  direction: "in" | "out" | "unknown";
+  status: "received" | "processed" | "duplicate" | "unmatched" | "rejected";
+  attendanceRecordId: string | null;
+  error: string | null;
+  receivedAt: string;
+};
+
+export type TimesheetStatus = "draft" | "pending" | "approved" | "rejected" | "returned" | "cancelled";
+
+export type TimesheetEntryView = {
+  id: string;
+  workDate: string;
+  minutes: number;
+  costCenterId: string | null;
+  taskRef: string | null;
+  description: string | null;
+};
+export type TimesheetEntryInput = { workDate: string; minutes: number; costCenterId?: string | null; taskRef?: string | null; description?: string | null };
+
+export type TimesheetView = {
+  id: string;
+  employeeId: string;
+  employeeName?: string;
+  periodStart: string;
+  periodEnd: string;
+  status: TimesheetStatus;
+  totalMinutes: number;
+  submittedAt: string | null;
+  decidedAt: string | null;
+  decisionComment: string | null;
+  workflowInstanceId: string | null;
+  entries: TimesheetEntryView[];
+  /** Minutes the attendance engine recorded per day, for comparison while filling the sheet. */
+  recordedMinutesByDay: Record<string, number>;
+};
+
+export type SaveTimesheetEntriesRequest = { entries: TimesheetEntryInput[] };
+export type DecideTimesheetRequest = { decision: "approved" | "rejected"; comment?: string };
+
+
+// --- Step 8C: TLM-07 / TLM-08 / TLM-10 / TLM-11 -----------------------------
+
+export type TimeRecordingProfile = "clock" | "timesheet" | "exception_only" | "none";
+
+/** Planned working time for one employee over a period (no row = full time, clock, tenant hours). */
+/** PAY-24: the tenant-wide standard hours; an employee's own work profile wins over it. */
+export type CompanyWorkTimeDefaultView = {
+  standardMonthlyHours: number;
+  standardWeeklyHours: number | null;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  /** "default" until a tenant sets its own: the figure then comes from the payroll settings or the built-in default. */
+  source: "work_time_defaults" | "payroll_settings" | "built_in";
+};
+
+export type SetCompanyWorkTimeDefaultRequest = {
+  standardMonthlyHours: number;
+  standardWeeklyHours?: number | null;
+  effectiveFrom?: string;
+};
+
+export type EmployeeWorkProfileView = {
+  id: string;
+  employeeId: string;
+  employmentPercentage: number;
+  weeklyHours: number | null;
+  monthlyHours: number | null;
+  /** monthlyHours, or weeklyHours x 52 / 12 when only weekly hours are given. */
+  effectiveMonthlyHours: number | null;
+  isPartTime: boolean;
+  timeRecordingProfile: TimeRecordingProfile;
+  notes: string | null;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+};
+
+export type SetWorkProfileRequest = {
+  employmentPercentage?: number;
+  weeklyHours?: number | null;
+  monthlyHours?: number | null;
+  isPartTime?: boolean;
+  timeRecordingProfile?: TimeRecordingProfile;
+  notes?: string | null;
+  effectiveFrom?: string;
+};
+
+export type OvertimePayoutMode = "pay" | "comp_off";
+
+export type OvertimeAuthorizationView = {
+  id: string;
+  employeeId: string;
+  workDate: string;
+  maxMinutes: number | null;
+  reason: string | null;
+  status: "active" | "used" | "revoked";
+  createdAt: string;
+};
+export type CreateOvertimeAuthorizationRequest = { employeeId: string; workDate: string; maxMinutes?: number; reason?: string };
+
+/** A scoped overtime policy: applies to an employee group and/or a location (and its sub-locations). */
+export type ScopedOvertimePolicyView = OvertimePolicyView & {
+  scopeKey: string;
+  name: string | null;
+  employeeGroupId: string | null;
+  locationId: string | null;
+};
+export type SetScopedOvertimePolicyRequest = SetOvertimePolicyRequest & {
+  name?: string;
+  employeeGroupId?: string;
+  locationId?: string;
+};
+
+export type HolidayDateBasis = "fixed" | "lunar";
+
+export type HolidayCalendarView = {
+  id: string;
+  name: string;
+  description: string | null;
+  status: "active" | "archived";
+  /** Empty = applies to every employee. */
+  locationIds: string[];
+  orgUnitIds: string[];
+  holidayCount: number;
+};
+export type CreateHolidayCalendarRequest = { name: string; description?: string; locationIds?: string[]; orgUnitIds?: string[] };
+export type UpdateHolidayCalendarRequest = Partial<CreateHolidayCalendarRequest> & { status?: "active" | "archived" };
+export type RollHolidaysForwardRequest = { fromYear: number; toYear: number; calendarId?: string | null };
 
 export type AttendanceRecordView = {
   id: string;
@@ -3188,7 +4172,7 @@ export type ResolvedWorkScheduleView = {
 // See 0028_attendance_corrections.sql — one decision (approve/reject),
 // made by the requester's own manager or HR, not routed through the
 // generic Workflow Engine.
-export type AttendanceCorrectionStatus = "pending" | "approved" | "rejected";
+export type AttendanceCorrectionStatus = "pending" | "approved" | "rejected" | "returned" | "cancelled";
 
 export type AttendanceCorrectionRequestView = {
   id: string;
@@ -3231,12 +4215,22 @@ export type HolidayView = {
   name: string;
   holidayDate: string;
   isOptional: boolean;
+  /** TLM-10 - null = company-wide. */
+  calendarId: string | null;
+  isGazetted: boolean;
+  dateBasis: "fixed" | "lunar";
+  /** A moon-dependent date still awaiting confirmation. */
+  isTentative: boolean;
 };
 
 export type CreateHolidayRequest = {
   name: string;
   holidayDate: string;
   isOptional?: boolean;
+  calendarId?: string | null;
+  isGazetted?: boolean;
+  dateBasis?: "fixed" | "lunar";
+  isTentative?: boolean;
 };
 
 export type UpdateHolidayRequest = Partial<CreateHolidayRequest>;
@@ -3268,7 +4262,16 @@ export type ConfigurationDomainSummary = {
 // and offer acceptance as the second real caller of Employee Number
 // assignment).
 
-export type RequisitionStatus = "draft" | "pending_approval" | "approved" | "rejected" | "closed";
+export type RequisitionStatus =
+  | "draft"
+  | "pending_approval"
+  | "approved"
+  | "rejected"
+  | "closed"
+  | "open"
+  | "on_hold"
+  | "filled"
+  | "cancelled";
 
 export type JobRequisitionView = {
   id: string;
@@ -3279,6 +4282,15 @@ export type JobRequisitionView = {
   salaryBand: string | null;
   justification: string | null;
   hiringManagerId: string | null;
+  /** ORG-01: the approved position (seat) this requisition hires into, and the
+   * org dimensions it was raised against. `department` is derived from the org
+   * unit's name when `orgUnitId` is set. */
+  positionId: string | null;
+  orgUnitId: string | null;
+  jobId: string | null;
+  locationId: string | null;
+  filledHeadcount: number;
+  statusReason: string | null;
   status: RequisitionStatus;
   workflowInstanceId: string | null;
   createdByUserAccountId: string;
@@ -3294,7 +4306,21 @@ export type CreateJobRequisitionRequest = {
   salaryBand?: string;
   justification?: string;
   hiringManagerId?: string;
+  /** ORG-01: raise the requisition against an approved position with open
+   * capacity. When given, orgUnitId/jobId default from the position and must
+   * agree with it; `title` still names the advert. */
+  positionId?: string;
+  orgUnitId?: string;
+  jobId?: string;
+  locationId?: string;
 };
+
+export type JobRequisitionAction = "open" | "hold" | "resume" | "fill" | "cancel";
+
+export const RECRUITMENT_SOURCES = [
+  "referral", "job_board", "agency", "walk_in", "social_media", "company_website", "campus", "internal", "event", "other",
+] as const;
+export type RecruitmentSource = (typeof RECRUITMENT_SOURCES)[number];
 
 export type CandidateView = {
   id: string;
@@ -3303,7 +4329,23 @@ export type CandidateView = {
   lastName: string;
   email: string | null;
   phone: string | null;
+  /** Masked (only the last four characters are visible): the full value is stored encrypted. */
+  nationalIdMasked: string | null;
+  nationalIdType: string;
+  source: RecruitmentSource | null;
+  sourceDetail: string | null;
+  currentEmployer: string | null;
+  currentDesignation: string | null;
+  expectedSalary: number | null;
+  noticePeriodDays: number | null;
+  consentGivenAt: string | null;
+  consentPurpose: string | null;
+  retentionUntil: string | null;
+  personId: string | null;
+  anonymisedAt: string | null;
+  documentCount: number;
   createdAt: string;
+  updatedAt: string;
 };
 
 export type CreateCandidateRequest = {
@@ -3311,11 +4353,50 @@ export type CreateCandidateRequest = {
   lastName: string;
   email?: string;
   phone?: string;
+  nationalId?: string;
+  source?: RecruitmentSource;
+  sourceDetail?: string;
+  currentEmployer?: string;
+  currentDesignation?: string;
+  expectedSalary?: number;
+  noticePeriodDays?: number;
+  consentGiven?: boolean;
+  consentPurpose?: string;
+  /** Create anyway when the duplicate check found a likely match. */
+  allowDuplicate?: boolean;
 };
 
-/** The Kanban board's own column set. Forward-only in this phase — see
- * KNOWN_ISSUES.md — `rejected` is reachable from any non-terminal stage,
- * but there is no "move a candidate backward" path yet. */
+export type UpdateCandidateRequest = Partial<Omit<CreateCandidateRequest, "allowDuplicate">>;
+
+export type CandidateDuplicateMatch = {
+  candidateId: string;
+  fullName: string;
+  matchedOn: Array<"national_id" | "email" | "phone">;
+};
+
+export type CandidateDocumentType = "resume" | "cover_letter" | "identity" | "certificate" | "reference" | "other";
+
+export type CandidateDocumentView = {
+  id: string;
+  candidateId: string;
+  docType: CandidateDocumentType;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  uploadedBy: string | null;
+  createdAt: string;
+};
+
+export type RecruitmentSettingsView = {
+  candidateRetentionMonths: number | null;
+  consentRequired: boolean;
+  offerValidityDays: number | null;
+  offerLetterTemplateKey: string | null;
+};
+
+export type UpdateRecruitmentSettingsRequest = Partial<RecruitmentSettingsView>;
+
+/** The Kanban board's own column set. Forward-only; `rejected` is reachable from any non-terminal stage and needs a reason. */
 export type ApplicationStage = "applied" | "screening" | "interview" | "offer" | "hired" | "rejected";
 
 export type ApplicationView = {
@@ -3324,6 +4405,10 @@ export type ApplicationView = {
   requisitionId: string;
   candidateId: string;
   stage: ApplicationStage;
+  source: RecruitmentSource | null;
+  sourceDetail: string | null;
+  rejectionReason: string | null;
+  rejectedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -3331,13 +4416,142 @@ export type ApplicationView = {
 export type CreateApplicationRequest = {
   requisitionId: string;
   candidateId: string;
+  source?: RecruitmentSource;
+  sourceDetail?: string;
 };
 
 export type MoveApplicationStageRequest = {
   stage: ApplicationStage;
+  /** Required when `stage` is `rejected`. */
+  reason?: string;
 };
 
-export type OfferStatus = "pending" | "accepted" | "declined" | "rescinded";
+export type ApplicationStageHistoryView = {
+  id: string;
+  applicationId: string;
+  fromStage: ApplicationStage | null;
+  toStage: ApplicationStage;
+  reason: string | null;
+  changedBy: string | null;
+  changedAt: string;
+};
+
+export type InterviewType = "phone" | "video" | "onsite" | "technical" | "hr" | "panel" | "other";
+export type InterviewStatus = "scheduled" | "completed" | "cancelled" | "no_show";
+export type InterviewRecommendation = "strong_yes" | "yes" | "no" | "strong_no";
+
+export type ScorecardEntry = { criterion: string; rating: number; comment?: string };
+
+export type InterviewFeedbackView = {
+  id: string;
+  interviewId: string;
+  employeeId: string;
+  overallRating: number;
+  recommendation: InterviewRecommendation;
+  strengths: string | null;
+  concerns: string | null;
+  scorecard: ScorecardEntry[];
+  submittedAt: string;
+};
+
+export type InterviewView = {
+  id: string;
+  applicationId: string;
+  roundNo: number;
+  interviewType: InterviewType;
+  scheduledStart: string;
+  scheduledEnd: string;
+  locationText: string | null;
+  meetingLink: string | null;
+  status: InterviewStatus;
+  cancelReason: string | null;
+  notes: string | null;
+  interviewerEmployeeIds: string[];
+  feedback: InterviewFeedbackView[];
+  createdAt: string;
+};
+
+export type ScheduleInterviewRequest = {
+  applicationId: string;
+  roundNo?: number;
+  interviewType?: InterviewType;
+  scheduledStart: string;
+  scheduledEnd: string;
+  locationText?: string;
+  meetingLink?: string;
+  interviewerEmployeeIds: string[];
+  notes?: string;
+};
+
+export type UpdateInterviewRequest = {
+  scheduledStart?: string;
+  scheduledEnd?: string;
+  interviewType?: InterviewType;
+  locationText?: string;
+  meetingLink?: string;
+  interviewerEmployeeIds?: string[];
+  status?: InterviewStatus;
+  cancelReason?: string;
+  notes?: string;
+};
+
+export type SubmitInterviewFeedbackRequest = {
+  overallRating: number;
+  recommendation: InterviewRecommendation;
+  strengths?: string;
+  concerns?: string;
+  scorecard?: ScorecardEntry[];
+  /** HR may record feedback on behalf of an interviewer; interviewers omit this. */
+  employeeId?: string;
+};
+
+export type PreEmploymentCheckType = "reference" | "education" | "employment_history" | "identity" | "criminal_record" | "medical" | "other";
+export type PreEmploymentCheckStatus = "requested" | "in_progress" | "passed" | "failed" | "waived";
+
+export type PreEmploymentCheckView = {
+  id: string;
+  applicationId: string;
+  checkType: PreEmploymentCheckType;
+  label: string | null;
+  isRequired: boolean;
+  status: PreEmploymentCheckStatus;
+  resultNote: string | null;
+  performedBy: string | null;
+  updatedAt: string;
+};
+
+export type CreatePreEmploymentCheckRequest = {
+  applicationId: string;
+  checkType: PreEmploymentCheckType;
+  label?: string;
+  isRequired?: boolean;
+};
+
+export type UpdatePreEmploymentCheckRequest = {
+  status?: PreEmploymentCheckStatus;
+  resultNote?: string;
+  isRequired?: boolean;
+};
+
+export type CandidateTimelineEntry = {
+  at: string;
+  kind: "created" | "application" | "stage" | "interview" | "feedback" | "offer" | "check" | "document" | "event";
+  summary: string;
+  refId: string | null;
+};
+
+export type ApplicationTimelineView = {
+  application: ApplicationView;
+  stageHistory: ApplicationStageHistoryView[];
+  interviews: InterviewView[];
+  checks: PreEmploymentCheckView[];
+  offers: OfferView[];
+};
+
+export type OfferStatus =
+  | "pending" | "pending_approval" | "approval_rejected" | "accepted" | "declined" | "rescinded" | "expired";
+
+export type OfferComponentView = { componentId: string; componentKey: string; componentName: string; amount: number };
 
 export type OfferView = {
   id: string;
@@ -3347,30 +4561,96 @@ export type OfferView = {
   startDate: string;
   status: OfferStatus;
   extendedByUserAccountId: string;
-  /** Set once `decideOffer()` records the candidate's decision — an
-   * `accepted` offer's `hiredEmployeeId` then points at the real
-   * Employee record it created. */
+  /** Set once `decideOffer()` records the candidate's decision. */
   hiredEmployeeId: string | null;
   decidedAt: string | null;
+  expiresAt: string | null;
+  declineReason: string | null;
+  rescindReason: string | null;
+  currencyCode: string;
+  notes: string | null;
+  approvedAt: string | null;
+  workflowInstanceId: string | null;
+  components: OfferComponentView[];
+  latestLetterVersion: number | null;
   createdAt: string;
 };
 
 export type ExtendOfferRequest = {
   applicationId: string;
-  salary: number;
+  /** Optional when components are given (then the salary is the sum of the components). */
+  salary?: number;
   startDate: string;
+  components?: Array<{ componentId: string; amount: number }>;
+  expiresAt?: string;
+  notes?: string;
 };
+
+export type RescindOfferRequest = { reason?: string };
 
 export type DecideOfferRequest = {
   decision: "accepted" | "declined";
+  reason?: string;
 };
 
 export type DecideOfferResponse = {
   offer: OfferView;
-  /** Present only when `decision: "accepted"` — the real Employee
-   * record `decideOffer()` created via `EmployeesService.create()`,
-   * complete with a freshly assigned Employee Number. */
+  /** Present only when `decision: "accepted"`. */
   employee: EmployeeView | null;
+};
+
+export type OfferLetterView = {
+  id: string;
+  offerId: string;
+  versionNo: number;
+  templateKey: string | null;
+  templateSource: "built_in" | "custom";
+  content: string;
+  contentHash: string;
+  status: "issued" | "superseded";
+  generatedAt: string;
+};
+
+export type GenerateOfferLetterRequest = { templateKey?: string };
+
+export type RecruitmentEventType =
+  | "career_fair" | "campus_drive" | "walk_in_drive" | "interview_day" | "info_session" | "job_posting" | "other";
+
+export type RecruitmentEventView = {
+  id: string;
+  title: string;
+  eventType: RecruitmentEventType;
+  startsAt: string;
+  endsAt: string | null;
+  locationId: string | null;
+  locationText: string | null;
+  requisitionId: string | null;
+  capacity: number | null;
+  status: "planned" | "completed" | "cancelled";
+  notes: string | null;
+  attendeeCount: number;
+};
+
+export type UpsertRecruitmentEventRequest = {
+  title: string;
+  eventType?: RecruitmentEventType;
+  startsAt: string;
+  endsAt?: string;
+  locationId?: string;
+  locationText?: string;
+  requisitionId?: string;
+  capacity?: number;
+  status?: "planned" | "completed" | "cancelled";
+  notes?: string;
+};
+
+export type RecruitmentCalendarEntry = {
+  kind: "interview" | "event";
+  id: string;
+  title: string;
+  start: string;
+  end: string | null;
+  status: string;
 };
 
 // --- Phase 11: Performance & Goals --------------------------------------
@@ -3393,6 +4673,9 @@ export type ReviewCycleView = {
   createdByUserAccountId: string;
   createdAt: string;
   updatedAt: string;
+  /** TAL-07: deadlines per phase; empty when the cycle has no phase windows. */
+  phases?: ReviewCyclePhaseView[];
+  currentPhase?: ReviewPhaseKey | null;
 };
 
 export type CreateReviewCycleRequest = {
@@ -3412,7 +4695,7 @@ export type LaunchReviewCycleResponse = {
   participantCount: number;
 };
 
-export type GoalStatus = "active" | "completed";
+export type GoalStatus = "active" | "in_progress" | "at_risk" | "overdue" | "completed" | "cancelled";
 
 export type GoalView = {
   id: string;
@@ -3423,7 +4706,16 @@ export type GoalView = {
   title: string;
   description: string | null;
   weight: number | null;
+  /** The stored status. `overdue` is set by the nightly job; see `effectiveStatus` for the live value. */
   status: GoalStatus;
+  /** `overdue` as soon as the due date has passed on an open goal, even before the nightly job persists it. */
+  effectiveStatus: GoalStatus;
+  dueDate: string | null;
+  targetValue: number | null;
+  targetUnit: string | null;
+  currentValue: number | null;
+  progressPct: number;
+  completedAt: string | null;
   createdByUserAccountId: string;
   createdAt: string;
   updatedAt: string;
@@ -3436,14 +4728,250 @@ export type CreateGoalRequest = {
   title: string;
   description?: string;
   weight?: number;
+  dueDate?: string;
+  targetValue?: number;
+  targetUnit?: string;
 };
 
 export type UpdateGoalRequest = {
   title?: string;
   description?: string;
   weight?: number;
-  status?: GoalStatus;
+  /** `overdue` is system-managed and cannot be set by hand. */
+  status?: Exclude<GoalStatus, "overdue">;
+  dueDate?: string | null;
+  targetValue?: number | null;
+  targetUnit?: string | null;
+  currentValue?: number;
+  progressPct?: number;
+  /** Stored on the update history row. */
+  note?: string;
 };
+
+export type GoalUpdateType = "created" | "progress" | "status" | "due_date" | "weight" | "edit" | "note" | "system";
+
+export type GoalUpdateView = {
+  id: string;
+  goalId: string;
+  updateType: GoalUpdateType;
+  fromStatus: GoalStatus | null;
+  toStatus: GoalStatus | null;
+  progressPct: number | null;
+  currentValue: number | null;
+  note: string | null;
+  changes: Record<string, unknown>;
+  authorUserAccountId: string | null;
+  createdAt: string;
+};
+
+export type GoalPlanStatus = "draft" | "finalised";
+
+/** One employee's goals in one cycle: weights must add up to exactly 100 before the plan is finalised. */
+export type GoalPlanView = {
+  reviewCycleId: string;
+  employeeId: string;
+  status: GoalPlanStatus;
+  goalCount: number;
+  totalWeight: number;
+  remainingWeight: number;
+  /** Every open goal is weighted and the weights add up to 100. */
+  isComplete: boolean;
+  finalisedAt: string | null;
+  reopenedReason: string | null;
+};
+
+export type GoalPlanRequest = { reviewCycleId: string; employeeId: string };
+export type ReopenGoalPlanRequest = GoalPlanRequest & { reason: string };
+
+export type GoalEvidenceView = { id: string; goalId: string; label: string; url: string; createdBy: string | null; createdAt: string };
+
+// --- TAL-07 review cycle phases -------------------------------------------------------
+
+export const REVIEW_PHASE_KEYS = ["goal_setting", "self_assessment", "manager_assessment", "calibration", "release"] as const;
+export type ReviewPhaseKey = (typeof REVIEW_PHASE_KEYS)[number];
+
+export type ReviewCyclePhaseView = {
+  phaseKey: ReviewPhaseKey;
+  startsOn: string;
+  endsOn: string;
+  /** Relative to today in the company's time zone. */
+  state: "upcoming" | "open" | "closed";
+};
+
+export type SetReviewCyclePhasesRequest = {
+  phases: Array<{ phaseKey: ReviewPhaseKey; startsOn: string; endsOn: string }>;
+};
+
+// --- TAL-06 competencies, ratings, feedback, development plans ------------------------
+
+export type CompetencyView = { id: string; code: string; name: string; description: string | null; category: string | null; isActive: boolean };
+export type UpsertCompetencyRequest = { code?: string; name: string; description?: string; category?: string; isActive?: boolean };
+
+export type RatingSource = "self" | "manager" | "peer" | "upward" | "skip_level" | "calibration";
+
+export type ReviewRatingInput = { goalId?: string; competencyId?: string; rating: number; comment?: string };
+export type SetReviewRatingsRequest = { source: "self" | "manager" | "calibration"; ratings: ReviewRatingInput[] };
+
+export type ReviewRatingView = {
+  id: string;
+  reviewId: string;
+  source: RatingSource;
+  goalId: string | null;
+  competencyId: string | null;
+  rating: number;
+  comment: string | null;
+  /** Absent for anonymous multi-rater input unless the caller is HR. */
+  raterUserAccountId?: string | null;
+  createdAt: string;
+};
+
+export type ScorecardGoalLine = {
+  goalId: string;
+  title: string;
+  weight: number | null;
+  progressPct: number;
+  status: GoalStatus;
+  ratings: Partial<Record<RatingSource, number>>;
+};
+
+export type ScorecardCompetencyLine = {
+  competencyId: string;
+  name: string;
+  ratings: Partial<Record<RatingSource, { average: number; count: number }>>;
+};
+
+export type ReviewScorecardView = {
+  reviewId: string;
+  goals: ScorecardGoalLine[];
+  competencies: ScorecardCompetencyLine[];
+  /** Σ weight × rating / Σ weight per source, over goals that carry both. Information only - it never sets the review rating. */
+  weightedGoalScore: Partial<Record<RatingSource, number>>;
+  /** Anonymous multi-rater responses hidden because fewer than the tenant's minimum have arrived. */
+  withheldAnonymousCount: number;
+};
+
+export type FeedbackType = "continuous" | "recognition" | "peer" | "upward" | "skip_level";
+export type FeedbackVisibility = "subject" | "manager_only" | "hr_only";
+
+export type FeedbackEvidenceInput = { label: string; url: string };
+
+export type FeedbackView = {
+  id: string;
+  subjectEmployeeId: string;
+  feedbackType: FeedbackType;
+  reviewId: string | null;
+  goalId: string | null;
+  competencyId: string | null;
+  body: string;
+  rating: number | null;
+  visibility: FeedbackVisibility;
+  isAnonymous: boolean;
+  /** Absent when the feedback is anonymous and the caller is not HR. */
+  authorEmployeeId?: string | null;
+  evidence: Array<{ id: string; label: string; url: string }>;
+  createdAt: string;
+};
+
+export type GiveFeedbackRequest = {
+  subjectEmployeeId: string;
+  body: string;
+  feedbackType?: "continuous" | "recognition";
+  goalId?: string;
+  competencyId?: string;
+  rating?: number;
+  visibility?: FeedbackVisibility;
+  evidence?: FeedbackEvidenceInput[];
+};
+
+export type FeedbackRequestStatus = "requested" | "submitted" | "declined" | "cancelled";
+
+export type FeedbackRequestView = {
+  id: string;
+  reviewId: string;
+  subjectEmployeeId: string;
+  raterEmployeeId: string;
+  raterType: "peer" | "upward" | "skip_level" | "other";
+  status: FeedbackRequestStatus;
+  isAnonymous: boolean;
+  dueDate: string | null;
+  requestedAt: string;
+  respondedAt: string | null;
+};
+
+export type RequestFeedbackRequest = {
+  raterEmployeeIds: string[];
+  raterType: "peer" | "upward" | "skip_level" | "other";
+  dueDate?: string;
+  isAnonymous?: boolean;
+};
+
+export type RespondFeedbackRequest = {
+  body: string;
+  rating?: number;
+  competencyRatings?: Array<{ competencyId: string; rating: number; comment?: string }>;
+  evidence?: FeedbackEvidenceInput[];
+};
+
+export type DevelopmentPlanStatus = "draft" | "active" | "completed" | "cancelled";
+export type DevelopmentItemType = "course" | "mentoring" | "coaching" | "project" | "stretch_assignment" | "reading" | "other";
+export type DevelopmentItemStatus = "not_started" | "in_progress" | "done";
+
+export type DevelopmentPlanItemView = {
+  id: string;
+  planId: string;
+  competencyId: string | null;
+  courseId: string | null;
+  itemType: DevelopmentItemType;
+  action: string;
+  dueDate: string | null;
+  status: DevelopmentItemStatus;
+  notes: string | null;
+  completedAt: string | null;
+};
+
+export type DevelopmentPlanView = {
+  id: string;
+  employeeId: string;
+  reviewCycleId: string | null;
+  reviewId: string | null;
+  title: string;
+  objective: string | null;
+  status: DevelopmentPlanStatus;
+  targetDate: string | null;
+  items: DevelopmentPlanItemView[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DevelopmentItemInput = {
+  competencyId?: string;
+  courseId?: string;
+  itemType?: DevelopmentItemType;
+  action: string;
+  dueDate?: string;
+  notes?: string;
+};
+
+export type CreateDevelopmentPlanRequest = {
+  employeeId: string;
+  title: string;
+  objective?: string;
+  targetDate?: string;
+  reviewCycleId?: string;
+  reviewId?: string;
+  items?: DevelopmentItemInput[];
+};
+
+export type UpdateDevelopmentPlanRequest = {
+  title?: string;
+  objective?: string;
+  targetDate?: string | null;
+  status?: DevelopmentPlanStatus;
+};
+
+export type UpdateDevelopmentItemRequest = Partial<DevelopmentItemInput> & { status?: DevelopmentItemStatus };
+
+export type PerformanceSettingsView = { minRatersForAnonymity: number | null };
 
 export type PerformanceReviewStatus = "pending" | "in_progress" | "completed" | "calibrated" | "released";
 
@@ -3576,7 +5104,53 @@ export type AssignSystemAdminRoleRequest = {
  * gross/taxable gross; always non-taxable by construction, enforced in
  * `EmployeeCompensationService`, not just a UI default). Defaults to
  * `earning` for every pre-existing component. */
-export type CompensationComponentType = "earning" | "deduction";
+export type CompensationComponentType =
+  | "earning"
+  | "deduction"
+  | "employer_contribution"
+  | "reimbursement"
+  | "non_cash_benefit"
+  | "arrears"
+  | "retro"
+  | "shift_premium";
+
+/** PAY-07 - how an employee's monthly amount for a component is arrived at. */
+export type CompensationCalculationType = "fixed" | "percentage" | "per_unit" | "formula" | "threshold";
+export type CompensationBasisType = "none" | "basic_salary" | "component" | "gross_fixed_earnings";
+export type CompensationRoundingMode = "none" | "nearest" | "up" | "down";
+export type CompensationProrationMode = "prorated" | "none";
+/** Who is eligible for a component; every key is optional and all that are present must hold. */
+export type CompensationEligibility = {
+  /** Months of service at the end of the pay period. */
+  minServiceMonths?: number;
+  /** hr_reference_catalog_items ids of `employment_type`. */
+  employmentTypeCatalogItemIds?: string[];
+};
+
+/** The fields PAY-07 adds to a component definition (all optional on create / update). */
+export type CompensationComponentRules = {
+  categoryCatalogItemId?: string | null;
+  calculationType?: CompensationCalculationType;
+  basisType?: CompensationBasisType;
+  basisComponentId?: string | null;
+  defaultPercentage?: number | null;
+  unitRate?: number | null;
+  unitLabel?: string | null;
+  thresholdAmount?: number | null;
+  formulaExpression?: Record<string, unknown> | null;
+  capAmount?: number | null;
+  floorAmount?: number | null;
+  roundingMode?: CompensationRoundingMode;
+  roundingIncrement?: number;
+  prorationMode?: CompensationProrationMode;
+  eligibility?: CompensationEligibility;
+  countsTowardEobiBase?: boolean;
+  countsTowardGratuityBase?: boolean;
+  countsTowardProvidentFundBase?: boolean;
+  glAccountCode?: string | null;
+  payslipLabel?: string | null;
+  displayOrder?: number;
+};
 
 export type CompensationComponentView = {
   id: string;
@@ -3593,9 +5167,31 @@ export type CompensationComponentView = {
   isActive: boolean;
   sortOrder: number;
   createdAt: string;
+  // PAY-07
+  categoryCatalogItemId: string | null;
+  calculationType: CompensationCalculationType;
+  basisType: CompensationBasisType;
+  basisComponentId: string | null;
+  defaultPercentage: number | null;
+  unitRate: number | null;
+  unitLabel: string | null;
+  thresholdAmount: number | null;
+  formulaExpression: Record<string, unknown> | null;
+  capAmount: number | null;
+  floorAmount: number | null;
+  roundingMode: CompensationRoundingMode;
+  roundingIncrement: number;
+  prorationMode: CompensationProrationMode;
+  eligibility: CompensationEligibility;
+  countsTowardEobiBase: boolean;
+  countsTowardGratuityBase: boolean;
+  countsTowardProvidentFundBase: boolean;
+  glAccountCode: string | null;
+  payslipLabel: string | null;
+  displayOrder: number;
 };
 
-export type CreateCompensationComponentRequest = {
+export type CreateCompensationComponentRequest = CompensationComponentRules & {
   name: string;
   /** Slugified from name when omitted. */
   key?: string;
@@ -3604,7 +5200,7 @@ export type CreateCompensationComponentRequest = {
   componentType?: CompensationComponentType;
 };
 
-export type UpdateCompensationComponentRequest = {
+export type UpdateCompensationComponentRequest = CompensationComponentRules & {
   name?: string;
   isTaxable?: boolean;
   isActive?: boolean;
@@ -3625,13 +5221,28 @@ export type CompensationView = {
   componentName: string;
   isTaxable: boolean;
   componentType: CompensationComponentType;
+  /** The MONTHLY amount the payroll pays. For a percentage / per-unit / formula / threshold component this is the
+   * amount resolved when the row was written (and re-resolved when its basis changes). */
   amount: number;
   effectiveFrom: string;
   /** null = this is the current amount for this component. */
   effectiveTo: string | null;
   createdByUserAccountId: string;
   createdAt: string;
+  // PAY-07 / PAY-11
+  calculationType: CompensationCalculationType;
+  percentage: number | null;
+  units: number | null;
+  /** What was typed, in `payFrequency` terms (an annual figure is stored as typed; `amount` is its monthly share). */
+  enteredAmount: number | null;
+  payFrequency: CompensationPayFrequency;
+  currencyCode: string;
+  changeReasonCatalogItemId: string | null;
+  changeReasonNote: string | null;
+  salaryGradeId: string | null;
 };
+
+export type CompensationPayFrequency = "monthly" | "annual";
 
 /** Back-compat, single-component convenience that sets/updates ONLY the
  * "Basic Salary" component (creating the standard catalog for the
@@ -3653,7 +5264,19 @@ export type SetCompensationRequest = {
 export type SetEmployeeCompensationComponentsRequest = {
   employeeId: string;
   effectiveFrom: string;
-  components: Array<{ componentId: string; amount: number }>;
+  /**
+   * `amount` is the figure typed for a fixed or threshold component, and the RATE PER UNIT for a per-unit component.
+   * `percentage` (of the component's basis) is for a percentage component and falls back to its default percentage;
+   * `units` is for a per-unit component.
+   */
+  components: Array<{ componentId: string; amount?: number; percentage?: number; units?: number }>;
+  /** PAY-11 - applies to every row written by this call. */
+  payFrequency?: CompensationPayFrequency;
+  currencyCode?: string;
+  /** Catalog item of `lifecycle_reason:compensation_change`. */
+  changeReasonCatalogItemId?: string | null;
+  changeReasonNote?: string | null;
+  salaryGradeId?: string | null;
 };
 
 /** The employee's current (as-of-today) compensation: one entry per
@@ -3681,7 +5304,9 @@ export type EmployeeCompensationView = {
  * uses); Payroll only ever reads it, exactly like recurring compensation.
  */
 export type EmployeeLoanType = "loan" | "salary_advance";
-export type EmployeeLoanStatus = "active" | "closed" | "cancelled";
+/** PAY-13: `pending_approval` waits for the workflow engine, `on_hold` pauses recovery, `rejected` was refused. */
+export type EmployeeLoanStatus = "pending_approval" | "active" | "on_hold" | "closed" | "cancelled" | "rejected";
+export type EmployeeLoanApprovalStatus = "not_required" | "pending" | "approved" | "rejected";
 
 export type EmployeeLoanView = {
   id: string;
@@ -3697,6 +5322,19 @@ export type EmployeeLoanView = {
   createdByUserAccountId: string;
   createdAt: string;
   updatedAt: string;
+  // PAY-13
+  loanTypeId: string | null;
+  loanTypeName: string | null;
+  deductionStartDate: string | null;
+  installmentsCount: number | null;
+  guarantorEmployeeId: string | null;
+  approvalStatus: EmployeeLoanApprovalStatus;
+  /** Early settlement through payroll: the next regular run recovers the whole balance. */
+  settlementRequested: boolean;
+  holdReason: string | null;
+  closedReason: string | null;
+  /** True when a repayment schedule exists; false for a loan created before schedules (fixed instalment). */
+  hasSchedule: boolean;
 };
 
 export type CreateEmployeeLoanRequest = {
@@ -3704,13 +5342,75 @@ export type CreateEmployeeLoanRequest = {
   loanType: EmployeeLoanType;
   reason?: string;
   principalAmount: number;
-  installmentAmount: number;
+  /** Either the instalment or the number of instalments (the instalment is then worked out). */
+  installmentAmount?: number;
+  installmentsCount?: number;
   issuedDate: string;
+  /** First instalment due date; defaults to the issue date. */
+  deductionStartDate?: string;
+  loanTypeId?: string;
+  guarantorEmployeeId?: string;
 };
 
 export type CancelEmployeeLoanRequest = {
   reason?: string;
 };
+
+/** PAY-13: a catalogue entry with the tenant's own policy limits (null = no limit). */
+export type LoanTypeView = {
+  id: string;
+  code: string;
+  name: string;
+  kind: EmployeeLoanType;
+  maxInstallmentPercent: number | null;
+  maxPrincipalMultiple: number | null;
+  maxInstallments: number | null;
+  requiresGuarantor: boolean;
+  description: string | null;
+  isActive: boolean;
+  sortOrder: number;
+};
+
+export type UpsertLoanTypeRequest = {
+  code?: string;
+  name?: string;
+  kind?: EmployeeLoanType;
+  maxInstallmentPercent?: number | null;
+  maxPrincipalMultiple?: number | null;
+  maxInstallments?: number | null;
+  requiresGuarantor?: boolean;
+  description?: string | null;
+  isActive?: boolean;
+  sortOrder?: number;
+};
+
+export type LoanScheduleStatus = "scheduled" | "held" | "skipped" | "paid" | "settled" | "cancelled";
+
+export type LoanScheduleRowView = {
+  id: string;
+  loanId: string;
+  installmentNo: number;
+  dueDate: string;
+  amount: number;
+  status: LoanScheduleStatus;
+  paidAmount: number;
+  paidRunId: string | null;
+  paidAt: string | null;
+  note: string | null;
+};
+
+export type HoldEmployeeLoanRequest = { reason: string };
+/** `resumeFrom` moves the remaining instalments so the first falls on or after that date. */
+export type ResumeEmployeeLoanRequest = { resumeFrom?: string };
+export type SkipLoanInstallmentsRequest = { installmentNos: number[]; reason: string };
+export type SettleEmployeeLoanRequest = {
+  /** `payroll`: the next regular run recovers the balance. `cash`: record money received. `withdraw`: undo a payroll request. */
+  mode: "payroll" | "cash" | "withdraw";
+  amount?: number;
+  receivedOn?: string;
+  reference?: string;
+};
+export type GenerateLoanScheduleRequest = { startDate?: string };
 
 /** One finalized payroll period's worth of installment actually
  * deducted against a loan — the ledger `EmployeeLoanView.outstandingBalance`
@@ -3718,10 +5418,12 @@ export type CancelEmployeeLoanRequest = {
 export type EmployeeLoanRepaymentView = {
   id: string;
   loanId: string;
-  payrollRunId: string;
-  payslipId: string;
+  payrollRunId: string | null;
+  payslipId: string | null;
   amount: number;
   createdAt: string;
+  source: "payroll" | "cash" | "adjustment";
+  reference: string | null;
 };
 
 /**
@@ -3747,12 +5449,29 @@ export type EmployeeAdditionalPaymentView = {
   consumedPayrollRunId: string | null;
   createdByUserAccountId: string;
   createdAt: string;
+  // PAY-12
+  componentId: string | null;
+  reasonCatalogItemId: string | null;
+  reasonNote: string | null;
+  approvalStatus: PayrollAdjustmentApprovalStatus;
+  workflowInstanceId: string | null;
+  approvedBy: string | null;
+  approvedAt: string | null;
 };
+
+/** `pending` = waiting for a workflow decision; payroll only picks up `not_required` and `approved` adjustments. */
+export type PayrollAdjustmentApprovalStatus = "not_required" | "pending" | "approved" | "rejected";
 
 export type CreateEmployeeAdditionalPaymentRequest = {
   employeeId: string;
   paymentType: AdditionalPaymentType;
-  label: string;
+  /** Optional when `componentId` is given: the component's payslip label (or name) is used. */
+  label?: string;
+  /** PAY-12 - the pay component this adjustment is paid under. */
+  componentId?: string | null;
+  /** Catalog `payroll_adjustment_reason`. */
+  reasonCatalogItemId?: string | null;
+  reasonNote?: string | null;
   amount: number;
   /** Defaults to true for an earning; forced false for a deduction
    * (same "never presume a tax treatment" posture every other
@@ -3789,13 +5508,24 @@ export type EmployeeOffCyclePaymentView = {
   status: EmployeeOffCyclePaymentStatus;
   createdByUserAccountId: string;
   createdAt: string;
+  // PAY-12
+  componentId: string | null;
+  reasonCatalogItemId: string | null;
+  reasonNote: string | null;
+  approvalStatus: PayrollAdjustmentApprovalStatus;
+  workflowInstanceId: string | null;
+  approvedBy: string | null;
+  approvedAt: string | null;
 };
 
 export type CreateEmployeeOffCyclePaymentRequest = {
   employeeId: string;
   payrollRunId: string;
   paymentType: AdditionalPaymentType;
-  label: string;
+  label?: string;
+  componentId?: string | null;
+  reasonCatalogItemId?: string | null;
+  reasonNote?: string | null;
   amount: number;
   /** Defaults to true for an earning; forced false for a deduction. */
   isTaxable?: boolean;
@@ -3963,7 +5693,32 @@ export type PayrollFormulaContractView = {
 // wrong moves here permanently — its payslips are preserved as-is for the
 // record — and a brand new `draft` run opens for the same period via
 // `PayrollRunView.correctiveRunId`.
-export type PayrollRunStatus = "draft" | "calculated" | "pending_approval" | "approved" | "finalized" | "reversed";
+export type PayrollRunStatus =
+  | "draft"
+  | "pre_validated"
+  | "calculating"
+  | "calculated"
+  | "validated"
+  | "pending_approval"
+  | "approved"
+  | "finalized"
+  | "accounting"
+  | "payment_released"
+  | "reconciled"
+  | "closed"
+  | "reopened"
+  | "reversed"
+  | "cancelled";
+
+/** Statuses at or beyond finalisation: the payslips are locked and count as paid history. */
+export const PAYROLL_POST_FINAL_STATUSES: readonly PayrollRunStatus[] = [
+  "finalized",
+  "accounting",
+  "payment_released",
+  "reconciled",
+  "closed",
+  "reopened",
+];
 
 /**
  * Payroll Enterprise Gap Analysis Phase P4 — `regular` is every run that
@@ -4031,11 +5786,409 @@ export type PayrollRunView = {
    * caller holding only `payroll.*.scoped` can act on it iff the area is
    * inside their data scope. */
   payrollAreaId: string | null;
+  /** PAY-02. A simulation never consumes inputs, never reaches approval and never blocks a period. */
+  isSimulation: boolean;
+  currencyCode: string;
+  roundingPrecision: number;
+  idempotencyKey: string | null;
+  /** PAY-03 - the payroll period this run belongs to, when it was created from one. */
+  payrollPeriodId: string | null;
+  /** The frozen settings / tax slabs / formulas the last calculation used (PAY-02, PAY-05). */
+  ruleSnapshotId: string | null;
+  /** How many times this run has been calculated; each calculation has its own rule snapshot. */
+  calculationSequence: number;
+  calculatedAt: string | null;
+  /** PAY-06 - 'async' when the last calculation ran as a background job. */
+  calculationMode: "sync" | "async";
+  /** Null until the run has been calculated. */
+  totals: PayrollRunTotals | null;
+  populationCount: number;
+  calculatedCount: number;
+  failedCount: number;
+  warningCount: number;
+  cancelledAt: string | null;
+  cancelReason: string | null;
+  closedAt: string | null;
+};
+
+export type PayrollRetroStatus = "detected" | "included" | "paid" | "dismissed" | "superseded";
+export type PayrollRetroSourceEvent = "compensation_change" | "leave_change" | "manual";
+
+/** PAY-12 - one difference between what a finalised payslip paid and what it would pay with today's data. */
+export type PayrollRetroResultView = {
+  id: string;
+  employeeId: string;
+  employeeNumber: string | null;
+  employeeName: string | null;
+  sourceRunId: string;
+  sourcePayslipId: string;
+  sourceEventType: PayrollRetroSourceEvent;
+  sourceEventId: string | null;
+  affectedPeriodStart: string;
+  affectedPeriodEnd: string;
+  componentKey: string;
+  componentLabel: string;
+  originalAmount: number;
+  recalculatedAmount: number;
+  /** Positive = underpaid (arrears owed to the employee); negative = overpaid (recovery). */
+  delta: number;
+  isTaxable: boolean;
+  status: PayrollRetroStatus;
+  targetRunId: string | null;
+  includedPayslipId: string | null;
+  paidAt: string | null;
+  dismissedReason: string | null;
+  detail: Record<string, unknown>;
+  createdAt: string;
+};
+
+export type DetectPayrollRetroRequest = {
+  /** Only these employees; default = the target run's population. */
+  employeeIds?: string[];
+  /** How far back to look for finalised periods (default 12, at most 36). */
+  lookbackMonths?: number;
+};
+export type DetectPayrollRetroResponse = {
+  detected: number;
+  unchanged: number;
+  superseded: number;
+  results: PayrollRetroResultView[];
+  /** Paid payslips that could not be recalculated (the rest were still checked). */
+  failures?: Array<{ employeeId: string; periodEnd: string; message: string }>;
+};
+export type IncludePayrollRetroRequest = { retroResultIds?: string[] };
+
+export type PayrollExceptionClass = "calculation" | "data" | "duplicate_payment" | "rule_change" | "system";
+export type PayrollExceptionStatus = "open" | "resolved" | "waived" | "superseded";
+
+/** PAY-06 - one employee (or the run itself) that a calculation could not handle. */
+export type PayrollExceptionView = {
+  id: string;
+  payrollRunId: string;
+  payrollPartitionId: string | null;
+  employeeId: string | null;
+  employeeNumber: string | null;
+  employeeName: string | null;
+  calculationSequence: number;
+  exceptionClass: PayrollExceptionClass;
+  severity: "error" | "warning";
+  message: string;
+  detail: Record<string, unknown>;
+  status: PayrollExceptionStatus;
+  retryCount: number;
+  lastRetryAt: string | null;
+  resolution: string | null;
+  resolutionNote: string | null;
+  resolvedBy: string | null;
+  resolvedAt: string | null;
+  correlationId: string | null;
+  createdAt: string;
+};
+
+export type PayrollPartitionProgressView = {
+  partitionNo: number;
+  state: "pending" | "running" | "completed" | "failed";
+  employeeCount: number;
+  calculatedCount: number;
+  failedCount: number;
+  attempts: number;
+  lastError: string | null;
+};
+
+export type PayrollCalculationProgressView = {
+  payrollRunId: string;
+  status: PayrollRunStatus;
+  calculationMode: "sync" | "async";
+  calculationSequence: number;
+  jobId: string | null;
+  jobStatus: "queued" | "running" | "completed" | "failed" | "cancelled" | null;
+  progressPercent: number;
+  progressNote: string | null;
+  attempts: number;
+  maxAttempts: number;
+  lastError: string | null;
+  populationCount: number;
+  calculatedCount: number;
+  failedCount: number;
+  openExceptionCount: number;
+  partitionCount: number;
+  partitionsCompleted: number;
+  startedAt: string | null;
+  partitions: PayrollPartitionProgressView[];
+};
+
+export type StartPayrollCalculationResponse = { run: PayrollRunView; jobId: string };
+export type RetryPayrollExceptionResponse = { resolved: boolean; message: string; exception: PayrollExceptionView };
+export type ResolvePayrollExceptionRequest = { note: string };
+
+export type PayrollRunTotals = {
+  gross: number;
+  net: number;
+  incomeTax: number;
+  employeeDeductions: number;
+  employerContributions: number;
+  employerCost: number;
+};
+
+export type PayrollRunEventView = {
+  id: string;
+  payrollRunId: string;
+  fromStatus: PayrollRunStatus | null;
+  toStatus: PayrollRunStatus;
+  action: string;
+  actorUserAccountId: string | null;
+  reason: string | null;
+  correlationId: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+};
+
+export type PayrollFindingSeverity = "error" | "warning" | "info";
+
+export type PayrollValidationFinding = {
+  severity: PayrollFindingSeverity;
+  code: string;
+  message: string;
+  employeeId?: string;
+  employeeNumber?: string;
+};
+
+export type PayrollRunValidationView = {
+  run: PayrollRunView;
+  stage: "pre_validation" | "validation";
+  passed: boolean;
+  errorCount: number;
+  warningCount: number;
+  findings: PayrollValidationFinding[];
+};
+
+export type CancelPayrollRunRequest = { reason: string };
+export type ReopenPayrollRunRequest = { reason: string };
+export type ClosePayrollRunRequest = { note?: string };
+
+export type PayrollReversalView = {
+  id: string;
+  payrollRunId: string;
+  correctiveRunId: string | null;
+  reason: string;
+  requestedBy: string | null;
+  authorizedBy: string | null;
+  authorizationPermission: string;
+  impact: Record<string, unknown>;
+  createdAt: string;
+};
+
+export type PayrollRunReopenView = {
+  id: string;
+  payrollRunId: string;
+  fromStatus: PayrollRunStatus;
+  reason: string;
+  requestedBy: string | null;
+  authorizedBy: string | null;
+  createdAt: string;
+};
+
+export type PayrollRuleSnapshotView = {
+  id: string;
+  payrollRunId: string;
+  calculationSequence: number;
+  asOfDate: string;
+  engineVersion: string;
+  contentHash: string;
+  settingsRowId: string | null;
+  taxSlabIds: string[];
+  formulaIds: string[];
+  settings: Record<string, unknown>;
+  taxSlabs: unknown[];
+  formulas: unknown[];
+  createdAt: string;
+};
+
+/** Fields of a payslip an authorised preparer may override (PAY-23); net pay is recomputed. */
+export type PayrollOverridableField =
+  | "incomeTaxMonthly"
+  | "eobiEmployeeContribution"
+  | "eobiEmployerContribution"
+  | "socialSecurityEmployerContribution";
+
+export type SetPayrollOverrideRequest = {
+  employeeId: string;
+  field: PayrollOverridableField;
+  value: number;
+  reason: string;
+};
+
+export type PayrollOverrideView = {
+  id: string;
+  payrollRunId: string;
+  payslipId: string | null;
+  employeeId: string;
+  field: PayrollOverridableField;
+  oldValue: number | null;
+  newValue: number;
+  reason: string;
+  status: "applied" | "withdrawn";
+  overriddenBy: string;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  reappliedCount: number;
+  createdAt: string;
+  withdrawnAt: string | null;
+};
+
+
+// ---------------------------------------------------------------- Step 9B: calendars, periods, population (PAY-03, PAY-04)
+export type PayrollFrequency = "monthly" | "semi_monthly" | "bi_weekly" | "weekly";
+export type PayrollPeriodStatus = "open" | "locked" | "closed";
+
+export type PayrollCalendarView = {
+  id: string;
+  companyId: string;
+  code: string;
+  name: string;
+  frequency: PayrollFrequency;
+  currencyCode: string;
+  payDayOffset: number;
+  cutoffDaysBeforeEnd: number;
+  isActive: boolean;
+  periodCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreatePayrollCalendarRequest = {
+  code: string;
+  name: string;
+  frequency?: PayrollFrequency;
+  currencyCode?: string;
+  payDayOffset?: number;
+  cutoffDaysBeforeEnd?: number;
+};
+
+export type UpdatePayrollCalendarRequest = {
+  name?: string;
+  payDayOffset?: number;
+  cutoffDaysBeforeEnd?: number;
+  isActive?: boolean;
+};
+
+export type PayrollPeriodView = {
+  id: string;
+  companyId: string;
+  calendarId: string;
+  calendarCode: string;
+  label: string;
+  periodStart: string;
+  periodEnd: string;
+  payDate: string;
+  cutoffDate: string;
+  status: PayrollPeriodStatus;
+  lockedAt: string | null;
+  closedAt: string | null;
+  runCount: number;
+};
+
+export type GeneratePayrollPeriodsRequest = {
+  /** First day to cover (a period starting on or after this date is generated). */
+  fromDate: string;
+  /** How many consecutive periods to generate (1-60). */
+  count: number;
+};
+
+export type GeneratePayrollPeriodsResponse = {
+  created: PayrollPeriodView[];
+  skipped: Array<{ periodStart: string; periodEnd: string; reason: string }>;
+};
+
+export type PayrollRunPopulationView = {
+  id: string;
+  payrollRunId: string;
+  employeeId: string;
+  employeeNumber: string;
+  calculationSequence: number;
+  inclusionReason: "area_member" | "company_wide" | "target_employee" | "final_settlement";
+  status: "included" | "calculated" | "failed" | "excluded";
+  exclusionReason: string | null;
+  snapshot: Record<string, unknown>;
+  createdAt: string;
+};
+
+
+// ---------------------------------------------------------------- Step 9C: structured payslip results (PAY-05, PAY-21)
+export type PayslipComponentCategory = "earning" | "employee_deduction" | "employer_contribution" | "tax" | "statutory_deduction" | "recovery" | "adjustment";
+/** gross: sums to gross pay; net: with gross, sums to net pay; employer_cost: employer contributions. */
+export type PayslipComponentAffects = "gross" | "net" | "employer_cost";
+
+export type PayslipComponentView = {
+  lineNo: number;
+  key: string;
+  label: string;
+  category: PayslipComponentCategory;
+  affects: PayslipComponentAffects;
+  /** Signed from the employee's point of view; employer contributions are positive. */
+  amount: number;
+  isTaxable: boolean;
+  quantity: number | null;
+  unit: string | null;
+  rate: number | null;
+  basisAmount: number | null;
+  sourceType: string;
+  sourceId: string | null;
+  isOverridden: boolean;
+  /** How the figure was reached (brackets used, proration days, rule overrides, ...). */
+  trace: Record<string, unknown>;
+};
+
+export type PayslipConsumptionView = {
+  sourceType: "additional_payment" | "off_cycle_payment" | "overtime" | "loan_installment" | "unpaid_leave" | "attendance_deduction";
+  sourceId: string;
+  amount: number;
+  quantity: number | null;
+  unit: string | null;
+  status: "previewed" | "consumed" | "released";
+};
+
+export type PayslipDetailView = {
+  payslipId: string;
+  payrollRunId: string;
+  employeeId: string;
+  status: "calculated" | "overridden" | "final" | "voided";
+  isImmutable: boolean;
+  calculationSequence: number;
+  employerCost: number;
+  components: PayslipComponentView[];
+  /** Payroll staff only. */
+  consumptions: PayslipConsumptionView[] | null;
+  /** Payroll staff only: everything the payslip was calculated from, apart from the rules. */
+  inputSnapshot: Record<string, unknown> | null;
+  inputSnapshotHash: string | null;
+};
+
+export type PayrollYtdView = {
+  employeeId: string;
+  taxYear: string;
+  grossPay: number;
+  taxableGross: number;
+  incomeTax: number;
+  eobiEmployee: number;
+  eobiEmployer: number;
+  socialSecurityEmployer: number;
+  netPay: number;
+  employerCost: number;
+  payslipCount: number;
+  lastPeriodEnd: string | null;
 };
 
 export type CreatePayrollRunRequest = {
-  periodStart: string;
-  periodEnd: string;
+  /** Same key + same body returns the run already created instead of a second one. */
+  idempotencyKey?: string;
+  /** Calculate without ever consuming inputs; cannot be approved or finalised. */
+  isSimulation?: boolean;
+  /** PAY-03. Create the run for this payroll period; its dates are used. A tenant policy can require this for regular runs. */
+  payrollPeriodId?: string | null;
+  /** Required unless `payrollPeriodId` is given (then they must match the period). */
+  periodStart?: string;
+  periodEnd?: string;
   /** Omit/null for a company-wide run (requires `payroll.calculate.all`). */
   payrollAreaId?: string | null;
   /** Phase P4. Omit for a `regular` run (unchanged default behavior). */
@@ -4071,6 +6224,11 @@ export type PayrollAreaView = {
   isActive: boolean;
   /** How many employees currently carry this area as `employees.payroll_area_id`. */
   employeeCount: number;
+  /** PAY-04 */
+  frequency: PayrollFrequency;
+  currencyCode: string;
+  calendarId: string | null;
+  jurisdiction: string | null;
   scopeLinks: PayrollAreaScopeLinkView[];
   createdAt: string;
   updatedAt: string;
@@ -4080,12 +6238,20 @@ export type CreatePayrollAreaRequest = {
   code: string;
   name: string;
   description?: string | null;
+  frequency?: PayrollFrequency;
+  currencyCode?: string;
+  calendarId?: string | null;
+  jurisdiction?: string | null;
 };
 
 export type UpdatePayrollAreaRequest = {
   name?: string;
   description?: string | null;
   isActive?: boolean;
+  frequency?: PayrollFrequency;
+  currencyCode?: string;
+  calendarId?: string | null;
+  jurisdiction?: string | null;
 };
 
 export type AddPayrollAreaScopeLinkRequest = {
@@ -4172,6 +6338,8 @@ export type PayslipView = {
    * payslip (`calculateOnePayslip()`'s own `offCycleRunId` option) —
    * empty for every regular-run payslip. */
   consumedOffCyclePayments: Array<{ offCyclePaymentId: string; amount: number }>;
+  /** TLM-07 - the approved overtime claims this payslip paid; they become 'paid' when the run is finalised. */
+  consumedOvertime: Array<{ overtimeId: string; amount: number }>;
   createdAt: string;
   updatedAt: string;
 };
@@ -4210,14 +6378,78 @@ export type DisbursementFieldKey =
 export type PayrollDisbursementSettingsView = {
   companyId: string;
   columns: DisbursementFieldKey[];
+  /** PAY-16: a second person must approve a batch before it can be released to the bank. */
+  requireReleaseApproval: boolean;
   updatedAt: string;
 };
 
 export type UpdatePayrollDisbursementSettingsRequest = {
-  columns: DisbursementFieldKey[];
+  columns?: DisbursementFieldKey[];
+  requireReleaseApproval?: boolean;
 };
 
-export type PayrollPaymentBatchStatus = "generated" | "voided";
+/** PAY-16: generated -> (approved) -> released -> acknowledged | rejected; a rejected batch is reissued; any unreleased one can be voided. */
+export type PayrollPaymentBatchStatus = "generated" | "approved" | "released" | "acknowledged" | "rejected" | "reissued" | "voided";
+export type PayrollPaymentItemStatus = "generated" | "released" | "acknowledged" | "rejected" | "reissued" | "voided";
+export type BankFileDelimiter = "comma" | "semicolon" | "pipe" | "tab";
+
+/** PAY-16: a payment-file layout defined by the tenant. */
+export type BankFileFormatView = {
+  id: string;
+  code: string;
+  name: string;
+  delimiter: BankFileDelimiter;
+  includeHeader: boolean;
+  columns: DisbursementFieldKey[];
+  headerLabels: Record<string, string>;
+  fileExtension: string;
+  isDefault: boolean;
+  isActive: boolean;
+};
+
+export type UpsertBankFileFormatRequest = {
+  code?: string;
+  name?: string;
+  delimiter?: BankFileDelimiter;
+  includeHeader?: boolean;
+  columns?: DisbursementFieldKey[];
+  headerLabels?: Record<string, string>;
+  fileExtension?: string;
+  isDefault?: boolean;
+  isActive?: boolean;
+};
+
+/** One payment to one employee, with the account as it stood when the file was made (only the last four digits are shown). */
+export type PayrollPaymentItemView = {
+  id: string;
+  batchId: string;
+  payrollRunId: string;
+  payslipId: string;
+  employeeId: string;
+  employeeNumber: string;
+  amount: number;
+  currency: string;
+  paymentMethod: string;
+  bankName: string | null;
+  accountTitle: string | null;
+  accountLast4: string | null;
+  branchCode: string | null;
+  status: PayrollPaymentItemStatus;
+  bankReference: string | null;
+  rejectionReason: string | null;
+  retryCount: number;
+  reissuedToItemId: string | null;
+  acknowledgedAt: string | null;
+};
+
+export type AcknowledgePaymentBatchRequest = {
+  /** The bank's reference for the whole file. */
+  bankReference?: string;
+  /** Per-payment results; any released payment not named is acknowledged. */
+  items?: Array<{ itemId: string; status: "acknowledged" | "rejected"; bankReference?: string; reason?: string }>;
+};
+
+export type ReissuePaymentItemsRequest = { itemIds?: string[]; reason?: string };
 
 /** One row per `generateDisbursementFile()` call that actually produced a
  * file — the duplicate-payment-protection ledger. See that method's own doc
@@ -4240,6 +6472,16 @@ export type PayrollPaymentBatchView = {
   voidedByUserAccountId: string | null;
   generatedByUserAccountId: string;
   generatedAt: string;
+  // PAY-16
+  formatId: string | null;
+  approvedByUserAccountId: string | null;
+  approvedAt: string | null;
+  releasedByUserAccountId: string | null;
+  releasedAt: string | null;
+  acknowledgedAt: string | null;
+  bankReference: string | null;
+  rejectionReason: string | null;
+  reissuedFromBatchId: string | null;
 };
 
 /** `PayrollService.generateDisbursementFile()`'s response — the CSV plus
@@ -4338,6 +6580,14 @@ export type ChecklistCategory = "it" | "hr" | "finance" | "facilities" | "genera
 export type ChecklistResponsibleRole = "self" | "team" | "all";
 export type ChecklistItemStatus = "pending" | "completed" | "skipped";
 
+/** LIF-09: who an onboarding item applies to. Empty / omitted lists mean "everyone". */
+export type OnboardingItemApplicability = {
+  employmentTypes?: string[];
+  orgUnitIds?: string[];
+  locationIds?: string[];
+};
+export type OnboardingAssigneeRule = "none" | "employee" | "manager";
+
 export type OnboardingItemTemplateView = {
   id: string;
   title: string;
@@ -4345,6 +6595,9 @@ export type OnboardingItemTemplateView = {
   responsibleRole: ChecklistResponsibleRole;
   sortOrder: number;
   isActive: boolean;
+  applicability: OnboardingItemApplicability;
+  assigneeRule: OnboardingAssigneeRule;
+  dueOffsetDays: number | null;
 };
 
 export type CreateOnboardingItemTemplateRequest = {
@@ -4352,6 +6605,9 @@ export type CreateOnboardingItemTemplateRequest = {
   category: ChecklistCategory;
   responsibleRole: ChecklistResponsibleRole;
   sortOrder?: number;
+  applicability?: OnboardingItemApplicability;
+  assigneeRule?: OnboardingAssigneeRule;
+  dueOffsetDays?: number | null;
 };
 
 export type UpdateOnboardingItemTemplateRequest = Partial<CreateOnboardingItemTemplateRequest> & {
@@ -4368,6 +6624,24 @@ export type OnboardingChecklistItemView = {
   status: ChecklistItemStatus;
   notes: string | null;
   completedAt: string | null;
+  assignedToUserAccountId: string | null;
+  assignedAt: string | null;
+  dueDate: string | null;
+  isOverdue: boolean;
+  workflowTaskId: string | null;
+};
+
+/** LIF-09: an item on someone's to-do list, with enough context to act on it. */
+export type MyOnboardingItemView = OnboardingChecklistItemView & {
+  onboardingId: string;
+  employeeId: string;
+  employeeName: string;
+  employeeNumber: string;
+};
+
+export type AssignOnboardingItemRequest = {
+  assignedToUserAccountId: string | null;
+  dueDate?: string | null;
 };
 
 export type EmployeeOnboardingView = {
@@ -4432,12 +6706,39 @@ export type EmployeeOffboardingView = {
   startedAt: string;
   completedAt: string | null;
   items: OffboardingChecklistItemView[];
+  /** LIF-05 */
+  reasonCode: string | null;
+  noticePeriodDays: number | null;
+  noticeStartDate: string | null;
+  rehireEligibility: OffboardingRehireEligibility | null;
+  rehireEligibilityNote: string | null;
+  exitInterviewStatus: OffboardingExitInterviewStatus;
+  exitInterviewCompletedAt: string | null;
+  exitInterviewNotes: string | null;
+  /** The lifecycle termination event this offboarding produced (set at completion). */
+  terminationEventId: string | null;
 };
+
+export type OffboardingRehireEligibility = "eligible" | "conditional" | "not_eligible";
+export type OffboardingExitInterviewStatus = "not_required" | "pending" | "completed" | "declined";
 
 export type InitiateOffboardingRequest = {
   reason: OffboardingReason;
   lastWorkingDay: string;
   notes?: string;
+  reasonCode?: string;
+  noticePeriodDays?: number;
+  noticeStartDate?: string;
+  exitInterviewRequired?: boolean;
+};
+
+export type UpdateOffboardingExitRequest = {
+  rehireEligibility?: OffboardingRehireEligibility;
+  rehireEligibilityNote?: string;
+  exitInterviewStatus?: OffboardingExitInterviewStatus;
+  exitInterviewNotes?: string;
+  noticePeriodDays?: number;
+  noticeStartDate?: string;
 };
 
 // --- Overtime & On-Duty, first increment (2026-09-18) -------------------
@@ -4451,7 +6752,7 @@ export type InitiateOffboardingRequest = {
 
 export type OvertimeDayType = "weekday" | "rest_day" | "holiday";
 
-export type OvertimeClaimStatus = "pending" | "approved" | "rejected";
+export type OvertimeClaimStatus = "pending" | "approved" | "rejected" | "returned" | "cancelled" | "paid";
 
 export type OvertimePolicyView = {
   id: string;
@@ -4462,6 +6763,15 @@ export type OvertimePolicyView = {
   restDayRateMultiplier: number;
   holidayRateMultiplier: number;
   effectiveFrom: string;
+  /** TLM-07 - claimable minutes per day / per calendar month (null = no cap). */
+  maxDailyMinutes: number | null;
+  maxMonthlyMinutes: number | null;
+  /** A claim needs a prior authorisation for the day. */
+  requiresPreApproval: boolean;
+  /** An approved claim may be taken as compensatory leave instead of pay. */
+  compOffAllowed: boolean;
+  /** Overtime minutes that earn one day of compensatory leave. */
+  compOffMinutesPerDay: number;
 };
 
 export type SetOvertimePolicyRequest = {
@@ -4470,6 +6780,11 @@ export type SetOvertimePolicyRequest = {
   weekdayRateMultiplier?: number;
   restDayRateMultiplier?: number;
   holidayRateMultiplier?: number;
+  maxDailyMinutes?: number | null;
+  maxMonthlyMinutes?: number | null;
+  requiresPreApproval?: boolean;
+  compOffAllowed?: boolean;
+  compOffMinutesPerDay?: number;
 };
 
 export type OvertimeRecordView = {
@@ -4490,12 +6805,20 @@ export type OvertimeRecordView = {
   decisionComment: string | null;
   decidedAt: string | null;
   createdAt: string;
+  payoutMode: OvertimePayoutMode;
+  /** Minutes removed from the claim by a daily / monthly / authorisation cap. */
+  cappedMinutes: number;
+  /** The payroll run that paid this claim (null until paid; comp-off claims are never paid by payroll). */
+  consumedPayrollRunId: string | null;
+  compOffDays: number | null;
 };
 
 export type SubmitOvertimeClaimRequest = {
   employeeId: string;
   workDate: string;
   reason?: string;
+  /** "comp_off" takes the time back as compensatory leave; needs the policy to allow it. */
+  payoutMode?: OvertimePayoutMode;
 };
 
 export type DecideOvertimeClaimRequest = {
@@ -4511,7 +6834,7 @@ export type DecideOvertimeClaimRequest = {
 // clock-in/out comparison. Decided via the same plain RBAC self/team/all
 // shape AttendanceCorrectionRequestView/OvertimeRecordView already use.
 
-export type OnDutyRequestStatus = "pending" | "approved" | "rejected";
+export type OnDutyRequestStatus = "pending" | "approved" | "rejected" | "returned" | "cancelled";
 
 export type OnDutyRequestView = {
   id: string;
@@ -4521,6 +6844,8 @@ export type OnDutyRequestView = {
   startDate: string;
   endDate: string;
   location: string | null;
+  locationId: string | null;
+  locationName: string | null;
   reason: string | null;
   status: OnDutyRequestStatus;
   isOnBehalf: boolean;
@@ -4534,6 +6859,8 @@ export type SubmitOnDutyRequestRequest = {
   startDate: string;
   endDate: string;
   location?: string;
+  /** TLM-11 - a configured location; `location` stays as a free-text note. */
+  locationId?: string;
   reason?: string;
 };
 
@@ -4810,7 +7137,71 @@ export type JobVersionView = {
  * occupies it — set ONLY by PositionsService.assignEmployee(), never by a
  * plain field patch) / `frozen` (temporarily not fillable) / `abolished`
  * (permanently retired — a soft-delete state, the row is never removed). */
-export type PositionStatus = "vacant" | "filled" | "frozen" | "abolished";
+export type PositionStatus = "vacant" | "filled" | "frozen" | "abolished" | "pending_approval" | "rejected";
+
+/** ORG-02: one employee's slot in a (possibly multi-incumbent) position. */
+export type PositionIncumbentView = {
+  id: string;
+  positionId: string;
+  employeeId: string;
+  employeeName: string | null;
+  fte: number;
+  status: "active" | "ended";
+  effectiveFrom: string;
+  effectiveTo: string | null;
+};
+
+export type PositionBudgetView = {
+  id: string;
+  positionId: string;
+  fiscalYear: number;
+  plannedHeadcount: number;
+  budgetAmount: number | null;
+  currency: string;
+  notes: string | null;
+  updatedAt: string;
+};
+
+export type UpsertPositionBudgetRequest = {
+  plannedHeadcount: number;
+  budgetAmount?: number | null;
+  currency?: string;
+  notes?: string;
+};
+
+export type PositionRelationshipType = "reports_to" | "dotted_line";
+
+export type PositionRelationshipView = {
+  id: string;
+  positionId: string;
+  relatedPositionId: string;
+  relatedPositionTitle: string | null;
+  relationshipType: PositionRelationshipType;
+  status: "active" | "ended";
+  effectiveFrom: string;
+  effectiveTo: string | null;
+};
+
+export type CreatePositionRelationshipRequest = {
+  relatedPositionId: string;
+  relationshipType: PositionRelationshipType;
+  effectiveFrom?: string;
+};
+
+export type PositionPlanningSummaryRow = {
+  positionId: string;
+  positionTitle: string;
+  orgUnitId: string;
+  status: PositionStatus;
+  fiscalYear: number;
+  approvedHeadcount: number;
+  plannedHeadcount: number | null;
+  filledFte: number;
+  openCapacityFte: number;
+  openRequisitionHeadcount: number;
+  budgetAmount: number | null;
+  overPlanned: boolean;
+};
 
 export type PositionView = {
   id: string;
@@ -5122,6 +7513,8 @@ export type LocationView = {
   name: string;
   address: string | null;
   status: LocationStatus;
+  /** PAY-28: the province / jurisdiction for provincial social security (inherited by sites below it). */
+  statutoryJurisdiction: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -5269,7 +7662,33 @@ export type OrgChangeStatus =
   | "published"
   | "failed";
 
-export type OrgChangeItemAction = "move" | "rename" | "retype" | "archive" | "activate";
+export type OrgChangeItemAction =
+  | "move"
+  | "rename"
+  | "retype"
+  | "archive"
+  | "activate"
+  // ORG-07: a reorganization can also batch positions, locations, cost / profit centers and assignments.
+  | "position_freeze"
+  | "position_unfreeze"
+  | "position_abolish"
+  | "position_reactivate"
+  | "position_rename"
+  | "position_move"
+  | "location_rename"
+  | "location_archive"
+  | "location_activate"
+  | "cost_center_rename"
+  | "cost_center_archive"
+  | "cost_center_activate"
+  | "profit_center_rename"
+  | "profit_center_archive"
+  | "profit_center_activate"
+  | "assignment_transfer";
+
+/** What an item targets. `org_unit` items use `orgUnitId`; every other type uses `entityId`
+ * (for `assignment` the entity is the EMPLOYEE whose primary assignment moves). */
+export type OrgChangeEntityType = "org_unit" | "position" | "location" | "cost_center" | "profit_center" | "assignment";
 
 /**
  * Cross-module integration audit Item 7 (2026-10-01) — what an `archive`
@@ -5286,7 +7705,12 @@ export type OrgChangeItemView = {
   id: string;
   orgChangeId: string;
   sequence: number;
-  orgUnitId: string;
+  /** Null for non-org-unit items. */
+  orgUnitId: string | null;
+  entityType: OrgChangeEntityType;
+  entityId: string | null;
+  /** Action-specific extras, e.g. `{ orgUnitId }` for position_move / assignment_transfer. */
+  payload: Record<string, unknown>;
   action: OrgChangeItemAction;
   newParentId: string | null;
   newName: string | null;
@@ -5345,7 +7769,12 @@ export type OrgChangeView = {
 };
 
 export type CreateOrgChangeItemRequest = {
-  orgUnitId: string;
+  /** Required for org-unit items (the default entityType). */
+  orgUnitId?: string;
+  entityType?: OrgChangeEntityType;
+  /** Required for every non-org-unit item. */
+  entityId?: string;
+  payload?: Record<string, unknown>;
   action: OrgChangeItemAction;
   newParentId?: string;
   newName?: string;
@@ -5431,3 +7860,855 @@ export type OrganizationIntegrityWarning = {
   label: string;
   count: number;
 };
+
+
+// --- Step 3: configuration versions (CFG-02), rule registry (CFG-14) ----
+
+export type ConfigurationVersionStatus = "draft" | "validated" | "published" | "retired";
+
+export type ConfigurationVersionView = {
+  id: string;
+  companyId: string;
+  domain: string;
+  versionNo: number;
+  status: ConfigurationVersionStatus;
+  snapshot: Record<string, unknown>;
+  effectiveFrom: string | null;
+  effectiveTo: string | null;
+  changeReason: string | null;
+  changeRequestId: string | null;
+  createdAt: string;
+  publishedAt: string | null;
+};
+
+export type CreateConfigurationVersionRequest = {
+  domain: string;
+  /** Omit to capture the domain's current state. */
+  snapshot?: Record<string, unknown>;
+  changeReason?: string;
+};
+
+export type RuleType = "validation" | "default" | "visibility" | "editability" | "applicability" | "eligibility" | "calculation";
+
+export type RuleDefinitionView = {
+  id: string;
+  companyId: string;
+  ruleKey: string;
+  ruleType: RuleType;
+  name: string;
+  description: string | null;
+  targetObject: string | null;
+  targetField: string | null;
+  ownerModule: string | null;
+  isActive: boolean;
+};
+
+export type RuleVersionView = {
+  id: string;
+  ruleDefinitionId: string;
+  versionNo: number;
+  expression: Record<string, unknown>;
+  message: string | null;
+  status: "draft" | "published" | "retired";
+  effectiveFrom: string | null;
+  effectiveTo: string | null;
+  changeReason: string | null;
+};
+
+export type CreateRuleDefinitionRequest = {
+  ruleKey: string;
+  ruleType: RuleType;
+  name: string;
+  description?: string;
+  targetObject?: string;
+  targetField?: string;
+  ownerModule?: string;
+};
+
+export type CreateRuleVersionRequest = {
+  expression: Record<string, unknown>;
+  message?: string;
+  changeReason?: string;
+};
+
+export type RuleEvaluationResult = {
+  ruleKey: string;
+  versionNo: number;
+  result: boolean;
+  message: string | null;
+  asOf: string;
+};
+
+// ---------------------------------------------------------------------------
+// Step 4 (Gap Register EMP-01..06): canonical person, employment periods,
+// effective-dated history and as-of reads.
+// ---------------------------------------------------------------------------
+
+export type PersonNationalIdType = "cnic" | "nicop" | "passport" | "b_form" | "other";
+
+export type PersonView = {
+  id: string;
+  companyId: string;
+  fullName: string;
+  firstName: string | null;
+  middleName: string | null;
+  lastName: string | null;
+  preferredName: string | null;
+  title: string | null;
+  gender: string | null;
+  nationality: string | null;
+  secondNationality: string | null;
+  language: string | null;
+  maritalStatus: string | null;
+  maritalStatusDate: string | null;
+  placeOfBirth: string | null;
+  nationalIdType: PersonNationalIdType;
+  passportExpiry: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /** Sensitive - present only for callers who may see sensitive identity data. */
+  cnic?: string | null;
+  dateOfBirth?: string | null;
+  passportNumber?: string | null;
+  ntn?: string | null;
+};
+
+export type UpdatePersonRequest = {
+  firstName?: string;
+  middleName?: string | null;
+  lastName?: string;
+  preferredName?: string | null;
+  title?: string | null;
+  gender?: string | null;
+  nationality?: string | null;
+  secondNationality?: string | null;
+  language?: string | null;
+  maritalStatus?: string | null;
+  maritalStatusDate?: string | null;
+  placeOfBirth?: string | null;
+  nationalIdType?: PersonNationalIdType;
+  passportNumber?: string | null;
+  passportExpiry?: string | null;
+  ntn?: string | null;
+  /** When the change takes effect (history window); defaults to today. */
+  effectiveDate?: string;
+  reason?: string;
+};
+
+export type PersonVersionView = {
+  id: string;
+  personId: string;
+  validFrom: string;
+  validTo: string | null;
+  fullName: string | null;
+  firstName: string | null;
+  middleName: string | null;
+  lastName: string | null;
+  preferredName: string | null;
+  title: string | null;
+  gender: string | null;
+  nationality: string | null;
+  secondNationality: string | null;
+  language: string | null;
+  maritalStatus: string | null;
+  maritalStatusDate: string | null;
+  placeOfBirth: string | null;
+  nationalIdType: string | null;
+  passportExpiry: string | null;
+  recordedAt: string;
+};
+
+export type EmploymentView = {
+  id: string;
+  personId: string;
+  employeeId: string | null;
+  periodNumber: number;
+  startDate: string;
+  endDate: string | null;
+  status: "active" | "ended";
+  employeeNumber: string | null;
+  rehireOfEmploymentId: string | null;
+};
+
+export type PersonDuplicateCandidateView = {
+  personId: string;
+  fullName: string;
+  matchedOn: "cnic" | "date_of_birth_and_name";
+  employeeNumbers: string[];
+  hasActiveEmployment: boolean;
+};
+
+export type EmployeeAsOfView = {
+  employeeId: string;
+  asOf: string;
+  personId: string;
+  employmentId: string | null;
+  periodNumber: number | null;
+  employeeNumber: string | null;
+  fullName: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  preferredName: string | null;
+  gender: string | null;
+  maritalStatus: string | null;
+  nationality: string | null;
+  orgUnitId: string | null;
+  positionId: string | null;
+  jobId: string | null;
+  locationId: string | null;
+  managerId: string | null;
+  employeeSubgroupId: string | null;
+  payrollAreaId: string | null;
+  department: string | null;
+  designation: string | null;
+  salaryBand: string | null;
+  employmentType: string | null;
+  employmentStatus: string | null;
+  statusReason: string | null;
+  dateOfJoining: string | null;
+  terminationDate: string | null;
+};
+
+
+// ---------------------------------------------------------------------------------------------------------------
+// Step 9F - tax years, tax profiles, exemptions, credits and employee tax profiles (PAY-09, PAY-10)
+// ---------------------------------------------------------------------------------------------------------------
+
+export type TaxPublicationStatus = "draft" | "published" | "retired";
+
+export type TaxYearView = {
+  id: string;
+  label: string;
+  jurisdiction: string;
+  startDate: string;
+  endDate: string;
+  status: TaxPublicationStatus;
+  sourceReference: string | null;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  notes: string | null;
+  profileCount: number;
+  createdAt: string;
+};
+export type CreateTaxYearRequest = { label: string; jurisdiction?: string; startDate: string; endDate: string; notes?: string };
+export type UpdateTaxYearRequest = { label?: string; startDate?: string; endDate?: string; notes?: string | null };
+export type PublishTaxRecordRequest = { sourceReference: string };
+
+export type TaxRoundingMode = "none" | "nearest" | "up" | "down";
+export type TaxProfileSlabInput = { minAnnualIncome: number; maxAnnualIncome: number | null; baseTax: number; ratePercent: number };
+export type TaxProfileSlabView = TaxProfileSlabInput & { id: string };
+export type TaxExemptionType = "fixed_amount" | "percentage_of_income";
+export type TaxCreditType = "fixed_amount" | "percentage_of_amount";
+
+export type TaxExemptionView = {
+  id: string;
+  taxProfileId: string;
+  code: string;
+  name: string;
+  exemptionType: TaxExemptionType;
+  annualCap: number | null;
+  ratePercent: number | null;
+  requiresEvidence: boolean;
+  sourceReference: string | null;
+};
+export type TaxCreditView = {
+  id: string;
+  taxProfileId: string;
+  code: string;
+  name: string;
+  creditType: TaxCreditType;
+  annualCap: number | null;
+  ratePercent: number | null;
+  requiresEvidence: boolean;
+  sourceReference: string | null;
+};
+export type TaxExemptionInput = { code: string; name: string; exemptionType: TaxExemptionType; annualCap?: number | null; ratePercent?: number | null; requiresEvidence?: boolean; sourceReference?: string | null };
+export type TaxCreditInput = { code: string; name: string; creditType: TaxCreditType; annualCap?: number | null; ratePercent?: number | null; requiresEvidence?: boolean; sourceReference?: string | null };
+
+export type TaxProfileView = {
+  id: string;
+  taxYearId: string;
+  taxYearLabel: string;
+  code: string;
+  name: string;
+  description: string | null;
+  roundingMode: TaxRoundingMode;
+  roundingIncrement: number;
+  surchargeThreshold: number | null;
+  surchargeRatePercent: number | null;
+  status: TaxPublicationStatus;
+  sourceReference: string | null;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  slabs: TaxProfileSlabView[];
+  exemptions: TaxExemptionView[];
+  credits: TaxCreditView[];
+  employeeCount: number;
+  createdAt: string;
+};
+export type CreateTaxProfileRequest = {
+  taxYearId: string;
+  code: string;
+  name: string;
+  description?: string;
+  roundingMode?: TaxRoundingMode;
+  roundingIncrement?: number;
+  surchargeThreshold?: number | null;
+  surchargeRatePercent?: number | null;
+};
+export type UpdateTaxProfileRequest = Partial<Omit<CreateTaxProfileRequest, "taxYearId" | "code">>;
+
+export type TaxFilerStatus = "filer" | "non_filer" | "late_filer" | "not_applicable";
+export type TaxResidency = "resident" | "non_resident";
+export type TaxClaimInput = { amount: number; evidenceRef?: string | null };
+export type EmployeeTaxProfileView = {
+  id: string;
+  employeeId: string;
+  taxProfileId: string | null;
+  taxProfileCode: string | null;
+  taxProfileName: string | null;
+  filerStatus: TaxFilerStatus;
+  taxResidency: TaxResidency;
+  provincialScheme: "none" | "pessi" | "sessi" | "bessi" | "other" | null;
+  claimedExemptions: Array<TaxClaimInput & { exemptionId: string }>;
+  claimedCredits: Array<TaxClaimInput & { creditId: string }>;
+  previousEmployerIncome: number;
+  previousEmployerTax: number;
+  previousEmployerTaxYear: number | null;
+  notes: string | null;
+  changeReasonNote: string | null;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  createdAt: string;
+};
+export type SetEmployeeTaxProfileRequest = {
+  effectiveFrom: string;
+  taxProfileId?: string | null;
+  filerStatus?: TaxFilerStatus;
+  taxResidency?: TaxResidency;
+  provincialScheme?: "none" | "pessi" | "sessi" | "bessi" | "other" | null;
+  claimedExemptions?: Array<TaxClaimInput & { exemptionId: string }>;
+  claimedCredits?: Array<TaxClaimInput & { creditId: string }>;
+  previousEmployerIncome?: number;
+  previousEmployerTax?: number;
+  previousEmployerTaxYear?: number | null;
+  notes?: string | null;
+  changeReasonNote?: string | null;
+};
+
+
+// ---------------------------------------------------------------- PAY-18 reconciliations
+export type PayrollReconciliationKind = "calculation" | "payroll" | "payment" | "bank" | "accounting" | "costing" | "tax" | "reversal";
+export type PayrollReconciliationStatus = "matched" | "variance" | "pending" | "resolved";
+
+export type PayrollReconciliationView = {
+  id: string;
+  payrollRunId: string;
+  kind: PayrollReconciliationKind;
+  sequence: number;
+  status: PayrollReconciliationStatus;
+  expectedAmount: number;
+  actualAmount: number;
+  variance: number;
+  /** What was compared and, for a variance, the rows that differ. */
+  detail: Record<string, unknown>;
+  runBy: string | null;
+  runAt: string;
+  resolvedBy: string | null;
+  resolvedAt: string | null;
+  resolutionNote: string | null;
+};
+
+export type RunPayrollReconciliationRequest = { kinds?: PayrollReconciliationKind[] };
+export type ResolvePayrollReconciliationRequest = { note: string };
+
+// ---------------------------------------------------------------- PAY-14 final settlement / PAY-15 scheme ledgers
+export type PayrollSchemeType = "provident_fund" | "gratuity" | "other";
+
+/** Every figure is the tenant's own: nothing here has a shipped default. */
+export type PayrollSchemeParameters = {
+  /** provident_fund: the payslip component whose deductions are the employee's contribution (posted to the ledger when a run is finalised). */
+  employeeComponentKey?: string | null;
+  /** provident_fund: the payslip component that carries the employer's contribution. */
+  employerComponentKey?: string | null;
+  /** provident_fund: below this many months of service the employer's share is not paid out on separation. */
+  employerVestingMonths?: number | null;
+  /** gratuity: days of pay per year of service. */
+  daysPerYearOfService?: number | null;
+  /** gratuity: no gratuity is due before this many months of service. */
+  minimumServiceMonths?: number | null;
+  /** gratuity: monthly salary / this = one day's pay. */
+  dailyRateDivisor?: number | null;
+  /** gratuity: count completed years only, or pro-rata months. */
+  serviceRounding?: "complete_years" | "pro_rata" | null;
+  /** gratuity: whether the payment is taxable in the final payroll run. */
+  isTaxable?: boolean | null;
+};
+
+export type PayrollSchemeDefinitionView = {
+  id: string;
+  code: string;
+  name: string;
+  schemeType: PayrollSchemeType;
+  countryCode: string;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  isActive: boolean;
+  parameters: PayrollSchemeParameters;
+  /** False while a gratuity scheme still lacks figures the tenant has to supply. */
+  isComplete: boolean;
+  missingParameters: string[];
+};
+
+export type UpsertPayrollSchemeRequest = {
+  code: string;
+  name?: string;
+  schemeType?: PayrollSchemeType;
+  countryCode?: string;
+  effectiveFrom: string;
+  isActive?: boolean;
+  parameters?: PayrollSchemeParameters;
+};
+
+export type EmployeeSchemeAccountView = {
+  id: string;
+  employeeId: string;
+  schemeCode: string;
+  status: "active" | "closed";
+  openedOn: string;
+  closedOn: string | null;
+  balance: number;
+};
+
+export type SchemeLedgerEntryType = "opening_balance" | "employee_contribution" | "employer_contribution" | "withdrawal" | "payout" | "adjustment" | "reversal";
+
+export type SchemeLedgerEntryView = {
+  id: string;
+  accountId: string;
+  entryType: SchemeLedgerEntryType;
+  amount: number;
+  entryDate: string;
+  payrollRunId: string | null;
+  settlementId: string | null;
+  reversesEntryId: string | null;
+  note: string | null;
+  createdAt: string;
+};
+
+export type PostSchemeLedgerEntryRequest = {
+  entryType: "opening_balance" | "withdrawal" | "adjustment";
+  /** Positive for an opening balance or withdrawal (a withdrawal is stored negative); signed for an adjustment. */
+  amount: number;
+  entryDate?: string;
+  note?: string;
+};
+
+export type PayrollSettlementSettingsView = {
+  dailyRateDivisor: number | null;
+  /** Which monthly figure one day's pay (leave encashment, notice recovery) is taken from; the tenant chooses. */
+  dailyRateBase: "basic_salary" | "gross_earnings" | null;
+  leaveEncashmentEnabled: boolean;
+  leaveEncashmentTaxable: boolean;
+  noticeRecoveryEnabled: boolean;
+  updatedAt: string | null;
+};
+export type UpdatePayrollSettlementSettingsRequest = Partial<Omit<PayrollSettlementSettingsView, "updatedAt">>;
+
+export type FinalSettlementStatus = "open" | "calculated" | "approved" | "finalized" | "cancelled" | "reversed";
+export type FinalSettlementLineKind = "salary_due" | "leave_encashment" | "gratuity" | "provident_fund" | "notice_recovery" | "loan_outstanding" | "tax_finalization" | "other_deductions";
+export type FinalSettlementSettleVia = "payslip" | "scheme_ledger" | "run_result" | "info";
+
+export type FinalSettlementLineView = {
+  id: string;
+  lineNo: number;
+  kind: FinalSettlementLineKind;
+  label: string;
+  /** Signed: money to the employee is positive, money recovered from them negative. */
+  amount: number;
+  settleVia: FinalSettlementSettleVia;
+  isTaxable: boolean | null;
+  additionalPaymentId: string | null;
+  schemeCode: string | null;
+  basis: Record<string, unknown>;
+  warning: string | null;
+};
+
+export type FinalSettlementView = {
+  id: string;
+  employeeId: string;
+  employeeNumber: string;
+  employeeName: string;
+  terminationEventId: string;
+  lastWorkingDay: string;
+  status: FinalSettlementStatus;
+  payrollRunId: string | null;
+  calculationSequence: number;
+  calculatedBy: string | null;
+  calculatedAt: string | null;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  finalizedAt: string | null;
+  isImmutable: boolean;
+  cancelReason: string | null;
+  result: Record<string, unknown> | null;
+  lines: FinalSettlementLineView[];
+};
+
+
+// ---------------------------------------------------------------- Step 10D (PAY-17, 20, 22, 25, 26, 27)
+
+// ---- PAY-27 payroll domain events (versioned payloads published through the outbox)
+export type PayrollEventType =
+  | "payroll.run.state_changed"
+  | "payroll.run.finalized"
+  | "payroll.employee.calculated"
+  | "payroll.payment.status_changed"
+  | "payroll.posting.status_changed";
+
+export type PayrollRunStateChangedPayloadV1 = {
+  runId: string;
+  runType: string;
+  payrollAreaId: string | null;
+  periodStart: string;
+  periodEnd: string;
+  from: string | null;
+  to: string;
+  action: string;
+  calculationSequence: number;
+};
+export type PayrollRunFinalizedPayloadV1 = {
+  runId: string;
+  runType: string;
+  payrollAreaId: string | null;
+  periodStart: string;
+  periodEnd: string;
+  currencyCode: string;
+  payslipCount: number;
+  /** Aggregate for the whole run (never an individual's pay - SEC-13 keeps salary-like figures out of events). */
+  totalPayable: number;
+  totalIncomeTax: number;
+  totalEmployerCost: number;
+  finalizedAt: string | null;
+};
+export type PayrollEmployeeCalculatedPayloadV1 = {
+  runId: string;
+  payslipId: string;
+  employeeId: string;
+  employeeNumber: string;
+  calculationSequence: number;
+};
+export type PayrollPaymentStatusChangedPayloadV1 = {
+  runId: string;
+  batchId: string;
+  batchReference: string;
+  from: string | null;
+  to: string;
+  rowCount: number;
+  /** Aggregate for the batch. */
+  totalPayable: number;
+};
+export type PayrollPostingStatusChangedPayloadV1 = {
+  runId: string;
+  journalId: string;
+  journalNumber: string | null;
+  journalKind: "run" | "reversal";
+  from: string | null;
+  to: string;
+  totalDebit: number;
+  totalCredit: number;
+};
+
+export type PayrollEventCatalogEntry = {
+  eventType: PayrollEventType;
+  schemaVersion: number;
+  aggregateType: string;
+  description: string;
+  fields: string[];
+};
+
+/** What a subscriber can rely on: event types, the schema version they carry, and the payload fields of that version. */
+export const PAYROLL_EVENT_CATALOG: readonly PayrollEventCatalogEntry[] = [
+  { eventType: "payroll.run.state_changed", schemaVersion: 1, aggregateType: "payroll_run", description: "A payroll run moved to a new state.", fields: ["runId", "runType", "payrollAreaId", "periodStart", "periodEnd", "from", "to", "action", "calculationSequence"] },
+  { eventType: "payroll.run.finalized", schemaVersion: 1, aggregateType: "payroll_run", description: "A payroll run was finalised; its payslips are now settled.", fields: ["runId", "runType", "payrollAreaId", "periodStart", "periodEnd", "currencyCode", "payslipCount", "totalPayable", "totalIncomeTax", "totalEmployerCost", "finalizedAt"] },
+  { eventType: "payroll.employee.calculated", schemaVersion: 1, aggregateType: "payroll_run", description: "One employee's payslip was calculated (published only while a subscription listens for it). Carries identifiers only: an individual's pay never travels in an event (SEC-13); the subscriber reads the payslip through the API.", fields: ["runId", "payslipId", "employeeId", "employeeNumber", "calculationSequence"] },
+  { eventType: "payroll.payment.status_changed", schemaVersion: 1, aggregateType: "payroll_payment_batch", description: "A payment batch moved to a new state (generated, approved, released, acknowledged, rejected, voided).", fields: ["runId", "batchId", "batchReference", "from", "to", "rowCount", "totalPayable"] },
+  { eventType: "payroll.posting.status_changed", schemaVersion: 1, aggregateType: "payroll_journal", description: "A payroll journal was generated, posted, reversed or discarded.", fields: ["runId", "journalId", "journalNumber", "journalKind", "from", "to", "totalDebit", "totalCredit"] },
+];
+
+// ---- PAY-17 accounting and costing
+export type PayrollGlMatchType = "component_key" | "category" | "special";
+export type PayrollGlMappingView = {
+  id: string;
+  matchType: PayrollGlMatchType;
+  matchValue: string;
+  debitAccountCode: string | null;
+  creditAccountCode: string | null;
+  description: string | null;
+  isActive: boolean;
+};
+export type UpsertPayrollGlMappingRequest = {
+  matchType: PayrollGlMatchType;
+  matchValue: string;
+  debitAccountCode?: string | null;
+  creditAccountCode?: string | null;
+  description?: string | null;
+  isActive?: boolean;
+};
+export type PayrollJournalPurpose = "payroll_run" | "final_settlement" | "reversal";
+export type PayrollJournalTypeView = {
+  id: string;
+  code: string;
+  name: string;
+  purpose: PayrollJournalPurpose;
+  numberPrefix: string;
+  nextNumber: number;
+  isActive: boolean;
+};
+export type UpdatePayrollJournalTypeRequest = { name?: string; numberPrefix?: string; isActive?: boolean };
+export type PayrollJournalStatus = "draft" | "posted" | "reversed" | "discarded";
+export type PayrollJournalLineKind = "expense" | "employer_expense" | "liability" | "employer_liability" | "net_pay";
+export type PayrollJournalLineView = {
+  lineNo: number;
+  accountCode: string;
+  debit: number;
+  credit: number;
+  lineKind: PayrollJournalLineKind;
+  componentKey: string | null;
+  description: string | null;
+  costCenterId: string | null;
+  costCenterCode: string | null;
+  profitCenterId: string | null;
+  profitCenterCode: string | null;
+};
+export type PayrollJournalView = {
+  id: string;
+  payrollRunId: string;
+  journalKind: "run" | "reversal";
+  journalTypeCode: string;
+  journalNumber: string | null;
+  status: PayrollJournalStatus;
+  reversesJournalId: string | null;
+  postingDate: string;
+  currencyCode: string;
+  totalDebit: number;
+  totalCredit: number;
+  lineCount: number;
+  postingReference: string | null;
+  notes: string | null;
+  generatedAt: string;
+  postedAt: string | null;
+  reversedAt: string | null;
+  lines?: PayrollJournalLineView[];
+};
+export type PayrollAccountingPreviewView = {
+  payrollRunId: string;
+  unmappedKeys: Array<{ key: string; category: string; affects: string; label: string }>;
+  missingSpecial: string[];
+  unallocatedEmployees: number;
+  totalDebit: number;
+  totalCredit: number;
+  ready: boolean;
+};
+export type GeneratePayrollJournalRequest = { postingDate?: string; notes?: string };
+export type PostPayrollJournalRequest = { postingReference?: string };
+export type PayrollCostingRowView = {
+  payslipId: string;
+  employeeId: string;
+  employeeNumber: string;
+  costCenterId: string | null;
+  costCenterCode: string | null;
+  profitCenterId: string | null;
+  profitCenterCode: string | null;
+  allocationPercentage: number;
+  allocationSource: "allocation" | "position" | "unallocated";
+  grossCost: number;
+  employerCost: number;
+  totalCost: number;
+  status: "draft" | "final" | "superseded";
+};
+export type PayrollCostingSummaryView = {
+  payrollRunId: string;
+  rows: PayrollCostingRowView[];
+  byCostCenter: Array<{ costCenterId: string | null; costCenterCode: string | null; profitCenterId: string | null; grossCost: number; employerCost: number; totalCost: number; employees: number }>;
+  totalCost: number;
+};
+
+// ---- PAY-20 documents
+export type PayrollDocumentType = "payslip" | "tax_certificate" | "salary_certificate";
+export type GeneratedDocumentView = {
+  id: string;
+  documentType: PayrollDocumentType;
+  employeeId: string;
+  employeeNumber: string | null;
+  employeeName: string | null;
+  payrollRunId: string | null;
+  payslipId: string | null;
+  taxYear: number | null;
+  templateKey: string | null;
+  templateSource: "built_in" | "custom";
+  title: string;
+  status: "issued" | "superseded" | "revoked";
+  publishedAt: string | null;
+  generatedAt: string;
+  contentHash: string;
+  revokeReason: string | null;
+  content?: string;
+};
+export type PayrollDocumentSettingsView = {
+  requirePublication: boolean;
+  templateChoices: Array<{ documentType: PayrollDocumentType; templateKey: string | null }>;
+  availableTemplates: Array<{ key: string; name: string }>;
+};
+export type UpdatePayrollDocumentSettingsRequest = {
+  requirePublication?: boolean;
+  /** templateKey null returns the type to its built-in body. */
+  templateChoices?: Array<{ documentType: PayrollDocumentType; templateKey: string | null }>;
+};
+export type PayrollDocumentPlaceholderView = { documentType: PayrollDocumentType; placeholders: Array<{ key: string; description: string }> };
+export type GenerateTaxCertificateRequest = { employeeId: string; taxYear: number };
+export type GenerateSalaryCertificateRequest = { employeeId: string; addressedTo?: string; purpose?: string };
+
+// ---- PAY-22 benefits
+export type BenefitType = "health_insurance" | "life_insurance" | "pension" | "allowance" | "loan_scheme" | "other";
+export type BenefitContributionMode = "fixed" | "percentage";
+export type BenefitPlanView = {
+  id: string;
+  code: string;
+  name: string;
+  benefitType: BenefitType;
+  description: string | null;
+  employeeComponentId: string | null;
+  employeeComponentKey: string | null;
+  employerComponentKey: string | null;
+  employeeContributionMode: BenefitContributionMode;
+  employeeContributionValue: number | null;
+  employerContributionMode: BenefitContributionMode;
+  employerContributionValue: number | null;
+  minServiceMonths: number | null;
+  employmentTypes: string[] | null;
+  payrollAreaId: string | null;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  status: "active" | "inactive";
+  enrolledCount: number;
+};
+export type UpsertBenefitPlanRequest = {
+  id?: string;
+  code: string;
+  name: string;
+  benefitType?: BenefitType;
+  description?: string | null;
+  employeeComponentId?: string | null;
+  employerComponentKey?: string | null;
+  employeeContributionMode?: BenefitContributionMode;
+  employeeContributionValue?: number | null;
+  employerContributionMode?: BenefitContributionMode;
+  employerContributionValue?: number | null;
+  minServiceMonths?: number | null;
+  employmentTypes?: string[] | null;
+  payrollAreaId?: string | null;
+  effectiveFrom: string;
+  effectiveTo?: string | null;
+  status?: "active" | "inactive";
+};
+export type BenefitEnrolmentView = {
+  id: string;
+  planId: string;
+  planCode: string;
+  planName: string;
+  employeeId: string;
+  employeeNumber: string;
+  employeeName: string;
+  status: "enrolled" | "waived" | "ended";
+  coverageLevel: string | null;
+  employeeContributionOverride: number | null;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  endReason: string | null;
+};
+export type EnrolBenefitRequest = {
+  planId: string;
+  employeeId: string;
+  effectiveFrom: string;
+  coverageLevel?: string | null;
+  employeeContributionOverride?: number | null;
+  /** Records a deliberate decline instead of an enrolment. */
+  waive?: boolean;
+};
+export type EndBenefitEnrolmentRequest = { effectiveTo: string; reason: string };
+export type BenefitEligibilityView = { eligible: boolean; reasons: string[]; serviceMonths: number };
+export type BenefitContributionView = {
+  id: string;
+  planId: string;
+  enrolmentId: string;
+  employeeId: string;
+  employeeNumber: string;
+  payrollRunId: string;
+  periodEnd: string;
+  employeeAmount: number;
+  employerAmount: number;
+  status: "accrued" | "reversed";
+};
+
+// ---- PAY-25 dashboard
+export type PayrollDashboardRunView = {
+  runId: string;
+  runType: string;
+  payrollAreaId: string | null;
+  periodStart: string;
+  periodEnd: string;
+  status: PayrollRunStatus;
+  calculationMode: string;
+  populationCount: number;
+  calculatedCount: number;
+  failedCount: number;
+  openExceptions: number;
+  partitions: { total: number; byState: Record<string, number> };
+  progressPercent: number;
+  throughputPerMinute: number | null;
+  estimatedSecondsRemaining: number | null;
+  jobStatus: string | null;
+  paymentStatus: string | null;
+  postingStatus: string | null;
+  totalGross: number | null;
+  totalNet: number | null;
+  totalEmployerCost: number | null;
+};
+export type PayrollDashboardView = {
+  generatedAt: string;
+  runsByStatus: Record<string, number>;
+  active: PayrollDashboardRunView[];
+  recent: PayrollDashboardRunView[];
+  attention: Array<{ runId: string; kind: string; message: string }>;
+};
+
+// ---- PAY-26 bulk payroll inputs
+export type PayrollInputImportType = "payroll_components" | "payroll_payments";
+export type PayrollInputBatchView = {
+  id: string;
+  importType: PayrollInputImportType;
+  status: string;
+  fileName: string | null;
+  totalRows: number;
+  validRows: number;
+  invalidRows: number;
+  importedRows: number;
+  failedRows: number;
+  checkpointRow: number;
+  allowPartial: boolean;
+  backgroundJobId: string | null;
+  createdAt: string;
+  executedAt: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  lastError: string | null;
+};
+export type PayrollInputRowView = {
+  rowNumber: number;
+  status: "valid" | "invalid" | "imported" | "failed";
+  payload: Record<string, unknown>;
+  errors: Array<{ field?: string; message: string }>;
+  employeeId: string | null;
+};
+export type DryRunPayrollInputRequest = { importType: PayrollInputImportType; csv: string; fileName?: string; allowPartial?: boolean };
+export type PayrollInputTemplateView = { importType: PayrollInputImportType; columns: Array<{ name: string; required: boolean; description: string }>; example: string };

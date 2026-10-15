@@ -24,7 +24,25 @@ const ACTION_LABELS: Record<OrgChangeItemAction, string> = {
   retype: "Retype",
   archive: "Archive",
   activate: "Activate",
+  position_freeze: "Freeze position",
+  position_unfreeze: "Unfreeze position",
+  position_abolish: "Abolish position",
+  position_reactivate: "Reactivate position",
+  position_rename: "Rename position",
+  position_move: "Move position",
+  location_rename: "Rename location",
+  location_archive: "Archive location",
+  location_activate: "Activate location",
+  cost_center_rename: "Rename cost center",
+  cost_center_archive: "Archive cost center",
+  cost_center_activate: "Activate cost center",
+  profit_center_rename: "Rename profit center",
+  profit_center_archive: "Archive profit center",
+  profit_center_activate: "Activate profit center",
+  assignment_transfer: "Transfer employee",
 };
+// The in-page composer builds org-unit items; the other entity types are created through the API / bulk tooling.
+const UNIT_ACTIONS: OrgChangeItemAction[] = ["move", "rename", "retype", "archive", "activate"];
 
 const STATUS_BADGE_CLASS: Record<OrgChangeStatus, string> = {
   draft: "bg-black/10 text-label-tertiary",
@@ -94,7 +112,7 @@ function ItemRow({
           onChange={(e) => onChange({ ...item, action: e.target.value as OrgChangeItemAction })}
           className="w-full rounded-lg border border-black/10 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
         >
-          {(Object.keys(ACTION_LABELS) as OrgChangeItemAction[]).map((a) => (
+          {UNIT_ACTIONS.map((a) => (
             <option key={a} value={a}>
               {ACTION_LABELS[a]}
             </option>

@@ -1,9 +1,12 @@
+import { redactPayload } from "../domain-events/payload-redaction";
+import { decryptIntegrationConfig } from "../crypto/integration-secrets";
 import { BadRequestException, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import { createHmac } from "crypto";
 import type { PoolClient } from "pg";
 import { DatabaseService } from "../database/database.service";
 import { AuditService } from "../audit/audit.service";
+import { DomainEventsService } from "../domain-events/domain-events.service";
 import type { RequestClaims } from "../database/tenant-context";
 import type { WebhookEvent } from "@aihxm/shared-types";
 
@@ -34,6 +37,17 @@ const BACKOFF_SCHEDULE_MS = [
 ];
 
 const SWEEP_BATCH_LIMIT = 50;
+
+/** Aggregate type recorded in domain_events for each Organization Management event (ORG-06). */
+const ORG_AGGREGATE_BY_EVENT: Record<string, string> = {
+  "org.unit.changed": "org_unit",
+  "org.position.changed": "position",
+  "org.assignment.changed": "employee_org_assignment",
+  "org.relationship.changed": "org_relationship",
+  "org.location.changed": "location",
+  "org.financial_center.changed": "financial_center",
+  "org.reorganization.published": "org_change",
+};
 const DELIVERY_TIMEOUT_MS = 10_000;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -72,7 +86,8 @@ async function loadWebhookTarget(
     [companyId]
   );
   if (result.rowCount === 0) return null;
-  const config = result.rows[0].config ?? {};
+  // SEC-03: the signing secret is stored encrypted.
+  const config = await decryptIntegrationConfig(client, companyId, "webhook", result.rows[0].config ?? {});
   const url: unknown = config.url;
   const signingSecret: unknown = config.signingSecret;
   if (typeof url !== "string" || !url || typeof signingSecret !== "string" || !signingSecret) return null;
@@ -99,11 +114,18 @@ export class WebhookDispatchService {
 
   constructor(
     private readonly db: DatabaseService,
-    private readonly audit: AuditService
+    private readonly audit: AuditService,
+    // ORG-06: organization events are also appended to the domain_events outbox.
+    // The service has no dependencies, so it is default-instantiated (positional
+    // spec constructions keep working).
+    private readonly domainEvents: DomainEventsService = new DomainEventsService()
   ) {}
 
   /**
-   * Queues one event for delivery. Deliberately never throws for "nothing
+   * Queues one event for delivery. The payload is run through redactPayload()
+   * first (Gap Register SEC-13): CNIC, DOB, bank/IBAN, salary and secrets
+   * never leave the system in a webhook body, whatever the caller passed.
+   * Deliberately never throws for "nothing
    * to deliver to" — a tenant that hasn't configured (or hasn't enabled)
    * its webhook integration is the overwhelmingly common case, and every
    * call site (an employee-created event, a termination event, ...) would
@@ -113,11 +135,24 @@ export class WebhookDispatchService {
    */
   async enqueue(companyId: string, eventType: string, payload: Record<string, unknown>): Promise<void> {
     await this.db.withClaims(SERVICE_CLAIMS, async (client) => {
+      // ORG-06: every org.* event lands in the outbox whether or not the tenant
+      // has an outbound webhook, so internal consumers (workflow approver
+      // refresh, denormalized-text sync) and subscriptions can react to it.
+      const aggregate = ORG_AGGREGATE_BY_EVENT[eventType];
+      if (aggregate && typeof payload.entityId === "string") {
+        await this.domainEvents.publish(client, SERVICE_CLAIMS, {
+          companyId,
+          eventType,
+          aggregateType: aggregate,
+          aggregateId: payload.entityId,
+          payload,
+        });
+      }
       const target = await loadWebhookTarget(client, companyId);
       if (!target) return;
       await client.query(
         `INSERT INTO webhook_events (company_id, event_type, payload) VALUES ($1, $2, $3::jsonb)`,
-        [companyId, eventType, JSON.stringify(payload)]
+        [companyId, eventType, JSON.stringify(redactPayload(payload))]
       );
     });
   }

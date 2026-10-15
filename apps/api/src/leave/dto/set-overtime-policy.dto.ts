@@ -1,4 +1,4 @@
-import { IsInt, IsNumber, IsOptional, Min } from "class-validator";
+import { IsBoolean, IsInt, IsNumber, IsOptional, IsString, IsUUID, Min, MaxLength, ValidateIf } from "class-validator";
 
 /**
  * All fields optional — `OvertimeService.setPolicy()` merges onto the
@@ -32,4 +32,46 @@ export class SetOvertimePolicyDto {
   @IsNumber()
   @Min(0.01)
   holidayRateMultiplier?: number;
+
+  /** TLM-07 - null clears a cap. */
+  @IsOptional()
+  @ValidateIf((_o, v) => v !== null)
+  @IsInt()
+  @Min(1)
+  maxDailyMinutes?: number | null;
+
+  @IsOptional()
+  @ValidateIf((_o, v) => v !== null)
+  @IsInt()
+  @Min(1)
+  maxMonthlyMinutes?: number | null;
+
+  @IsOptional()
+  @IsBoolean()
+  requiresPreApproval?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  compOffAllowed?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  compOffMinutesPerDay?: number;
+}
+
+/** A policy for an employee group and/or a location. */
+export class SetScopedOvertimePolicyDto extends SetOvertimePolicyDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  name?: string;
+
+  @IsOptional()
+  @IsUUID()
+  employeeGroupId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  locationId?: string;
 }

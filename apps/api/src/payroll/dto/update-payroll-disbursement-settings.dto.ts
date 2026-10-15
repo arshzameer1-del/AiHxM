@@ -1,4 +1,4 @@
-import { ArrayMinSize, IsArray, IsIn } from "class-validator";
+import { ArrayMinSize, IsArray, IsBoolean, IsIn, IsOptional } from "class-validator";
 import type { DisbursementFieldKey } from "@aihxm/shared-types";
 
 // Kept in sync with PayrollService's own DISBURSEMENT_FIELD_KEYS constant —
@@ -20,9 +20,16 @@ const DISBURSEMENT_FIELD_KEYS: DisbursementFieldKey[] = [
   "netPay",
 ];
 
+export { DISBURSEMENT_FIELD_KEYS };
+
 export class UpdatePayrollDisbursementSettingsDto {
+  @IsOptional()
   @IsArray()
   @ArrayMinSize(1)
   @IsIn(DISBURSEMENT_FIELD_KEYS, { each: true })
-  columns!: DisbursementFieldKey[];
+  columns?: DisbursementFieldKey[];
+
+  @IsOptional()
+  @IsBoolean()
+  requireReleaseApproval?: boolean;
 }

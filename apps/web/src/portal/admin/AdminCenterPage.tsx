@@ -2,15 +2,21 @@ import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { EmployeeGroupsPanel } from "./EmployeeGroupsPanel";
 import { LeavePoliciesPanel } from "./LeavePoliciesPanel";
+import { LeaveTypesPanel } from "./LeaveTypesPanel";
+import { AttendanceDevicesPanel } from "./AttendanceDevicesPanel";
 import { ShiftsPanel } from "./ShiftsPanel";
 import { HolidaysPanel } from "./HolidaysPanel";
 import { ChecklistsPanel } from "./ChecklistsPanel";
+import { OvertimePoliciesPanel } from "./OvertimePoliciesPanel";
 
-type Tab = "groups" | "policies" | "shifts" | "holidays" | "checklists";
+type Tab = "groups" | "policies" | "leavetypes" | "devices" | "overtime" | "shifts" | "holidays" | "checklists";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "groups", label: "Employee Groups" },
   { key: "policies", label: "Leave Policies" },
+  { key: "leavetypes", label: "Leave Types" },
+  { key: "devices", label: "Attendance Devices" },
+  { key: "overtime", label: "Overtime" },
   { key: "shifts", label: "Shifts & Work Schedule" },
   { key: "holidays", label: "Holidays" },
   { key: "checklists", label: "Onboarding & Offboarding" },
@@ -20,7 +26,7 @@ const TABS: { key: Tab; label: string }[] = [
 // against the same query-param keys its own admin_route rows use
 // (0032_configuration_center.sql), read once on mount so a normal
 // in-page tab click still just uses local state, not the URL.
-const VALID_TABS: Tab[] = ["groups", "policies", "shifts", "holidays", "checklists"];
+const VALID_TABS: Tab[] = ["groups", "policies", "leavetypes", "devices", "overtime", "shifts", "holidays", "checklists"];
 function initialTabFrom(searchParams: URLSearchParams): Tab {
   const requested = searchParams.get("tab");
   return (VALID_TABS as string[]).includes(requested ?? "") ? (requested as Tab) : "groups";
@@ -65,6 +71,12 @@ export function AdminCenterPage() {
         <EmployeeGroupsPanel />
       ) : tab === "policies" ? (
         <LeavePoliciesPanel />
+      ) : tab === "leavetypes" ? (
+        <LeaveTypesPanel />
+      ) : tab === "devices" ? (
+        <AttendanceDevicesPanel />
+      ) : tab === "overtime" ? (
+        <OvertimePoliciesPanel />
       ) : tab === "shifts" ? (
         <ShiftsPanel />
       ) : tab === "holidays" ? (
