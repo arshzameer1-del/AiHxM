@@ -320,6 +320,31 @@ describe("Leave types, ledger and request rules (Step 8A)", () => {
       await expect(ledger.history(femaleClaims, staffEmployeeId)).rejects.toThrow();
     });
 
+    it("a balance row created at 0 before a policy applied is topped up when the policy grants days, once only (LIVE-18)", async () => {
+      const year = 2031;
+      const row = async () => (await sql<{ entitled_days: string }>("SELECT entitled_days FROM leave_balances WHERE employee_id = $1 AND leave_type = 'annual' AND year = $2", [staffEmployeeId, year]))[0];
+      await db.withClaims(hr, (c) => ledger.ensureBalance(c, companyId, staffEmployeeId, "annual", year, { days: 0, method: "upfront" }));
+      expect(Number((await row()).entitled_days)).toBe(0);
+
+      await db.withClaims(hr, (c) => ledger.ensureBalance(c, companyId, staffEmployeeId, "annual", year, { days: 14, method: "upfront" }));
+      expect(Number((await row()).entitled_days)).toBe(14);
+
+      // Asking again does not post the entitlement twice, and a later HR adjustment is not undone.
+      await db.withClaims(hr, (c) => ledger.ensureBalance(c, companyId, staffEmployeeId, "annual", year, { days: 14, method: "upfront" }));
+      expect(Number((await row()).entitled_days)).toBe(14);
+      await ledger.adjust(hr, { employeeId: staffEmployeeId, leaveType: "annual", year, days: 3, reason: "Carried over by agreement" });
+      await db.withClaims(hr, (c) => ledger.ensureBalance(c, companyId, staffEmployeeId, "annual", year, { days: 14, method: "upfront" }));
+      expect(Number((await row()).entitled_days)).toBe(17);
+    });
+
+    it("a type with accrual method 'none' is never topped up from the policy (LIVE-18)", async () => {
+      const year = 2032;
+      await db.withClaims(hr, (c) => ledger.ensureBalance(c, companyId, staffEmployeeId, "sick", year, { days: 0, method: "none" }));
+      await db.withClaims(hr, (c) => ledger.ensureBalance(c, companyId, staffEmployeeId, "sick", year, { days: 8, method: "none" }));
+      const [r] = await sql<{ entitled_days: string }>("SELECT entitled_days FROM leave_balances WHERE employee_id = $1 AND leave_type = 'sick' AND year = $2", [staffEmployeeId, year]);
+      expect(Number(r.entitled_days)).toBe(0);
+    });
+
     it("the monthly accrual job accrues each elapsed month once, is idempotent and catches up", async () => {
       await types.create(hr, { code: "monthly_leave", name: "Monthly leave", accrualMethod: "monthly" });
       await groups.updateLeavePolicy(hr, defaultPolicyId, { entitlements: [{ leaveType: "monthly_leave", days: 12 }] });

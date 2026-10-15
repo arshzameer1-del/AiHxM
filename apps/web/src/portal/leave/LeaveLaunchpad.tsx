@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CalendarDays, CalendarPlus, ClipboardCheck, PartyPopper, UserCog } from "lucide-react";
+import { CalendarDays, CalendarPlus, ClipboardCheck, PartyPopper, Scale, UserCog } from "lucide-react";
 import { api } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { useModuleContext } from "../shared/ModuleContext";
@@ -59,6 +59,10 @@ export function LeaveLaunchpad() {
   }
   if (canSubmitOnBehalf) {
     manage.push({ to: "/app/leave/on-behalf", title: "Request on Behalf", description: "Create leave for an employee", icon: UserCog, testId: "tile-on-behalf" });
+  }
+
+  if (canSubmitOnBehalf) {
+    manage.push({ to: "/app/leave/balances", title: "Leave Balances", description: "See and adjust an employee's balances", icon: Scale, testId: "tile-leave-balances" });
   }
 
   return (

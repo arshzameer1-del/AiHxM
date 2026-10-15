@@ -135,7 +135,8 @@ export class LeaveLedgerService {
    * first time it is needed: `upfront` posts the whole year as an opening entry, `monthly`
    * posts the months elapsed so far (the accrual job posts the rest), `none` starts at 0
    * (e.g. compensatory off, earned through ledger entries). An existing row is returned
-   * untouched.
+   * untouched, except a zero-entitlement row for a type the policy now grants days for, which
+   * is topped up (LIVE-18).
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async ensureBalance(
@@ -149,7 +150,10 @@ export class LeaveLedgerService {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ): Promise<any> {
     const existing = await client.query("SELECT * FROM leave_balances WHERE employee_id = $1 AND leave_type = $2 AND year = $3", [employeeId, leaveType, year]);
-    if ((existing.rowCount ?? 0) > 0) return existing.rows[0];
+    // LIVE-18: a row that was created at 0 before a policy gave this person an entitlement is topped up from the
+    // policy now. Posting is idempotent per source key, so a balance that already has its entitlement is untouched.
+    const needsEntitlement = (existing.rowCount ?? 0) > 0 && Number(existing.rows[0].entitled_days) === 0 && entitlement.days > 0 && entitlement.method !== "none";
+    if ((existing.rowCount ?? 0) > 0 && !needsEntitlement) return existing.rows[0];
     if (entitlement.days > 0) {
       if (entitlement.method === "upfront") {
         await this.post(client, {

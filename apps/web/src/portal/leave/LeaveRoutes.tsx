@@ -14,6 +14,7 @@ import { LeaveFormPage } from "./LeaveFormPage";
 import { LeaveDetailPage } from "./LeaveDetailPage";
 import { OnBehalfOverviewPage, OnBehalfSelectPage } from "./OnBehalfPages";
 import { LeaveLaunchpad } from "./LeaveLaunchpad";
+import { LeaveBalancesPage, LeaveBalancesSelectPage } from "./LeaveBalancesPages";
 import { SapSection } from "../shared/FormSections";
 
 /**
@@ -28,6 +29,7 @@ import { SapSection } from "../shared/FormSections";
  *   /app/leave/approvals             leave requests waiting for the signed-in approver
  *   /app/leave/on-behalf             Select Employee, then /on-behalf/:employeeId
  *   /app/leave/holidays              holiday calendar
+ *   /app/leave/balances              HR: Select Employee, then /balances/:employeeId (balances and adjustments)
  *
  * Which actions exist is still decided by the roles plus the server; the client only chooses what to show.
  */
@@ -40,6 +42,8 @@ export function LeaveRoutes() {
         <Route path="my-requests" element={<MyLeavePage />} />
         <Route path="approvals" element={<LeaveApprovalsPage />} />
         <Route path="holidays" element={<HolidaysPage />} />
+        <Route path="balances" element={<LeaveBalancesSelectPage />} />
+        <Route path="balances/:employeeId" element={<LeaveBalancesPage />} />
         <Route path="new" element={<LeaveFormPage />} />
         <Route path="on-behalf" element={<OnBehalfSelectPage />} />
         <Route path="on-behalf/:employeeId" element={<OnBehalfOverviewPage />} />
