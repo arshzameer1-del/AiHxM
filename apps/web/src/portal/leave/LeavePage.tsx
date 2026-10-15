@@ -1,11 +1,9 @@
 import { useEffect, useState } from "react";
-import { CalendarDays } from "lucide-react";
 import type {
   AttendanceCorrectionRequestView,
   AttendanceRecordView,
   EmployeeView,
   HolidayView,
-  LeaveBalanceView,
   LeaveRequestView,
   OverlapWarning,
 } from "@aihxm/shared-types";
@@ -15,6 +13,8 @@ import { AttendanceCorrectionForm } from "./AttendanceCorrectionForm";
 import { MyAttendanceDays } from "./MyAttendanceDays";
 import { MyTimesheet } from "./MyTimesheet";
 import { LeaveRequestForm, OverlapNotice } from "./LeaveRequestForm";
+import { MyLeaveOverview } from "./LeaveOverview";
+import { OnBehalfLeave } from "./OnBehalfLeave";
 import {
   ATTENDANCE_STATUS_LABELS,
   ATTENDANCE_STATUS_STYLES,
@@ -54,11 +54,11 @@ function MyLeaveCard({
   onChanged: () => void;
 }) {
   const [employee, setEmployee] = useState<EmployeeView | null>(null);
-  const [balances, setBalances] = useState<LeaveBalanceView[] | null>(null);
   const [attendance, setAttendance] = useState<AttendanceRecordView[] | null>(null);
   const [corrections, setCorrections] = useState<AttendanceCorrectionRequestView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [formRange, setFormRange] = useState<{ start: string; end: string } | null>(null);
   const [showCorrectionForm, setShowCorrectionForm] = useState(false);
   const [overlapWarnings, setOverlapWarnings] = useState<OverlapWarning[]>([]);
   const [clockBusy, setClockBusy] = useState(false);
@@ -67,13 +67,11 @@ function MyLeaveCard({
   useEffect(() => {
     Promise.all([
       api.getEmployee(employeeId),
-      api.getLeaveBalances(employeeId),
       canClock ? api.listAttendance(employeeId) : Promise.resolve(null),
       canClock ? api.listAttendanceCorrections(employeeId) : Promise.resolve(null),
     ])
-      .then(([emp, bal, att, corr]) => {
+      .then(([emp, att, corr]) => {
         setEmployee(emp);
-        setBalances(bal);
         if (att) setAttendance(att);
         if (corr) setCorrections(corr);
       })
@@ -210,42 +208,19 @@ function MyLeaveCard({
         </div>
       )}
 
-      {!balances ? (
-        <div className="text-label-tertiary text-sm">Loading…</div>
-      ) : (
-        // UI Re-skin Phase 4 — Part 2 category 3 ("Leave Management"):
-        // "Balance cards: annual, sick, casual/other configured leave
-        // types." Same `balances` data as before, just presented as the
-        // bordered icon-badge card pattern the rest of the re-skin uses
-        // (PortalHomePage's KPI row, the module tile grid) instead of a
-        // flat black/5 chip.
-        <div className="flex flex-wrap gap-3">
-          {balances.map((b) => (
-            <div
-              key={b.leaveType}
-              className="flex items-center gap-3 bg-surface border border-black/5 rounded-lg px-3.5 py-2.5 min-w-[160px]"
-            >
-              <div className="w-9 h-9 rounded-lg bg-accent/10 text-accent flex items-center justify-center shrink-0">
-                <CalendarDays size={16} strokeWidth={1.75} />
-              </div>
-              <div>
-                <div className="text-xs uppercase tracking-wide text-label-tertiary">{(b.leaveTypeName ?? leaveTypeLabel(b.leaveType))}</div>
-                <div className="font-semibold text-sm tabular-nums">
-                  {b.remainingDays} <span className="text-label-tertiary font-normal">/ {b.entitledDays} days</span>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
       {showForm && (
         <div className="mt-4">
           <LeaveRequestForm
             fixedEmployeeId={employeeId}
-            onCancel={() => setShowForm(false)}
+            initialStart={formRange?.start}
+            initialEnd={formRange?.end}
+            onCancel={() => {
+              setShowForm(false);
+              setFormRange(null);
+            }}
             onSubmitted={(result) => {
               setShowForm(false);
+              setFormRange(null);
               setOverlapWarnings(result.overlapWarnings);
               onChanged();
             }}
@@ -257,6 +232,16 @@ function MyLeaveCard({
           <OverlapNotice warnings={overlapWarnings} />
         </div>
       )}
+      <MyLeaveOverview
+        employeeId={employeeId}
+        refreshKey={refreshKey}
+        canSubmit={canSubmit}
+        onChanged={onChanged}
+        onCreateRange={(start, end) => {
+          setFormRange({ start, end });
+          setShowForm(true);
+        }}
+      />
       {canClock && <MyAttendanceDays employeeId={employeeId} refreshKey={refreshKey} />}
       {canClock && <MyTimesheet employeeId={employeeId} />}
     </section>
@@ -472,8 +457,6 @@ function RequestsSection({
   const [employees, setEmployees] = useState<EmployeeView[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [showOnBehalfForm, setShowOnBehalfForm] = useState(false);
-  const [overlapWarnings, setOverlapWarnings] = useState<OverlapWarning[]>([]);
-
   useEffect(() => {
     Promise.all([api.listLeaveRequests(), api.listEmployees()])
       .then(([reqs, emps]) => {
@@ -501,23 +484,7 @@ function RequestsSection({
         )}
       </div>
 
-      {showOnBehalfForm && (
-        <div className="mb-4">
-          <LeaveRequestForm
-            onCancel={() => setShowOnBehalfForm(false)}
-            onSubmitted={(result) => {
-              setShowOnBehalfForm(false);
-              setOverlapWarnings(result.overlapWarnings);
-              onChanged();
-            }}
-          />
-        </div>
-      )}
-      {overlapWarnings.length > 0 && (
-        <div className="mb-4">
-          <OverlapNotice warnings={overlapWarnings} />
-        </div>
-      )}
+      {showOnBehalfForm && <OnBehalfLeave onChanged={onChanged} onClose={() => setShowOnBehalfForm(false)} />}
 
       {!requests ? (
         <div className="text-label-tertiary text-sm">Loading…</div>
