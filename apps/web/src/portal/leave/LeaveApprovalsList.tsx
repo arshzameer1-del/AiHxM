@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import type { EmployeeView, LeaveRequestView } from "@aihxm/shared-types";
@@ -238,7 +239,7 @@ export function RequestsSection({
       </div>
 
       {!requests ? (
-        <div className="text-label-tertiary text-sm">Loading…</div>
+        <LoadingNote />
       ) : requests.length === 0 ? (
         <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-tertiary">
           No leave requests to show.

@@ -145,7 +145,7 @@ export function FeedbackPanel() {
             <Field label="To">
               <select required className={inputCls} value={form.subjectEmployeeId} onChange={(e) => setForm({ ...form, subjectEmployeeId: e.target.value })}>
                 <option value="">Choose a colleague…</option>
-                {employees.filter((x) => x.id !== identity?.employeeId).map((x) => <option key={x.id} value={x.id}>{x.firstName} {x.lastName}</option>)}
+                {employees.filter((x) => x.id !== identity?.employeeId).map((x) => <option key={x.id} value={x.id}>{x.firstName} {x.lastName} ({x.employeeNumber})</option>)}
               </select>
             </Field>
             <Field label="Type">
@@ -184,7 +184,7 @@ export function FeedbackPanel() {
             <select aria-label="Feedback about" className="rounded-lg border border-black/10 px-3 py-1.5 text-sm" value={subject} onChange={(e) => setSubject(e.target.value)}>
               {canSeeOthers ? <option value="">Choose…</option> : null}
               {(canSeeOthers ? employees : employees.filter((x) => x.id === identity?.employeeId)).map((x) => (
-                <option key={x.id} value={x.id}>{x.id === identity?.employeeId ? "Me" : `${x.firstName} ${x.lastName}`}</option>
+                <option key={x.id} value={x.id}>{x.id === identity?.employeeId ? "Me" : `${x.firstName} ${x.lastName} (${x.employeeNumber})`}</option>
               ))}
             </select>
           )}

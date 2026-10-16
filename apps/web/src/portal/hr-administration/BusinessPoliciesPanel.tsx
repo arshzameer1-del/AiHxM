@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import type {
   ConfigurationRuleMappingScopeType,
@@ -540,7 +541,7 @@ function PolicyTypePanel({ type }: { type: HrBusinessPolicyTypeSummary }) {
 
       {adding && <PolicyForm type={type} onCancel={() => setAdding(false)} onSaved={() => { setAdding(false); load(); }} />}
 
-      {policies === null && <div className="text-sm text-label-tertiary">Loading…</div>}
+      {policies === null && <LoadingNote />}
       {policies && policies.length === 0 && !adding && <div className="text-sm text-label-tertiary">No policies yet.</div>}
 
       {policies && policies.length > 0 && (
@@ -608,7 +609,7 @@ export function BusinessPoliciesPanel() {
   }, []);
 
   if (loadError) return <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-secondary">{loadError}</div>;
-  if (!types) return <div className="text-label-tertiary text-sm">Loading…</div>;
+  if (!types) return <LoadingNote />;
 
   const selectedType = types.find((t) => t.policyType === selected) ?? types[0] ?? null;
 

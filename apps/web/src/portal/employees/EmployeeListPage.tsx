@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import type { EmployeeView } from "@aihxm/shared-types";
@@ -62,7 +63,7 @@ export function EmployeeListPage() {
 
       {error && <div className="text-danger text-sm mb-4">{error}</div>}
 
-      {!error && !employees && <div className="text-label-tertiary text-sm">Loading…</div>}
+      {!error && !employees && <LoadingNote />}
 
       {employees && employees.length === 0 && (
         <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-tertiary">

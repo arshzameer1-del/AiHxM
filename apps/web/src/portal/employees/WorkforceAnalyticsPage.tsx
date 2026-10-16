@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { useEffect, useState } from "react";
 import type { EmployeeAnalyticsSummary, EmployeeHeadcountBreakdown } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
@@ -58,7 +59,7 @@ export function WorkforceAnalyticsPage() {
   }, []);
 
   if (error) return <div className="text-danger text-sm">{error}</div>;
-  if (!summary) return <div className="text-label-tertiary text-sm">Loading…</div>;
+  if (!summary) return <LoadingNote />;
 
   return (
     <div className="max-w-2xl">

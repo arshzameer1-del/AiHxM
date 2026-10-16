@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import type { CompetencyView } from "@aihxm/shared-types";
 import { api } from "../../api/client";
@@ -50,7 +51,7 @@ export function PerformanceSetupPanel() {
     }
   }
 
-  if (!loaded) return error ? <ErrorNote message={error} /> : <div className="text-label-tertiary text-sm">Loading…</div>;
+  if (!loaded) return error ? <ErrorNote message={error} /> : <LoadingNote />;
 
   return (
     <div className="space-y-6">

@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import type { EmployeeLoanView, EmployeeView, LoanScheduleRowView, LoanTypeView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
@@ -81,7 +82,7 @@ export function EmployeeLoansPanel({ employeeId, canManage }: { employeeId: stri
       )}
 
       {!loans ? (
-        <p className="text-sm text-label-tertiary">Loading…</p>
+        <LoadingNote />
       ) : loans.length === 0 ? (
         <p className="text-sm text-label-tertiary">No loans or salary advances on record.</p>
       ) : (

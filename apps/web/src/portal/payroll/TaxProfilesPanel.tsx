@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { useCallback, useEffect, useState } from "react";
 import type { TaxExemptionInput, TaxProfileSlabInput, TaxProfileView, TaxPublicationStatus, TaxYearView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
@@ -80,7 +81,7 @@ export function TaxProfilesPanel() {
       <section className="space-y-2">
         <h4 className="text-xs font-semibold uppercase tracking-wide text-label-tertiary">Tax years</h4>
         {!years ? (
-          <div className="text-sm text-label-tertiary">Loading…</div>
+          <LoadingNote />
         ) : years.length === 0 ? (
           <div className="text-xs text-label-tertiary">No tax year yet.</div>
         ) : (

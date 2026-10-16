@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { useEffect, useState } from "react";
 import type {
   PayrollAccountingPreviewView,
@@ -84,7 +85,7 @@ export function GlMappingsPanel({ canManage }: { canManage: boolean }) {
       </p>
       <Notice error={error} saved={saved} />
       {!rows ? (
-        <p className="text-sm text-label-tertiary">Loading…</p>
+        <LoadingNote />
       ) : rows.length === 0 ? (
         <p className="text-sm text-label-tertiary">Nothing is mapped yet.</p>
       ) : (

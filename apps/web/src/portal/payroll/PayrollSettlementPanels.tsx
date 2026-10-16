@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { useEffect, useState } from "react";
 import type {
   EmployeeSchemeAccountView,
@@ -63,7 +64,7 @@ export function FinalSettlementsSection({ canPrepare, canApprove }: { canPrepare
   }, []);
 
   if (error) return <p className="text-xs text-danger">{error}</p>;
-  if (!rows) return <p className="text-sm text-label-tertiary">Loading…</p>;
+  if (!rows) return <LoadingNote />;
   if (rows.length === 0) return <p className="text-sm text-label-tertiary">No terminations yet. A settlement opens here when an employee's termination takes effect.</p>;
 
   return (
@@ -331,7 +332,7 @@ function SchemeDefinitionsPanel() {
       </div>
       {error && <p className="text-xs text-danger">{error}</p>}
       {!rows ? (
-        <p className="text-sm text-label-tertiary">Loading…</p>
+        <LoadingNote />
       ) : rows.length === 0 && !form ? (
         <p className="text-xs text-label-tertiary">No schemes yet. Each scheme's rates and day counts are entered by you; none are built in.</p>
       ) : (

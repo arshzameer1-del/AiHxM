@@ -1,3 +1,4 @@
+import { LoadingNote } from "../../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import { ApiError } from "../../../api/client";
 
@@ -301,7 +302,7 @@ export function SubEntityPanel<TView extends SubEntityRow>({
         </div>
       )}
 
-      {items === null && <div className="text-sm text-label-tertiary">Loading…</div>}
+      {items === null && <LoadingNote />}
       {items && items.length === 0 && !adding && <div className="text-sm text-label-tertiary">{config.emptyLabel}</div>}
 
       {items && items.length > 0 && (

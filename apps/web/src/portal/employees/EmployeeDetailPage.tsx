@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, ReactNode, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import type {
@@ -100,7 +101,7 @@ export function EmployeeDetailPage() {
   }, [id]);
 
   if (error) return <div className="text-danger text-sm">{error}</div>;
-  if (!employee) return <div className="text-label-tertiary text-sm">Loading…</div>;
+  if (!employee) return <LoadingNote />;
 
   const costCenterOptions = costCenters.map((c) => ({ value: c.id, label: c.name }));
   const contactTypeOptions = contactTypes.map((t) => ({ value: t.code, label: t.label }));
@@ -180,7 +181,7 @@ export function EmployeeDetailPage() {
             <h2 className="font-semibold text-sm uppercase tracking-wide text-label-tertiary mb-3">
               Job history
             </h2>
-            {jobHistory === null && <div className="text-sm text-label-tertiary">Loading…</div>}
+            {jobHistory === null && <LoadingNote />}
             {jobHistory && jobHistory.length === 0 && (
               <div className="text-sm text-label-tertiary">No job history recorded.</div>
             )}

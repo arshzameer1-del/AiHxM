@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { REVIEW_PHASE_KEYS } from "@aihxm/shared-types";
 import type { ReviewCycleView, ReviewPhaseKey } from "@aihxm/shared-types";
 import { api } from "../../api/client";
+import { LoadingNote } from "../shared/PageChrome";
 import { ErrorNote, errorText, inputCls, primaryBtn } from "./perfUi";
 
 const LABELS: Record<ReviewPhaseKey, string> = {
@@ -19,6 +20,8 @@ export function PhasesModal({ cycle, onClose, onSaved }: { cycle: ReviewCycleVie
   );
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The form stays locked until the saved dates have arrived, so nothing typed early is overwritten (LIVE-07).
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     api.getReviewCyclePhases(cycle.id).then(({ phases }) => {
@@ -27,6 +30,7 @@ export function PhasesModal({ cycle, onClose, onSaved }: { cycle: ReviewCycleVie
         for (const p of phases) next[p.phaseKey] = { startsOn: p.startsOn, endsOn: p.endsOn };
         return next;
       });
+      setLoaded(true);
     }).catch((err) => setError(errorText(err, "Could not load the phases")));
   }, [cycle.id]);
 
@@ -58,17 +62,18 @@ export function PhasesModal({ cycle, onClose, onSaved }: { cycle: ReviewCycleVie
           Employees and managers can only act inside a phase&apos;s window. HR can always act, and a phase without dates is not restricted. Each later phase may not start or end before the one above it.
         </p>
         <ErrorNote message={error} />
+        {!loaded && !error && <LoadingNote what="saved dates" />}
         <div className="space-y-3">
           {REVIEW_PHASE_KEYS.map((k) => (
             <div key={k} className="grid grid-cols-[1fr_auto_auto] gap-3 items-center">
               <span className="text-sm font-medium">{LABELS[k]}</span>
-              <input aria-label={`${LABELS[k]} starts`} type="date" className={inputCls} value={rows[k].startsOn} onChange={(e) => setRows({ ...rows, [k]: { ...rows[k], startsOn: e.target.value } })} />
-              <input aria-label={`${LABELS[k]} ends`} type="date" className={inputCls} value={rows[k].endsOn} onChange={(e) => setRows({ ...rows, [k]: { ...rows[k], endsOn: e.target.value } })} />
+              <input aria-label={`${LABELS[k]} starts`} type="date" disabled={!loaded} className={inputCls} value={rows[k].startsOn} onChange={(e) => setRows({ ...rows, [k]: { ...rows[k], startsOn: e.target.value } })} />
+              <input aria-label={`${LABELS[k]} ends`} type="date" disabled={!loaded} className={inputCls} value={rows[k].endsOn} onChange={(e) => setRows({ ...rows, [k]: { ...rows[k], endsOn: e.target.value } })} />
             </div>
           ))}
         </div>
         <div className="flex gap-3">
-          <button type="submit" disabled={busy} className={primaryBtn}>Save phases</button>
+          <button type="submit" disabled={busy || !loaded} className={primaryBtn}>Save phases</button>
           <button type="button" onClick={onClose} className="text-sm font-medium text-label-secondary">Cancel</button>
         </div>
       </form>

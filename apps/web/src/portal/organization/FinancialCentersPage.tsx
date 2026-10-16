@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import type { CostCenterView, OrgUnitView, ProfitCenterView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
@@ -328,7 +329,7 @@ export function FinancialCentersPage() {
   useEffect(load, []);
 
   if (error) return <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-secondary">{error}</div>;
-  if (!costCenters || !profitCenters) return <div className="text-label-tertiary text-sm">Loading…</div>;
+  if (!costCenters || !profitCenters) return <LoadingNote />;
 
   return (
     <div className="space-y-10">

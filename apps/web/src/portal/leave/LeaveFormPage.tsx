@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import type { EmployeeView, LeaveRequestView } from "@aihxm/shared-types";
 import { api } from "../../api/client";
 import { useModuleContext } from "../shared/ModuleContext";
-import { BackLink, PageHeader } from "../shared/PageChrome";
+import { BackLink, PageHeader, LoadingNote } from "../shared/PageChrome";
 import { OnBehalfBanner } from "./OnBehalfBanner";
 import { LeaveRequestForm } from "./LeaveRequestForm";
 
@@ -41,7 +41,7 @@ export function LeaveFormPage() {
   const leave = () => navigate(backTo);
 
   if (failed) return <p className="text-sm text-label-secondary">{failed}</p>;
-  if (id && !request) return <p className="text-sm text-label-tertiary">Loading…</p>;
+  if (id && !request) return <LoadingNote />;
   if (!employeeId) return <p className="text-sm text-label-secondary">Your login has no employee record to create leave for.</p>;
   if (request && request.status !== "pending") {
     return (

@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ORG_REPORTING_RELATIONSHIP_CODES } from "@aihxm/shared-types";
@@ -234,7 +235,7 @@ function PositionDetails({
     }
   }
 
-  if (!position) return error ? <Notice error={error} /> : <p className="text-sm text-label-tertiary">Loading…</p>;
+  if (!position) return error ? <Notice error={error} /> : <LoadingNote />;
   const editable = canManage && position.status !== "abolished";
   const holders = node.children;
 
@@ -261,7 +262,7 @@ function PositionDetails({
 
   if (tab === "periods") {
     return history === null ? (
-      <p className="text-sm text-label-tertiary">Loading…</p>
+      <LoadingNote />
     ) : (
       <table className="w-full text-sm">
         <thead><tr className="text-left text-xs text-slate-600 border-b border-black/15"><th className="py-1 pr-3">Valid from</th><th className="py-1 pr-3">Valid to</th><th className="py-1 pr-3">Title</th><th className="py-1 pr-3">Code</th><th className="py-1 pr-3 text-right">FTE</th><th className="py-1">Staffing status</th></tr></thead>
@@ -405,7 +406,7 @@ function UnitDetails({ node, tab, roots, canManage, aux, onChanged }: { node: Or
   }
   if (tab === "periods") {
     return history === null ? (
-      <p className="text-sm text-label-tertiary">Loading…</p>
+      <LoadingNote />
     ) : (
       <table className="w-full text-sm">
         <thead><tr className="text-left text-xs text-slate-600 border-b border-black/15"><th className="py-1 pr-3">Valid from</th><th className="py-1 pr-3">Valid to</th><th className="py-1 pr-3">Name</th><th className="py-1 pr-3">Code</th><th className="py-1">Status</th></tr></thead>

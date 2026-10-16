@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { RECRUITMENT_SOURCES } from "@aihxm/shared-types";
 import type { CandidateDuplicateMatch, CandidateView, RecruitmentSource } from "@aihxm/shared-types";
@@ -205,7 +206,7 @@ export function CandidatesPanel() {
   }, [candidates, query]);
 
   if (error) return <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-secondary">{error}</div>;
-  if (!candidates) return <div className="text-label-tertiary text-sm">Loading…</div>;
+  if (!candidates) return <LoadingNote />;
 
   if (openId) {
     return (

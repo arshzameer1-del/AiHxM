@@ -1,3 +1,4 @@
+import { LoadingNote } from "../../shared/PageChrome";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { HireProcessView } from "@aihxm/shared-types";
@@ -60,7 +61,7 @@ export function HiringDraftsPage() {
 
       {error && <div className="text-danger text-sm mb-4">{error}</div>}
 
-      {drafts === null && <div className="text-sm text-label-tertiary">Loading…</div>}
+      {drafts === null && <LoadingNote />}
       {drafts && drafts.length === 0 && <div className="text-sm text-label-tertiary">No hires in progress.</div>}
 
       {drafts && drafts.length > 0 && (

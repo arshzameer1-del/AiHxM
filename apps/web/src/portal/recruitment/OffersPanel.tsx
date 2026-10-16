@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import type { ApplicationView, CandidateView, CompensationComponentView, OfferLetterView, OfferView } from "@aihxm/shared-types";
 import { api } from "../../api/client";
@@ -105,7 +106,7 @@ export function OffersPanel() {
     }
   }
 
-  if (!offers) return error ? <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-secondary">{error}</div> : <div className="text-label-tertiary text-sm">Loading…</div>;
+  if (!offers) return error ? <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-secondary">{error}</div> : <LoadingNote />;
 
   return (
     <div className="space-y-4">

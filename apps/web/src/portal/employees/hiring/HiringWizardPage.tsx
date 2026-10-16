@@ -1,3 +1,4 @@
+import { LoadingNote } from "../../shared/PageChrome";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import type {
@@ -506,7 +507,7 @@ export function HiringWizardPage() {
   }
 
   if (loadError) return <div className="text-danger text-sm">{loadError}</div>;
-  if (!process || !options) return <div className="text-label-tertiary text-sm">Loading…</div>;
+  if (!process || !options) return <LoadingNote />;
 
   const activeCard = enabledCards.find((c) => c.cardKey === activeCardKey);
   const canLeaveProcess = process.status !== "hired" && process.status !== "cancelled";
@@ -563,7 +564,7 @@ export function HiringWizardPage() {
             </div>
 
             {cardLoading ? (
-              <div className="text-sm text-label-tertiary">Loading…</div>
+              <LoadingNote />
             ) : activeCard.cardKey === "review_completion" ? (
               <ReviewCompletionCard
                 process={process}

@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import type { PayrollCalendarView, PayrollFrequency, PayrollPeriodStatus, PayrollPeriodView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
@@ -184,7 +185,7 @@ export function PayrollCalendarsSection({ canManage }: { canManage: boolean }) {
       )}
 
       {!calendars ? (
-        <div className="text-sm text-label-tertiary">Loading…</div>
+        <LoadingNote />
       ) : periods.length === 0 ? (
         <div className="text-sm text-label-tertiary">No payroll periods yet{canManage ? " — pick a calendar and generate some." : "."}</div>
       ) : (

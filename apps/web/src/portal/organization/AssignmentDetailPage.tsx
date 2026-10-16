@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import type {
@@ -81,7 +82,7 @@ export function AssignmentDetailPage() {
   const employeeName = useMemo(() => (employee ? `${employee.firstName} ${employee.lastName}` : null), [employee]);
 
   if (error) return <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-secondary">{error}</div>;
-  if (!assignment) return <div className="text-label-tertiary text-sm">Loading…</div>;
+  if (!assignment) return <LoadingNote />;
 
   return (
     <div>

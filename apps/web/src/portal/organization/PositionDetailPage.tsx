@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import type {
@@ -133,7 +134,7 @@ export function PositionDetailPage() {
   const occupant = useMemo(() => employees.find((e) => e.positionId === id), [employees, id]);
 
   if (error) return <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-secondary">{error}</div>;
-  if (!position) return <div className="text-label-tertiary text-sm">Loading…</div>;
+  if (!position) return <LoadingNote />;
 
   return (
     <div>
@@ -216,7 +217,7 @@ export function PositionDetailPage() {
           {planningError && <div className="text-danger text-sm">{planningError}</div>}
           <div className="bg-card rounded-card p-5 shadow-sm">
             <h2 className="text-sm font-semibold mb-2">Incumbents ({position.headcountFte} FTE approved)</h2>
-            {incumbents === null && <div className="text-sm text-label-tertiary">Loading…</div>}
+            {incumbents === null && <LoadingNote />}
             {incumbents && incumbents.length === 0 && <div className="text-sm text-label-tertiary">Nobody holds this position.</div>}
             {incumbents?.map((i) => (
               <div key={i.id} className="flex items-center gap-3 py-2 border-b border-black/5 last:border-0 text-sm">

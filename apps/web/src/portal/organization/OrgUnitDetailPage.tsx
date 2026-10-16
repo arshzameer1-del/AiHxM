@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import type {
@@ -203,7 +204,7 @@ export function OrgUnitDetailPage() {
   }, [orgChanges, id]);
 
   if (error) return <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-secondary">{error}</div>;
-  if (!unit) return <div className="text-label-tertiary text-sm">Loading…</div>;
+  if (!unit) return <LoadingNote />;
 
   return (
     <div>
@@ -331,7 +332,7 @@ export function OrgUnitDetailPage() {
           <div>
             <div className="text-xs uppercase tracking-wide text-label-tertiary mb-1.5">Headcount</div>
             {positions === null ? (
-              <div className="text-sm text-label-tertiary">Loading…</div>
+              <LoadingNote />
             ) : headcount.total === 0 ? (
               <div className="text-sm text-label-tertiary">No positions in this unit yet.</div>
             ) : (

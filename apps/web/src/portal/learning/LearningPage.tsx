@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import { isSelfService } from "../shared/roles";
 import { BookOpen, GraduationCap, PlayCircle } from "lucide-react";
@@ -330,7 +331,7 @@ export function LearningPage() {
   }, [refreshKey, identity?.employeeId]);
 
   if (error) return <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-secondary">{error}</div>;
-  if (!courses || !enrollments) return <div className="text-label-tertiary text-sm">Loading…</div>;
+  if (!courses || !enrollments) return <LoadingNote />;
 
   const enrollmentByCourseId = new Map(enrollments.map((e) => [e.courseId, e]));
   const active = enrollments.filter((e) => e.status !== "completed");

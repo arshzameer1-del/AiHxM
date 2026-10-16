@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import type { CompensationCalculationType, CompensationComponentType, CompensationComponentView, CompensationView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
@@ -247,7 +248,7 @@ export function EmployeeCompensationPanel({ employeeId, canManage }: { employeeI
             <div className="space-y-2">
               <div className="text-xs font-semibold uppercase tracking-wide text-label-tertiary">Compensation history</div>
               {!history ? (
-                <div className="text-sm text-label-tertiary">Loading…</div>
+                <LoadingNote />
               ) : history.length === 0 ? (
                 <div className="text-sm text-label-tertiary">No compensation set for this employee yet.</div>
               ) : (

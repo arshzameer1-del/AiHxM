@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, Fragment, useEffect, useMemo, useState } from "react";
 import type {
   CostCenterView,
@@ -773,7 +774,7 @@ export function PayrollAreasSection({ canManage, onChanged }: { canManage: boole
       )}
 
       {!areas ? (
-        <div className="text-sm text-label-tertiary">Loading…</div>
+        <LoadingNote />
       ) : areas.length === 0 ? (
         <div className="bg-black/5 rounded-lg p-4 text-sm text-label-tertiary">
           {includeInactive ? "No payroll areas yet." : "No active payroll areas."} Every run is company-wide until one is

@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import type {
   ApproverType,
@@ -353,7 +354,7 @@ export function WorkflowTemplatesPanel() {
   useEffect(load, []);
 
   if (error) return <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-secondary">{error}</div>;
-  if (!templates || !roles) return <div className="text-label-tertiary text-sm">Loading…</div>;
+  if (!templates || !roles) return <LoadingNote />;
 
   return (
     <div className="space-y-4">

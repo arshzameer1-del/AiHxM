@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { ORG_REPORTING_RELATIONSHIP_CODES, type EmployeeView, type OrgRelationshipType, type OrgRelationshipView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
@@ -295,7 +296,7 @@ export function RelationshipExplorerPage() {
         </div>
       )}
 
-      {!relationships && <div className="text-label-tertiary text-sm">Loading…</div>}
+      {!relationships && <LoadingNote />}
 
       {relationships && relationships.length === 0 && !creating && (
         <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-tertiary">

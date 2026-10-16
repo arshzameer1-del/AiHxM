@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import type { ConfigurationChangeDomain, ConfigurationChangeOperation, ConfigurationChangeRequestView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
@@ -356,7 +357,7 @@ export function ChangeRequestsPanel() {
         />
       )}
 
-      {changes === null && <div className="text-sm text-label-tertiary">Loading…</div>}
+      {changes === null && <LoadingNote />}
       {changes && changes.length === 0 && !adding && <div className="text-sm text-label-tertiary">No change requests yet.</div>}
 
       {changes && changes.length > 0 && (

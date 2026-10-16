@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import type { AssignableUserView, Role, SystemAdminRoleAssignmentView, TenantRoleKey } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
@@ -259,7 +260,7 @@ export function RolesAccessPanel() {
   useEffect(load, []);
 
   if (error) return <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-secondary">{error}</div>;
-  if (!users || !roles || !assignments) return <div className="text-label-tertiary text-sm">Loading…</div>;
+  if (!users || !roles || !assignments) return <LoadingNote />;
 
   return (
     <div className="space-y-3">

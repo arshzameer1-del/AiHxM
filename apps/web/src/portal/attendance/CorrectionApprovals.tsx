@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { useEffect, useState } from "react";
 import type { AttendanceCorrectionRequestView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
@@ -111,7 +112,7 @@ export function PendingCorrectionsSection({ refreshKey, onChanged, standalone = 
       {pending && pending.length === 0 ? (
         <div className="bg-white rounded-md p-5 shadow-sm text-sm text-label-tertiary">No attendance corrections are waiting for you.</div>
       ) : !pending ? (
-        <div className="text-label-tertiary text-sm">Loading…</div>
+        <LoadingNote />
       ) : (
         <div className="space-y-3">
           {pending.map((c) => (

@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import type {
   AdditionalPaymentType,
@@ -613,7 +614,7 @@ export function OffCyclePaymentsPanel({ run, canManage }: { run: PayrollRunView;
       )}
 
       {!payments ? (
-        <p className="text-sm text-label-tertiary">Loading…</p>
+        <LoadingNote />
       ) : payments.length === 0 ? (
         <p className="text-sm text-label-tertiary">
           No off-cycle payments queued yet

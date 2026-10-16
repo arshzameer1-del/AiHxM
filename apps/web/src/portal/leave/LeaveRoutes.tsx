@@ -5,7 +5,7 @@ import { OverlapNotice } from "./LeaveRequestForm";
 import { Users } from "lucide-react";
 import { api } from "../../api/client";
 import { ModuleContext, useBuildModuleContext, useModuleContext } from "../shared/ModuleContext";
-import { BackLink, PageHeader } from "../shared/PageChrome";
+import { BackLink, PageHeader, LoadingNote } from "../shared/PageChrome";
 import { describeError } from "../shared/describeError";
 import { RequestsSection } from "./LeaveApprovalsList";
 import { UpcomingHolidaysCard } from "./UpcomingHolidaysCard";
@@ -138,7 +138,7 @@ function HolidaysPage() {
         {error ? (
           <p className="text-sm text-label-secondary">{error}</p>
         ) : !holidays ? (
-          <p className="text-sm text-label-tertiary">Loading…</p>
+          <LoadingNote />
         ) : holidays.length === 0 ? (
           <p className="text-sm text-label-tertiary">No holidays are set up yet.</p>
         ) : (

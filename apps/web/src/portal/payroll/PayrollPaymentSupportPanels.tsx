@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { useEffect, useState } from "react";
 import type { BankFileDelimiter, BankFileFormatView, DisbursementFieldKey, PayrollReconciliationKind, PayrollReconciliationView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
@@ -99,7 +100,7 @@ export function BankFileFormatsPanel() {
     }
   }
 
-  if (!formats) return error ? <p className="text-xs text-danger">{error}</p> : <p className="text-sm text-label-tertiary">Loading…</p>;
+  if (!formats) return error ? <p className="text-xs text-danger">{error}</p> : <LoadingNote />;
 
   return (
     <div className="space-y-3">

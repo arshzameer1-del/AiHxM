@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import type { AccrualMethod, LeaveGenderRestriction, LeaveTypeView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
@@ -62,7 +63,7 @@ export function LeaveTypesPanel() {
   }
 
   if (error && !types) return <p className="text-sm text-danger">{error}</p>;
-  if (!types) return <p className="text-sm text-label-tertiary">Loading…</p>;
+  if (!types) return <LoadingNote />;
 
   return (
     <div className="space-y-4">

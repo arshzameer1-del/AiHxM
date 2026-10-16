@@ -4,7 +4,7 @@ import { Pencil, XCircle } from "lucide-react";
 import type { HolidayView, LeaveRequestView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { useModuleContext } from "../shared/ModuleContext";
-import { BackLink, PageHeader } from "../shared/PageChrome";
+import { BackLink, PageHeader, LoadingNote } from "../shared/PageChrome";
 import { RequestDetail } from "./LeaveOverview";
 
 /** One request on its own page: header, fields, approval chain and the Team calendar, with Edit and Cancel. */
@@ -33,7 +33,7 @@ export function LeaveDetailPage() {
   const backTo = onBehalfId ? `/app/leave/on-behalf/${onBehalfId}` : request && request.employeeId !== ownEmployeeId && canSubmitOnBehalf ? `/app/leave/on-behalf/${request.employeeId}` : "/app/leave/my-requests";
 
   if (error) return (<div><BackLink to="/app/leave/my-requests">Back to My Leave Request</BackLink><p className="text-sm text-label-secondary">{error}</p></div>);
-  if (!request) return <p className="text-sm text-label-tertiary">Loading…</p>;
+  if (!request) return <LoadingNote />;
 
   const mine = request.employeeId === ownEmployeeId;
   const canAct = (mine && canSubmitSelf) || canSubmitOnBehalf;

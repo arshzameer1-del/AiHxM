@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Archive, ArchiveRestore, ChevronsDownUp, ChevronsUpDown, Crown, ExternalLink, FolderPlus, ListTree, MoveRight, Pencil, Plus, RefreshCw, Search, UserMinus, UserPlus } from "lucide-react";
@@ -302,7 +303,7 @@ export function OrgStructurePage() {
   }
 
   if (error) return <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-secondary">{error}</div>;
-  if (!view) return <div className="text-label-tertiary text-sm">Loading…</div>;
+  if (!view) return <LoadingNote />;
 
   const actionBtn = "inline-flex items-center gap-1.5 h-8 px-2.5 rounded border border-black/15 bg-white text-sm text-slate-800 hover:border-accent hover:text-accent disabled:opacity-40 disabled:hover:border-black/15 disabled:hover:text-slate-800";
   const iconBtn = "inline-flex items-center justify-center h-8 w-8 rounded border border-black/15 bg-white text-slate-700 hover:border-accent hover:text-accent disabled:opacity-40 disabled:hover:border-black/15 disabled:hover:text-slate-700";

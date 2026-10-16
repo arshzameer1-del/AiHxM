@@ -1,3 +1,4 @@
+import { LoadingNote } from "../../shared/PageChrome";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { CardDefinitionView, UpdateCardDefinitionRequest } from "@aihxm/shared-types";
@@ -149,7 +150,7 @@ export function HiringCardDesignerPage() {
   }
 
   if (loadError) return <div className="text-danger text-sm">{loadError}</div>;
-  if (!cards) return <div className="text-label-tertiary text-sm">Loading…</div>;
+  if (!cards) return <LoadingNote />;
 
   return (
     <div className="max-w-2xl">

@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import type {
   CreateOrgChangeItemRequest,
@@ -470,7 +471,7 @@ export function ReorganizationsPage() {
   useEffect(load, []);
 
   if (error) return <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-secondary">{error}</div>;
-  if (!changes) return <div className="text-label-tertiary text-sm">Loading…</div>;
+  if (!changes) return <LoadingNote />;
 
   return (
     <div className="space-y-6">

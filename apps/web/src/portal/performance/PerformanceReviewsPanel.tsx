@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { useEffect, useRef, useState } from "react";
 import { isSelfService } from "../shared/roles";
 import type { EmployeeView, PerformanceReviewView } from "@aihxm/shared-types";
@@ -100,7 +101,7 @@ export function PerformanceReviewsPanel() {
   };
 
   if (loading) {
-    return <div className="text-label-tertiary">Loading reviews...</div>;
+    return <LoadingNote what="reviews" />;
   }
 
   return (

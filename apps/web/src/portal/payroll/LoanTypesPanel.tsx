@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import type { CompanyWorkTimeDefaultView, LoanTypeView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
@@ -50,7 +51,7 @@ export function LoanTypesPanel() {
           />
         )}
         {!types ? (
-          <p className="text-sm text-label-tertiary">Loading…</p>
+          <LoadingNote />
         ) : (
           <div className="space-y-2">
             {types.map((t) => (

@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { ConfigurationDomainSummary } from "@aihxm/shared-types";
@@ -59,7 +60,7 @@ export function ConfigurationCenterPage() {
 
       {error && <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-secondary">{error}</div>}
 
-      {!error && !domains && <div className="text-label-tertiary text-sm">Loading…</div>}
+      {!error && !domains && <LoadingNote />}
 
       {!error && domains && domains.length === 0 && (
         <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-tertiary">

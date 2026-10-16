@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import { api } from "../../api/client";
 import { describeError, inputCls, primaryBtn } from "./recruitUi";
@@ -42,7 +43,7 @@ export function RecruitmentSettingsPanel() {
     }
   }
 
-  if (!loaded) return error ? <div role="alert" className="text-red-600 text-sm bg-red-50 p-3 rounded">{error}</div> : <div className="text-label-tertiary text-sm">Loading…</div>;
+  if (!loaded) return error ? <div role="alert" className="text-red-600 text-sm bg-red-50 p-3 rounded">{error}</div> : <LoadingNote />;
 
   return (
     <form onSubmit={save} className="bg-card rounded-card shadow-sm p-5 space-y-4 max-w-2xl" onChange={() => setSaved(false)}>

@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import type {
   ShiftView,
@@ -411,7 +412,7 @@ export function WorkScheduleAssignmentRulesPanel({ shifts }: { shifts: ShiftView
         </div>
       )}
 
-      {rules === null && !error && <div className="text-label-tertiary text-sm">Loading…</div>}
+      {rules === null && !error && <LoadingNote />}
 
       {rules && rules.length === 0 && !creating && (
         <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-tertiary">

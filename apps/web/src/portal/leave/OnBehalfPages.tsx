@@ -6,7 +6,7 @@ import { Users } from "lucide-react";
 import type { EmployeeView } from "@aihxm/shared-types";
 import { api } from "../../api/client";
 import { useModuleContext } from "../shared/ModuleContext";
-import { BackLink, PageHeader } from "../shared/PageChrome";
+import { BackLink, PageHeader, LoadingNote } from "../shared/PageChrome";
 import { OnBehalfBanner } from "./OnBehalfBanner";
 import { MyLeaveOverview } from "./LeaveOverview";
 
@@ -87,7 +87,7 @@ export function OnBehalfOverviewPage() {
 
   if (!canSubmitOnBehalf) return <p className="text-sm text-label-secondary">Only HR can create leave on behalf of an employee.</p>;
   if (failed) return <p className="text-sm text-label-secondary">This employee could not be loaded. <Link className="text-accent underline" to="/app/leave/on-behalf">Choose another</Link></p>;
-  if (!target || !employeeId) return <p className="text-sm text-label-tertiary">Loading…</p>;
+  if (!target || !employeeId) return <LoadingNote />;
 
   return (
     <div data-testid="on-behalf-leave">

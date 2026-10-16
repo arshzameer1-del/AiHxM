@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { CalendarDays, ChevronLeft, ChevronRight, Pencil, XCircle } from "lucide-react";
@@ -605,7 +606,7 @@ export function MyLeaveOverview({
   const holidays = useMemo(() => new Map(holidayList.filter((h) => !h.isOptional).map((h) => [h.holidayDate.slice(0, 10), h.name])), [holidayList]);
 
   if (error) return <p className="text-sm text-label-tertiary">{error}</p>;
-  if (!balances || !requests) return <p className="text-sm text-label-tertiary">Loading…</p>;
+  if (!balances || !requests) return <LoadingNote />;
 
   // Newest first, like the reference list.
   const visibleRequests = showFrom ? requests.filter((r) => r.endDate >= showFrom) : requests;

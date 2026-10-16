@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import type {
@@ -251,7 +252,7 @@ function TemplateList({ kind, moduleLabel }: { kind: "onboarding" | "offboarding
   useEffect(load, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (error) return <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-secondary">{error}</div>;
-  if (!templates) return <div className="text-label-tertiary text-sm">Loading…</div>;
+  if (!templates) return <LoadingNote />;
 
   return (
     <div className="space-y-4">

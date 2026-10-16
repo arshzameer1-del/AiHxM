@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import type { HrReferenceCatalogItemView, HrReferenceCatalogTypeSummary } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
@@ -243,7 +244,7 @@ function CatalogItemsPanel({ type }: { type: HrReferenceCatalogTypeSummary }) {
 
       {adding && <AddItemForm catalogType={type.catalogType} onCancel={() => setAdding(false)} onAdded={() => { setAdding(false); load(); }} />}
 
-      {items === null && <div className="text-sm text-label-tertiary">Loading…</div>}
+      {items === null && <LoadingNote />}
       {items && items.length === 0 && !adding && <div className="text-sm text-label-tertiary">No items yet.</div>}
 
       {items && items.length > 0 && (
@@ -320,7 +321,7 @@ function ReferenceCatalogsTab() {
   }, []);
 
   if (loadError) return <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-secondary">{loadError}</div>;
-  if (!types) return <div className="text-label-tertiary text-sm">Loading…</div>;
+  if (!types) return <LoadingNote />;
 
   const groups = groupTypes(types);
   const selectedType = types.find((t) => t.catalogType === selected) ?? types[0] ?? null;

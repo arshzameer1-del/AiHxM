@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import type { CompensationComponentView, EmployeeAdditionalPaymentView, HrReferenceCatalogItemView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
@@ -74,7 +75,7 @@ export function EmployeeAdditionalPaymentsPanel({ employeeId, canManage }: { emp
       )}
 
       {!payments ? (
-        <p className="text-sm text-label-tertiary">Loading…</p>
+        <LoadingNote />
       ) : payments.length === 0 ? (
         <p className="text-sm text-label-tertiary">No one-time payments on record.</p>
       ) : (

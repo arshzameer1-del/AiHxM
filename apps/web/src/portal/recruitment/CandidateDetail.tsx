@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { RECRUITMENT_SOURCES } from "@aihxm/shared-types";
 import type { CandidateDocumentType, CandidateDocumentView, CandidateTimelineEntry, CandidateView, RecruitmentSource } from "@aihxm/shared-types";
@@ -89,7 +90,7 @@ export function CandidateDetail({ candidateId, onBack }: { candidateId: string; 
     }
   }
 
-  if (!candidate) return error ? <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-secondary">{error}</div> : <div className="text-label-tertiary text-sm">Loading…</div>;
+  if (!candidate) return error ? <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-secondary">{error}</div> : <LoadingNote />;
   const anonymised = Boolean(candidate.anonymisedAt);
 
   return (

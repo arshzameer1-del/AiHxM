@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type { AssignmentType, EmployeeOrgAssignmentView, EmployeeView, OrgUnitView, PositionView } from "@aihxm/shared-types";
@@ -324,7 +325,7 @@ export function AssignmentWorkbenchPage() {
         </div>
       )}
 
-      {!assignments && <div className="text-label-tertiary text-sm">Loading…</div>}
+      {!assignments && <LoadingNote />}
 
       {assignments && assignments.length === 0 && !creating && (
         <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-tertiary">

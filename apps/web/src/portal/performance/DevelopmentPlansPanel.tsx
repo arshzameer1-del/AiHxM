@@ -77,7 +77,7 @@ export function DevelopmentPlansPanel() {
               <Field label="Employee">
                 <select required className={inputCls} value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })}>
                   <option value="">Choose…</option>
-                  {employees.map((x) => <option key={x.id} value={x.id}>{x.firstName} {x.lastName}</option>)}
+                  {employees.map((x) => <option key={x.id} value={x.id}>{x.firstName} {x.lastName} ({x.employeeNumber})</option>)}
                 </select>
               </Field>
             )}

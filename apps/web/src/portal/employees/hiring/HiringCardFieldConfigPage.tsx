@@ -1,3 +1,4 @@
+import { LoadingNote } from "../../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import type { CardFieldDefinitionView, CardFieldsConfigView, CustomFieldDefinition, CustomFieldType } from "@aihxm/shared-types";
@@ -286,7 +287,7 @@ export function HiringCardFieldConfigPage() {
   }
 
   if (loadError) return <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-secondary">{loadError}</div>;
-  if (!view) return <div className="text-label-tertiary text-sm">Loading…</div>;
+  if (!view) return <LoadingNote />;
 
   const builtIn = [...view.builtIn].sort((a, b) => a.sortOrder - b.sortOrder);
 

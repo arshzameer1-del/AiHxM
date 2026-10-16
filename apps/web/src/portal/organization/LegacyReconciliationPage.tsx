@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { useEffect, useState } from "react";
 import type { LegacyReconciliationEmployeeView, LegacyReconciliationGap } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
@@ -154,7 +155,7 @@ export function LegacyReconciliationPage() {
   useEffect(load, []);
 
   if (error) return <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-secondary">{error}</div>;
-  if (!employees) return <div className="text-label-tertiary text-sm">Loading…</div>;
+  if (!employees) return <LoadingNote />;
 
   return (
     <div className="space-y-6">

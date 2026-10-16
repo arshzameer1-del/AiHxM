@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { LocationTreeNode, LocationType, LocationView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
@@ -554,7 +555,7 @@ export function LocationsPage() {
   }
 
   if (error) return <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-secondary">{error}</div>;
-  if (!tree) return <div className="text-label-tertiary text-sm">Loading…</div>;
+  if (!tree) return <LoadingNote />;
 
   return (
     <div>

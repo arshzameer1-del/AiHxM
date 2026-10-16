@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { useSearchParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { FileText, Download } from "lucide-react";
@@ -61,7 +62,7 @@ function DocumentsTab({ employeeId }: { employeeId: string }) {
   }
 
   if (error) return <div className="text-sm text-danger">{error}</div>;
-  if (documents === null) return <div className="text-sm text-label-tertiary">Loading…</div>;
+  if (documents === null) return <LoadingNote />;
   if (documents.length === 0) {
     return <div className="text-sm text-label-tertiary">No documents have been placed on your file yet.</div>;
   }
@@ -123,7 +124,7 @@ export function MyProfilePage() {
   }
 
   if (error) return <div className="text-danger text-sm">{error}</div>;
-  if (!employee) return <div className="text-label-tertiary text-sm">Loading…</div>;
+  if (!employee) return <LoadingNote />;
 
   return (
     <div className="max-w-2xl">
@@ -183,7 +184,7 @@ export function MyProfilePage() {
 
       {activeTab === "Employment History" && (
         <section className="bg-card rounded-card p-5 shadow-sm">
-          {jobHistory === null && <div className="text-sm text-label-tertiary">Loading…</div>}
+          {jobHistory === null && <LoadingNote />}
           {jobHistory && jobHistory.length === 0 && (
             <div className="text-sm text-label-tertiary">No job history recorded.</div>
           )}

@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type {
   ApplicationStage,
@@ -419,7 +420,7 @@ export function PipelinePanel() {
   };
 
   if (error) return <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-secondary">{error}</div>;
-  if (!requisitions) return <div className="text-label-tertiary text-sm">Loading…</div>;
+  if (!requisitions) return <LoadingNote />;
 
   if (approvedRequisitions.length === 0) {
     return (
@@ -459,7 +460,7 @@ export function PipelinePanel() {
       )}
 
       {applications === null ? (
-        <div className="text-label-tertiary text-sm">Loading…</div>
+        <LoadingNote />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-4">
           {PIPELINE_STAGES.map((stage) => (

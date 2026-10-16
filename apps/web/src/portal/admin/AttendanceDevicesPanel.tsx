@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import type { AttendanceDeviceView, DeviceEnrollmentView, EmployeeView, RawPunchView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
@@ -125,7 +126,7 @@ export function AttendanceDevicesPanel() {
   }
 
   if (error && !devices) return <p className="text-sm text-danger">{error}</p>;
-  if (!devices) return <p className="text-sm text-label-tertiary">Loading…</p>;
+  if (!devices) return <LoadingNote />;
 
   return (
     <div className="space-y-4">

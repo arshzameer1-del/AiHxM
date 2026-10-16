@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import type { LeaveEntitlementInput, LeavePolicyVersionView, LeavePolicyView, LeaveTypeView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
@@ -315,7 +316,7 @@ export function LeavePoliciesPanel() {
   useEffect(load, []);
 
   if (error) return <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-secondary">{error}</div>;
-  if (!policies) return <div className="text-label-tertiary text-sm">Loading…</div>;
+  if (!policies) return <LoadingNote />;
 
   return (
     <div className="space-y-4">

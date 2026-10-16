@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { useEffect, useState } from "react";
 import type { AttendanceCorrectionRequestView, AttendanceRecordView, EmployeeView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
@@ -84,7 +85,7 @@ export function ClockPanel({ employeeId, refreshKey, onChanged }: { employeeId: 
 
       <SapSection title="Recent attendance" count={attendance?.length}>
         {!attendance ? (
-          <p className="text-sm text-label-tertiary">Loading…</p>
+          <LoadingNote />
         ) : attendance.length === 0 ? (
           <p className="text-sm text-label-tertiary">No attendance recorded yet.</p>
         ) : (
@@ -140,7 +141,7 @@ export function CorrectionsPanel({ employeeId, refreshKey, onChanged }: { employ
 
       <SapSection title="Correction requests" count={corrections?.length}>
         {!corrections ? (
-          <p className="text-sm text-label-tertiary">Loading…</p>
+          <LoadingNote />
         ) : corrections.length === 0 ? (
           <p className="text-sm text-label-tertiary">You have not requested any corrections.</p>
         ) : (

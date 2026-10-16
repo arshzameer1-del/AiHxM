@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { EmployeeView, JobView, OrgUnitView, PositionStatus, PositionView } from "@aihxm/shared-types";
@@ -480,7 +481,7 @@ export function PositionWorkbenchPage() {
         </select>
       </div>
 
-      {!positions && <div className="text-label-tertiary text-sm">Loading…</div>}
+      {!positions && <LoadingNote />}
 
       {positions && positions.length === 0 && !creating && (
         <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-tertiary">

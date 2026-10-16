@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { useEffect, useRef, useState } from "react";
 import { isSelfService } from "../shared/roles";
 import { Receipt, Upload } from "lucide-react";
@@ -360,7 +361,7 @@ export function ExpensesPage() {
       {error ? (
         <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-secondary">{error}</div>
       ) : !claims ? (
-        <div className="text-label-tertiary text-sm">Loading…</div>
+        <LoadingNote />
       ) : (
         <>
           <SummaryCards claims={claims} />

@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { useEffect, useRef, useState } from "react";
 import type { PayrollDashboardRunView, PayrollDashboardView, PayrollEventCatalogEntry, PayrollInputBatchView, PayrollInputImportType, PayrollInputRowView, PayrollInputTemplateView } from "@aihxm/shared-types";
 import { api } from "../../api/client";
@@ -52,7 +53,7 @@ export function PayrollDashboardPanel() {
     };
   }, []);
   if (error) return <p className="text-xs text-danger">{error}</p>;
-  if (!d) return <p className="text-sm text-label-tertiary">Loading…</p>;
+  if (!d) return <LoadingNote />;
   return (
     <div className="space-y-4">
       {d.attention.length > 0 && (
@@ -82,7 +83,7 @@ export function PayrollEventCatalogPanel() {
   useEffect(() => {
     api.getPayrollEventCatalog().then(setRows).catch(() => setRows([]));
   }, []);
-  if (!rows) return <p className="text-sm text-label-tertiary">Loading…</p>;
+  if (!rows) return <LoadingNote />;
   return (
     <div className="space-y-3">
       <p className="text-xs text-label-tertiary">Subscribe to these through webhooks or the event feed. Payloads carry identifiers and run totals only, never an individual's pay.</p>

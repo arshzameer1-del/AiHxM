@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { useEffect, useState } from "react";
 import type { GeneratedDocumentView, PayrollDocumentSettingsView, PayrollDocumentType } from "@aihxm/shared-types";
 import { api } from "../../api/client";
@@ -118,7 +119,7 @@ export function PayrollDocumentsPanel({ canIssue }: { canIssue: boolean }) {
           </select>
         </div>
         {!docs ? (
-          <p className="text-sm text-label-tertiary">Loading…</p>
+          <LoadingNote />
         ) : docs.length === 0 ? (
           <p className="text-sm text-label-tertiary">No documents yet.</p>
         ) : (

@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import type { LocationView, ScopedOvertimePolicyView, SetOvertimePolicyRequest } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
@@ -205,7 +206,7 @@ export function OvertimePoliciesPanel() {
   }
 
   if (error && !policies) return <p className="text-sm text-danger">{error}</p>;
-  if (!policies) return <p className="text-sm text-label-tertiary">Loading…</p>;
+  if (!policies) return <LoadingNote />;
 
   const nameOf = (p: ScopedOvertimePolicyView) => {
     if (p.scopeKey === "company") return "Company-wide";

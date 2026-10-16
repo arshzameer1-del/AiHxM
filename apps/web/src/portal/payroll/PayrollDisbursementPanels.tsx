@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { useEffect, useState } from "react";
 import type {
   DisbursementFieldKey,
@@ -101,7 +102,7 @@ export function DisbursementSettingsForm() {
   }
 
   if (error) return <p className="text-xs text-danger">{error}</p>;
-  if (!settings) return <p className="text-sm text-label-tertiary">Loading…</p>;
+  if (!settings) return <LoadingNote />;
 
   const dirty = JSON.stringify(columns) !== JSON.stringify(settings.columns);
 

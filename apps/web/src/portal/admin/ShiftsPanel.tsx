@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import type { EmployeeView, ShiftView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
@@ -359,7 +360,7 @@ export function ShiftsPanel() {
   useEffect(load, []);
 
   if (error) return <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-secondary">{error}</div>;
-  if (!shifts) return <div className="text-label-tertiary text-sm">Loading…</div>;
+  if (!shifts) return <LoadingNote />;
 
   return (
     <div className="space-y-4">

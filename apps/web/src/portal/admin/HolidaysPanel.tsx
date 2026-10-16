@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import type { HolidayCalendarView, HolidayView, LocationView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
@@ -343,7 +344,7 @@ export function HolidaysPanel() {
   }
 
   if (error) return <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-secondary">{error}</div>;
-  if (!holidays) return <div className="text-label-tertiary text-sm">Loading…</div>;
+  if (!holidays) return <LoadingNote />;
 
   const activeCalendars = calendars.filter((c) => c.status === "active");
 

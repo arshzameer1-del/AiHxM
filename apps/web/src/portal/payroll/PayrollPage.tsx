@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { useEffect, useRef, useState } from "react";
 import { isSelfService as isSelfServiceRole } from "../shared/roles";
 import { useSearchParams } from "react-router-dom";
@@ -601,7 +602,7 @@ function RunsSection({
       )}
 
       {!runs ? (
-        <div className="text-label-tertiary text-sm">Loading…</div>
+        <LoadingNote />
       ) : runs.length === 0 ? (
         <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-tertiary">No payroll runs yet.</div>
       ) : (
@@ -747,7 +748,7 @@ function SettingsAndSlabsSection() {
         <h3 className="text-sm font-semibold mb-2">EOBI &amp; social security</h3>
         {settings && <p className="text-xs text-label-tertiary mb-2">In effect since {formatDate(settings.effectiveFrom)}</p>}
         {!settings ? (
-          <div className="text-sm text-label-tertiary">Loading…</div>
+          <LoadingNote />
         ) : (
           <PayrollSettingsForm
             settings={settings}
@@ -777,7 +778,7 @@ function SettingsAndSlabsSection() {
           </div>
         )}
         {!slabs ? (
-          <div className="text-sm text-label-tertiary">Loading…</div>
+          <LoadingNote />
         ) : (
           <TaxSlabsForm
             slabs={slabs}
@@ -831,7 +832,7 @@ function MyPayslipsCard({ refreshKey }: { refreshKey: number }) {
       {error ? (
         <p className="text-sm text-label-secondary">{error}</p>
       ) : !payslips ? (
-        <div className="text-sm text-label-tertiary">Loading…</div>
+        <LoadingNote />
       ) : payslips.length === 0 ? (
         <p className="text-sm text-label-tertiary">No finalized payslips yet.</p>
       ) : (

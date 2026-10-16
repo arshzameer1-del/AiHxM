@@ -1,3 +1,4 @@
+import { LoadingNote } from "../shared/PageChrome";
 import { useEffect, useState } from "react";
 import type { PerformanceReviewView, ReviewCycleView } from "@aihxm/shared-types";
 import { api } from "../../api/client";
@@ -67,7 +68,7 @@ export function CalibrationPanel() {
   }
 
   if (loading) {
-    return <div className="text-label-tertiary">Loading calibration data...</div>;
+    return <LoadingNote what="reviews" />;
   }
 
   if (cycles.length === 0) {

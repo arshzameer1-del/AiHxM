@@ -4,7 +4,7 @@ import { Scale, Users } from "lucide-react";
 import type { EmployeeView, LeaveBalanceView, LeaveLedgerEntryView, LeaveTypeView } from "@aihxm/shared-types";
 import { api } from "../../api/client";
 import { useModuleContext } from "../shared/ModuleContext";
-import { BackLink, PageHeader } from "../shared/PageChrome";
+import { BackLink, PageHeader, LoadingNote } from "../shared/PageChrome";
 import { SapField, SapSection } from "../shared/FormSections";
 import { describeError } from "../shared/describeError";
 import { parseAdjustmentDays } from "./leaveBalances";
@@ -119,7 +119,7 @@ export function LeaveBalancesPage() {
 
       <SapSection title="Balances" count={balances?.length} collapsible={false}>
         {!balances ? (
-          <p className="text-sm text-label-tertiary">Loading…</p>
+          <LoadingNote />
         ) : balances.length === 0 ? (
           <p className="text-sm text-label-tertiary">No balance exists yet. Post an adjustment below to grant days, or assign a leave policy.</p>
         ) : (
