@@ -1,3 +1,4 @@
+import { memoizeForRequest } from "../common/request-context";
 import { Injectable } from "@nestjs/common";
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
@@ -499,10 +500,16 @@ export class RbacService {
     return this.hasPermission(claims, permissionKey);
   }
 
-  private async hasPermission(claims: RequestClaims, permissionKey: string): Promise<boolean> {
-    return this.db.withClaims(claims, async (client) => {
-      const result = await client.query(
-        `SELECT 1
+  private hasPermission(claims: RequestClaims, permissionKey: string): Promise<boolean> {
+    // Asked once per http request for the same user and permission (see memoizeForRequest); the next request asks again.
+    return memoizeForRequest(`p|${claims.sub}|${claims.company_id ?? ""}|${permissionKey}`, () => this.lookupPermission(claims, permissionKey));
+  }
+
+  private async lookupPermission(claims: RequestClaims, permissionKey: string): Promise<boolean> {
+    // One round trip (see DatabaseService.queryWithClaims); never cached, so a role change applies on the next request.
+    const result = await this.db.queryWithClaims(
+      claims,
+      `SELECT 1
          FROM user_role_assignments ura
          JOIN roles r ON r.id = ura.role_id AND r.is_active
          JOIN role_permissions rp ON rp.role_id = ura.role_id
@@ -512,10 +519,9 @@ export class RbacService {
            AND ${ASSIGNMENT_ACTIVE}
            AND p.key = $3
          LIMIT 1`,
-        [claims.sub, claims.company_id, permissionKey]
-      );
-      return (result.rowCount ?? 0) > 0;
-    });
+      [claims.sub, claims.company_id ?? null, permissionKey]
+    );
+    return result.rowCount > 0;
   }
 }
 

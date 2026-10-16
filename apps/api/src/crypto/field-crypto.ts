@@ -109,6 +109,12 @@ function unwrap(wrapped: string, ring: KeyRing): Buffer {
 export class FieldCrypto {
   private cache = new Map<string, TenantKeys>();
 
+  /** True when this tenant's keys are already loaded and fresh, so `warm()` would not query. */
+  isWarm(companyId: string): boolean {
+    const hit = this.cache.get(companyId);
+    return Boolean(hit && Date.now() - hit.loadedAt < CACHE_TTL_MS);
+  }
+
   /** For tests. */
   clearCache(): void {
     this.cache.clear();

@@ -1,3 +1,4 @@
+import { memoizeForRequest } from "../common/request-context";
 import { BadRequestException, Injectable } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { DatabaseService } from "../database/database.service";
@@ -46,10 +47,13 @@ export class EntitlementsService {
   async isModuleEnabled(claims: RequestClaims, moduleKey: ModuleKey): Promise<boolean> {
     if (!claims.company_id) return false;
 
-    return this.db.withClaims(claims, async (client) => {
-      const result = await client.query<{ enabled: boolean }>(
+    // Asked once per http request for the same company and module (see memoizeForRequest); the next request asks again.
+    return memoizeForRequest(`m|${claims.company_id}|${moduleKey}`, async () => {
+      // One round trip (see DatabaseService.queryWithClaims).
+      const result = await this.db.queryWithClaims<{ enabled: boolean }>(
+        claims,
         `SELECT enabled FROM tenant_module_entitlement WHERE company_id = $1 AND module_key = $2`,
-        [claims.company_id, moduleKey]
+        [claims.company_id ?? null, moduleKey]
       );
       return result.rowCount !== 0 && result.rows[0].enabled === true;
     });

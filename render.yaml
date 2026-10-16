@@ -18,6 +18,10 @@ services:
   - type: web
     name: aihxm-api
     runtime: node
+    # SPEED: the database is in Supabase ap-southeast-2 (Sydney). Every page makes many small database calls, so the distance
+    # between this service and the database is paid on each of them. Create the service in `region: singapore` (the closest Render
+    # region; the region of an existing service cannot be changed, so a new service is needed) and use a paid plan: the free plan
+    # sleeps after 15 minutes without traffic (the first click then waits 30-60 seconds) and has a fraction of a CPU.
     plan: free
     buildCommand: npm install && npx turbo run build --filter=@ai-hxm/api
     startCommand: node apps/api/dist/main.js

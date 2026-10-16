@@ -59,6 +59,8 @@ export type RequestClaims = {
  */
 async function warmFieldKeys(client: PoolClient, claims: RequestClaims): Promise<void> {
   if (!claims.company_id) return;
+  // Keys already loaded: nothing to query, so no savepoint round trips either.
+  if (fieldCrypto.isWarm(claims.company_id)) return;
   await client.query("SAVEPOINT warm_field_keys");
   try {
     await fieldCrypto.warm(client, claims.company_id);
@@ -78,14 +80,58 @@ export async function runInTenantContext<T>(
 ): Promise<T> {
   const client = await pool.connect();
   try {
-    await client.query("BEGIN");
-    await client.query("SELECT set_config('request.jwt.claims', $1, true)", [
-      JSON.stringify(claims),
-    ]);
+    // One round trip, not two: BEGIN and the claims go to the server together (simple-query protocol runs both).
+    // The database is often a continent away from the API, so every round trip saved is felt on every request.
+    await client.query(`BEGIN; SELECT set_config('request.jwt.claims', ${client.escapeLiteral(JSON.stringify(claims))}, true)`);
     await warmFieldKeys(client, claims);
     const result = await fn(client);
     await client.query("COMMIT");
     return result;
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * A single read-only query under the caller's claims in ONE round trip: BEGIN, the claims, the query and COMMIT are sent as one
+ * batch. For the small gate lookups that run on nearly every request (is the module on, does this user hold the permission),
+ * where the five-step transaction wrapper cost far more than the query. Same isolation as runInTenantContext (the claims are
+ * transaction-local and RLS applies); nothing is cached, so an authorization change is seen on the very next request.
+ *
+ * Only for queries whose parameters are plain strings, numbers, booleans or null: they are written into the statement as
+ * escaped literals (the simple-query protocol has no bound parameters). It does not load tenant field keys, so it must not
+ * touch an encrypted column.
+ */
+export async function queryInTenantContext<R extends Record<string, unknown> = Record<string, unknown>>(
+  pool: Pool,
+  claims: RequestClaims,
+  text: string,
+  values: ReadonlyArray<string | number | boolean | null> = []
+): Promise<{ rows: R[]; rowCount: number }> {
+  const client = await pool.connect();
+  try {
+    const literal = (v: string | number | boolean | null): string => {
+      if (v === null) return "NULL";
+      if (typeof v === "number") {
+        if (!Number.isFinite(v)) throw new Error("queryInTenantContext: non-finite number parameter");
+        return String(v);
+      }
+      if (typeof v === "boolean") return v ? "TRUE" : "FALSE";
+      return client.escapeLiteral(v);
+    };
+    const statement = text.replace(/\$(\d+)/g, (_m, n: string) => {
+      const i = Number(n) - 1;
+      if (i < 0 || i >= values.length) throw new Error(`queryInTenantContext: no value for $${n}`);
+      return literal(values[i]);
+    });
+    const results = (await client.query(
+      `BEGIN; SELECT set_config('request.jwt.claims', ${client.escapeLiteral(JSON.stringify(claims))}, true); ${statement}; COMMIT`
+    )) as unknown as Array<{ rows: R[]; rowCount: number | null }>;
+    const r = results[2];
+    return { rows: r.rows, rowCount: r.rowCount ?? r.rows.length };
   } catch (err) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw err;

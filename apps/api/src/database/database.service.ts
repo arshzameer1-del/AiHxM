@@ -1,7 +1,7 @@
 import { Inject, Injectable } from "@nestjs/common";
 import type { Pool, PoolClient } from "pg";
 import { PG_POOL } from "./pg-pool.token";
-import { runInTenantContext, type RequestClaims } from "./tenant-context";
+import { queryInTenantContext, runInTenantContext, type RequestClaims } from "./tenant-context";
 
 @Injectable()
 export class DatabaseService {
@@ -17,6 +17,15 @@ export class DatabaseService {
    */
   withClaims<T>(claims: RequestClaims, fn: (client: PoolClient) => Promise<T>): Promise<T> {
     return runInTenantContext(this.pool, claims, fn);
+  }
+
+  /** One read-only query in one round trip (see `queryInTenantContext`): for the small per-request gate lookups. */
+  queryWithClaims<R extends Record<string, unknown> = Record<string, unknown>>(
+    claims: RequestClaims,
+    text: string,
+    values: ReadonlyArray<string | number | boolean | null> = []
+  ): Promise<{ rows: R[]; rowCount: number }> {
+    return queryInTenantContext<R>(this.pool, claims, text, values);
   }
 
   async close() {

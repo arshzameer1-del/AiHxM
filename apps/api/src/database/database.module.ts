@@ -23,7 +23,17 @@ import { resolveSslConfig } from "./db-connection.util";
         if (!connectionString) {
           throw new Error("APP_DATABASE_URL is not set");
         }
-        return new Pool({ connectionString, ssl: resolveSslConfig(connectionString) });
+        // A new connection to a remote database costs several round trips (TCP, TLS, login), so connections are kept
+        // for five minutes when idle (the default 10 seconds closed them between clicks) and kept alive at the TCP level.
+        // PG_POOL_MAX raises the ceiling if the database host allows more connections.
+        const max = Number(process.env.PG_POOL_MAX);
+        return new Pool({
+          connectionString,
+          ssl: resolveSslConfig(connectionString),
+          idleTimeoutMillis: 300_000,
+          keepAlive: true,
+          ...(Number.isInteger(max) && max > 0 ? { max } : {}),
+        });
       },
     },
     DatabaseService,

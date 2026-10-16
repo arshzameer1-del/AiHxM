@@ -9,6 +9,7 @@ loadEnvFile(join(__dirname, "..", ".env"));
 import { NestFactory } from "@nestjs/core";
 import { ValidationPipe } from "@nestjs/common";
 import helmet from "helmet";
+import compression from "compression";
 import { AppModule } from "./app.module";
 
 async function bootstrap() {
@@ -27,6 +28,10 @@ async function bootstrap() {
   // Standard security headers (HSTS, no-sniff, frame-deny, etc.) — cheap,
   // framework-agnostic, and there was previously nothing here at all.
   app.use(helmet());
+
+  // Compress responses (employee lists and exports are large, the text compresses to a fraction): less to send over the
+  // slow hop between Render and the browser.
+  app.use(compression());
 
   // Phase 1 shipped this as `app.enableCors()` (wide open, every origin)
   // with a comment promising it would be "locked down... once real auth
