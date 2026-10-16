@@ -255,6 +255,19 @@ describe("CoursesService + CourseEnrollmentsService", () => {
       expect(managerView.id).toBe(enrollment.id);
     });
 
+    it("the unfiltered list gives a manager their team's enrollments with the learner's name, and an outsider none (B2)", async () => {
+      const course = await courses.create(hrAdminClaims, { title: "Team View Course", category: "other", durationMinutes: 15 });
+      const enrollment = await enrollments.enroll(staffClaims, { employeeId: staffEmployeeId, courseId: course.id });
+
+      const team = await enrollments.listEnrollments(managerClaims);
+      const mine = team.find((e) => e.id === enrollment.id);
+      expect(mine).toBeDefined();
+      expect(mine!.employeeName).toBeTruthy();
+      expect(mine!.employeeNumber).toBeTruthy();
+      const outsider = await enrollments.listEnrollments(outsiderClaims);
+      expect(outsider.find((e) => e.id === enrollment.id)).toBeUndefined();
+    });
+
     it("manage.all can cancel an enrollment; a stranger cannot", async () => {
       const course = await courses.create(hrAdminClaims, { title: "Cancel Course", category: "other", durationMinutes: 15 });
       const enrollment = await enrollments.enroll(staffClaims, { employeeId: staffEmployeeId, courseId: course.id });

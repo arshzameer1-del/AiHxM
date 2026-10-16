@@ -63,6 +63,8 @@ function rowToEnrollment(row: any, employeeUserAccountId: string | null): Course
     id: row.id,
     companyId: row.company_id,
     employeeId: row.employee_id,
+    employeeName: row.employee_first_name ? `${row.employee_first_name} ${row.employee_last_name}`.trim() : null,
+    employeeNumber: row.employee_number ?? null,
     courseId: row.course_id,
     course: rowToCourse({
       id: row.course_id,
@@ -94,7 +96,8 @@ const ENROLLMENT_SELECT = `
          c.title AS course_title, c.description AS course_description, c.category AS course_category,
          c.duration_minutes AS course_duration_minutes, c.is_active AS course_is_active,
          c.created_at AS course_created_at, c.updated_at AS course_updated_at,
-         e.user_account_id AS employee_user_account_id, mgr.user_account_id AS manager_user_account_id
+         e.user_account_id AS employee_user_account_id, mgr.user_account_id AS manager_user_account_id,
+         e.first_name AS employee_first_name, e.last_name AS employee_last_name, e.employee_number AS employee_number
   FROM course_enrollments ce
   JOIN courses c ON c.id = ce.course_id
   JOIN employees e ON e.id = ce.employee_id

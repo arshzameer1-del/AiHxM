@@ -3758,6 +3758,9 @@ export type CourseEnrollmentView = {
   id: string;
   companyId: string;
   employeeId: string;
+  /** The learner's name and number, so a manager's team view can tell people apart. */
+  employeeName: string | null;
+  employeeNumber: string | null;
   courseId: string;
   course: CourseView;
   status: CourseEnrollmentStatus;

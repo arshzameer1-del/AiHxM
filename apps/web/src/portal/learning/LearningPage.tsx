@@ -1,13 +1,14 @@
 import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import { isSelfService } from "../shared/roles";
-import { BookOpen, GraduationCap, PlayCircle } from "lucide-react";
+import { BookOpen, GraduationCap, PlayCircle, Users } from "lucide-react";
+import { TeamLearningPanel } from "./TeamLearningPanel";
 import type { CourseCategory, CourseEnrollmentView, CourseView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { COURSE_CATEGORIES, COURSE_CATEGORY_LABELS, ENROLLMENT_STATUS_LABELS, ENROLLMENT_STATUS_STYLES } from "./learningLabels";
 
-type Tab = "my-learning" | "browse" | "progress";
+type Tab = "my-learning" | "browse" | "progress" | "team";
 
 function describeError(err: unknown): string {
   if (err instanceof ApiError) {
@@ -320,6 +321,8 @@ export function LearningPage() {
   const roleKeys = identity?.roleKeys ?? [];
   const canManageCatalog = roleKeys.includes("hr_admin");
   const canEnroll = isSelfService(roleKeys) && Boolean(identity?.employeeId);
+  // Parked B2: a Line Manager sees their team's learning (course_enrollment.view.team); HR keeps the catalog tools.
+  const canSeeTeam = roleKeys.includes("line_manager");
 
   useEffect(() => {
     Promise.all([api.listCourses(), identity?.employeeId ? api.listCourseEnrollments(identity.employeeId) : Promise.resolve([])])
@@ -353,6 +356,7 @@ export function LearningPage() {
               ["my-learning", "My Learning", GraduationCap],
               ["browse", "Browse Courses", BookOpen],
               ["progress", "My Progress", PlayCircle],
+              ...(canSeeTeam ? ([["team", "My Team", Users]] as const) : []),
             ] as const
           ).map(([key, label, Icon]) => (
             <button
@@ -389,6 +393,8 @@ export function LearningPage() {
           )}
         </div>
       )}
+
+      {activeTab === "team" && canSeeTeam && <TeamLearningPanel myEmployeeId={identity?.employeeId} />}
 
       {activeTab === "browse" && (
         <div>
