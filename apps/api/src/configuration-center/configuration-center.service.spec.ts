@@ -320,11 +320,13 @@ describe("ConfigurationCenterService", () => {
       for (const h of hidden.rows) expect(keys).not.toContain(h.domain_key);
     });
 
-    it("CFG-RLS: configuration_registry is a global catalog and must have Row Level Security OFF (0115, 0157)", async () => {
-      const rls = await db.withClaims(FIXTURE_CLAIMS, (c) =>
-        c.query("SELECT relrowsecurity FROM pg_class WHERE relname = 'configuration_registry' AND relnamespace = 'public'::regnamespace")
+    it("CFG-RLS: app_role can always read the global configuration_registry catalog, with Row Level Security on or off (0158)", async () => {
+      const policy = await db.withClaims(FIXTURE_CLAIMS, (c) =>
+        c.query("SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'configuration_registry' AND policyname = 'configuration_registry_read' AND cmd = 'SELECT'")
       );
-      expect(rls.rows[0].relrowsecurity).toBe(false);
+      expect(policy.rowCount).toBe(1);
+      const rows = await db.withClaims(FIXTURE_CLAIMS, (c) => c.query("SELECT count(*)::int AS n FROM configuration_registry"));
+      expect(rows.rows[0].n).toBeGreaterThan(0);
     });
 
     it("every returned summary row carries a real admin route and label from the registry", async () => {
