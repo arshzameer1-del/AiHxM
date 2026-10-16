@@ -92,13 +92,31 @@ export function EmployeeDetailPage() {
     load();
     setEditing(false);
     setTab("Overview");
-    api.listCostCenters().then(setCostCenters).catch(() => setCostCenters([]));
-    api.listHrCatalogItems("contact_type").then(setContactTypes).catch(() => setContactTypes([]));
-    api.listHrCatalogItems("address_type").then(setAddressTypes).catch(() => setAddressTypes([]));
-    api.listHrCatalogItems("family_relationship_type").then(setRelationshipTypes).catch(() => setRelationshipTypes([]));
-    api.listHrCatalogItems("qualification_type").then(setQualificationTypes).catch(() => setQualificationTypes([]));
+    // The pick-lists below are loaded when the tab that uses them opens, not on every visit (LIVE-02: fewer calls up front).
+    setLoadedLists({});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  // Each list is requested once per employee page, the first time its tab is shown.
+  const [loadedLists, setLoadedLists] = useState<Record<string, true>>({});
+  useEffect(() => {
+    const once = (key: string, run: () => void) => {
+      if (loadedLists[key]) return;
+      setLoadedLists((prev) => ({ ...prev, [key]: true }));
+      run();
+    };
+    if (tab === "Contact & Address") {
+      once("contact", () => api.listHrCatalogItems("contact_type").then(setContactTypes).catch(() => setContactTypes([])));
+      once("address", () => api.listHrCatalogItems("address_type").then(setAddressTypes).catch(() => setAddressTypes([])));
+    }
+    if (tab === "Family & Education") {
+      once("relationship", () => api.listHrCatalogItems("family_relationship_type").then(setRelationshipTypes).catch(() => setRelationshipTypes([])));
+      once("qualification", () => api.listHrCatalogItems("qualification_type").then(setQualificationTypes).catch(() => setQualificationTypes([])));
+    }
+    if (tab === "Compensation & Assets") {
+      once("costCenters", () => api.listCostCenters().then(setCostCenters).catch(() => setCostCenters([])));
+    }
+  }, [tab, loadedLists]);
 
   if (error) return <div className="text-danger text-sm">{error}</div>;
   if (!employee) return <LoadingNote />;
