@@ -90,8 +90,24 @@ test("Employee and Line Manager cannot read finance master data or reorganizatio
   await loginToApp(page, essToken);
   await page.goto("/app");
   const nav = page.getByRole("navigation");
-  await expect(nav.getByRole("link", { name: "Jobs" })).toBeVisible();
+  // The org chart stays (read only); the structure tools underneath are HR Admin and Line Manager only.
+  await expect(nav.getByRole("link", { name: "Organization", exact: true })).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Jobs" })).toHaveCount(0);
+  await expect(nav.getByRole("link", { name: "Positions" })).toHaveCount(0);
   await expect(nav.getByRole("link", { name: "Financial Centers" })).toHaveCount(0);
   await expect(nav.getByRole("link", { name: "Reorganizations" })).toHaveCount(0);
   await expect(page.getByText("Organization Command Center")).toHaveCount(0);
+  await expect(nav.getByRole("link", { name: "Assignments" })).toHaveCount(0);
+  await expect(nav.getByRole("link", { name: "Reporting Lines" })).toHaveCount(0);
+});
+
+test("Employee Performance shows only Goals, Performance Reviews, Feedback and Development; approval pages say approvers only", async ({ page }) => {
+  await loginToApp(page, essToken);
+  await page.goto("/app/performance");
+  const tabs = page.getByRole("tab");
+  await expect(tabs).toHaveText(["Goals", "Performance Reviews", "Feedback", "Development"]);
+  await page.goto("/app/leave/approvals");
+  await expect(page.getByText("Only approvers can use this page")).toBeVisible();
+  await page.goto("/app/attendance/approvals");
+  await expect(page.getByText("Only approvers can use this page")).toBeVisible();
 });

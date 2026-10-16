@@ -12,14 +12,17 @@ type Tab = "cycles" | "goals" | "reviews" | "calibration" | "feedback" | "develo
 
 export function PerformancePage() {
   const { identity } = useAuth();
-  const isHr = (identity?.roleKeys ?? []).includes("hr_admin");
-  const [activeTab, setActiveTab] = useState<Tab>("cycles");
+  const roleKeys = identity?.roleKeys ?? [];
+  const isHr = roleKeys.includes("hr_admin");
+  const isManager = roleKeys.includes("line_manager");
+  const [activeTab, setActiveTab] = useState<Tab>(isHr ? "cycles" : "goals");
 
+  // Role review (2026-10): cycles are set up by HR; calibration is HR and managers' work, never an employee's.
   const tabs: Array<{ key: Tab; label: string }> = [
-    { key: "cycles", label: "Review Cycles" },
+    ...(isHr ? [{ key: "cycles" as Tab, label: "Review Cycles" }] : []),
     { key: "goals", label: "Goals" },
     { key: "reviews", label: "Performance Reviews" },
-    { key: "calibration", label: "Calibration" },
+    ...(isHr || isManager ? [{ key: "calibration" as Tab, label: "Calibration" }] : []),
     { key: "feedback", label: "Feedback" },
     { key: "development", label: "Development" },
     ...(isHr ? [{ key: "setup" as Tab, label: "Setup" }] : []),
@@ -51,10 +54,10 @@ export function PerformancePage() {
       </div>
 
       <div className="mt-6">
-        {activeTab === "cycles" && <ReviewCyclesPanel />}
+        {activeTab === "cycles" && isHr && <ReviewCyclesPanel />}
         {activeTab === "goals" && <GoalsPanel />}
         {activeTab === "reviews" && <PerformanceReviewsPanel />}
-        {activeTab === "calibration" && <CalibrationPanel />}
+        {activeTab === "calibration" && (isHr || isManager) && <CalibrationPanel />}
         {activeTab === "feedback" && <FeedbackPanel />}
         {activeTab === "development" && <DevelopmentPlansPanel />}
         {activeTab === "setup" && isHr && <PerformanceSetupPanel />}

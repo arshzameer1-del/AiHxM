@@ -92,6 +92,15 @@ function MyLeavePage() {
 
 function LeaveApprovalsPage() {
   const { canSubmitOnBehalf, canDecide, canCancel, refreshKey, bump } = useModuleContext();
+  if (!canDecide) {
+    return (
+      <div>
+        <BackLink to="/app/leave">Back to Leave Management</BackLink>
+        <PageHeader title="Leave Approvals" subtitle="Leave requests you can decide." />
+        <p className="text-sm text-label-secondary">Only approvers can use this page. Your own requests are under My Leave Request.</p>
+      </div>
+    );
+  }
   return (
     <div>
       <BackLink to="/app/leave">Back to Leave Management</BackLink>

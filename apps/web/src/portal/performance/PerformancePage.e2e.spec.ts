@@ -64,11 +64,11 @@ test.describe("Performance & Goals Portal (Task #53)", () => {
     // review cycles yet" rendered when this freshly-signed-up company has
     // no cycles configured yet. The real nav element is the PerformancePage
     // tab button itself (`role="tab"`), which is unambiguous.
-    const cyclesSection = page
-      .locator("[data-testid='review-cycles']")
-      .or(page.getByRole("tab", { name: "Review Cycles", exact: true }));
-
-    await expect(cyclesSection).toBeVisible();
+    // Role review (2026-10): review cycles are set up by HR, so an Employee sees Goals, Reviews, Feedback and
+    // Development but not the Review Cycles or Calibration tabs.
+    await expect(page.getByRole("tab", { name: "Goals", exact: true })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Review Cycles", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "Calibration", exact: true })).toHaveCount(0);
 
     // Verify list of cycles
     const cyclesList = page
@@ -236,12 +236,7 @@ test.describe("Performance & Goals Portal (Task #53)", () => {
     }
 
     // Expect goals view
-    const goalsSection = page
-      .locator("[data-testid='goals']")
-      .or(page.locator("text=Goals"))
-      .or(page.locator("text=Objectives"));
-
-    await expect(goalsSection).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Goals", exact: true })).toHaveAttribute("aria-selected", "true");
 
     // Look for "Add Goal" or "New Goal" button
     const addGoalButton = page

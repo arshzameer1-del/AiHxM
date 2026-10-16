@@ -96,7 +96,16 @@ function CorrectionsPage() {
 }
 
 function CorrectionApprovalsPage() {
-  const { refreshKey, bump } = useModuleContext();
+  const { refreshKey, bump, canDecide } = useModuleContext();
+  if (!canDecide) {
+    return (
+      <div>
+        <BackLink to="/app/attendance">Back to Time & Attendance</BackLink>
+        <PageHeader title="Correction Approvals" subtitle="Attendance corrections you can decide." />
+        <p className="text-sm text-label-secondary">Only approvers can use this page. Your own corrections are under Attendance Corrections.</p>
+      </div>
+    );
+  }
   return (
     <div>
       <BackLink to="/app/attendance">Back to Time & Attendance</BackLink>

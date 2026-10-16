@@ -112,7 +112,11 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): 
   // same audience as the Employees/My Profile split above; org_unit.manage.all
   // (hr_admin only) is what actually gates the create/edit/move/archive
   // actions the page itself renders.
-  if (hasModule("employee") && roleKeys.length > 0) {
+  // Everyone may look at the org chart (read only, no holder names for employees). The structure tools underneath are for
+  // HR Admin and Line Manager, so an Employee gets one flat "Organization" link (access review 2026-10).
+  if (hasModule("employee") && roleKeys.length > 0 && !hasRole("hr_admin", "line_manager")) {
+    items.push({ to: "/app/organization", label: "Organization", end: true, icon: Network });
+  } else if (hasModule("employee") && hasRole("hr_admin", "line_manager")) {
     // Organization Management Phase 9 — collapses what Phases 2-5 each
     // added as their own flat top-level item (Jobs/Positions/Assignments/
     // Reporting Lines/Locations/Financial Centers/Reorganizations, all
@@ -133,8 +137,13 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): 
       children: [
         { to: "/app/organization/jobs", label: "Jobs" },
         { to: "/app/organization/positions", label: "Positions" },
-        { to: "/app/organization/assignments", label: "Assignments" },
-        { to: "/app/organization/relationships", label: "Reporting Lines" },
+        // Workbenches for looking up other people's assignments and reporting lines: HR Admin and Line Manager only.
+        ...(hasRole("hr_admin", "line_manager")
+          ? [
+              { to: "/app/organization/assignments", label: "Assignments" },
+              { to: "/app/organization/relationships", label: "Reporting Lines" },
+            ]
+          : []),
         { to: "/app/organization/locations", label: "Locations" },
         // Finance master data and reorganization plans are HR Admin only (access review 2026-10, migration 0155).
         ...(roleKeys.includes("hr_admin")
