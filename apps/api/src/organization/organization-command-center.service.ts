@@ -1,3 +1,4 @@
+import { sequentially } from "../database/sequentially";
 import { Injectable } from "@nestjs/common";
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
@@ -194,8 +195,8 @@ export class OrganizationCommandCenterService {
         orphanedAssignmentPositions,
         orphanedRelationshipManagers,
         legacyRecordsNotMapped,
-      ] = await Promise.all([
-        client.query(
+      ] = await sequentially([
+        () => client.query(
           `SELECT COUNT(*)::int AS n FROM employees e
            WHERE e.company_id = $1 AND e.employment_status = 'active'
            AND NOT EXISTS (
@@ -204,10 +205,10 @@ export class OrganizationCommandCenterService {
            )`,
           [companyId]
         ),
-        client.query(`SELECT COUNT(*)::int AS n FROM positions p WHERE p.company_id = $1 AND p.org_unit_id IS NULL`, [
+        () => client.query(`SELECT COUNT(*)::int AS n FROM positions p WHERE p.company_id = $1 AND p.org_unit_id IS NULL`, [
           companyId,
         ]),
-        client.query(
+        () => client.query(
           `SELECT COUNT(*)::int AS n FROM employees e
            WHERE e.company_id = $1 AND e.employment_status = 'active'
            AND NOT EXISTS (
@@ -216,7 +217,7 @@ export class OrganizationCommandCenterService {
            )`,
           [companyId]
         ),
-        client.query(
+        () => client.query(
           `SELECT COUNT(DISTINCT l.id)::int AS n FROM locations l
            WHERE l.company_id = $1 AND l.status = 'archived'
            AND (
@@ -231,7 +232,7 @@ export class OrganizationCommandCenterService {
            )`,
           [companyId]
         ),
-        client.query(
+        () => client.query(
           `SELECT COUNT(*)::int AS n FROM employees e
            JOIN employee_org_assignments a
              ON a.employee_id = e.id AND a.assignment_type = 'primary' AND a.status = 'active'
@@ -239,25 +240,25 @@ export class OrganizationCommandCenterService {
            AND (e.org_unit_id IS DISTINCT FROM a.org_unit_id OR e.position_id IS DISTINCT FROM a.position_id)`,
           [companyId]
         ),
-        client.query(
+        () => client.query(
           `SELECT COUNT(*)::int AS n FROM employee_org_assignments a
            JOIN org_units u ON u.id = a.org_unit_id
            WHERE a.company_id = $1 AND a.status = 'active' AND u.status = 'archived'`,
           [companyId]
         ),
-        client.query(
+        () => client.query(
           `SELECT COUNT(*)::int AS n FROM employee_org_assignments a
            JOIN positions p ON p.id = a.position_id
            WHERE a.company_id = $1 AND a.status = 'active' AND p.status = 'abolished'`,
           [companyId]
         ),
-        client.query(
+        () => client.query(
           `SELECT COUNT(*)::int AS n FROM org_relationships r
            JOIN employees m ON m.id = r.manager_employee_id
            WHERE r.company_id = $1 AND r.status = 'active' AND m.employment_status = 'terminated'`,
           [companyId]
         ),
-        client.query(
+        () => client.query(
           `SELECT COUNT(*)::int AS n FROM employees e
            WHERE e.company_id = $1 AND e.employment_status <> 'terminated'
            AND (
@@ -318,3 +319,4 @@ export class OrganizationCommandCenterService {
     });
   }
 }
+

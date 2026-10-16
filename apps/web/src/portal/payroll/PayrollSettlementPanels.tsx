@@ -119,7 +119,11 @@ function SettlementDetail({ id, canPrepare, canApprove, onChanged }: { id: strin
   return (
     <div className="px-3 pb-3 space-y-3 text-xs">
       {s.lines.length === 0 ? (
-        <p className="text-label-tertiary">Not calculated yet.</p>
+        <p className="text-label-tertiary">
+          {s.calculatedAt
+            ? "Calculated: nothing extra to settle (no leave encashment, notice recovery, gratuity, provident fund or loans apply). Salary up to the last working day is paid in the regular payroll run."
+            : "Not calculated yet."}
+        </p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-left">

@@ -1,3 +1,4 @@
+import { sequentially } from "../database/sequentially";
 import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
@@ -45,47 +46,47 @@ export class EmployeeAnalyticsService {
         terminationsResult,
         upcomingDatesResult,
         assetsResult,
-      ] = await Promise.all([
-        client.query<{ n: string }>(
+      ] = await sequentially([
+        () => client.query<{ n: string }>(
           `SELECT COUNT(*)::text AS n FROM employees WHERE company_id = $1 AND employment_status <> 'terminated'`,
           [companyId]
         ),
-        client.query<{ key: string; n: string }>(
+        () => client.query<{ key: string; n: string }>(
           `SELECT COALESCE(NULLIF(department, ''), 'Unassigned') AS key, COUNT(*) AS n
            FROM employees WHERE company_id = $1 AND employment_status <> 'terminated'
            GROUP BY key ORDER BY n DESC, key ASC`,
           [companyId]
         ),
-        client.query<{ key: string; n: string }>(
+        () => client.query<{ key: string; n: string }>(
           `SELECT COALESCE(NULLIF(employment_type, ''), 'Unspecified') AS key, COUNT(*) AS n
            FROM employees WHERE company_id = $1 AND employment_status <> 'terminated'
            GROUP BY key ORDER BY n DESC, key ASC`,
           [companyId]
         ),
-        client.query<{ key: string; n: string }>(
+        () => client.query<{ key: string; n: string }>(
           `SELECT COALESCE(NULLIF(gender, ''), 'Unspecified') AS key, COUNT(*) AS n
            FROM employees WHERE company_id = $1 AND employment_status <> 'terminated'
            GROUP BY key ORDER BY n DESC, key ASC`,
           [companyId]
         ),
-        client.query<{ avg_years: string | null }>(
+        () => client.query<{ avg_years: string | null }>(
           `SELECT AVG((COALESCE(termination_date, CURRENT_DATE) - date_of_joining) / 365.25)::text AS avg_years
            FROM employees
            WHERE company_id = $1 AND employment_status <> 'terminated' AND date_of_joining IS NOT NULL`,
           [companyId]
         ),
-        client.query<{ n: string }>(
+        () => client.query<{ n: string }>(
           `SELECT COUNT(*)::text AS n FROM employees
            WHERE company_id = $1 AND termination_date IS NOT NULL AND termination_date >= (CURRENT_DATE - INTERVAL '90 days')`,
           [companyId]
         ),
-        client.query<{ n: string }>(
+        () => client.query<{ n: string }>(
           `SELECT COUNT(*)::text AS n FROM employee_important_dates
            WHERE company_id = $1 AND status = 'active'
              AND date_value BETWEEN CURRENT_DATE AND (CURRENT_DATE + INTERVAL '30 days')`,
           [companyId]
         ),
-        client.query<{ n: string }>(
+        () => client.query<{ n: string }>(
           `SELECT COUNT(*)::text AS n FROM employee_assets WHERE company_id = $1 AND status = 'assigned'`,
           [companyId]
         ),

@@ -1,3 +1,4 @@
+import { sequentially } from "../database/sequentially";
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { DatabaseService } from "../database/database.service";
@@ -241,7 +242,7 @@ export class PayrollTaxService {
     await this.requireManage(claims);
     return this.db.withClaims(claims, async (client) => {
       const r = await client.query("SELECT id FROM tax_profiles WHERE company_id = $1 AND ($2::uuid IS NULL OR tax_year_id = $2) ORDER BY created_at DESC", [claims.company_id, taxYearId ?? null]);
-      return Promise.all(r.rows.map((x) => this.profileById(client, x.id)));
+      return sequentially(r.rows.map((x) => () => this.profileById(client, x.id)));
     });
   }
 
@@ -578,10 +579,10 @@ export class PayrollTaxService {
     );
     if (r.rowCount === 0) throw new NotFoundException("Tax profile not found");
     const p = r.rows[0];
-    const [slabs, exemptions, credits] = await Promise.all([
-      client.query("SELECT * FROM tax_profile_slabs WHERE tax_profile_id = $1 ORDER BY min_annual_income", [id]),
-      client.query("SELECT * FROM tax_exemptions WHERE tax_profile_id = $1 ORDER BY code", [id]),
-      client.query("SELECT * FROM tax_credits WHERE tax_profile_id = $1 ORDER BY code", [id]),
+    const [slabs, exemptions, credits] = await sequentially([
+      () => client.query("SELECT * FROM tax_profile_slabs WHERE tax_profile_id = $1 ORDER BY min_annual_income", [id]),
+      () => client.query("SELECT * FROM tax_exemptions WHERE tax_profile_id = $1 ORDER BY code", [id]),
+      () => client.query("SELECT * FROM tax_credits WHERE tax_profile_id = $1 ORDER BY code", [id]),
     ]);
     return {
       id: p.id,

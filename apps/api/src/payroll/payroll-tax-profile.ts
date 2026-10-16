@@ -1,3 +1,4 @@
+import { sequentially } from "../database/sequentially";
 import { BadRequestException } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import type { TaxSlabView } from "@aihxm/shared-types";
@@ -81,9 +82,9 @@ export async function loadEmployeeTaxContext(
 
   const slabs = await client.query("SELECT * FROM tax_profile_slabs WHERE tax_profile_id = $1 ORDER BY min_annual_income", [p.id]);
   if (slabs.rowCount === 0) throw new BadRequestException(`Tax profile "${p.name}" has no slabs`);
-  const [exemptions, credits] = await Promise.all([
-    client.query("SELECT * FROM tax_exemptions WHERE tax_profile_id = $1", [p.id]),
-    client.query("SELECT * FROM tax_credits WHERE tax_profile_id = $1", [p.id]),
+  const [exemptions, credits] = await sequentially([
+    () => client.query("SELECT * FROM tax_exemptions WHERE tax_profile_id = $1", [p.id]),
+    () => client.query("SELECT * FROM tax_credits WHERE tax_profile_id = $1", [p.id]),
   ]);
   const claims = (list: unknown, key: "exemptionId" | "creditId", rows: Array<Record<string, any>>, typeColumn: string): TaxClaim[] => { // eslint-disable-line @typescript-eslint/no-explicit-any
     const out: TaxClaim[] = [];
