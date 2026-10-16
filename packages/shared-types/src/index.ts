@@ -8915,3 +8915,31 @@ export type StarterSetupResult = {
   skipped: string[];
   status: StarterSetupStatus;
 };
+
+// Employee numbering policy and ledger (Configuration Center > Employee numbering)
+export type EmployeeNumberGenerationTiming = "hire" | "draft" | "save" | "approval";
+export type EmployeeNumberPolicyView = {
+  companyId: string;
+  generationTiming: EmployeeNumberGenerationTiming;
+  uniquenessScope: "company";
+  resetPolicy: "never" | "yearly";
+  allowManual: boolean;
+  manualPattern: string;
+  updatedAt: string | null;
+};
+export type EmployeeNumberLedgerView = {
+  id: string;
+  employeeNumber: string;
+  state: "reserved" | "issued" | "void";
+  seriesKey: string;
+  sequenceNo: number | null;
+  source: "generated" | "manual" | "imported" | "backfill";
+  hireProcessId: string | null;
+  employeeId: string | null;
+  reservedAt: string | null;
+  issuedAt: string | null;
+  voidedAt: string | null;
+  voidReason: string | null;
+  createdAt: string;
+};
+export type UpdateEmployeeNumberPolicyRequest = Partial<Pick<EmployeeNumberPolicyView, "generationTiming" | "resetPolicy" | "allowManual" | "manualPattern">>;

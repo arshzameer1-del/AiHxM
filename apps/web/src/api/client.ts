@@ -194,6 +194,9 @@ import type {
   HorizontalPosition,
   ConfigurationDomainSummary,
   StarterSetupResult,
+  EmployeeNumberLedgerView,
+  EmployeeNumberPolicyView,
+  UpdateEmployeeNumberPolicyRequest,
   StarterSetupStatus,
   ImpersonateResponse,
   InitiateOffboardingRequest,
@@ -2311,6 +2314,11 @@ export const api = {
   // access to — a card missing here means the real permission check on
   // that domain's own service failed, not that this endpoint hid it.
   getConfigurationCenterSummary: () => request<ConfigurationDomainSummary[]>("/configuration-center"),
+  getEmployeeNumberPolicy: () => request<EmployeeNumberPolicyView>("/configuration/core-employee/numbering"),
+  updateEmployeeNumberPolicy: (input: UpdateEmployeeNumberPolicyRequest) =>
+    request<EmployeeNumberPolicyView>("/configuration/core-employee/numbering", { method: "PUT", body: JSON.stringify(input) }),
+  listEmployeeNumbers: (state?: string) =>
+    request<EmployeeNumberLedgerView[]>(`/configuration/core-employee/numbering/ledger${state ? `?state=${encodeURIComponent(state)}` : ""}`),
   getStarterSetup: () => request<StarterSetupStatus>("/starter-setup"),
   applyStarterSetup: () => request<StarterSetupResult>("/starter-setup/apply", { method: "POST" }),
 

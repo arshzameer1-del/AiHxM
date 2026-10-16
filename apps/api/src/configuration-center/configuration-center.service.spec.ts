@@ -21,6 +21,7 @@ import { EmployeesService } from "../employees/employees.service";
 import { HiringProcessService } from "../employees/hiring/hiring-process.service";
 import { LocalFileStorageService } from "../file-storage/local-file-storage.service";
 import { OnboardingService } from "../onboarding-offboarding/onboarding.service";
+import { EmployeeNumberingService } from "../employees/employee-numbering.service";
 import { OffboardingService } from "../onboarding-offboarding/offboarding.service";
 import { ConfigurationCenterService } from "./configuration-center.service";
 
@@ -88,7 +89,8 @@ describe("ConfigurationCenterService", () => {
       profitCenters,
       hiring,
       onboarding,
-      offboarding
+      offboarding,
+      new EmployeeNumberingService(db, rbac, entitlements, audit)
     );
   });
 
@@ -242,6 +244,10 @@ describe("ConfigurationCenterService", () => {
       expect(byKey.onboarding_checklist_template.adminRoute).toBe("/app/admin?tab=checklists");
       expect(byKey.offboarding_checklist_template).toBeDefined();
       expect(byKey.offboarding_checklist_template.count).toBeGreaterThanOrEqual(1);
+      // Employee numbering (CFG-13): the card is counted from the issued-number ledger.
+      expect(byKey.employee_numbering).toBeDefined();
+      expect(byKey.employee_numbering.count).toBeGreaterThanOrEqual(0);
+      expect(byKey.employee_numbering.adminRoute).toBe("/app/configuration-center/employee-numbering");
       expect(summary.map((s) => s.domainKey)).not.toContain("recruitment");
       expect(summary.map((s) => s.domainKey)).not.toContain("performance");
 
@@ -279,6 +285,7 @@ describe("ConfigurationCenterService", () => {
       // above are.
       expect(domainKeys).not.toContain("onboarding_checklist_template");
       expect(domainKeys).not.toContain("offboarding_checklist_template");
+      expect(domainKeys).not.toContain("employee_numbering");
       expect(domainKeys).toEqual(expect.arrayContaining(["holiday", "custom_field"]));
     });
 

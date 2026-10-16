@@ -123,6 +123,15 @@ export class EmployeeNumberingService {
     });
   }
 
+  /** How many employee numbers have been issued (the Configuration Center card's count). Same access rule as the rest. */
+  async countIssued(claims: RequestClaims): Promise<number> {
+    await this.requireManage(claims);
+    return this.db.withClaims(claims, async (client) => {
+      const r = await client.query("SELECT count(*)::int AS n FROM employee_numbers WHERE company_id = $1 AND state = 'issued'", [claims.company_id]);
+      return r.rows[0].n as number;
+    });
+  }
+
   async list(claims: RequestClaims, filters: { state?: string; limit?: number } = {}): Promise<EmployeeNumberLedgerView[]> {
     await this.requireManage(claims);
     return this.db.withClaims(claims, async (client) => {

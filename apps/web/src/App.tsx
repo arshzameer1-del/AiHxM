@@ -106,6 +106,11 @@ const HiringWizardPage = lazy(() =>
     default: m.HiringWizardPage,
   })),
 );
+const EmployeeNumberingPage = lazy(() =>
+  import("./portal/admin/EmployeeNumberingPage").then((m) => ({
+    default: m.EmployeeNumberingPage,
+  })),
+);
 const HiringCardDesignerPage = lazy(() =>
   import("./portal/employees/hiring/HiringCardDesignerPage").then((m) => ({
     default: m.HiringCardDesignerPage,
@@ -472,6 +477,7 @@ export default function App() {
                     — that's the link ConfigurationCenterPage's own
                     DomainCard renders, driven entirely from that DB row,
                     not from anything in this file. */}
+                  <Route path="configuration-center/employee-numbering" element={<EmployeeNumberingPage />} />
                   <Route path="configuration-center/hiring" element={<HiringCardDesignerPage />} />
                   {/* Hiring Card Field Configuration (2026-09-27) — see
                     HiringCardFieldConfigPage.tsx's own doc comment. Same
