@@ -10,6 +10,16 @@ const CLASS_LABELS: Record<PayrollExceptionView["exceptionClass"], string> = {
   system: "System problem",
 };
 
+/** How many exceptions are listed before "Show all": a run with a hundred identical problems stays readable. */
+const EXCEPTIONS_SHOWN = 10;
+
+/** The distinct problems with how many employees each affects, largest first. */
+function summarizeExceptions(items: PayrollExceptionView[]): Array<{ message: string; count: number }> {
+  const counts = new Map<string, number>();
+  for (const ex of items) counts.set(ex.message, (counts.get(ex.message) ?? 0) + 1);
+  return [...counts.entries()].map(([message, count]) => ({ message, count })).sort((a, b) => b.count - a.count);
+}
+
 function describe(err: unknown, fallback: string) {
   return err instanceof ApiError ? err.message : fallback;
 }
@@ -31,6 +41,7 @@ export function PayrollCalculationPanel({
 }) {
   const [progress, setProgress] = useState<PayrollCalculationProgressView | null>(null);
   const [exceptions, setExceptions] = useState<PayrollExceptionView[]>([]);
+  const [showAllExceptions, setShowAllExceptions] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -123,8 +134,17 @@ export function PayrollCalculationPanel({
           <div className="text-xs font-semibold mb-1">
             {exceptions.length} employee{exceptions.length === 1 ? "" : "s"} need attention
           </div>
+          {exceptions.length > EXCEPTIONS_SHOWN && (
+            <ul className="mb-2 text-xs text-label-secondary space-y-0.5" data-testid="exception-summary">
+              {summarizeExceptions(exceptions).map((g) => (
+                <li key={g.message}>
+                  <span className="font-semibold tabular-nums">{g.count}</span> × {g.message}
+                </li>
+              ))}
+            </ul>
+          )}
           <ul className="space-y-2">
-            {exceptions.map((ex) => (
+            {(showAllExceptions ? exceptions : exceptions.slice(0, EXCEPTIONS_SHOWN)).map((ex) => (
               <li key={ex.id} className="text-xs rounded-lg border border-black/10 p-2">
                 <div className="flex items-start justify-between gap-2">
                   <div>
@@ -166,6 +186,11 @@ export function PayrollCalculationPanel({
               </li>
             ))}
           </ul>
+          {exceptions.length > EXCEPTIONS_SHOWN && (
+            <button type="button" onClick={() => setShowAllExceptions((v) => !v)} className="mt-2 text-xs font-semibold text-accent hover:underline">
+              {showAllExceptions ? "Show fewer" : `Show all ${exceptions.length}`}
+            </button>
+          )}
         </div>
       )}
 
