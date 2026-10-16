@@ -73,6 +73,9 @@ test("HR can give the role to an employee, and other roles keep their normal hom
   await page.goto("/app");
   await expect(page.getByTestId("ess-launchpad")).toHaveCount(0);
   await expect(page.getByRole("navigation").getByRole("link", { name: "Employee Self Service" })).toHaveCount(0);
+  await expect(page.getByRole("navigation").getByRole("link", { name: "Organization", exact: true })).toBeVisible();
+  await page.goto("/app/organization");
+  await expect(page.getByTestId("hr-admin-only")).toHaveCount(0);
 });
 
 test("Employee and Line Manager cannot read finance master data or reorganization plans; HR can", async ({ page }) => {
@@ -90,13 +93,19 @@ test("Employee and Line Manager cannot read finance master data or reorganizatio
   await loginToApp(page, essToken);
   await page.goto("/app");
   const nav = page.getByRole("navigation");
-  // The org chart stays (read only); the structure tools underneath are HR Admin and Line Manager only.
-  await expect(nav.getByRole("link", { name: "Organization", exact: true })).toBeVisible();
+  // Organization management is HR Admin only; the Employee gets My Org Chart instead.
+  await expect(nav.getByRole("link", { name: "Organization", exact: true })).toHaveCount(0);
+  await expect(nav.getByRole("link", { name: "My Org Chart", exact: true }).first()).toBeVisible();
   await expect(nav.getByRole("link", { name: "Jobs" })).toHaveCount(0);
   await expect(nav.getByRole("link", { name: "Positions" })).toHaveCount(0);
   await expect(nav.getByRole("link", { name: "Financial Centers" })).toHaveCount(0);
   await expect(nav.getByRole("link", { name: "Reorganizations" })).toHaveCount(0);
   await expect(page.getByText("Organization Command Center")).toHaveCount(0);
+  await page.goto("/app/organization");
+  await expect(page.getByTestId("hr-admin-only")).toBeVisible();
+  await page.goto("/app/organization/jobs");
+  await expect(page.getByTestId("hr-admin-only")).toBeVisible();
+  await page.goto("/app");
   await expect(nav.getByRole("link", { name: "Assignments" })).toHaveCount(0);
   await expect(nav.getByRole("link", { name: "Reporting Lines" })).toHaveCount(0);
 });

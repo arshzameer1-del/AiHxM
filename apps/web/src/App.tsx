@@ -11,6 +11,7 @@ import { LoginPage } from "./auth/LoginPage";
 import { SignupPage } from "./auth/SignupPage";
 import { PortalLayout } from "./portal/PortalLayout";
 import { PortalHomePage } from "./portal/PortalHomePage";
+import { RequireHrAdmin } from "./portal/shared/RequireHrAdmin";
 
 /**
  * Phase 14: every route below this point used to be a top-level import,
@@ -388,6 +389,7 @@ export default function App() {
                     seeded in 0066) are the real gates, enforced server-
                     side; PortalLayout's nav gates it the same courtesy way
                     as every other route here. */}
+                  <Route element={<RequireHrAdmin />}>
                   <Route path="organization" element={<OrgStructurePage />} />
                   <Route path="organization/manage" element={<Navigate to="/app/organization" replace />} />
                   {/* Organization Management Phase 9 — the unified workspace's
@@ -432,6 +434,7 @@ export default function App() {
                     nav gates this the same hr_admin courtesy way as every
                     other route here. */}
                   <Route path="organization/legacy-reconciliation" element={<LegacyReconciliationPage />} />
+                  </Route>
                   {/* Task #49 — Admin Center. hr_admin-only in PortalLayout's
                     nav (a courtesy); EmployeeGroupsService's own
                     employee_group.manage/leave_policy.manage gates are the

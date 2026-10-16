@@ -112,23 +112,11 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): 
   // same audience as the Employees/My Profile split above; org_unit.manage.all
   // (hr_admin only) is what actually gates the create/edit/move/archive
   // actions the page itself renders.
-  // Everyone may look at the org chart (read only, no holder names for employees). The structure tools underneath are for
-  // HR Admin and Line Manager, so an Employee gets one flat "Organization" link (access review 2026-10).
-  if (hasModule("employee") && roleKeys.length > 0 && !hasRole("hr_admin", "line_manager")) {
-    items.push({ to: "/app/organization", label: "Organization", end: true, icon: Network });
-  } else if (hasModule("employee") && hasRole("hr_admin", "line_manager")) {
-    // Organization Management Phase 9 — collapses what Phases 2-5 each
-    // added as their own flat top-level item (Jobs/Positions/Assignments/
-    // Reporting Lines/Locations/Financial Centers/Reorganizations, all
-    // gated identically to org_unit.view.all's own broad seed audience —
-    // 0069/0072/0074/0077) into one grouped "Organization" nav entry, per
-    // the Unified Integration & Synchronization Requirements doc's Section
-    // 2. The Hierarchy Explorer itself stays the group's own `to` (clicking
-    // "Organization" still opens it, same as before this phase); every
-    // other Organization Management screen becomes a child. This is the
-    // one and only group `NavItem.children` is used for in this file —
-    // every other section of the app stays exactly as flat as it always
-    // was.
+  // Organization management is HR Admin only (Kumail, 2026-10-16). Everyone else uses "My Org Chart", which shows only
+  // their own manager chain, colleagues and team.
+  if (hasModule("employee") && roleKeys.length > 0 && !hasRole("hr_admin")) {
+    items.push({ to: "/app/ess/org-chart", label: "My Org Chart", end: true, icon: Network });
+  } else if (hasModule("employee") && hasRole("hr_admin")) {
     items.push({
       to: "/app/organization",
       label: "Organization",

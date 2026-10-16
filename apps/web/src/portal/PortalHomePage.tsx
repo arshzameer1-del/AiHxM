@@ -63,7 +63,8 @@ function buildHomeCards(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]):
   }
 
   if (hasModule("employee") && roleKeys.length > 0) {
-    cards.push({ to: "/app/organization", label: "Organization", description: "Org chart, positions & structure", icon: Network });
+    if (hasRole("hr_admin")) cards.push({ to: "/app/organization", label: "Organization", description: "Org chart, positions & structure", icon: Network });
+    else cards.push({ to: "/app/ess/org-chart", label: "My Org Chart", description: "My manager, colleagues and team", icon: Network });
   }
 
   if (hasRole("hr_admin", "system_admin")) {
