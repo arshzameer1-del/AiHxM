@@ -187,13 +187,12 @@ describe("Reorganization Changes HTTP surface (e2e)", () => {
     expect(unitRes.body.name).toBe("Platform Engineering");
   });
 
-  it("a Line Manager can read the published change (view.all) even though they couldn't have created it", async () => {
+  it("a Line Manager cannot read reorganizations at all (HR only, confidential plans)", async () => {
     const res = await request(app.getHttpServer())
       .get(`/organization/reorganizations/${changeId}`)
       .set("Authorization", `Bearer ${managerToken}`);
 
-    expect(res.status).toBe(200);
-    expect(res.body.status).toBe("published");
+    expect(res.status).toBe(403);
   });
 
   it("execute() 400s once the change is already published", async () => {

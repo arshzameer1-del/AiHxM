@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { createHrAdminSession, createRoleSession, loginToApp } from "../../e2e-support/real-session";
+import { API_BASE_URL, createHrAdminSession, createRoleSession, loginToApp } from "../../e2e-support/real-session";
 
 /**
  * The "Employee Self Service" role: its own home is a launchpad of tiles. Tiles with a real page open it, the rest are
@@ -11,10 +11,12 @@ test.describe.configure({ mode: "serial" }); // one setup (login throttle: 10/mi
 
 let essToken = "";
 let hrToken = "";
+let hrSession: Awaited<ReturnType<typeof createHrAdminSession>>;
 
 test.beforeAll(async () => {
   const hr = await createHrAdminSession();
   hrToken = hr.token;
+  hrSession = hr;
   essToken = await createRoleSession(hr, "ess_portal");
 });
 
@@ -71,4 +73,25 @@ test("HR can give the role to an employee, and other roles keep their normal hom
   await page.goto("/app");
   await expect(page.getByTestId("ess-launchpad")).toHaveCount(0);
   await expect(page.getByRole("navigation").getByRole("link", { name: "Employee Self Service" })).toHaveCount(0);
+});
+
+test("Employee and Line Manager cannot read finance master data or reorganization plans; HR can", async ({ page }) => {
+  const hr = hrToken;
+  const lm = await createRoleSession(hrSession, "line_manager");
+  const status = async (token: string, path: string) => (await fetch(`${API_BASE_URL}${path}`, { headers: { Authorization: `Bearer ${token}` } })).status;
+  for (const path of ["/organization/cost-centers", "/organization/profit-centers", "/organization/reorganizations"]) {
+    expect(await status(essToken, path), `ess ${path}`).toBe(403);
+    expect(await status(lm, path), `line manager ${path}`).toBe(403);
+    expect(await status(hr, path), `hr ${path}`).toBe(200);
+  }
+  // The org chart itself stays readable.
+  expect(await status(essToken, "/organization/units")).toBe(200);
+
+  await loginToApp(page, essToken);
+  await page.goto("/app");
+  const nav = page.getByRole("navigation");
+  await expect(nav.getByRole("link", { name: "Jobs" })).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Financial Centers" })).toHaveCount(0);
+  await expect(nav.getByRole("link", { name: "Reorganizations" })).toHaveCount(0);
+  await expect(page.getByText("Organization Command Center")).toHaveCount(0);
 });

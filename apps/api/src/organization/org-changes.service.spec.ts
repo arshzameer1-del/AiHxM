@@ -444,9 +444,10 @@ describe("OrgChangesService", () => {
       expect(unit.name).not.toBe("Should Not Apply");
     });
 
-    it("a line_manager can view reorganization changes but not manage them", async () => {
-      const list = await orgChanges.list(managerClaims);
-      expect(Array.isArray(list)).toBe(true);
+    it("a line_manager can neither view nor manage reorganization changes (HR only, confidential plans)", async () => {
+      const list = await orgChanges.list(hrAdminClaims);
+      expect(list.length).toBeGreaterThan(0);
+      await expect(orgChanges.list(managerClaims)).rejects.toThrow(ForbiddenException);
       await expect(orgChanges.validate(managerClaims, list[0].id)).rejects.toThrow(ForbiddenException);
     });
   });

@@ -168,9 +168,8 @@ describe("ProfitCentersService", () => {
       );
     });
 
-    it("a Line Manager (profit_center.view.all only) can read the catalog but not mutate it", async () => {
-      const list = await profitCenters.list(managerClaims);
-      expect(list.length).toBeGreaterThan(0);
+    it("a Line Manager holds no profit_center permission: can neither read nor mutate the catalog (finance master data, HR only)", async () => {
+      await expect(profitCenters.list(managerClaims)).rejects.toThrow(ForbiddenException);
       await expect(profitCenters.create(managerClaims, { name: "Nope" })).rejects.toThrow(ForbiddenException);
       await expect(profitCenters.update(managerClaims, engineeringProfitCenterId, { name: "Nope" })).rejects.toThrow(
         ForbiddenException

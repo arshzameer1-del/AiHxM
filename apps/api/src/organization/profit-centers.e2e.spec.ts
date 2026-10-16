@@ -121,7 +121,7 @@ describe("Profit Centers HTTP surface (e2e)", () => {
       expect(res.status).toBe(404);
     });
 
-    it("403s for a Line Manager (profit_center.view.all only, no manage)", async () => {
+    it("403s for a Line Manager (no cost/profit center permission at all)", async () => {
       const res = await request(app.getHttpServer())
         .post("/organization/profit-centers")
         .set("Authorization", `Bearer ${managerToken}`)
@@ -140,11 +140,11 @@ describe("Profit Centers HTTP surface (e2e)", () => {
       expect(res.body.map((c: { id: string }) => c.id)).toContain(profitCenterId);
     });
 
-    it("a Line Manager can read the catalog (view.all) even though they can't mutate it", async () => {
+    it("a Line Manager can no longer read the catalog (finance master data is HR only)", async () => {
       const res = await request(app.getHttpServer())
         .get("/organization/profit-centers")
         .set("Authorization", `Bearer ${managerToken}`);
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(403);
     });
 
     it("returns one profit center by id", async () => {

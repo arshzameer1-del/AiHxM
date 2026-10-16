@@ -357,7 +357,8 @@ export function PortalHomePage() {
   // wrong, not just "this viewer shouldn't see it" — in which case hiding
   // the panel silently (rather than showing an error box) is still the
   // right call for a glance panel nobody explicitly asked to open.
-  const canSeeCommandCenter = (identity?.enabledModules.includes("employee") ?? false) && (identity?.roleKeys.length ?? 0) > 0;
+  // HR Admin only: the panel composes cost centers, profit centers and reorganizations (migration 0155).
+  const canSeeCommandCenter = (identity?.enabledModules.includes("employee") ?? false) && (identity?.roleKeys.includes("hr_admin") ?? false);
 
   useEffect(() => {
     if (!canSeeCommandCenter) return;

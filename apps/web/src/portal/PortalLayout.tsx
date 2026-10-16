@@ -136,8 +136,13 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): 
         { to: "/app/organization/assignments", label: "Assignments" },
         { to: "/app/organization/relationships", label: "Reporting Lines" },
         { to: "/app/organization/locations", label: "Locations" },
-        { to: "/app/organization/financial-centers", label: "Financial Centers" },
-        { to: "/app/organization/reorganizations", label: "Reorganizations" },
+        // Finance master data and reorganization plans are HR Admin only (access review 2026-10, migration 0155).
+        ...(roleKeys.includes("hr_admin")
+          ? [
+              { to: "/app/organization/financial-centers", label: "Financial Centers" },
+              { to: "/app/organization/reorganizations", label: "Reorganizations" },
+            ]
+          : []),
         // Organization Management Phase 12 — unlike every sibling above
         // (all broadly seeded alongside org_unit.view.all), Legacy Data
         // Reconciliation is gated server-side on `employee.manage.all`,

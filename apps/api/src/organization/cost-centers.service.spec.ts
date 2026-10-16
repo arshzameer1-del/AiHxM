@@ -179,9 +179,8 @@ describe("CostCentersService", () => {
       );
     });
 
-    it("a Line Manager (cost_center.view.all only) can read the catalog but not mutate it", async () => {
-      const list = await costCenters.list(managerClaims);
-      expect(list.length).toBeGreaterThan(0);
+    it("a Line Manager holds no cost_center permission: can neither read nor mutate the catalog (finance master data, HR only)", async () => {
+      await expect(costCenters.list(managerClaims)).rejects.toThrow(ForbiddenException);
       await expect(costCenters.create(managerClaims, { name: "Nope" })).rejects.toThrow(ForbiddenException);
       await expect(costCenters.update(managerClaims, engineeringCostCenterId, { name: "Nope" })).rejects.toThrow(
         ForbiddenException
