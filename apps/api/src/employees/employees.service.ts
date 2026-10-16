@@ -75,7 +75,7 @@ const SENSITIVE_FIELDS: readonly string[] = Array.from(
 // role to a colleague (or a second role to themselves, though that
 // defeats the segregation of duties the role exists for) without a
 // separate Platform-Admin step.
-const TENANT_ROLE_KEYS = ["hr_admin", "line_manager", "employee_self_service", "system_admin", "payroll_approver"] as const;
+const TENANT_ROLE_KEYS = ["hr_admin", "line_manager", "employee_self_service", "ess_portal", "system_admin", "payroll_approver"] as const;
 const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024; // 10MB — see addDocument()'s doc comment.
 
 // Tenant Management gap-fill Phase 1 item #10 — Storage quota enforcement.

@@ -1,9 +1,11 @@
+import { useSearchParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { FileText, Download } from "lucide-react";
 import type { EmployeeDocumentView, EmployeeView, JobHistoryEntryView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { EmployeeFields } from "./EmployeeFields";
+import { PROFILE_TABS, profileTabFromParam, type ProfileTab } from "./profileTabs";
 import { OnboardingOffboardingSection } from "../onboarding-offboarding/OnboardingOffboardingSection";
 
 /**
@@ -26,8 +28,8 @@ import { OnboardingOffboardingSection } from "../onboarding-offboarding/Onboardi
  * (`EmployeesService.listDocuments`/`downloadDocument`, same view-scope
  * as the profile itself) rather than new logic invented for this page.
  */
-const TABS = ["Personal Information", "Job Details", "Contact", "Employment History", "Documents"] as const;
-type Tab = (typeof TABS)[number];
+const TABS = PROFILE_TABS;
+type Tab = ProfileTab;
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -100,7 +102,8 @@ export function MyProfilePage() {
   const [employee, setEmployee] = useState<EmployeeView | null>(null);
   const [jobHistory, setJobHistory] = useState<JobHistoryEntryView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<Tab>("Personal Information");
+  const [searchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<Tab>(() => profileTabFromParam(searchParams.get("tab")));
 
   useEffect(() => {
     if (!identity?.employeeId) return;

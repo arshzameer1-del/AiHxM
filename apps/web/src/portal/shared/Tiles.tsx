@@ -7,7 +7,12 @@ import type { LucideIcon } from "lucide-react";
  * grid uses the whole page width (1 column on a phone, up to 4 on a wide screen).
  */
 export type TileSpec = {
-  to: string;
+  /** Where the tile goes. A tile without a target (or with `comingSoon`) is shown but cannot be opened. */
+  to?: string;
+  /** Feature not available yet: the tile is shown greyed out with a "Coming soon" label. */
+  comingSoon?: boolean;
+  /** Small line under the description, e.g. "Confidential". */
+  note?: string;
   title: string;
   description: string;
   icon: LucideIcon;
@@ -19,20 +24,18 @@ export type TileSpec = {
   testId?: string;
 };
 
-export function Tile({ spec }: { spec: TileSpec }) {
+function TileBody({ spec }: { spec: TileSpec }) {
   const Icon = spec.icon;
+  const dim = spec.comingSoon || !spec.to;
   return (
-    <Link
-      to={spec.to}
-      data-testid={spec.testId}
-      aria-label={spec.title}
-      className="group relative flex flex-col justify-between min-h-[168px] bg-white rounded-md border border-black/10 shadow-sm p-4 hover:border-accent hover:shadow transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-    >
+    <>
       <div className="flex items-start justify-between gap-3">
-        <span className="inline-flex p-2 rounded-md bg-accent/10 text-accent">
+        <span className={`inline-flex p-2 rounded-md ${dim ? "bg-black/5 text-label-tertiary" : "bg-accent/10 text-accent"}`}>
           <Icon size={22} strokeWidth={1.75} aria-hidden />
         </span>
-        {spec.badge ? (
+        {spec.comingSoon ? (
+          <span className="rounded-full bg-black/5 text-label-secondary text-[11px] font-semibold px-2 py-0.5">Coming soon</span>
+        ) : spec.badge ? (
           <span className="rounded-full bg-danger text-white text-xs font-semibold px-2 py-0.5 tabular-nums" aria-label={`${spec.badge} waiting`}>
             {spec.badge}
           </span>
@@ -45,9 +48,31 @@ export function Tile({ spec }: { spec: TileSpec }) {
             {spec.figureLabel && <span className="ml-1.5 text-xs text-label-tertiary">{spec.figureLabel}</span>}
           </div>
         )}
-        <h2 className="text-sm font-bold group-hover:text-accent">{spec.title}</h2>
+        <h2 className={`text-sm font-bold ${dim ? "text-label-secondary" : "group-hover:text-accent"}`}>{spec.title}</h2>
         <p className="text-xs text-label-secondary mt-0.5">{spec.description}</p>
+        {spec.note && <p className="text-xs text-label-tertiary mt-1">{spec.note}</p>}
       </div>
+    </>
+  );
+}
+
+export function Tile({ spec }: { spec: TileSpec }) {
+  const box = "group relative flex flex-col justify-between min-h-[168px] rounded-md border border-black/10 p-4";
+  if (spec.comingSoon || !spec.to) {
+    return (
+      <div role="group" aria-disabled="true" aria-label={`${spec.title} (coming soon)`} data-testid={spec.testId} className={`${box} bg-black/[0.03]`}>
+        <TileBody spec={spec} />
+      </div>
+    );
+  }
+  return (
+    <Link
+      to={spec.to}
+      data-testid={spec.testId}
+      aria-label={spec.title}
+      className={`${box} bg-white shadow-sm hover:border-accent hover:shadow transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent`}
+    >
+      <TileBody spec={spec} />
     </Link>
   );
 }
@@ -56,7 +81,7 @@ export function TileGrid({ tiles, label }: { tiles: TileSpec[]; label: string })
   return (
     <div role="navigation" aria-label={label} className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
       {tiles.map((t) => (
-        <Tile key={t.to} spec={t} />
+        <Tile key={t.testId ?? `${t.to ?? ""}|${t.title}`} spec={t} />
       ))}
     </div>
   );

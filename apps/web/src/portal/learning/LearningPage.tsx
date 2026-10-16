@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
+import { isSelfService } from "../shared/roles";
 import { BookOpen, GraduationCap, PlayCircle } from "lucide-react";
 import type { CourseCategory, CourseEnrollmentView, CourseView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
@@ -317,7 +318,7 @@ export function LearningPage() {
 
   const roleKeys = identity?.roleKeys ?? [];
   const canManageCatalog = roleKeys.includes("hr_admin");
-  const canEnroll = roleKeys.includes("employee_self_service") && Boolean(identity?.employeeId);
+  const canEnroll = isSelfService(roleKeys) && Boolean(identity?.employeeId);
 
   useEffect(() => {
     Promise.all([api.listCourses(), identity?.employeeId ? api.listCourseEnrollments(identity.employeeId) : Promise.resolve([])])

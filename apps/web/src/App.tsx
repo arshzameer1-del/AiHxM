@@ -71,6 +71,11 @@ const EmployeeDetailPage = lazy(() =>
     default: m.EmployeeDetailPage,
   })),
 );
+const EssLaunchpadPage = lazy(() =>
+  import("./portal/ess/EssLaunchpad").then((m) => ({
+    default: m.EssLaunchpadPage,
+  })),
+);
 const MyProfilePage = lazy(() =>
   import("./portal/employees/MyProfilePage").then((m) => ({
     default: m.MyProfilePage,
@@ -353,6 +358,7 @@ export default function App() {
                     other three routes show HR Admins/Managers; RBAC (not
                     a route guard) is what actually scopes each one. */}
                   <Route path="profile" element={<MyProfilePage />} />
+                  <Route path="ess" element={<EssLaunchpadPage />} />
                   <Route path="employees" element={<EmployeeListPage />} />
                   <Route
                     path="employees/new"

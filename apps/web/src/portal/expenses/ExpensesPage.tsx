@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { isSelfService } from "../shared/roles";
 import { Receipt, Upload } from "lucide-react";
 import type { ExpenseClaimView, WorkflowInstanceView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
@@ -333,7 +334,7 @@ export function ExpensesPage() {
   const bump = () => setRefreshKey((k) => k + 1);
 
   const roleKeys = identity?.roleKeys ?? [];
-  const canSubmitSelf = roleKeys.includes("employee_self_service");
+  const canSubmitSelf = isSelfService(roleKeys);
   const canSubmitOnBehalf = roleKeys.includes("hr_admin");
   const canSubmit = canSubmitSelf || canSubmitOnBehalf;
   const canDecide = roleKeys.includes("hr_admin") || roleKeys.includes("line_manager");

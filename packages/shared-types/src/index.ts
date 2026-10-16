@@ -2136,7 +2136,7 @@ export type UpdateEmployeeRequest = Partial<
  * added additively alongside the original three, not in place of any of
  * them.
  */
-export type TenantRoleKey = "hr_admin" | "line_manager" | "employee_self_service" | "system_admin" | "payroll_approver";
+export type TenantRoleKey = "hr_admin" | "line_manager" | "employee_self_service" | "ess_portal" | "system_admin" | "payroll_approver";
 
 /**
  * Decision #12: before this, there was no way for an Employee record to

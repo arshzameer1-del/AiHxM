@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { isSelfService } from "../shared/roles";
 import type { EmployeeView, PerformanceReviewView } from "@aihxm/shared-types";
 import { api } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
@@ -167,7 +168,7 @@ export function PerformanceReviewsPanel() {
                   <h4 className="font-medium mb-2">Self Assessment</h4>
                   {selectedReview.selfAssessmentSubmittedAt ? (
                     <p className="text-sm text-label-primary">{selectedReview.selfAssessment}</p>
-                  ) : roleKeys.includes("employee_self_service") ||
+                  ) : isSelfService(roleKeys) ||
                     roleKeys.includes("hr_admin") ? (
                     <AssessmentForm
                       placeholder="Your assessment of your own performance..."

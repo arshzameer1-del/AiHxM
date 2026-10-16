@@ -17,6 +17,7 @@ import {
   BookOpenCheck,
   Receipt,
   GraduationCap,
+  LayoutGrid,
 } from "lucide-react";
 import type { ModuleKey, PublicTenantBranding, TenantRoleKey } from "@aihxm/shared-types";
 import { api, publicTenantBrandingAssetUrl } from "../api/client";
@@ -33,6 +34,7 @@ const ROLE_LABELS: Record<TenantRoleKey, string> = {
   hr_admin: "HR Admin",
   line_manager: "Line Manager",
   employee_self_service: "Employee",
+  ess_portal: "Employee Self Service",
   system_admin: "System Admin",
   payroll_approver: "Payroll Approver",
 };
@@ -65,6 +67,11 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): 
   const hasModule = (key: ModuleKey) => enabledModules.includes(key);
 
   const items: NavItem[] = [{ to: "/app", label: "Home", end: true, icon: Home }];
+
+  // The Employee Self Service role has its own tile launchpad (portal/ess).
+  if (hasRole("ess_portal")) {
+    items.push({ to: "/app/ess", label: "Employee Self Service", icon: LayoutGrid });
+  }
 
   if (hasRole("hr_admin", "line_manager") && hasModule("employee")) {
     // Core Employee Enterprise Phases 2/12's frontend catch-up (2026-09-27)
@@ -207,7 +214,7 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): 
   // employee_self_service respectively (no partial-admin role), so
   // those are the only two role keys that ever have anything to see on
   // this route; a line_manager-only session gets no nav entry here.
-  if (hasModule("payroll") && hasRole("hr_admin", "employee_self_service")) {
+  if (hasModule("payroll") && hasRole("hr_admin", "employee_self_service", "ess_portal")) {
     items.push({ to: "/app/payroll", label: "Payroll", icon: Wallet });
   }
 

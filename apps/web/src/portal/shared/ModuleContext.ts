@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { isSelfService } from "./roles";
 import { useOutletContext } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 
@@ -25,10 +26,10 @@ export function useBuildModuleContext(): ModuleContext {
   const roleKeys = identity?.roleKeys ?? [];
   // employee.view.self/.all are what let GET /employees/:id resolve the caller's own record (hr_admin and
   // employee_self_service only), so the personal pages are offered to the same roles.
-  const hasOwnRecord = roleKeys.includes("hr_admin") || roleKeys.includes("employee_self_service");
+  const hasOwnRecord = roleKeys.includes("hr_admin") || isSelfService(roleKeys);
   return {
     employeeId: identity?.employeeId && hasOwnRecord ? identity.employeeId : undefined,
-    canSubmitSelf: roleKeys.includes("employee_self_service"),
+    canSubmitSelf: isSelfService(roleKeys),
     canSubmitOnBehalf: roleKeys.includes("hr_admin"),
     canDecide: roleKeys.includes("hr_admin") || roleKeys.includes("line_manager"),
     canCancel: roleKeys.includes("hr_admin"),

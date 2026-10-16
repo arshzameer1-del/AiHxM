@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { hasEssPortalRole, isSelfService } from "./shared/roles";
+import { EssTiles } from "./ess/EssLaunchpad";
 import { Link } from "react-router-dom";
 import {
   type LucideIcon,
@@ -32,6 +34,7 @@ const ROLE_LABELS: Record<string, string> = {
   hr_admin: "HR Admin",
   line_manager: "Line Manager",
   employee_self_service: "Employee",
+  ess_portal: "Employee Self Service",
 };
 
 // Theme alignment pass (2026-09-26) — kumail's reference screenshot shows
@@ -88,7 +91,7 @@ function buildHomeCards(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]):
     cards.push({ to: "/app/performance", label: "Performance", description: "Goals & review cycles", icon: Target });
   }
 
-  if (hasModule("payroll") && hasRole("hr_admin", "employee_self_service")) {
+  if (hasModule("payroll") && hasRole("hr_admin", "employee_self_service", "ess_portal")) {
     cards.push({ to: "/app/payroll", label: "Payroll", description: "Payslips & statutory calculations", icon: Wallet });
   }
 
@@ -235,7 +238,7 @@ function QuickActionsRow({ enabledModules, roleKeys }: { enabledModules: ModuleK
   const actions: { to: string; label: string; icon: LucideIcon }[] = [
     { to: "/app/leave", label: "Apply Leave", icon: CalendarDays },
   ];
-  if (enabledModules.includes("payroll") && roleKeys.includes("employee_self_service")) {
+  if (enabledModules.includes("payroll") && isSelfService(roleKeys)) {
     actions.push({ to: "/app/payroll", label: "View Payslip", icon: Wallet });
   }
   actions.push({ to: "/app/profile", label: "Documents", icon: FileText });
@@ -375,7 +378,11 @@ export function PortalHomePage() {
         <MyDaySection employeeId={identity.employeeId} enabledModules={enabledModules} roleKeys={roleKeys} />
       )}
 
-      {homeCards.length > 0 && (
+      {hasEssPortalRole(roleKeys) ? (
+        <div className="mb-6">
+          <EssTiles />
+        </div>
+      ) : homeCards.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
           {homeCards.map((card) => (
             <HomeCardTile key={card.to} card={card} />

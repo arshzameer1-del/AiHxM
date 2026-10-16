@@ -1,0 +1,80 @@
+import {
+  Building2,
+  ClipboardList,
+  Clock,
+  FileText,
+  FolderOpen,
+  GraduationCap,
+  HeartPulse,
+  IdCard,
+  Landmark,
+  ListChecks,
+  MapPin,
+  PlayCircle,
+  Receipt,
+  Search,
+  Sun,
+  Target,
+  UserRound,
+  Users,
+  Wallet,
+  Phone,
+  Gift,
+  Network,
+} from "lucide-react";
+import type { ModuleKey } from "@aihxm/shared-types";
+import type { TileSpec } from "../shared/Tiles";
+
+/**
+ * Tiles of the Employee Self Service launchpad (modelled on the SAP "Employee (HCM)" group).
+ *
+ * Merged on purpose, so nothing appears twice: "My Profile Enhance" is My Profile, "My Leave Requests Enhance" and "My Team Calendar" (the calendar sits on that page) are My
+ * Leave Requests, "My Benefits Enrollment" is My Benefits, and "My Time Statements" lives inside My Timesheet.
+ *
+ * A tile opens a real page when the feature exists. Where the app has no feature (or no data) behind a tile yet it is
+ * shown as "Coming soon" instead of pointing at a made-up page. Tiles that need a module the company has not enabled
+ * are left out.
+ */
+export type EssTileGroup = { key: string; title: string; tiles: TileSpec[] };
+
+const PROFILE = "/app/profile";
+
+export function buildEssTileGroups(enabledModules: readonly ModuleKey[]): EssTileGroup[] {
+  const has = (m: ModuleKey) => enabledModules.includes(m);
+  const soon = (title: string, description: string, icon: TileSpec["icon"]): TileSpec => ({ title, description, icon, comingSoon: true });
+
+  const hcm: TileSpec[] = [];
+  if (has("payroll")) hcm.push({ to: "/app/payroll", title: "My Paystubs", description: "View my paystubs", note: "Confidential", icon: Wallet });
+  if (has("leave")) hcm.push({ to: "/app/attendance/clock", title: "My Time Events", description: "Manage my time events", icon: Clock });
+  if (has("leave")) hcm.push({ to: "/app/leave/my-requests", title: "My Leave Requests", description: "Requests, balance and team calendar", icon: Sun });
+  hcm.push(soon("Employee Lookup", "Search for employees", Search));
+  if (has("employee")) hcm.push({ to: PROFILE, title: "My Profile", description: "View my profile", icon: UserRound });
+  hcm.push(soon("My Benefits", "Display and enroll in benefit plans", Gift));
+  if (has("employee")) {
+    hcm.push({ to: `${PROFILE}?tab=personal`, title: "My Personal Data", description: "View my personal data", icon: IdCard });
+    hcm.push({ to: `${PROFILE}?tab=contact`, title: "My Bank Details", description: "View my bank details", icon: Landmark });
+  }
+  hcm.push(soon("My Addresses", "Manage my addresses", MapPin));
+  hcm.push(soon("My Family Members", "Manage my family members", Users));
+  if (has("employee")) {
+    hcm.push({ to: `${PROFILE}?tab=contact`, title: "My Communication Data", description: "View my contact details", icon: Phone });
+    hcm.push({ to: `${PROFILE}?tab=job`, title: "My Internal Data", description: "View my job and internal data", icon: Network });
+  }
+  if (has("leave")) hcm.push({ to: "/app/attendance/timesheet", title: "My Timesheet", description: "Manage working time and time statements", icon: ClipboardList });
+  hcm.push(soon("My Medical Information", "Manage my medical information", HeartPulse));
+  hcm.push(soon("My External Organizations", "Manage my external organizations", Building2));
+  hcm.push(soon("Start Process", "Initiate a process instance", PlayCircle));
+  hcm.push(soon("My Forms", "View my HR forms", FileText));
+  hcm.push(soon("My Online Selections", "Manage my online selections", ListChecks));
+
+  const more: TileSpec[] = [];
+  if (has("expense")) more.push({ to: "/app/expenses", title: "My Expenses", description: "Submit and track expense claims", icon: Receipt });
+  if (has("learning")) more.push({ to: "/app/learning", title: "My Learning", description: "Courses and progress", icon: GraduationCap });
+  if (has("performance")) more.push({ to: "/app/performance", title: "My Performance", description: "Goals, feedback and reviews", icon: Target });
+  if (has("employee")) more.push({ to: `${PROFILE}?tab=documents`, title: "My Documents", description: "Documents kept on my file", icon: FolderOpen });
+
+  const groups: EssTileGroup[] = [{ key: "hcm", title: "Employee (HCM)", tiles: hcm }];
+  if (more.length > 0) groups.push({ key: "more", title: "More services", tiles: more });
+  return groups;
+}
+

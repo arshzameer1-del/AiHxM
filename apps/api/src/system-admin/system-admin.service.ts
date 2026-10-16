@@ -20,6 +20,7 @@ const ASSIGNABLE_ROLE_KEYS: TenantRoleKey[] = [
   "hr_admin",
   "line_manager",
   "employee_self_service",
+  "ess_portal",
   "system_admin",
   "payroll_approver",
 ];

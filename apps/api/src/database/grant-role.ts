@@ -89,7 +89,7 @@ async function main() {
 
       const role = await client.query("SELECT id FROM roles WHERE key = $1", [roleKey]);
       if (role.rowCount === 0) {
-        throw new Error(`No role with key "${roleKey}" — expected one of hr_admin, line_manager, employee_self_service, system_admin.`);
+        throw new Error(`No role with key "${roleKey}" — expected one of hr_admin, line_manager, employee_self_service, ess_portal, system_admin.`);
       }
       const roleId = role.rows[0].id as string;
 

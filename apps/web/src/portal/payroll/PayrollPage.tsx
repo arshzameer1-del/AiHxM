@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { isSelfService as isSelfServiceRole } from "../shared/roles";
 import { useSearchParams } from "react-router-dom";
 import type {
   EmployeeView,
@@ -880,7 +881,7 @@ export function PayrollPage() {
   const roleKeys = identity?.roleKeys ?? [];
   const isHrAdmin = roleKeys.includes("hr_admin");
   const isPayrollApprover = roleKeys.includes("payroll_approver");
-  const isSelfService = roleKeys.includes("employee_self_service");
+  const isSelfService = isSelfServiceRole(roleKeys);
 
   return (
     <div>

@@ -3,7 +3,7 @@ import type { TenantRoleKey } from "@aihxm/shared-types";
 
 // Decision #20 — widened to include `system_admin`; see
 // employees.service.ts's own TENANT_ROLE_KEYS comment.
-const TENANT_ROLE_KEYS: TenantRoleKey[] = ["hr_admin", "line_manager", "employee_self_service", "system_admin"];
+const TENANT_ROLE_KEYS: TenantRoleKey[] = ["hr_admin", "line_manager", "employee_self_service", "ess_portal", "system_admin"];
 
 export class CreateEmployeeLoginDto {
   @MinLength(8)
