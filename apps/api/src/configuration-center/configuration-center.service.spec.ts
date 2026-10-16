@@ -21,6 +21,7 @@ import { EmployeesService } from "../employees/employees.service";
 import { HiringProcessService } from "../employees/hiring/hiring-process.service";
 import { LocalFileStorageService } from "../file-storage/local-file-storage.service";
 import { OnboardingService } from "../onboarding-offboarding/onboarding.service";
+import { PayslipDesignService } from "../payroll/payslip-design.service";
 import { EmployeeNumberingService } from "../employees/employee-numbering.service";
 import { OffboardingService } from "../onboarding-offboarding/offboarding.service";
 import { ConfigurationCenterService } from "./configuration-center.service";
@@ -90,7 +91,8 @@ describe("ConfigurationCenterService", () => {
       hiring,
       onboarding,
       offboarding,
-      new EmployeeNumberingService(db, rbac, entitlements, audit)
+      new EmployeeNumberingService(db, rbac, entitlements, audit),
+      new PayslipDesignService(db, rbac, entitlements, audit)
     );
   });
 

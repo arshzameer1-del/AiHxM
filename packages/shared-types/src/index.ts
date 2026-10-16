@@ -8943,3 +8943,4 @@ export type EmployeeNumberLedgerView = {
   createdAt: string;
 };
 export type UpdateEmployeeNumberPolicyRequest = Partial<Pick<EmployeeNumberPolicyView, "generationTiming" | "resetPolicy" | "allowManual" | "manualPattern">>;
+export * from "./payslip-design";

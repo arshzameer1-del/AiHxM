@@ -14,6 +14,7 @@ import { CostCentersService } from "../organization/cost-centers.service";
 import { ProfitCentersService } from "../organization/profit-centers.service";
 import { HiringProcessService } from "../employees/hiring/hiring-process.service";
 import { OnboardingService } from "../onboarding-offboarding/onboarding.service";
+import { PayslipDesignService } from "../payroll/payslip-design.service";
 import { EmployeeNumberingService } from "../employees/employee-numbering.service";
 import { OffboardingService } from "../onboarding-offboarding/offboarding.service";
 import type { ConfigurationDomainSummary } from "@aihxm/shared-types";
@@ -61,7 +62,8 @@ export class ConfigurationCenterService {
     private readonly hiring: HiringProcessService,
     private readonly onboarding: OnboardingService,
     private readonly offboarding: OffboardingService,
-    private readonly numbering: EmployeeNumberingService
+    private readonly numbering: EmployeeNumberingService,
+    private readonly payslipDesign: PayslipDesignService
   ) {}
 
   async getSummary(claims: RequestClaims): Promise<ConfigurationDomainSummary[]> {
@@ -227,6 +229,9 @@ export class ConfigurationCenterService {
         case "employee_numbering":
           // CFG-13: the number of employee numbers issued so far; the screen itself edits the policy and shows the ledger.
           return await this.numbering.countIssued(claims);
+        case "payslip_print_design":
+          // 1 when the company saved its own design, 0 while the built-in default is in use.
+          return await this.payslipDesign.countCustomised(claims);
         default:
           return null;
       }

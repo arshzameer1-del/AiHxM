@@ -474,7 +474,7 @@ import type {
 
 // Configuration Publish Lifecycle ("then 2" Phase 6, 2026-10-02, gap-table
 // item #13) — own import block, same reason the two blocks above are.
-import type { ConfigurationChangeRequestView, CreateConfigurationChangeRequestRequest } from "@aihxm/shared-types";
+import type { ConfigurationChangeRequestView, CreateConfigurationChangeRequestRequest, PayslipPrintDesign, PayslipPrintDesignView } from "@aihxm/shared-types";
 
 // Hiring Card Field Configuration (2026-09-27) — kumail's own request, one
 // level deeper than the card-level toggles above `listHiringCardConfig`
@@ -3306,6 +3306,9 @@ export const api = {
   },
 
   // PAY-20 - payslip and certificate documents.
+  getPayslipDesign: () => request<PayslipPrintDesignView>("/payroll/payslip-design"),
+  savePayslipDesign: (design: PayslipPrintDesign) => request<PayslipPrintDesignView>("/payroll/payslip-design", { method: "PUT", body: JSON.stringify(design) }),
+  resetPayslipDesign: () => request<PayslipPrintDesignView>("/payroll/payslip-design", { method: "DELETE" }),
   getDocumentSettings: () => request<PayrollDocumentSettingsView>("/payroll/document-settings"),
   updateDocumentSettings: (input: UpdatePayrollDocumentSettingsRequest) => request<PayrollDocumentSettingsView>("/payroll/document-settings", { method: "PATCH", body: JSON.stringify(input) }),
   listDocumentPlaceholders: () => request<PayrollDocumentPlaceholderView[]>("/payroll/document-placeholders"),
