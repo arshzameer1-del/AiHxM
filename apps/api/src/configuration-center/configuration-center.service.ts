@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { ForbiddenException, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
 import { EmployeeGroupsService } from "../employee-groups/employee-groups.service";
@@ -42,6 +42,8 @@ type RegistryRow = {
  */
 @Injectable()
 export class ConfigurationCenterService {
+  private readonly logger = new Logger(ConfigurationCenterService.name);
+
   constructor(
     private readonly db: DatabaseService,
     private readonly employeeGroups: EmployeeGroupsService,
@@ -68,6 +70,12 @@ export class ConfigurationCenterService {
       );
       return result.rows;
     });
+
+    if (registryRows.length === 0) {
+      // An empty catalog is never normal (0032 seeds it). It means app_role cannot read configuration_registry,
+      // which happened twice on production when Row Level Security was switched on for it (see 0115 and 0157).
+      this.logger.warn("configuration_registry returned no rows; check that Row Level Security is OFF for it (migration 0157)");
+    }
 
     // Live production measurement (2026-10-02): this page was taking
     // 20-25+ seconds to load -- each of the ~15 registry rows was
