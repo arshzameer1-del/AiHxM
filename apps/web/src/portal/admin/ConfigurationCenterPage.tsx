@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { ConfigurationDomainSummary } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
+import { StarterSetupPanel } from "./StarterSetupPanel";
 
 function describeError(err: unknown): string {
   if (err instanceof ApiError) return err.message;
@@ -57,6 +58,8 @@ export function ConfigurationCenterPage() {
       <p className="text-label-tertiary text-sm mb-6">
         Everything about this company that's configurable, in one place — pick a card to open its screen.
       </p>
+
+      <StarterSetupPanel />
 
       {error && <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-secondary">{error}</div>}
 

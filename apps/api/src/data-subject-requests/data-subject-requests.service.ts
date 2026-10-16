@@ -145,13 +145,22 @@ export class DataSubjectRequestsService {
     // A separate transaction — see this class's own doc comment on the
     // deliberate non-atomicity this introduces (same tradeoff
     // LeaveRequestsService.submit() already accepts).
-    const instance = await this.workflow.submitForApproval(claims, {
-      templateKey: WORKFLOW_TEMPLATE_KEY,
-      objectKey: WORKFLOW_OBJECT_KEY,
-      recordId: insertedRow.id,
-      record: { requestType: input.requestType },
-      subjectUserAccountId: employee.user_account_id,
-    });
+    let instance;
+    try {
+      instance = await this.workflow.submitForApproval(claims, {
+        templateKey: WORKFLOW_TEMPLATE_KEY,
+        objectKey: WORKFLOW_OBJECT_KEY,
+        recordId: insertedRow.id,
+        record: { requestType: input.requestType },
+        subjectUserAccountId: employee.user_account_id,
+      });
+    } catch (err) {
+      // Never submitted: do not leave a request behind that no approver will see.
+      await this.db.withClaims(claims, (client) =>
+        client.query("DELETE FROM data_subject_requests WHERE id = $1 AND workflow_instance_id IS NULL", [insertedRow.id])
+      );
+      throw err;
+    }
 
     const updatedRow = await this.db.withClaims(claims, async (client) => {
       const updateResult = await client.query(

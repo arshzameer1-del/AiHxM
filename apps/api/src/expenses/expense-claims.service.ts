@@ -192,13 +192,22 @@ export class ExpenseClaimsService {
 
     // Separate transaction — see this class's own doc comment on the
     // deliberate non-atomicity this introduces (same as Leave).
-    const instance = await this.workflow.submitForApproval(claims, {
-      templateKey: WORKFLOW_TEMPLATE_KEY,
-      objectKey: WORKFLOW_OBJECT_KEY,
-      recordId: claimRow.id,
-      record: { category: input.category, amount: input.amount },
-      subjectUserAccountId: employee.user_account_id,
-    });
+    let instance;
+    try {
+      instance = await this.workflow.submitForApproval(claims, {
+        templateKey: WORKFLOW_TEMPLATE_KEY,
+        objectKey: WORKFLOW_OBJECT_KEY,
+        recordId: claimRow.id,
+        record: { category: input.category, amount: input.amount },
+        subjectUserAccountId: employee.user_account_id,
+      });
+    } catch (err) {
+      // Not submitted after all: do not leave a claim behind that no approver will ever see.
+      await this.db.withClaims(claims, (client) =>
+        client.query("DELETE FROM expense_claims WHERE id = $1 AND workflow_instance_id IS NULL", [claimRow.id])
+      );
+      throw err;
+    }
 
     const updatedRow = await this.db.withClaims(claims, async (client) => {
       const updateResult = await client.query(

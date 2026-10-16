@@ -8887,3 +8887,31 @@ export type OrgStructureView = {
   /** false when the caller may not see employee records, so holders are left out. */
   peopleVisible: boolean;
 };
+
+// --- Starter setup (first-day defaults for a new company) ----------------
+
+export type StarterSetupItemState = "ready" | "missing" | "unavailable" | "attention";
+
+export type StarterSetupItem = {
+  /** Stable id: `workflow:leave_request`, `holidays`, `leave_policy`, `shift`, `payroll_approver`. */
+  key: string;
+  group: "approvals" | "calendar" | "leave" | "attendance" | "payroll";
+  label: string;
+  /** One plain sentence about what is there or what the setup would add. */
+  detail: string;
+  state: StarterSetupItemState;
+};
+
+export type StarterSetupStatus = {
+  items: StarterSetupItem[];
+  /** True when applying the setup would add something. */
+  canApply: boolean;
+  /** Items the setup cannot do for the company and HR must decide (for example: nobody holds Payroll Approver). */
+  needsAttention: number;
+};
+
+export type StarterSetupResult = {
+  created: string[];
+  skipped: string[];
+  status: StarterSetupStatus;
+};

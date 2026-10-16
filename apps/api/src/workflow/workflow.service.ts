@@ -324,6 +324,47 @@ export class WorkflowService {
   }
 
   /**
+   * Starter setup: creates each template that does not exist yet for the caller's company and leaves existing
+   * ones (any version, active or not) exactly as they are. No RBAC check here on purpose - the caller (the
+   * starter-pack service) has already checked its own permission, and a tenant's first approval routes must
+   * not wait for a System Admin. Returns the keys it created and the keys it skipped.
+   */
+  async createMissingTemplatesInTx(
+    client: PoolClient,
+    claims: RequestClaims,
+    templates: CreateTemplateInput[]
+  ): Promise<{ created: string[]; skipped: string[] }> {
+    if (!claims.company_id) throw new ForbiddenException();
+    const created: string[] = [];
+    const skipped: string[] = [];
+    for (const dto of templates) {
+      const existing = await client.query("SELECT 1 FROM workflow_templates WHERE company_id = $1 AND key = $2", [claims.company_id, dto.key]);
+      if (existing.rowCount) {
+        skipped.push(dto.key);
+        continue;
+      }
+      await this.validateTemplate(client, claims.company_id, dto);
+      const def = this.toDefinition(dto);
+      const inserted = await client.query<{ id: string }>(
+        `INSERT INTO workflow_templates (company_id, key, name, object_key, description, trigger_event, start_condition)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb) RETURNING id`,
+        [claims.company_id, dto.key, dto.name, dto.objectKey, dto.description ?? null, def.triggerEvent, def.startCondition ? JSON.stringify(def.startCondition) : null]
+      );
+      const templateId = inserted.rows[0].id;
+      await this.writeTemplateChildren(client, templateId, def);
+      await this.publishVersion(client, claims, templateId, 1, def);
+      await this.audit.record(client, claims, {
+        companyId: claims.company_id,
+        action: "workflow_template.create",
+        target: templateId,
+        metadata: { key: dto.key, objectKey: dto.objectKey, stepCount: dto.steps.length, source: "starter_setup" },
+      });
+      created.push(dto.key);
+    }
+    return { created, skipped };
+  }
+
+  /**
    * WFL-02: editing a template publishes a NEW immutable version. Approvals
    * already in flight keep the version they were submitted under.
    */
@@ -509,7 +550,7 @@ export class WorkflowService {
       [claims.company_id, dto.templateKey]
     );
     if (templateResult.rowCount === 0 || !templateResult.rows[0].is_active) {
-      throw new NotFoundException("No active workflow template with that key");
+      throw new NotFoundException(`No active approval route (workflow template "${dto.templateKey}") is set up for this company. An HR Admin can add the starter routes from Configuration Center > Starter setup.`);
     }
     const template = templateResult.rows[0];
     if (template.object_key !== dto.objectKey) {

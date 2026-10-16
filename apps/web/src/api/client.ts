@@ -193,6 +193,8 @@ import type {
   HolidayView,
   HorizontalPosition,
   ConfigurationDomainSummary,
+  StarterSetupResult,
+  StarterSetupStatus,
   ImpersonateResponse,
   InitiateOffboardingRequest,
   IntegrationProviderKey,
@@ -2309,6 +2311,8 @@ export const api = {
   // access to — a card missing here means the real permission check on
   // that domain's own service failed, not that this endpoint hid it.
   getConfigurationCenterSummary: () => request<ConfigurationDomainSummary[]>("/configuration-center"),
+  getStarterSetup: () => request<StarterSetupStatus>("/starter-setup"),
+  applyStarterSetup: () => request<StarterSetupResult>("/starter-setup/apply", { method: "POST" }),
 
   // --- Leave & Attendance (Task #50) -----------------------------------
   // listLeaveRequests() is the same "server already RBAC-scopes it" shape

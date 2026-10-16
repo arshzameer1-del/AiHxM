@@ -349,14 +349,24 @@ export class LeaveRequestsService {
 
     // A separate transaction — see this class's own doc comment on the
     // deliberate non-atomicity this introduces.
-    const instance = await this.workflow.submitForApproval(claims, {
-      templateKey: WORKFLOW_TEMPLATE_KEY,
-      objectKey: WORKFLOW_OBJECT_KEY,
-      recordId: result.leaveRequestRow.id,
-      // ORG-05: `orgUnitId` is the canonical dimension; `department` text stays for existing start conditions.
-      record: { leaveType: input.leaveType, daysRequested: result.daysRequested, department: employee.department, orgUnitId: employee.org_unit_id ?? null },
-      subjectUserAccountId: employee.user_account_id,
-    });
+    let instance;
+    try {
+      instance = await this.workflow.submitForApproval(claims, {
+        templateKey: WORKFLOW_TEMPLATE_KEY,
+        objectKey: WORKFLOW_OBJECT_KEY,
+        recordId: result.leaveRequestRow.id,
+        // ORG-05: `orgUnitId` is the canonical dimension; `department` text stays for existing start conditions.
+        record: { leaveType: input.leaveType, daysRequested: result.daysRequested, department: employee.department, orgUnitId: employee.org_unit_id ?? null },
+        subjectUserAccountId: employee.user_account_id,
+      });
+    } catch (err) {
+      // No approval route (or nobody to route to): the request was never really submitted, so it must not
+      // stay behind as a "pending" row nobody can approve and that still counts against the balance.
+      await this.db.withClaims(claims, (client) =>
+        client.query("DELETE FROM leave_requests WHERE id = $1 AND workflow_instance_id IS NULL", [result.leaveRequestRow.id])
+      );
+      throw err;
+    }
 
     const updatedRow = await this.db.withClaims(claims, async (client) => {
       const updateResult = await client.query(
