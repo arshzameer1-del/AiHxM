@@ -282,4 +282,38 @@ describe("RecruitmentService", () => {
       expect(application.stage).toBe("offer"); // unchanged — still open to a fresh offer
     });
   });
+  describe("hiring manager view (parked B3)", () => {
+    it("a hiring manager sees their own requisitions with stage counts and nothing else; others see none", async () => {
+      const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const managerUserId = await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const u = await client.query("INSERT INTO user_accounts (email, password_hash) VALUES ($1, 'x') RETURNING id", [`hm-${stamp}@example.com`]);
+        const role = await client.query("SELECT id FROM roles WHERE key = 'line_manager'");
+        await client.query("INSERT INTO user_role_assignments (user_account_id, company_id, role_id) VALUES ($1, $2, $3)", [u.rows[0].id, companyId, role.rows[0].id]);
+        return u.rows[0].id as string;
+      });
+      const managerEmployeeId = await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const e = await client.query(
+          "INSERT INTO employees (company_id, employee_number, first_name, last_name, user_account_id) VALUES ($1, $2, 'Hiring', 'Manager', $3) RETURNING id",
+          [companyId, `HM-${stamp}`.slice(0, 20), managerUserId]
+        );
+        return e.rows[0].id as string;
+      });
+      const managerClaims: RequestClaims = { is_platform_admin: false, company_id: companyId, sub: managerUserId };
+
+      const mine = await recruitment.createRequisition(hrAdminClaims, { title: "Mine to hire", headcount: 2, hiringManagerId: managerEmployeeId });
+      const notMine = await recruitment.createRequisition(hrAdminClaims, { title: "Someone else's" });
+      for (const r of [mine, notMine]) {
+        await recruitment.submitRequisition(hrAdminClaims, r.id);
+        await recruitment.decideRequisition(approverClaims, r.id, { decision: "approved" });
+      }
+      const candidate = await recruitment.createCandidate(hrAdminClaims, { firstName: "Cand", lastName: "Idate", email: `cand-${stamp}@example.com` });
+      await recruitment.createApplication(hrAdminClaims, { requisitionId: mine.id, candidateId: candidate.id });
+
+      const view = await recruitment.listMyRequisitions(managerClaims);
+      expect(view.map((v) => v.requisition.id)).toEqual([mine.id]);
+      expect(view[0].applicationCounts).toEqual({ applied: 1, screening: 0, interview: 0, offer: 0, hired: 0, rejected: 0 });
+      expect(JSON.stringify(view)).not.toContain("Idate"); // counts only, no candidate data
+      expect(await recruitment.listMyRequisitions(outsiderClaims)).toEqual([]);
+    });
+  });
 });

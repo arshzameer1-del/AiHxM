@@ -206,6 +206,9 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): 
 
   if (hasRole("hr_admin") && hasModule("recruitment")) {
     items.push({ to: "/app/recruitment", label: "Recruitment", icon: Briefcase });
+  } else if (hasRole("line_manager") && hasModule("recruitment")) {
+    // Parked B3: a hiring manager and interviewer works from their own page, not the HR module.
+    items.push({ to: "/app/my-hiring", label: "My Hiring", icon: Briefcase });
   }
 
   if (hasModule("performance") && roleKeys.length > 0) {

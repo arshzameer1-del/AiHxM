@@ -1,5 +1,6 @@
 import type {
   MyOrgChart,
+  MyRequisitionView,
   TeamAttendanceView,
   BenefitContributionView,
   BenefitEligibilityView,
@@ -2553,6 +2554,8 @@ export const api = {
     request<JobRequisitionView>("/job-requisitions", { method: "POST", body: JSON.stringify(input) }),
 
   listRequisitions: () => request<JobRequisitionView[]>("/job-requisitions"),
+  /** Requisitions the signed-in person is the hiring manager of, with application counts per stage (parked B3). */
+  listMyRequisitions: () => request<MyRequisitionView[]>("/job-requisitions/mine"),
 
   getRequisition: (id: string) => request<JobRequisitionView>(`/job-requisitions/${id}`),
 

@@ -86,6 +86,8 @@ function buildHomeCards(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]):
 
   if (hasRole("hr_admin") && hasModule("recruitment")) {
     cards.push({ to: "/app/recruitment", label: "Recruitment", description: "Requisitions, candidates & offers", icon: Briefcase });
+  } else if (hasRole("line_manager") && hasModule("recruitment")) {
+    cards.push({ to: "/app/my-hiring", label: "My Hiring", description: "Roles you hire for & your interviews", icon: Briefcase });
   }
 
   if (hasModule("performance") && roleKeys.length > 0) {

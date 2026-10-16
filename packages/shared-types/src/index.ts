@@ -4498,6 +4498,12 @@ export type RecruitmentSettingsView = {
 export type UpdateRecruitmentSettingsRequest = Partial<RecruitmentSettingsView>;
 
 /** The Kanban board's own column set. Forward-only; `rejected` is reachable from any non-terminal stage and needs a reason. */
+/** A requisition the signed-in person is the hiring manager of, with how many applications sit at each stage (counts only, no candidate data). */
+export type MyRequisitionView = {
+  requisition: JobRequisitionView;
+  applicationCounts: Record<ApplicationStage, number>;
+};
+
 export type ApplicationStage = "applied" | "screening" | "interview" | "offer" | "hired" | "rejected";
 
 export type ApplicationView = {
@@ -4558,6 +4564,9 @@ export type InterviewFeedbackView = {
 export type InterviewView = {
   id: string;
   applicationId: string;
+  /** For the interviewer's own list: who is being interviewed and for which requisition. */
+  candidateName: string | null;
+  requisitionTitle: string | null;
   roundNo: number;
   interviewType: InterviewType;
   scheduledStart: string;

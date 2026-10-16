@@ -37,6 +37,7 @@ import type {
   ExtendOfferRequest,
   JobRequisitionAction,
   JobRequisitionView,
+  MyRequisitionView,
   OfferView,
   UpdateCandidateRequest,
 } from "@aihxm/shared-types";
@@ -323,6 +324,30 @@ export class RecruitmentService {
         metadata: { from: status, to: rule.to },
       });
       return rowToRequisition(updated.rows[0]);
+    });
+  }
+
+  /**
+   * Hiring Manager view (parked B3): the requisitions the caller is the named hiring manager of, with application counts
+   * per stage. The relationship ("I am the hiring manager") is the authorization, as with a manager's team elsewhere;
+   * candidate details never leave this method, only counts. Anyone without such requisitions gets an empty list.
+   */
+  async listMyRequisitions(claims: RequestClaims): Promise<MyRequisitionView[]> {
+    if (!(await this.entitlements.isModuleEnabled(claims, MODULE_KEY))) throw new NotFoundException();
+    return this.db.withClaims(claims, async (client) => {
+      const me = await client.query<{ id: string }>("SELECT id FROM employees WHERE user_account_id = $1 LIMIT 1", [claims.sub]);
+      if (me.rowCount === 0) return [];
+      const reqs = await client.query("SELECT * FROM job_requisitions WHERE hiring_manager_id = $1 ORDER BY created_at DESC LIMIT 200", [me.rows[0].id]);
+      if (reqs.rowCount === 0) return [];
+      const counts = await client.query<{ requisition_id: string; stage: ApplicationStage; n: number }>(
+        "SELECT requisition_id, stage, count(*)::int AS n FROM applications WHERE requisition_id = ANY($1::uuid[]) GROUP BY requisition_id, stage",
+        [reqs.rows.map((r) => r.id)]
+      );
+      return reqs.rows.map((r) => {
+        const applicationCounts: Record<ApplicationStage, number> = { applied: 0, screening: 0, interview: 0, offer: 0, hired: 0, rejected: 0 };
+        for (const c of counts.rows) if (c.requisition_id === r.id) applicationCounts[c.stage] = c.n;
+        return { requisition: rowToRequisition(r), applicationCounts };
+      });
     });
   }
 

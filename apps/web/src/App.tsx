@@ -82,6 +82,11 @@ const MyOrgChartPage = lazy(() =>
     default: m.MyOrgChartPage,
   })),
 );
+const MyHiringPage = lazy(() =>
+  import("./portal/recruitment/MyHiringPage").then((m) => ({
+    default: m.MyHiringPage,
+  })),
+);
 const MyProfilePage = lazy(() =>
   import("./portal/employees/MyProfilePage").then((m) => ({
     default: m.MyProfilePage,
@@ -366,6 +371,7 @@ export default function App() {
                   <Route path="profile" element={<MyProfilePage />} />
                   <Route path="ess" element={<EssLaunchpadPage />} />
                   <Route path="ess/org-chart" element={<MyOrgChartPage />} />
+                  <Route path="my-hiring" element={<MyHiringPage />} />
                   <Route path="employees" element={<EmployeeListPage />} />
                   <Route
                     path="employees/new"

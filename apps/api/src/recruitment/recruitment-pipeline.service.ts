@@ -279,7 +279,15 @@ export class RecruitmentPipelineService {
   // --- interviews --------------------------------------------------------------
 
   private async loadInterviews(client: PoolClient, where: string, params: unknown[], onlyFeedbackOf?: string): Promise<InterviewView[]> {
-    const rows = await client.query(`SELECT i.* FROM interviews i WHERE ${where} ORDER BY i.scheduled_start`, params);
+    const rows = await client.query(
+      `SELECT i.*, trim(c.first_name || ' ' || c.last_name) AS candidate_name, jr.title AS requisition_title
+         FROM interviews i
+         LEFT JOIN applications a ON a.id = i.application_id
+         LEFT JOIN candidates c ON c.id = a.candidate_id
+         LEFT JOIN job_requisitions jr ON jr.id = a.requisition_id
+        WHERE ${where} ORDER BY i.scheduled_start`,
+      params
+    );
     if (rows.rowCount === 0) return [];
     const ids = rows.rows.map((r) => r.id);
     const interviewers = await client.query(`SELECT interview_id, employee_id FROM interview_interviewers WHERE interview_id = ANY($1::uuid[])`, [ids]);
@@ -290,6 +298,8 @@ export class RecruitmentPipelineService {
     return rows.rows.map((r) => ({
       id: r.id,
       applicationId: r.application_id,
+      candidateName: r.candidate_name ?? null,
+      requisitionTitle: r.requisition_title ?? null,
       roundNo: r.round_no,
       interviewType: r.interview_type,
       scheduledStart: toIso(r.scheduled_start) as string,

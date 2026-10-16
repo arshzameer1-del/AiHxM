@@ -49,6 +49,12 @@ export class RecruitmentController {
     return this.recruitment.createRequisition(claims, dto);
   }
 
+  /** Declared before `job-requisitions/:id` so "mine" is never read as an id. */
+  @Get("job-requisitions/mine")
+  myRequisitions(@CurrentClaims() claims: RequestClaims) {
+    return this.recruitment.listMyRequisitions(claims);
+  }
+
   @Get("job-requisitions")
   listRequisitions(@CurrentClaims() claims: RequestClaims) {
     return this.recruitment.listRequisitions(claims);
