@@ -2,6 +2,13 @@ import { expect, test, type Page } from "@playwright/test";
 import { generate as generateTotp } from "otplib";
 import { API_BASE_URL, createHrAdminSession, loginToApp } from "../../e2e-support/real-session";
 
+/** How the calendar names a day: "16 Nov 2026" (the app-wide format). */
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function shown(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return `${d} ${MONTHS[m - 1]} ${y}`;
+}
+
 /**
  * LV-UP: the SAP-style "My Leave Request" screen against the real API. One company, one manager, one staff
  * member (browser session) and a teammate (seeded through HR, never logs in), with the leave policy and the
@@ -209,11 +216,11 @@ test("calendar: pick two days to open the create form filled in, then submit", a
   const nextMonday = plus(wednesday, 5);
   const nextTuesday = plus(nextMonday, 1);
   // Walk the two-month calendar forward until both days are on screen.
-  for (let i = 0; i < 4 && (await page.getByRole("button", { name: new RegExp(`^${nextMonday.split("-").reverse().join("\\.")}`) }).count()) === 0; i += 1) {
+  for (let i = 0; i < 4 && (await page.getByRole("button", { name: new RegExp(`^${shown(nextMonday)}`) }).count()) === 0; i += 1) {
     await page.getByRole("button", { name: "Next month" }).click();
   }
-  await page.getByRole("button", { name: new RegExp(`^${nextMonday.split("-").reverse().join("\\.")}`) }).first().click();
-  await page.getByRole("button", { name: new RegExp(`^${nextTuesday.split("-").reverse().join("\\.")}`) }).first().click();
+  await page.getByRole("button", { name: new RegExp(`^${shown(nextMonday)}`) }).first().click();
+  await page.getByRole("button", { name: new RegExp(`^${shown(nextTuesday)}`) }).first().click();
 
   const form = page.getByRole("form", { name: "Create leave request" });
   await expect(form).toBeVisible();
@@ -226,7 +233,7 @@ test("calendar: pick two days to open the create form filled in, then submit", a
   // Saving returns to My Leave Request; its calendar marks the new request and the Items tab lists it too.
   await expect(page).toHaveURL(/\/app\/leave\/my-requests/);
   await page.getByRole("tab", { name: "Calendar" }).click();
-  await expect(page.getByRole("button", { name: new RegExp(`^${nextMonday.split("-").reverse().join("\\.")}.*Pending`) }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: new RegExp(`^${shown(nextMonday)}.*Pending`) }).first()).toBeVisible();
   await page.getByRole("tab", { name: /Items/ }).click();
   await expect(page.locator("[data-testid='leave-requests'] tbody tr")).toHaveCount(2);
 });

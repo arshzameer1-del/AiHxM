@@ -1,6 +1,7 @@
 import type { TeamAttendanceMember } from "@aihxm/shared-types";
+import { localDayKey } from "../shared/dates";
 
-const iso = (d: Date) => d.toISOString().slice(0, 10);
+const iso = (d: Date) => localDayKey(d);
 
 /** The window the Team Attendance page shows: the last 14 days up to and including today. */
 export function teamWindow(today: Date = new Date()): { from: string; to: string } {

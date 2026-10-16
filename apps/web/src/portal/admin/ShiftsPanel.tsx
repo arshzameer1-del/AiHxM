@@ -5,6 +5,7 @@ import { api, ApiError } from "../../api/client";
 import { WeeklyPatternEditor } from "./WeeklyPatternEditor";
 import { WorkScheduleAssignmentRulesPanel } from "./WorkScheduleAssignmentRulesPanel";
 import { SchedulePreview } from "./SchedulePreview";
+import { formatClock, formatDay, todayIso } from "../shared/dates";
 
 function describeError(err: unknown): string {
   if (err instanceof ApiError) {
@@ -217,7 +218,7 @@ function ShiftRow({ shift, onChanged }: { shift: ShiftView; onChanged: () => voi
         <div>
           <div className="text-xs uppercase tracking-wide text-label-tertiary mb-0.5">Hours</div>
           <div className="font-mono">
-            {shift.startTime.slice(0, 5)}–{shift.endTime.slice(0, 5)}
+            {formatClock(shift.startTime)} – {formatClock(shift.endTime)}
           </div>
         </div>
         <div>
@@ -238,7 +239,7 @@ function AssignShiftForm({ shifts, onAssigned }: { shifts: ShiftView[]; onAssign
   const [employees, setEmployees] = useState<EmployeeView[] | null>(null);
   const [employeeId, setEmployeeId] = useState("");
   const [shiftId, setShiftId] = useState("");
-  const [effectiveFrom, setEffectiveFrom] = useState(() => new Date().toISOString().slice(0, 10));
+  const [effectiveFrom, setEffectiveFrom] = useState(() => todayIso());
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -254,7 +255,7 @@ function AssignShiftForm({ shifts, onAssigned }: { shifts: ShiftView[]; onAssign
     setSubmitting(true);
     try {
       const assignment = await api.assignShift({ employeeId, shiftId, effectiveFrom });
-      setSuccess(`${assignment.employeeName} assigned to ${assignment.shiftName}, effective ${assignment.effectiveFrom}.`);
+      setSuccess(`${assignment.employeeName} assigned to ${assignment.shiftName}, effective ${formatDay(assignment.effectiveFrom)}.`);
       onAssigned();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not assign this shift.");
@@ -298,7 +299,7 @@ function AssignShiftForm({ shifts, onAssigned }: { shifts: ShiftView[]; onAssign
             </option>
             {shifts.map((s) => (
               <option key={s.id} value={s.id}>
-                {s.name} ({s.startTime.slice(0, 5)}–{s.endTime.slice(0, 5)})
+                {s.name} ({formatClock(s.startTime)} – {formatClock(s.endTime)})
               </option>
             ))}
           </select>

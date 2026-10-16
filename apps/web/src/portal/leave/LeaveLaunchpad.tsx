@@ -5,6 +5,7 @@ import { useAuth } from "../../auth/AuthContext";
 import { useModuleContext } from "../shared/ModuleContext";
 import { PageHeader } from "../shared/PageChrome";
 import { TileGrid, TileGroup, type TileSpec } from "../shared/Tiles";
+import { todayIso } from "../shared/dates";
 
 /**
  * Leave Management launchpad: one tile per task, each opening its own page. A tile only appears when the
@@ -37,7 +38,7 @@ export function LeaveLaunchpad() {
         .then((rows) => setWaiting(rows.filter((r) => r.status === "pending" && r.employeeId !== identity?.employeeId).length))
         .catch(() => setWaiting(0));
     }
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayIso();
     api
       .listHolidays(String(new Date().getUTCFullYear()))
       .then((rows) => setUpcoming(rows.filter((h) => h.holidayDate >= today).length))

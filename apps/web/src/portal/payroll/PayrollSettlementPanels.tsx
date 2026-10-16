@@ -12,6 +12,7 @@ import type {
 } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { pkr } from "./payrollLabels";
+import { formatDay, todayIso } from "../shared/dates";
 
 const inputClass = "w-full rounded-lg border border-black/10 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-accent";
 
@@ -74,7 +75,7 @@ export function FinalSettlementsSection({ canPrepare, canApprove }: { canPrepare
           <button type="button" onClick={() => setOpenId(openId === s.id ? null : s.id)} className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-sm">
             <span>
               <span className="font-medium">{s.employeeName}</span> <span className="font-mono text-xs text-label-tertiary">{s.employeeNumber}</span>
-              <span className="text-xs text-label-tertiary"> · last working day {s.lastWorkingDay}</span>
+              <span className="text-xs text-label-tertiary"> · last working day {formatDay(s.lastWorkingDay)}</span>
             </span>
             <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${STATUS_STYLE[s.status]}`}>{STATUS_LABEL[s.status]}</span>
           </button>
@@ -294,7 +295,7 @@ function SchemeDefinitionsPanel() {
   function edit(r: PayrollSchemeDefinitionView) {
     setError(null);
     setForm({
-      code: r.code, name: r.name, schemeType: r.schemeType, effectiveFrom: new Date().toISOString().slice(0, 10),
+      code: r.code, name: r.name, schemeType: r.schemeType, effectiveFrom: todayIso(),
       values: Object.fromEntries(Object.entries(r.parameters).map(([k, v]) => [k, v === null || v === undefined ? "" : String(v)])),
     });
   }
@@ -325,7 +326,7 @@ function SchemeDefinitionsPanel() {
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold">Provident fund &amp; gratuity schemes</h3>
         {!form && (
-          <button type="button" className="text-xs font-semibold text-accent hover:underline" onClick={() => setForm({ code: "", name: "", schemeType: "provident_fund", effectiveFrom: new Date().toISOString().slice(0, 10), values: {} })}>
+          <button type="button" className="text-xs font-semibold text-accent hover:underline" onClick={() => setForm({ code: "", name: "", schemeType: "provident_fund", effectiveFrom: todayIso(), values: {} })}>
             + New scheme
           </button>
         )}
@@ -341,7 +342,7 @@ function SchemeDefinitionsPanel() {
             <div key={r.id} className="flex items-center justify-between gap-2 px-3 py-2 text-sm">
               <div>
                 <span className="font-medium">{r.name}</span> <span className="font-mono text-xs text-label-tertiary">{r.code}</span>
-                <span className="text-xs text-label-tertiary"> · {r.schemeType.replace("_", " ")} · from {r.effectiveFrom}</span>
+                <span className="text-xs text-label-tertiary"> · {r.schemeType.replace("_", " ")} · from {formatDay(r.effectiveFrom)}</span>
                 {!r.isActive && <span className="ml-2 text-xs text-label-tertiary">Inactive</span>}
                 {!r.isComplete && <div className="text-xs text-amber-700">Still needs: {r.missingParameters.join(", ")}</div>}
               </div>
@@ -450,7 +451,7 @@ export function EmployeeSchemeAccountsPanel({ employeeId, canManage }: { employe
                 <tbody>
                   {entries.map((e) => (
                     <tr key={e.id} className="border-t border-black/5">
-                      <td className="py-1 pr-2">{e.entryDate}</td>
+                      <td className="py-1 pr-2">{formatDay(e.entryDate)}</td>
                       <td className="py-1 pr-2">{e.entryType.replace(/_/g, " ")}{e.note ? ` - ${e.note}` : ""}</td>
                       <td className="py-1 text-right tabular-nums">{pkr.format(e.amount)}</td>
                     </tr>

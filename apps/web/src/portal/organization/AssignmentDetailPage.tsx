@@ -10,6 +10,7 @@ import type {
   PositionView,
 } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
+import { formatDay } from "../shared/dates";
 
 const TYPE_LABELS: Record<AssignmentType, string> = {
   primary: "Primary",
@@ -184,8 +185,8 @@ export function AssignmentDetailPage() {
                   <span className="text-xs text-label-tertiary">{v.status}</span>
                 </div>
                 <div className="text-xs text-label-tertiary mt-0.5">
-                  Effective {v.effectiveFrom}
-                  {v.effectiveTo ? ` – ${v.effectiveTo}` : " – present"}
+                  Effective {formatDay(v.effectiveFrom)}
+                  {v.effectiveTo ? ` – ${formatDay(v.effectiveTo)}` : " – present"}
                 </div>
               </div>
             ))}

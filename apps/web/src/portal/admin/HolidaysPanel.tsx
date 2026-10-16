@@ -2,6 +2,7 @@ import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import type { HolidayCalendarView, HolidayView, LocationView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
+import { formatDay, todayIso } from "../shared/dates";
 
 function describeError(err: unknown): string {
   if (err instanceof ApiError) {
@@ -24,7 +25,7 @@ type HolidayFormValue = {
 function emptyForm(initial?: HolidayView, calendarId?: string): HolidayFormValue {
   return {
     name: initial?.name ?? "",
-    holidayDate: initial?.holidayDate ?? new Date().toISOString().slice(0, 10),
+    holidayDate: initial?.holidayDate ?? todayIso(),
     isOptional: initial?.isOptional ?? false,
     isGazetted: initial?.isGazetted ?? false,
     dateBasis: initial?.dateBasis ?? "fixed",
@@ -206,7 +207,7 @@ function HolidayRow({
   return (
     <div className="bg-card rounded-card p-4 shadow-sm flex items-center justify-between gap-4">
       <div className="flex items-center gap-3 flex-wrap min-w-0">
-        <div className="font-mono text-sm text-label-tertiary w-28 shrink-0">{holiday.holidayDate}</div>
+        <div className="font-mono text-sm text-label-tertiary w-28 shrink-0">{formatDay(holiday.holidayDate)}</div>
         <div className="font-semibold text-sm">{holiday.name}</div>
         {calendarName && <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold bg-accent/10 text-accent">{calendarName}</span>}
         {holiday.isGazetted && <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold bg-black/5 text-label-secondary">Gazetted</span>}

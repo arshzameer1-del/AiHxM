@@ -1,4 +1,5 @@
 import type { EmployeeView } from "@aihxm/shared-types";
+import { formatDay } from "../shared/dates";
 
 /**
  * Read-only label/value display for an EmployeeView, shared by the HR
@@ -51,9 +52,12 @@ const ENUM_FIELDS = new Set<keyof EmployeeView>([
   "maritalStatus",
 ]);
 
-function displayValue(value: unknown): string {
+// Calendar days from the API; shown as "1 Sep 2026" like every other date in the app.
+const DATE_FIELDS = new Set<keyof EmployeeView>(["dateOfJoining", "dateOfBirth", "terminationDate"]);
+
+function displayValue(value: unknown, isDate = false): string {
   if (value === null || value === undefined || value === "") return "—";
-  return String(value);
+  return isDate ? formatDay(String(value)) : String(value);
 }
 
 export function EmployeeFields({ employee, sections }: { employee: EmployeeView; sections?: FieldGroup[] }) {
@@ -66,7 +70,7 @@ export function EmployeeFields({ employee, sections }: { employee: EmployeeView;
             {row.label}
           </dt>
           <dd className={`text-sm ${ENUM_FIELDS.has(row.key) ? "capitalize" : ""}`}>
-            {displayValue(employee[row.key])}
+            {displayValue(employee[row.key], DATE_FIELDS.has(row.key))}
           </dd>
         </div>
       ))}

@@ -7,6 +7,7 @@ import type { CourseCategory, CourseEnrollmentView, CourseView } from "@aihxm/sh
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { COURSE_CATEGORIES, COURSE_CATEGORY_LABELS, ENROLLMENT_STATUS_LABELS, ENROLLMENT_STATUS_STYLES } from "./learningLabels";
+import { formatDay } from "../shared/dates";
 
 type Tab = "my-learning" | "browse" | "progress" | "team";
 
@@ -105,7 +106,7 @@ function EnrollmentRow({ enrollment, onChanged }: { enrollment: CourseEnrollment
           <div className="font-medium text-sm">{enrollment.course.title}</div>
           <div className="text-sm text-label-secondary mt-0.5">
             {COURSE_CATEGORY_LABELS[enrollment.course.category]} · {enrollment.course.durationMinutes} min
-            {enrollment.dueDate && ` · due ${enrollment.dueDate}`}
+            {enrollment.dueDate && ` · due ${formatDay(enrollment.dueDate)}`}
             {enrollment.isOnBehalf && <span className="text-xs text-label-tertiary"> (assigned by HR)</span>}
           </div>
           {enrollment.status !== "completed" && (
@@ -129,7 +130,7 @@ function EnrollmentRow({ enrollment, onChanged }: { enrollment: CourseEnrollment
         </div>
       )}
       {enrollment.status === "completed" && enrollment.completedAt && (
-        <div className="mt-2 text-xs text-label-tertiary">Completed {enrollment.completedAt.slice(0, 10)}</div>
+        <div className="mt-2 text-xs text-label-tertiary">Completed {formatDay(enrollment.completedAt)}</div>
       )}
     </div>
   );
@@ -453,7 +454,7 @@ export function LearningPage() {
                 {completed.map((e) => (
                   <div key={e.id} className="flex items-center justify-between text-sm bg-card rounded-card p-3 shadow-sm">
                     <span>{e.course.title}</span>
-                    <span className="text-xs text-label-tertiary tabular-nums">{e.completedAt?.slice(0, 10)}</span>
+                    <span className="text-xs text-label-tertiary tabular-nums">{formatDay(e.completedAt)}</span>
                   </div>
                 ))}
               </div>

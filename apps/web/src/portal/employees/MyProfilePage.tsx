@@ -8,6 +8,7 @@ import { useAuth } from "../../auth/AuthContext";
 import { EmployeeFields } from "./EmployeeFields";
 import { PROFILE_TABS, profileTabFromParam, type ProfileTab } from "./profileTabs";
 import { OnboardingOffboardingSection } from "../onboarding-offboarding/OnboardingOffboardingSection";
+import { formatDay, localDayKey } from "../shared/dates";
 
 /**
  * The employee_self_service view of the same object `EmployeeDetailPage`
@@ -79,7 +80,7 @@ function DocumentsTab({ employeeId }: { employeeId: string }) {
               <div className="text-sm font-medium truncate">{doc.fileName}</div>
               <div className="text-xs text-label-tertiary capitalize">
                 {doc.documentType.replace(/_/g, " ")} · {formatBytes(doc.sizeBytes)} ·{" "}
-                {new Date(doc.createdAt).toLocaleDateString()}
+                {formatDay(localDayKey(doc.createdAt))}
               </div>
             </div>
           </div>
@@ -201,7 +202,7 @@ export function MyProfilePage() {
                       </span>
                     )}
                   </div>
-                  <div className="text-xs text-label-tertiary whitespace-nowrap">{entry.effectiveDate}</div>
+                  <div className="text-xs text-label-tertiary whitespace-nowrap">{formatDay(entry.effectiveDate)}</div>
                 </div>
               ))}
             </div>

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { BankFileDelimiter, BankFileFormatView, DisbursementFieldKey, PayrollReconciliationKind, PayrollReconciliationView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { pkr } from "./payrollLabels";
+import { formatDateTime } from "../shared/dates";
 
 function errorMessage(err: unknown, fallback: string): string {
   return err instanceof ApiError ? err.message : fallback;
@@ -273,7 +274,7 @@ export function ReconciliationPanel({ runId }: { runId: string }) {
                     <div>
                       <span className="font-medium">{KIND_LABELS[r.kind]}</span>{" "}
                       <span className={`inline-block px-2 py-0.5 rounded-full font-semibold ${STATUS_STYLE[r.status]}`}>{r.status}</span>
-                      <span className="text-label-tertiary"> · run {r.sequence} · {new Date(r.runAt).toLocaleString()}</span>
+                      <span className="text-label-tertiary"> · run {r.sequence} · {formatDateTime(r.runAt)}</span>
                     </div>
                     <div className="tabular-nums text-label-secondary">
                       expected {pkr.format(r.expectedAmount)} · actual {pkr.format(r.actualAmount)}

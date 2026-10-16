@@ -1,11 +1,7 @@
 import { useEffect, useState } from "react";
 import type { AuditLogEntry, AuditLogFilters, CompanyDashboardRow, PlatformSavedView } from "@aihxm/shared-types";
 import { api } from "../api/client";
-
-const dateFormat = new Intl.DateTimeFormat("en-PK", {
-  dateStyle: "medium",
-  timeStyle: "short",
-});
+import { formatDateTime } from "../portal/shared/dates";
 
 // Tenant Management gap-fill Phase 1 item #6 — Audit tab search/filter +
 // saved searches. Extends the original company-only filter with
@@ -221,7 +217,7 @@ export function AuditLogPage() {
             {entries?.map((entry) => (
               <tr key={entry.id} className="border-b border-black/5 last:border-0 align-top">
                 <td className="px-4 py-3 whitespace-nowrap text-label-tertiary text-xs">
-                  {dateFormat.format(new Date(entry.createdAt))}
+                  {formatDateTime(entry.createdAt)}
                 </td>
                 <td className="px-4 py-3">{entry.companyName ?? "—"}</td>
                 <td className="px-4 py-3 font-mono text-xs">{entry.action}</td>

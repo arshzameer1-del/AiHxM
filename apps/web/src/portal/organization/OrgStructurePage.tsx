@@ -24,6 +24,7 @@ import {
   type StructureAction,
   type StructureRow,
 } from "./orgStructure";
+import { todayIso } from "../shared/dates";
 
 /**
  * Staff assignments (structure): the company's organisation as one tree-table. An org unit lists its positions
@@ -99,7 +100,7 @@ export function OrgStructurePage() {
   const { identity } = useAuth();
   const navigate = useNavigate();
   const canManage = identity?.roleKeys.includes("hr_admin") ?? false;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayIso();
 
   const [view, setView] = useState<OrgStructureView | null>(null);
   const [error, setError] = useState<string | null>(null);

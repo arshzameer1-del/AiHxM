@@ -7,6 +7,7 @@ import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { ExpenseClaimForm } from "./ExpenseClaimForm";
 import { EXPENSE_CATEGORY_LABELS, EXPENSE_STATUS_LABELS, EXPENSE_STATUS_STYLES } from "./expenseLabels";
+import { formatDay } from "../shared/dates";
 
 function describeError(err: unknown): string {
   if (err instanceof ApiError) {
@@ -298,7 +299,7 @@ function ClaimRow({
             {claim.isOnBehalf && <span className="text-xs text-label-tertiary ml-1.5">(on behalf)</span>}
           </div>
           <div className="text-sm text-label-secondary mt-0.5">
-            {EXPENSE_CATEGORY_LABELS[claim.category]} · {claim.expenseDate} ·{" "}
+            {EXPENSE_CATEGORY_LABELS[claim.category]} · {formatDay(claim.expenseDate)} ·{" "}
             <span className="tabular-nums">{formatAmount(claim.amount, claim.currency)}</span>
           </div>
         </div>

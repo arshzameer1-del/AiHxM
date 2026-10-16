@@ -2,10 +2,9 @@ import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import type { LeaveEntitlementInput, LeavePolicyVersionView, LeavePolicyView, LeaveTypeView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
+import { formatDay } from "../shared/dates";
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
-}
+const formatDate = (iso: string): string => formatDay(iso);
 
 function describeError(err: unknown): string {
   if (err instanceof ApiError) {

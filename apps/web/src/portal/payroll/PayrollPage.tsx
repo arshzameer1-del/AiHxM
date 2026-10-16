@@ -697,9 +697,7 @@ function CollapsibleSection({
   );
 }
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
-}
+const formatDate = (iso: string): string => formatDay(iso);
 
 /**
  * Migration 0033's read-side deliverable for tax slabs: every effective-

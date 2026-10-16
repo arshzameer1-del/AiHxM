@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { CustomFieldDefinition } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
+import { formatDay } from "../shared/dates";
 
 /**
  * Hiring Card Field Configuration (2026-09-27) — kumail's own "Wizard +
@@ -58,6 +59,7 @@ function CustomFieldValueInput({
 function formatValue(definition: CustomFieldDefinition, value: unknown): string {
   if (value === null || value === undefined || value === "") return "—";
   if (definition.fieldType === "boolean") return value ? "Yes" : "No";
+  if (definition.fieldType === "date") return formatDay(String(value));
   return String(value);
 }
 

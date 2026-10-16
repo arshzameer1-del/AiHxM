@@ -5,6 +5,7 @@ import type { EmployeeView, LeaveRequestView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { describeError } from "../shared/describeError";
 import { leaveTypeLabel, STATUS_LABELS, STATUS_STYLES } from "./leaveLabels";
+import { formatDay, formatPeriod } from "../shared/dates";
 
 function RequestRow({
   request,
@@ -97,7 +98,7 @@ function RequestRow({
             {request.isOnBehalf && <span className="text-xs text-label-tertiary ml-1.5">(on behalf)</span>}
           </div>
           <div className="text-sm text-label-secondary mt-0.5">
-            {leaveTypeLabel(request.leaveType)} · {request.startDate} – {request.endDate} · {request.daysRequested}{" "}
+            {leaveTypeLabel(request.leaveType)} · {formatPeriod(request.startDate, request.endDate)} · {request.daysRequested}{" "}
             day{request.daysRequested === 1 ? "" : "s"}
           </div>
           {request.dayPart !== "full" && (
@@ -108,7 +109,7 @@ function RequestRow({
             <div className="text-xs text-danger mt-1">Rejected: {request.rejectionReason}</div>
           )}
           {request.returnDate && request.status === "approved" && (
-            <div className="text-xs text-label-tertiary mt-1">Back on {request.returnDate}</div>
+            <div className="text-xs text-label-tertiary mt-1">Back on {formatDay(request.returnDate)}</div>
           )}
           {request.cancellationStatus === "declined" && <div className="text-xs text-label-tertiary mt-1">Cancellation request declined</div>}
         </div>

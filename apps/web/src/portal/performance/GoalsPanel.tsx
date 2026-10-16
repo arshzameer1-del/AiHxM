@@ -4,6 +4,7 @@ import { api } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { ReasonModal } from "../../components/ReasonModal";
 import { ErrorNote, Field, GoalStatusBadge, GOAL_STATUS_LABELS, ProgressBar, errorText, formatDate, inputCls, linkBtn, primaryBtn } from "./perfUi";
+import { formatDateTime } from "../shared/dates";
 
 type GoalForm = { title: string; description: string; weight: string; dueDate: string; targetValue: string; targetUnit: string };
 const emptyForm: GoalForm = { title: "", description: "", weight: "", dueDate: "", targetValue: "", targetUnit: "" };
@@ -289,7 +290,7 @@ export function GoalsPanel() {
             {history.map((h) => (
               <li key={h.id} className="py-2">
                 <span className="font-medium capitalize">{h.updateType.replace(/_/g, " ")}</span>
-                <span className="text-label-tertiary"> · {new Date(h.createdAt).toLocaleString()}</span>
+                <span className="text-label-tertiary"> · {formatDateTime(h.createdAt)}</span>
                 {h.fromStatus !== h.toStatus && h.toStatus && <span> · {h.fromStatus ? `${GOAL_STATUS_LABELS[h.fromStatus]} → ` : ""}{GOAL_STATUS_LABELS[h.toStatus]}</span>}
                 {h.progressPct !== null && <span> · {h.progressPct}%</span>}
                 {h.note && <div className="text-xs text-label-secondary">{h.note}</div>}

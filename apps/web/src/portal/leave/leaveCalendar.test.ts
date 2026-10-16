@@ -24,9 +24,9 @@ test("addDays crosses month and year ends without time zone drift", () => {
 });
 
 test("display formatting is DD.MM.YYYY", () => {
-  assert.equal(formatDisplayDate("2026-10-25"), "25.10.2026");
-  assert.equal(formatDisplayRange("2026-10-25", "2026-10-26"), "25.10.2026 – 26.10.2026");
-  assert.equal(formatDisplayRange("2026-10-25", "2026-10-25"), "25.10.2026");
+  assert.equal(formatDisplayDate("2026-10-25"), "25 Oct 2026");
+  assert.equal(formatDisplayRange("2026-10-25", "2026-10-26"), "25 Oct 2026 – 26 Oct 2026");
+  assert.equal(formatDisplayRange("2026-10-25", "2026-10-25"), "25 Oct 2026");
 });
 
 test("weekends and holidays do not count as working days", () => {
@@ -101,9 +101,9 @@ test("month navigation wraps the year", () => {
 
 test("long date formats", async () => {
   const { formatLongDate, formatLongRange } = await import("./leaveCalendar");
-  assert.equal(formatLongDate("2026-08-30"), "August 30, 2026");
-  assert.equal(formatLongRange("2026-08-30", "2026-08-31"), "August 30, 2026 – August 31, 2026");
-  assert.equal(formatLongRange("2026-08-30", "2026-08-30"), "August 30, 2026");
+  assert.equal(formatLongDate("2026-08-30"), "30 August 2026");
+  assert.equal(formatLongRange("2026-08-30", "2026-08-31"), "30 August 2026 – 31 August 2026");
+  assert.equal(formatLongRange("2026-08-30", "2026-08-30"), "30 August 2026");
 });
 
 test("eachDate is inclusive, empty for an inverted range and capped", async () => {

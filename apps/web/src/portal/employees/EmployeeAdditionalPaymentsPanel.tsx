@@ -2,6 +2,7 @@ import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import type { CompensationComponentView, EmployeeAdditionalPaymentView, HrReferenceCatalogItemView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
+import { formatDay } from "../shared/dates";
 
 const inputClass =
   "w-full rounded-lg border border-black/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent";
@@ -88,7 +89,7 @@ export function EmployeeAdditionalPaymentsPanel({ employeeId, canManage }: { emp
                   {!p.isTaxable && <span className="text-label-tertiary text-xs ml-1">(non-taxable)</span>}
                 </div>
                 <div className="text-xs text-label-tertiary">
-                  {p.effectiveDate} · Status: <span className="font-semibold">{p.status}</span>
+                  {formatDay(p.effectiveDate)} · Status: <span className="font-semibold">{p.status}</span>
                   {p.approvalStatus === "pending" && <span className="ml-2 px-1.5 rounded bg-amber-100 text-amber-800">awaiting approval</span>}
                   {p.approvalStatus === "approved" && <span className="ml-2 px-1.5 rounded bg-green-100 text-green-800">approved</span>}
                   {p.approvalStatus === "rejected" && <span className="ml-2 px-1.5 rounded bg-red-100 text-red-800">rejected</span>}

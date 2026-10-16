@@ -2,6 +2,7 @@ import { LoadingNote } from "../shared/PageChrome";
 import { useCallback, useEffect, useState } from "react";
 import type { TaxExemptionInput, TaxProfileSlabInput, TaxProfileView, TaxPublicationStatus, TaxYearView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
+import { formatDay } from "../shared/dates";
 
 const inputClass = "w-full rounded-lg border border-black/10 px-2 py-1.5 text-xs bg-card focus:outline-none focus:ring-2 focus:ring-accent";
 const STATUS_STYLE: Record<TaxPublicationStatus, string> = {
@@ -90,7 +91,7 @@ export function TaxProfilesPanel() {
               <li key={y.id} className="text-xs rounded-lg border border-black/10 p-2">
                 <div className="flex items-center justify-between gap-2">
                   <div>
-                    <span className="font-semibold">{y.label}</span> <span className="text-label-secondary">{y.startDate} to {y.endDate} · {y.jurisdiction}</span>{" "}
+                    <span className="font-semibold">{y.label}</span> <span className="text-label-secondary">{formatDay(y.startDate)} to {formatDay(y.endDate)} · {y.jurisdiction}</span>{" "}
                     <StatusPill status={y.status} />
                     {y.sourceReference && <div className="text-label-tertiary">Source: {y.sourceReference}</div>}
                   </div>

@@ -2,6 +2,7 @@ import { LoadingNote } from "../shared/PageChrome";
 import { useEffect, useState } from "react";
 import type { EmployeeAnalyticsSummary, EmployeeHeadcountBreakdown } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
+import { formatDateTime } from "../shared/dates";
 
 /**
  * Core Employee Enterprise Phase 12's frontend catch-up (2026-09-27) —
@@ -65,7 +66,7 @@ export function WorkforceAnalyticsPage() {
     <div className="max-w-2xl">
       <h1 className="text-2xl font-bold tracking-tight mb-1">Workforce Analytics</h1>
       <p className="text-label-tertiary text-sm mb-6">
-        Generated {new Date(summary.generatedAt).toLocaleString()}
+        Generated {formatDateTime(summary.generatedAt)}
       </p>
 
       <section className="bg-card rounded-card p-5 shadow-sm mb-6">

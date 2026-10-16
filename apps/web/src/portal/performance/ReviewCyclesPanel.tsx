@@ -5,6 +5,7 @@ import { useAuth } from "../../auth/AuthContext";
 import { CreateCycleModal } from "./modals/CreateCycleModal";
 import { PhasesModal } from "./PhasesModal";
 import { formatDate } from "./perfUi";
+import { formatPeriod } from "../shared/dates";
 
 export function ReviewCyclesPanel() {
   const { identity } = useAuth();
@@ -117,7 +118,7 @@ export function ReviewCyclesPanel() {
                 <tr key={cycle.id} className="border-b border-black/5 hover:bg-surface">
                   <td className="py-3 px-4">{cycle.name}</td>
                   <td className="py-3 px-4">
-                    {new Date(cycle.periodStart).toLocaleDateString()} — {new Date(cycle.periodEnd).toLocaleDateString()}
+                    {formatPeriod(cycle.periodStart, cycle.periodEnd)}
                   </td>
                   <td className="py-3 px-4">{getStatusBadge(cycle.status)}</td>
                   <td className="py-3 px-4 text-xs text-label-secondary">

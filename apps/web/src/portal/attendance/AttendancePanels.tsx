@@ -8,6 +8,7 @@ import { SapSection } from "../shared/FormSections";
 import { describeError } from "../shared/describeError";
 import { staleClockInHours, staleClockInMessage } from "./openClockIn";
 import { ATTENDANCE_STATUS_LABELS, ATTENDANCE_STATUS_STYLES, CORRECTION_STATUS_LABELS, CORRECTION_STATUS_STYLES } from "./attendanceLabels";
+import { formatDateTime, formatDay, localDayKey } from "../shared/dates";
 
 /**
  * Pages of the Time & Attendance module. Each is one task on its own page (the launchpad tiles link here):
@@ -72,7 +73,7 @@ export function ClockPanel({ employeeId, refreshKey, onChanged }: { employeeId: 
           {clockedIn && attendance && (
             <div className="flex items-center gap-2 flex-wrap">
               <p className="text-xs text-label-secondary">
-                Clocked in since {new Date(attendance[0].clockInAt).toLocaleString()}
+                Clocked in since {formatDateTime(attendance[0].clockInAt)}
                 {attendance[0].shiftName && ` · ${attendance[0].shiftName} shift`}
               </p>
               <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${ATTENDANCE_STATUS_STYLES[attendance[0].status]}`}>
@@ -101,7 +102,7 @@ export function ClockPanel({ employeeId, refreshKey, onChanged }: { employeeId: 
             {attendance.slice(0, 10).map((rec) => (
               <div key={rec.id} className="flex items-center justify-between gap-3 text-sm">
                 <span className="text-label-secondary">
-                  {new Date(rec.clockInAt).toLocaleDateString()}
+                  {formatDay(localDayKey(rec.clockInAt))}
                   {rec.shiftName && <span className="text-label-tertiary"> · {rec.shiftName}</span>}
                 </span>
                 <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${ATTENDANCE_STATUS_STYLES[rec.status]}`}>{ATTENDANCE_STATUS_LABELS[rec.status]}</span>
@@ -157,7 +158,7 @@ export function CorrectionsPanel({ employeeId, refreshKey, onChanged }: { employ
             {corrections.map((c) => (
               <div key={c.id} className="flex items-center justify-between gap-3 text-sm">
                 <span className="text-label-secondary">
-                  {c.requestedDate}
+                  {formatDay(c.requestedDate)}
                   {c.reason && <span className="text-label-tertiary"> · &ldquo;{c.reason}&rdquo;</span>}
                 </span>
                 <span className={`shrink-0 inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${CORRECTION_STATUS_STYLES[c.status]}`}>{CORRECTION_STATUS_LABELS[c.status]}</span>

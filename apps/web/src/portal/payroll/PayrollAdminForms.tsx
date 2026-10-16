@@ -1,5 +1,5 @@
 import { LoadingNote } from "../shared/PageChrome";
-import { formatPeriod } from "../shared/dates";
+import { formatDay, formatPeriod } from "../shared/dates";
 import { FormEvent, useEffect, useState } from "react";
 import type {
   AdditionalPaymentType,
@@ -433,7 +433,7 @@ export function CreateRunForm({ onCreated, onCancel }: { onCreated: () => void; 
               {employeeOptions.map((emp) => (
                 <option key={emp.id} value={emp.id}>
                   {emp.employeeNumber} — {emp.firstName} {emp.lastName}
-                  {emp.terminationDate ? ` (terminated ${emp.terminationDate})` : ""}
+                  {emp.terminationDate ? ` (terminated ${formatDay(emp.terminationDate)})` : ""}
                 </option>
               ))}
             </select>

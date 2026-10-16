@@ -15,6 +15,7 @@ import type {
 import { ORG_REPORTING_RELATIONSHIP_CODES, ORG_STRUCTURE_RELATIONSHIP_CODES } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
+import { formatDay } from "../shared/dates";
 
 const UNIT_TYPE_LABELS: Record<OrgUnitType, string> = {
   department: "Department",
@@ -486,8 +487,8 @@ export function OrgUnitDetailPage() {
                   <span className="text-xs text-label-tertiary">{v.status}</span>
                 </div>
                 <div className="text-xs text-label-tertiary mt-0.5">
-                  Effective {v.effectiveFrom}
-                  {v.effectiveTo ? ` – ${v.effectiveTo}` : " – present"}
+                  Effective {formatDay(v.effectiveFrom)}
+                  {v.effectiveTo ? ` – ${formatDay(v.effectiveTo)}` : " – present"}
                 </div>
               </div>
             ))}
@@ -506,7 +507,7 @@ export function OrgUnitDetailPage() {
                 {change.title}
               </Link>
               <div className="text-xs text-label-tertiary mt-0.5">
-                {change.status} · Effective {change.effectiveDate} ·{" "}
+                {change.status} · Effective {formatDay(change.effectiveDate)} ·{" "}
                 {items.map((i) => i.action).join(", ")}
               </div>
             </div>

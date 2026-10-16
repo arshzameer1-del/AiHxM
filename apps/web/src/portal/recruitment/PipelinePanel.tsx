@@ -10,6 +10,7 @@ import type {
 import { api, ApiError } from "../../api/client";
 import { ReasonModal } from "../../components/ReasonModal";
 import { OFFER_STATUS_LABELS, PIPELINE_STAGES, STAGE_LABELS } from "./requisitionLabels";
+import { formatDay } from "../shared/dates";
 
 function describeError(err: unknown): string {
   if (err instanceof ApiError) {
@@ -186,11 +187,11 @@ function OfferControls({
   return (
     <div className="mt-2 text-xs space-y-1.5">
       <div className="font-mono">
-        PKR {offer.salary.toLocaleString()}/mo · starts {offer.startDate}
+        PKR {offer.salary.toLocaleString()}/mo · starts {formatDay(offer.startDate)}
       </div>
       <div className="font-semibold">
         {OFFER_STATUS_LABELS[offer.status]}
-        {offer.expiresAt ? <span className="font-normal text-label-tertiary"> · valid until {offer.expiresAt.slice(0, 10)}</span> : null}
+        {offer.expiresAt ? <span className="font-normal text-label-tertiary"> · valid until {formatDay(offer.expiresAt)}</span> : null}
       </div>
       {offer.components.length > 0 && (
         <ul className="text-label-secondary">

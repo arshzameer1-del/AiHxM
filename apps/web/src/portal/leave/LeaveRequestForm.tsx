@@ -6,6 +6,7 @@ import { countCalendarDays, countWorkingDays, formatDisplayDate, returnDateAfter
 import { approverStepLabel, groupApprovalSteps } from "./leaveApprovals";
 import { TeamCalendar } from "./TeamCalendar";
 import { SapConfirm, SapField, SapFooter, SapSection } from "../shared/FormSections";
+import { formatPeriod } from "../shared/dates";
 
 /**
  * Shared by both submit paths: an employee_self_service holder submitting their own request
@@ -386,7 +387,7 @@ export function OverlapNotice({ warnings }: { warnings: OverlapWarning[] }) {
       </div>
       {warnings.map((w) => (
         <div key={w.leaveRequestId} className="text-amber-900">
-          {w.employeeFullName}: {w.startDate} – {w.endDate}
+          {w.employeeFullName}: {formatPeriod(w.startDate, w.endDate)}
         </div>
       ))}
       <div className="text-amber-800">This is just a notice — your request was still submitted.</div>

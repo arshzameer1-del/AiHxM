@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { AttendanceDailyResultView, AttendanceDailyStatus, AttendancePeriodSummary } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
+import { formatDayWithWeekday, formatTime, localDayKey } from "../shared/dates";
 
 export const STATUS_LABELS: Record<AttendanceDailyStatus, string> = {
   present: "Present",
@@ -35,9 +36,6 @@ const EXCEPTION_LABELS: Record<string, string> = {
   unscheduled_work: "Worked on a day off",
 };
 
-function isoDay(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
 
 function hm(minutes: number): string {
   const h = Math.floor(minutes / 60);
@@ -46,7 +44,7 @@ function hm(minutes: number): string {
 }
 
 function time(iso: string | null): string {
-  return iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—";
+  return formatTime(iso, "—");
 }
 
 /**
@@ -62,8 +60,8 @@ export function MyAttendanceDays({ employeeId, refreshKey }: { employeeId: strin
     const to = new Date();
     const from = new Date(to.getTime() - 13 * 86400000);
     Promise.all([
-      api.attendanceResults(employeeId, isoDay(from), isoDay(to)),
-      api.attendanceSummary(employeeId, isoDay(from), isoDay(to)),
+      api.attendanceResults(employeeId, localDayKey(from), localDayKey(to)),
+      api.attendanceSummary(employeeId, localDayKey(from), localDayKey(to)),
     ])
       .then(([rows, sum]) => {
         setDays(rows);
@@ -102,7 +100,7 @@ export function MyAttendanceDays({ employeeId, refreshKey }: { employeeId: strin
             <tbody className="divide-y divide-black/5 tabular-nums">
               {[...days].reverse().map((d) => (
                 <tr key={d.id}>
-                  <td className="py-1.5 pr-4 whitespace-nowrap">{new Date(`${d.workDate}T00:00:00`).toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })}</td>
+                  <td className="py-1.5 pr-4 whitespace-nowrap">{formatDayWithWeekday(d.workDate)}</td>
                   <td className="py-1.5 pr-4">
                     <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${STATUS_STYLES[d.status]}`}>{STATUS_LABELS[d.status]}</span>
                   </td>

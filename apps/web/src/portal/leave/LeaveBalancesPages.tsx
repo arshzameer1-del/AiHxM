@@ -8,6 +8,7 @@ import { BackLink, PageHeader, LoadingNote } from "../shared/PageChrome";
 import { SapField, SapSection } from "../shared/FormSections";
 import { describeError } from "../shared/describeError";
 import { parseAdjustmentDays } from "./leaveBalances";
+import { formatDay } from "../shared/dates";
 
 /**
  * HR leave balances (LIVE-19): pick an employee, see the balance per leave type and year, and post a signed
@@ -170,7 +171,7 @@ export function LeaveBalancesPage() {
             {ledger.map((l) => (
               <li key={l.id} className="py-1.5 flex items-center justify-between gap-3">
                 <span>{nameOf(l.leaveType)} · {l.entryType}{l.reason ? ` · ${l.reason}` : ""}</span>
-                <span className="font-mono text-xs shrink-0">{l.days > 0 ? "+" : ""}{fmt(l.days)} · {l.effectiveDate.slice(0, 10)}</span>
+                <span className="font-mono text-xs shrink-0">{l.days > 0 ? "+" : ""}{fmt(l.days)} · {formatDay(l.effectiveDate)}</span>
               </li>
             ))}
           </ul>

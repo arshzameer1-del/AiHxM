@@ -33,6 +33,7 @@ import {
   paymentAccountsConfig,
   qualificationsConfig,
 } from "./subentities/subEntityConfigs";
+import { formatDay } from "../shared/dates";
 
 /**
  * Core Employee Enterprise Phases 6-10's frontend catch-up (2026-09-27) —
@@ -217,7 +218,7 @@ export function EmployeeDetailPage() {
                       )}
                       {entry.notes && <div className="text-xs text-label-tertiary mt-0.5">{entry.notes}</div>}
                     </div>
-                    <div className="text-xs text-label-tertiary whitespace-nowrap">{entry.effectiveDate}</div>
+                    <div className="text-xs text-label-tertiary whitespace-nowrap">{formatDay(entry.effectiveDate)}</div>
                   </div>
                 ))}
               </div>

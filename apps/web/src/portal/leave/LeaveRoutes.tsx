@@ -16,6 +16,7 @@ import { OnBehalfOverviewPage, OnBehalfSelectPage } from "./OnBehalfPages";
 import { LeaveLaunchpad } from "./LeaveLaunchpad";
 import { LeaveBalancesPage, LeaveBalancesSelectPage } from "./LeaveBalancesPages";
 import { SapSection } from "../shared/FormSections";
+import { formatDay, todayIso } from "../shared/dates";
 
 /**
  * Leave Management opens on a launchpad of tiles and every tile opens its own page (nothing is stacked on one
@@ -129,7 +130,7 @@ function HolidaysPage() {
       .then(([a, b]) => setHolidays([...a, ...b].sort((x, z) => x.holidayDate.localeCompare(z.holidayDate))))
       .catch((err) => setError(describeError(err)));
   }, []);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayIso();
   return (
     <div>
       <BackLink to="/app/leave">Back to Leave Management</BackLink>
@@ -149,7 +150,7 @@ function HolidaysPage() {
                   {h.name}
                   {h.isOptional && <span className="text-xs text-label-tertiary"> (optional)</span>}
                 </span>
-                <span className="font-mono text-xs shrink-0">{h.holidayDate}</span>
+                <span className="font-mono text-xs shrink-0">{formatDay(h.holidayDate)}</span>
               </li>
             ))}
           </ul>

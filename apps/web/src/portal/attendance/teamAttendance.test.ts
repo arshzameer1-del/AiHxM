@@ -7,7 +7,7 @@ const m = (name: string, absent: number, late: number) =>
   ({ employeeName: name, summary: { byStatus: { absent }, lateMinutes: late } }) as unknown as TeamAttendanceMember;
 
 test("window is 14 days ending today", () => {
-  assert.deepEqual(teamWindow(new Date("2026-10-16T10:00:00Z")), { from: "2026-10-03", to: "2026-10-16" });
+  assert.deepEqual(teamWindow(new Date(2026, 9, 16, 10, 0)), { from: "2026-10-03", to: "2026-10-16" });
 });
 test("absent days outrank late minutes; ties by name", () => {
   const out = sortTeam([m("Cy", 0, 5), m("Ann", 0, 5), m("Bob", 1, 0), m("Dee", 0, 90)]);

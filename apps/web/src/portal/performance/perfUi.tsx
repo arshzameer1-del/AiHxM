@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { GoalStatus } from "@aihxm/shared-types";
+import { formatDay } from "../shared/dates";
 
 export const inputCls =
   "w-full rounded-lg border border-black/10 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-accent";
@@ -64,7 +65,5 @@ export function ProgressBar({ pct }: { pct: number }) {
 }
 
 export function formatDate(iso: string | null | undefined): string {
-  if (!iso) return "-";
-  const d = new Date(iso.length === 10 ? `${iso}T00:00:00` : iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString();
+  return formatDay(iso, "-");
 }

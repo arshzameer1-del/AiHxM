@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { hasAnyRoleKey, hasEssPortalRole, isSelfService } from "./shared/roles";
-import { formatDay, formatPeriod } from "./shared/dates";
+import { formatDay, formatPeriod, formatTime, todayIso } from "./shared/dates";
 import { EssTiles } from "./ess/EssLaunchpad";
 import { Link } from "react-router-dom";
 import {
@@ -274,7 +274,7 @@ function QuickActionsRow({ enabledModules, roleKeys }: { enabledModules: ModuleK
 function UpcomingAndRecentLeave({ requests }: { requests: LeaveRequestView[] | null }) {
   if (!requests) return null;
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayIso();
   const upcoming = requests
     .filter((r) => r.status === "approved" && r.startDate >= today)
     .sort((a, b) => a.startDate.localeCompare(b.startDate))
@@ -427,7 +427,7 @@ export function PortalHomePage() {
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold">Organization Command Center</h2>
             <span className="text-xs text-label-tertiary">
-              Updated {new Date(commandCenter.generatedAt).toLocaleTimeString()}
+              Updated {formatTime(commandCenter.generatedAt)}
             </span>
           </div>
 
@@ -505,7 +505,7 @@ export function PortalHomePage() {
                       {c.title}
                     </Link>
                     <div className="text-xs text-label-tertiary">
-                      {REORG_STATUS_LABELS[c.status] ?? c.status} · Effective {c.effectiveDate}
+                      {REORG_STATUS_LABELS[c.status] ?? c.status} · Effective {formatDay(c.effectiveDate)}
                     </div>
                   </div>
                 </li>

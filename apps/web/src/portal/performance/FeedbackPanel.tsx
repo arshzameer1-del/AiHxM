@@ -3,6 +3,7 @@ import type { CompetencyView, EmployeeView, FeedbackRequestView, FeedbackView, F
 import { api } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { ErrorNote, Field, errorText, formatDate, inputCls, primaryBtn } from "./perfUi";
+import { formatDay, localDayKey } from "../shared/dates";
 
 type Mine = FeedbackRequestView & { subjectName: string };
 
@@ -195,7 +196,7 @@ export function FeedbackPanel() {
             {about.items.map((f) => (
               <li key={f.id} className="p-3 text-sm space-y-1">
                 <div className="text-xs text-label-tertiary">
-                  {f.feedbackType.replace("_", "-")} · {new Date(f.createdAt).toLocaleDateString()} · {f.authorEmployeeId ? nameOf(f.authorEmployeeId) : "Anonymous"}
+                  {f.feedbackType.replace("_", "-")} · {formatDay(localDayKey(f.createdAt))} · {f.authorEmployeeId ? nameOf(f.authorEmployeeId) : "Anonymous"}
                   {f.visibility !== "subject" && ` · ${f.visibility === "hr_only" ? "HR only" : "manager and HR only"}`}
                 </div>
                 <div>{f.body}</div>
@@ -213,7 +214,7 @@ export function FeedbackPanel() {
         <h3 className="font-semibold">Feedback I have given</h3>
         {given.length === 0 ? <p className="text-sm text-label-tertiary">None yet.</p> : (
           <ul className="bg-card rounded-card shadow-sm divide-y divide-black/5 text-sm">
-            {given.map((f) => <li key={f.id} className="p-3"><span className="text-xs text-label-tertiary">To {nameOf(f.subjectEmployeeId)} · {new Date(f.createdAt).toLocaleDateString()}</span><div>{f.body}</div></li>)}
+            {given.map((f) => <li key={f.id} className="p-3"><span className="text-xs text-label-tertiary">To {nameOf(f.subjectEmployeeId)} · {formatDay(localDayKey(f.createdAt))}</span><div>{f.body}</div></li>)}
           </ul>
         )}
       </section>

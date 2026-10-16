@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { EmployeeView, ResolvedWorkScheduleView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
+import { formatClock, todayIso } from "../shared/dates";
 
 const ASSIGNMENT_SOURCE_LABELS: Record<NonNullable<ResolvedWorkScheduleView["assignmentSource"]>, string> = {
   individual: "Direct assignment",
@@ -30,7 +31,7 @@ const ASSIGNMENT_SOURCE_LABELS: Record<NonNullable<ResolvedWorkScheduleView["ass
 export function SchedulePreview() {
   const [employees, setEmployees] = useState<EmployeeView[] | null>(null);
   const [employeeId, setEmployeeId] = useState("");
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => todayIso());
   const [result, setResult] = useState<ResolvedWorkScheduleView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -145,7 +146,7 @@ export function SchedulePreview() {
               <div className="text-xs uppercase tracking-wide text-label-tertiary mb-0.5">Hours</div>
               <div className="font-mono">
                 {result.isWorking && result.startTime && result.endTime
-                  ? `${result.startTime.slice(0, 5)}–${result.endTime.slice(0, 5)}${result.crossesMidnight ? " (+1d)" : ""}`
+                  ? `${formatClock(result.startTime)} – ${formatClock(result.endTime)}${result.crossesMidnight ? " (+1d)" : ""}`
                   : "—"}
               </div>
             </div>
@@ -169,7 +170,7 @@ export function SchedulePreview() {
               <div className="flex flex-wrap gap-1.5">
                 {result.breaks.map((b, i) => (
                   <span key={i} className="text-xs font-mono bg-card rounded px-2 py-0.5">
-                    {b.startTime.slice(0, 5)}–{b.endTime.slice(0, 5)}
+                    {formatClock(b.startTime)} – {formatClock(b.endTime)}
                     {b.isPaid ? "" : " (unpaid)"}
                   </span>
                 ))}

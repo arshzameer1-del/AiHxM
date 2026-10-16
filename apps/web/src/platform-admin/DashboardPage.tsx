@@ -13,6 +13,7 @@ import { useAuth } from "../auth/AuthContext";
 import { StatusPill } from "../components/StatusPill";
 import { ReasonModal } from "../components/ReasonModal";
 import { useStepUp } from "../hooks/useStepUp";
+import { formatTime } from "../portal/shared/dates";
 
 const pkr = new Intl.NumberFormat("en-PK", { style: "currency", currency: "PKR", maximumFractionDigits: 0 });
 
@@ -212,7 +213,7 @@ export function DashboardPage() {
           <h2 className="text-sm font-semibold">Platform Health</h2>
           {healthSummary && (
             <span className="text-xs text-label-tertiary">
-              Updated {new Date(healthSummary.generatedAt).toLocaleTimeString()}
+              Updated {formatTime(healthSummary.generatedAt)}
             </span>
           )}
         </div>

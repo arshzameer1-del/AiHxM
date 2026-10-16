@@ -1,6 +1,7 @@
 import { FormEvent, ReactNode, useEffect, useState } from "react";
 import type { EmployeeView, HrReferenceCatalogItemView, LocationView, OrgUnitView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
+import { formatDay, todayIso } from "../shared/dates";
 
 /**
  * Core Employee Enterprise Phase 10's frontend catch-up (2026-09-27) —
@@ -30,10 +31,6 @@ const ACTIONS: { key: ActionKey; label: string }[] = [
   { key: "terminate", label: "Terminate" },
   { key: "reactivate", label: "Reactivate" },
 ];
-
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 // HR Administration v2 (2026-09-27) — the same `LIFECYCLE_EVENT_REASON_CATALOG`
 // mapping `catalog-type-registry.ts` defines server-side
@@ -312,8 +309,8 @@ function ActionForm({
       // employee changes until its effective date.
       onDone(
         result.event.status === "scheduled" || !result.jobHistory
-          ? `${label} scheduled — it will take effect on ${result.event.effectiveDate}.`
-          : `${label} recorded — ${result.jobHistory.eventType.replace("_", " ")} effective ${result.jobHistory.effectiveDate}.`
+          ? `${label} scheduled — it will take effect on ${formatDay(result.event.effectiveDate)}.`
+          : `${label} recorded — ${result.jobHistory.eventType.replace("_", " ")} effective ${formatDay(result.jobHistory.effectiveDate)}.`
       );
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not complete this action.");

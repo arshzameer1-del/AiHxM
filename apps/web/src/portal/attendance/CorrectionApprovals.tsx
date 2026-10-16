@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { AttendanceCorrectionRequestView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { describeError } from "../shared/describeError";
+import { formatDay, formatTime } from "../shared/dates";
 
 function CorrectionRow({ request, onChanged }: { request: AttendanceCorrectionRequestView; onChanged: () => void }) {
   const [deciding, setDeciding] = useState<"approved" | "rejected" | null>(null);
@@ -34,9 +35,9 @@ function CorrectionRow({ request, onChanged }: { request: AttendanceCorrectionRe
             {request.isOnBehalf && <span className="text-xs text-label-tertiary ml-1.5">(submitted by HR)</span>}
           </div>
           <div className="text-sm text-label-secondary mt-0.5">
-            {request.requestedDate}
-            {request.requestedClockIn && ` · in ${new Date(request.requestedClockIn).toLocaleTimeString()}`}
-            {request.requestedClockOut && ` · out ${new Date(request.requestedClockOut).toLocaleTimeString()}`}
+            {formatDay(request.requestedDate)}
+            {request.requestedClockIn && ` · in ${formatTime(request.requestedClockIn)}`}
+            {request.requestedClockOut && ` · out ${formatTime(request.requestedClockOut)}`}
           </div>
           <div className="text-xs text-label-tertiary mt-1">&ldquo;{request.reason}&rdquo;</div>
         </div>

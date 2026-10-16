@@ -7,6 +7,8 @@
  * (`daysRequested`) and which days are working days; nothing here is stored.
  */
 
+import { formatDay, formatLongDay } from "../shared/dates";
+
 export type DayKind = "working" | "non_working" | "holiday";
 
 export type CalendarCell = {
@@ -46,10 +48,9 @@ export function addDays(iso: string, days: number): string {
   return toIsoDate(d);
 }
 
-/** `2026-10-25` -> `25.10.2026`, the SAP-style display used on this screen. */
+/** `2026-10-25` -> `25 Oct 2026`, the app-wide date display (see shared/dates.ts). */
 export function formatDisplayDate(iso: string): string {
-  const [y, m, d] = iso.split("-");
-  return `${d}.${m}.${y}`;
+  return formatDay(iso);
 }
 
 export function formatDisplayRange(start: string, end: string): string {
@@ -116,10 +117,9 @@ export function weekdayLabels(weekStart = 1): string[] {
   return Array.from({ length: 7 }, (_, i) => names[(weekStart + i) % 7]);
 }
 
-/** `2026-08-30` -> `August 30, 2026` (the long form SAP's request header uses). */
+/** `2026-08-30` -> `30 August 2026`, the long form for request headers. */
 export function formatLongDate(iso: string): string {
-  const [y, m, d] = iso.split("-").map(Number);
-  return `${MONTH_NAMES[m - 1]} ${d}, ${y}`;
+  return formatLongDay(iso);
 }
 
 export function formatLongRange(start: string, end: string): string {

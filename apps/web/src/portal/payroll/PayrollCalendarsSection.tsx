@@ -214,7 +214,7 @@ export function PayrollCalendarsSection({ canManage }: { canManage: boolean }) {
                     {formatPeriod(p.periodStart, p.periodEnd)}
                   </td>
                   <td className="py-2 pr-4 font-mono text-xs">{formatDay(p.cutoffDate)}</td>
-                  <td className="py-2 pr-4 font-mono text-xs">{p.payDate}</td>
+                  <td className="py-2 pr-4 font-mono text-xs">{formatDay(p.payDate)}</td>
                   <td className="py-2 pr-4">{p.runCount}</td>
                   <td className="py-2 pr-4">
                     <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold ${PERIOD_STATUS_STYLES[p.status]}`}>{p.status}</span>

@@ -2,6 +2,7 @@ import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import type { EmployeeLoanView, EmployeeView, LoanScheduleRowView, LoanTypeView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
+import { formatDay } from "../shared/dates";
 
 const inputClass =
   "w-full rounded-lg border border-black/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent";
@@ -96,7 +97,7 @@ export function EmployeeLoansPanel({ employeeId, canManage }: { employeeId: stri
                     {loan.reason && <span className="text-label-tertiary"> — {loan.reason}</span>}
                   </div>
                   <div className="text-xs text-label-tertiary">
-                    Issued {loan.issuedDate} · Installment {pkr2.format(loan.installmentAmount)}
+                    Issued {formatDay(loan.issuedDate)} · Installment {pkr2.format(loan.installmentAmount)}
                     {loan.installmentsCount ? ` × ${loan.installmentsCount}` : ""} · Status:{" "}
                     <span className="font-semibold">{STATUS_LABEL[loan.status] ?? loan.status}</span>
                     {loan.status === "on_hold" && loan.holdReason ? ` (${loan.holdReason})` : ""}
@@ -196,7 +197,7 @@ function LoanDetail({ loan, canManage, onChanged }: { loan: EmployeeLoanView; ca
               {rows.map((r) => (
                 <tr key={r.id} className="border-t border-black/5">
                   <td className="py-1 pr-3">{r.installmentNo}</td>
-                  <td className="py-1 pr-3">{r.dueDate}</td>
+                  <td className="py-1 pr-3">{formatDay(r.dueDate)}</td>
                   <td className="py-1 pr-3 text-right font-mono">{pkr2.format(r.amount)}</td>
                   <td className="py-1 pr-3">
                     {ROW_LABEL[r.status] ?? r.status}

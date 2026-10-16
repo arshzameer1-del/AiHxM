@@ -9,6 +9,7 @@ import type {
 } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
+import { formatDay, todayIso } from "../shared/dates";
 
 function describeError(err: unknown): string {
   if (err instanceof ApiError) {
@@ -180,7 +181,7 @@ function ItemRow({
 function CreateChangeForm({ orgUnits, onCancel, onCreated }: { orgUnits: OrgUnitView[]; onCancel: () => void; onCreated: () => void }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [effectiveDate, setEffectiveDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [effectiveDate, setEffectiveDate] = useState(() => todayIso());
   const [items, setItems] = useState<DraftItem[]>([emptyItem()]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -306,7 +307,7 @@ function ChangeCard({ change, canManage, onChanged }: { change: OrgChangeView; c
     }
   }
 
-  const isDue = change.effectiveDate <= new Date().toISOString().slice(0, 10);
+  const isDue = change.effectiveDate <= todayIso();
 
   return (
     <div className="bg-card rounded-card shadow-sm p-4">
@@ -320,7 +321,7 @@ function ChangeCard({ change, canManage, onChanged }: { change: OrgChangeView; c
           </div>
           {change.description && <div className="text-xs text-label-tertiary mt-1">{change.description}</div>}
           <div className="text-xs text-label-tertiary mt-1">
-            Effective {change.effectiveDate} · {change.items.length} item{change.items.length === 1 ? "" : "s"}
+            Effective {formatDay(change.effectiveDate)} · {change.items.length} item{change.items.length === 1 ? "" : "s"}
           </div>
         </div>
         <button onClick={() => setExpanded((v) => !v)} className="text-xs font-medium text-accent hover:underline shrink-0">
@@ -429,7 +430,7 @@ function ChangeCard({ change, canManage, onChanged }: { change: OrgChangeView; c
               title={isDue ? undefined : "Executes automatically once the effective date arrives"}
               className="bg-accent text-white rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
             >
-              {isDue ? "Execute now" : `Scheduled for ${change.effectiveDate}`}
+              {isDue ? "Execute now" : `Scheduled for ${formatDay(change.effectiveDate)}`}
             </button>
           )}
         </div>

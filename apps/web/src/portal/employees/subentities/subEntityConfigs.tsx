@@ -11,6 +11,7 @@ import type {
   EmployeeQualificationView,
 } from "@aihxm/shared-types";
 import type { SubEntityPanelConfig } from "./SubEntityPanel";
+import { formatDay } from "../../shared/dates";
 
 /**
  * One config per sub-entity family — see `SubEntityPanel.tsx`'s own
@@ -138,7 +139,7 @@ export const importantDatesConfig: SubEntityPanelConfig<EmployeeImportantDateVie
     { key: "label", label: "Label", type: "text" },
   ],
   renderSummary: (item) => ({
-    primary: `${IMPORTANT_DATE_TYPE_OPTIONS.find((o) => o.value === item.dateType)?.label ?? item.dateType} — ${item.dateValue}`,
+    primary: `${IMPORTANT_DATE_TYPE_OPTIONS.find((o) => o.value === item.dateType)?.label ?? item.dateType} — ${formatDay(item.dateValue)}`,
     secondary: item.label ?? undefined,
   }),
   openStatus: "active",
@@ -281,7 +282,7 @@ export function familyMembersConfig(relationshipOptions: { value: string; label:
     ],
     renderSummary: (item) => ({
       primary: `${item.fullName} (${options.find((o) => o.value === item.relationship)?.label ?? item.relationship})${item.isBeneficiary ? " ★" : ""}`,
-      secondary: item.dateOfBirth ?? undefined,
+      secondary: item.dateOfBirth ? `Born ${formatDay(item.dateOfBirth)}` : undefined,
     }),
     openStatus: "active",
     closedStatusLabel: "Ended",

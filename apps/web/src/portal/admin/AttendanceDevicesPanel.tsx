@@ -2,6 +2,7 @@ import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import type { AttendanceDeviceView, DeviceEnrollmentView, EmployeeView, RawPunchView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
+import { formatDateTime } from "../shared/dates";
 
 function describeError(err: unknown): string {
   if (err instanceof ApiError) {
@@ -178,7 +179,7 @@ export function AttendanceDevicesPanel() {
                 <button onClick={() => openDevice(d.id)} className="text-left min-w-0">
                   <div className="font-medium text-sm">{d.name} <span className="text-xs text-label-tertiary ml-1">{d.deviceType}</span></div>
                   <div className="text-xs text-label-secondary mt-1">
-                    {d.enrolledCount} enrolled · {d.lastSeenAt ? `last seen ${new Date(d.lastSeenAt).toLocaleString()}` : "never connected"}
+                    {d.enrolledCount} enrolled · {d.lastSeenAt ? `last seen ${formatDateTime(d.lastSeenAt)}` : "never connected"}
                     {d.apiKeyPrefix && ` · key ${d.apiKeyPrefix}…`}
                   </div>
                 </button>
@@ -223,7 +224,7 @@ export function AttendanceDevicesPanel() {
                     <ul className="text-xs divide-y divide-black/5">
                       {punches.map((p) => (
                         <li key={p.id} className="py-1.5 flex justify-between gap-2">
-                          <span className="tabular-nums">{new Date(p.punchedAt).toLocaleString()} · id {p.deviceUserId} · {p.direction}</span>
+                          <span className="tabular-nums">{formatDateTime(p.punchedAt)} · id {p.deviceUserId} · {p.direction}</span>
                           <span title={p.error ?? ""} className={`px-2 py-0.5 rounded-full font-semibold ${PUNCH_STYLES[p.status]}`}>{p.status}</span>
                         </li>
                       ))}

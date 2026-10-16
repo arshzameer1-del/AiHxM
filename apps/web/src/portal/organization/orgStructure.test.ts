@@ -45,9 +45,9 @@ const base: StructureFilter = { keyDate: "2026-10-15", showEnded: false, showPos
 const names = (rows: ReturnType<typeof flattenStructure>) => rows.map((r) => `${"-".repeat(r.depth)}${r.node.name}`);
 
 test("dates read dd.mm.yyyy and an open end reads Unlimited", () => {
-  assert.equal(formatValidFrom("2024-05-01"), "01.05.2024");
+  assert.equal(formatValidFrom("2024-05-01"), "1 May 2024");
   assert.equal(formatValidTo(null), "Unlimited");
-  assert.equal(formatValidTo("2025-01-31"), "31.01.2025");
+  assert.equal(formatValidTo("2025-01-31"), "31 Jan 2025");
   assert.equal(formatValidFrom(null), "");
 });
 

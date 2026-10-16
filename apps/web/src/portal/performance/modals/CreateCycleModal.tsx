@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { CreateReviewCycleRequest } from "@aihxm/shared-types";
 import { api } from "../../../api/client";
+import { todayIso } from "../../shared/dates";
 
 interface CreateCycleModalProps {
   onClose: () => void;
@@ -10,8 +11,8 @@ interface CreateCycleModalProps {
 export function CreateCycleModal({ onClose, onSuccess }: CreateCycleModalProps) {
   const [formData, setFormData] = useState<CreateReviewCycleRequest>({
     name: "",
-    periodStart: new Date().toISOString().split("T")[0],
-    periodEnd: new Date().toISOString().split("T")[0],
+    periodStart: todayIso(),
+    periodEnd: todayIso(),
   });
 
   const [error, setError] = useState<string | null>(null);

@@ -12,6 +12,7 @@ import { api } from "../../api/client";
 import { ReasonModal } from "../../components/ReasonModal";
 import { Field, Notice, Pill, RunPicker, buttonClass, errorMessage, inputClass, quietButtonClass } from "./PayrollPanelKit";
 import { pkr } from "./payrollLabels";
+import { formatDay } from "../shared/dates";
 
 const money = (n: number) => pkr.format(n);
 
@@ -243,7 +244,7 @@ export function RunAccountingPanel({ canPost }: { canPost: boolean }) {
                   <button type="button" className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-sm" onClick={async () => setOpen(open?.id === j.id ? null : await api.getPayrollJournal(j.id))}>
                     <span>
                       <span className="font-medium">{j.journalNumber ?? "Draft journal"}</span>
-                      <span className="text-xs text-label-tertiary"> · {j.journalKind === "reversal" ? "Reversal" : "Payroll"} · {j.postingDate} · {money(j.totalDebit)}</span>
+                      <span className="text-xs text-label-tertiary"> · {j.journalKind === "reversal" ? "Reversal" : "Payroll"} · {formatDay(j.postingDate)} · {money(j.totalDebit)}</span>
                     </span>
                     <Pill tone={JOURNAL_TONE[j.status]}>{j.status}</Pill>
                   </button>

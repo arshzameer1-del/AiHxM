@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { HolidayView } from "@aihxm/shared-types";
 import { api } from "../../api/client";
+import { formatDay, todayIso } from "../shared/dates";
 
 /**
  * Holiday Management — `holiday.view.all` is granted broadly to every
@@ -23,7 +24,7 @@ export function UpcomingHolidaysCard() {
   }, []);
 
   if (holidays === null) return null;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayIso();
   const upcoming = holidays.filter((h) => h.holidayDate >= today).slice(0, 5);
   if (upcoming.length === 0) return null;
 
@@ -37,7 +38,7 @@ export function UpcomingHolidaysCard() {
               {h.name}
               {h.isOptional && <span className="text-xs text-label-tertiary"> (optional)</span>}
             </span>
-            <span className="font-mono text-xs text-label-tertiary shrink-0">{h.holidayDate}</span>
+            <span className="font-mono text-xs text-label-tertiary shrink-0">{formatDay(h.holidayDate)}</span>
           </div>
         ))}
       </div>

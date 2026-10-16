@@ -1,5 +1,5 @@
 import { LoadingNote } from "../shared/PageChrome";
-import { formatPeriod } from "../shared/dates";
+import { formatDay, formatPeriod } from "../shared/dates";
 import { useEffect, useRef, useState } from "react";
 import type { PayrollDashboardRunView, PayrollDashboardView, PayrollEventCatalogEntry, PayrollInputBatchView, PayrollInputImportType, PayrollInputRowView, PayrollInputTemplateView } from "@aihxm/shared-types";
 import { api } from "../../api/client";
@@ -247,7 +247,7 @@ export function PayrollInputImportPanel() {
             {batches.slice(0, 10).map((b) => (
               <li key={b.id} className="py-1.5 flex items-center justify-between gap-2">
                 <button type="button" className="text-left" onClick={async () => { setCurrent(b); setRows(await api.listPayrollInputImportRows(b.id)); }}>
-                  {b.fileName ?? "Pasted CSV"} <span className="text-xs text-label-tertiary">· {IMPORT_LABEL[b.importType]} · {b.createdAt.slice(0, 10)}</span>
+                  {b.fileName ?? "Pasted CSV"} <span className="text-xs text-label-tertiary">· {IMPORT_LABEL[b.importType]} · {formatDay(b.createdAt)}</span>
                 </button>
                 <Pill tone={BATCH_TONE(b.status)}>{b.status.replace(/_/g, " ")}</Pill>
               </li>

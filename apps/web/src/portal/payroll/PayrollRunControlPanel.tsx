@@ -10,6 +10,7 @@ import type {
 } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { RUN_STATUS_LABELS, isPostFinalRunStatus, pkr } from "./payrollLabels";
+import { formatDateTime } from "../shared/dates";
 
 const OVERRIDE_FIELD_LABELS: Record<PayrollOverridableField, string> = {
   incomeTaxMonthly: "Income tax (monthly)",
@@ -372,7 +373,7 @@ export function PayrollRunControlPanel({
                     <span className="text-label-tertiary">
                       {" "}
                       · {e.fromStatus ? `${RUN_STATUS_LABELS[e.fromStatus]} → ` : ""}
-                      {RUN_STATUS_LABELS[e.toStatus]} · {new Date(e.createdAt).toLocaleString()}
+                      {RUN_STATUS_LABELS[e.toStatus]} · {formatDateTime(e.createdAt)}
                     </span>
                     {e.reason && <div className="text-label-secondary">“{e.reason}”</div>}
                   </li>

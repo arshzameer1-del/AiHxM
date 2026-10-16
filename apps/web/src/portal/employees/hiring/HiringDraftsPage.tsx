@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { HireProcessView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../../api/client";
+import { formatDay, localDayKey } from "../../shared/dates";
 
 /**
  * Core Employee Enterprise Phase 2's Hiring Wizard entry point
@@ -80,7 +81,7 @@ export function HiringDraftsPage() {
                   <div>
                     <div className="text-sm font-medium capitalize">{d.status.replace(/_/g, " ")}</div>
                     <div className="text-xs text-label-tertiary">
-                      Started {new Date(d.createdAt).toLocaleDateString()} · {done}/{total} cards complete
+                      Started {formatDay(localDayKey(d.createdAt))} · {done}/{total} cards complete
                     </div>
                   </div>
                   <span className="text-xs font-semibold text-accent">Continue →</span>

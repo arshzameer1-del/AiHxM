@@ -66,6 +66,7 @@ import { StatusPill } from "../components/StatusPill";
 import { ReasonModal } from "../components/ReasonModal";
 import { ExportPasswordModal } from "../components/ExportPasswordModal";
 import { useStepUp } from "../hooks/useStepUp";
+import { formatDateTime, formatTimeAgo, nowLocalInput } from "../portal/shared/dates";
 
 const STATUSES: CompanyStatus[] = ["draft", "trial", "active", "suspended", "locked", "archived", "churned"];
 // Reasons are required server-side for these two (TM-005 Suspend, TM-030
@@ -444,7 +445,7 @@ function OverviewTab({
           {statusChangedAt && (
             <span className="text-label-tertiary">
               {" "}
-              — changed {new Date(statusChangedAt).toLocaleString()}
+              — changed {formatDateTime(statusChangedAt)}
             </span>
           )}
         </div>
@@ -1297,7 +1298,7 @@ function LifecycleTab({
                 deletionPurgeAt && (
                   <div className="text-xs text-red-700 mt-1">
                     This tenant will be permanently archived on{" "}
-                    {new Date(deletionPurgeAt).toLocaleString()} unless cancelled before then.
+                    {formatDateTime(deletionPurgeAt)} unless cancelled before then.
                   </div>
                 )
               )}
@@ -1521,7 +1522,7 @@ function SubscriptionTab({ companyId }: { companyId: string }) {
                   <span>Seats set to {h.seatsPurchased}</span>
                 )}
               </div>
-              <div className="text-xs text-label-tertiary">{new Date(h.changedAt).toLocaleString()}</div>
+              <div className="text-xs text-label-tertiary">{formatDateTime(h.changedAt)}</div>
             </div>
           ))}
           {summary.history.length === 0 && (
@@ -2296,7 +2297,7 @@ function IntegrationsTab({ companyId }: { companyId: string }) {
             {integration.previousSecretExpiresAt && (
               <p className="text-xs text-label-tertiary">
                 Previous secret still honored until{" "}
-                {new Date(integration.previousSecretExpiresAt).toLocaleString()}.
+                {formatDateTime(integration.previousSecretExpiresAt)}.
               </p>
             )}
             {rotatedSecret && rotatedSecret.providerKey === integration.providerKey && (
@@ -2309,7 +2310,7 @@ function IntegrationsTab({ companyId }: { companyId: string }) {
                 </code>
                 <p className="text-xs text-amber-800">
                   The previous secret keeps working until{" "}
-                  {new Date(rotatedSecret.previousSecretExpiresAt).toLocaleString()}, so you can update the
+                  {formatDateTime(rotatedSecret.previousSecretExpiresAt)}, so you can update the
                   device or endpoint without an outage.
                 </p>
                 <button
@@ -2414,9 +2415,9 @@ function WebhookDeliveryPanel({
                   <td className="pr-2 py-1">{event.attemptCount}</td>
                   <td className="pr-2 py-1 text-label-tertiary">
                     {event.deliveredAt
-                      ? new Date(event.deliveredAt).toLocaleString()
+                      ? formatDateTime(event.deliveredAt)
                       : event.attemptCount > 0
-                        ? new Date(event.createdAt).toLocaleString()
+                        ? formatDateTime(event.createdAt)
                         : "—"}
                   </td>
                   <td className="py-1">
@@ -2527,7 +2528,7 @@ function HealthTab({ companyId }: { companyId: string }) {
             </div>
             <div className="text-xs text-label-tertiary">{r.detail}</div>
             <div className="text-[11px] text-label-tertiary/70">
-              {new Date(r.checkedAt).getTime() === 0 ? "Never checked" : new Date(r.checkedAt).toLocaleString()}
+              {new Date(r.checkedAt).getTime() === 0 ? "Never checked" : formatDateTime(r.checkedAt)}
             </div>
           </div>
         ))}
@@ -2697,7 +2698,7 @@ function SupportTicketsTab({ companyId }: { companyId: string }) {
                 {t.slaBreached && (
                   <span
                     className="text-xs font-semibold px-2 py-0.5 rounded-full bg-red-600 text-white"
-                    title={`This ticket has been open past its ${t.priority}-priority SLA target (due ${new Date(t.dueBy).toLocaleString()})`}
+                    title={`This ticket has been open past its ${t.priority}-priority SLA target (due ${formatDateTime(t.dueBy)})`}
                   >
                     SLA breached
                   </span>
@@ -2744,9 +2745,9 @@ function SupportTicketsTab({ companyId }: { companyId: string }) {
                 }}
                 className="text-xs rounded-lg border border-black/10 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent"
               />
-              <span className="text-[11px] text-label-tertiary/70">Created {new Date(t.createdAt).toLocaleString()}</span>
+              <span className="text-[11px] text-label-tertiary/70">Created {formatDateTime(t.createdAt)}</span>
               <span className={`text-[11px] ${t.slaBreached ? "text-danger font-semibold" : "text-label-tertiary/70"}`}>
-                Due {new Date(t.dueBy).toLocaleString()}
+                Due {formatDateTime(t.dueBy)}
               </span>
             </div>
           </div>
@@ -2757,7 +2758,6 @@ function SupportTicketsTab({ companyId }: { companyId: string }) {
   );
 }
 
-const auditDateFormat = new Intl.DateTimeFormat("en-PK", { dateStyle: "medium", timeStyle: "short" });
 
 /**
  * TM-034 — per-tenant audit log. Deliberately reuses the SAME
@@ -2829,7 +2829,7 @@ function TenantAuditTab({ companyId }: { companyId: string }) {
             {filtered.map((entry) => (
               <tr key={entry.id} className="border-b border-black/5 last:border-0 align-top">
                 <td className="px-3 py-2 whitespace-nowrap text-label-tertiary text-xs">
-                  {auditDateFormat.format(new Date(entry.createdAt))}
+                  {formatDateTime(entry.createdAt)}
                 </td>
                 <td className="px-3 py-2 font-mono text-xs">{entry.action}</td>
                 <td className="px-3 py-2 text-xs">{entry.actor}</td>
@@ -2864,7 +2864,7 @@ function TenantAuditTab({ companyId }: { companyId: string }) {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-sm font-semibold font-mono">{detailEntry.action}</div>
-                <div className="text-xs text-label-tertiary">{auditDateFormat.format(new Date(detailEntry.createdAt))}</div>
+                <div className="text-xs text-label-tertiary">{formatDateTime(detailEntry.createdAt)}</div>
               </div>
               <button onClick={() => setDetailEntry(null)} className="text-label-tertiary hover:text-label-primary text-sm">
                 Close
@@ -2909,19 +2909,6 @@ function formatBytes(bytes: number | null): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-}
-
-// Phase 3 item #7 — used only for the "Last backup: X ago" summary line;
-// coarse (minutes/hours/days) is all that line needs.
-function formatTimeAgo(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime();
-  const minutes = Math.floor(ms / 60000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
 }
 
 const DR_TEST_OUTCOME_STYLES: Record<DrTestOutcome, string> = {
@@ -3034,7 +3021,7 @@ function BackupsTab({ companyId }: { companyId: string }) {
             {(backups ?? []).map((b) => (
               <tr key={b.id} className="border-b border-black/5 last:border-0">
                 <td className="px-3 py-2 whitespace-nowrap text-xs text-label-tertiary">
-                  {new Date(b.createdAt).toLocaleString()}
+                  {formatDateTime(b.createdAt)}
                 </td>
                 <td className="px-3 py-2">
                   <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${BACKUP_STATUS_STYLES[b.status]}`}>
@@ -3079,7 +3066,7 @@ function DrTestLogPanel({ companyId }: { companyId: string }) {
   const [tests, setTests] = useState<TenantDrTestLogEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
-  const [testedAt, setTestedAt] = useState(() => new Date().toISOString().slice(0, 16));
+  const [testedAt, setTestedAt] = useState(() => nowLocalInput());
   const [outcome, setOutcome] = useState<DrTestOutcome>("pass");
   const [notes, setNotes] = useState("");
 
@@ -3186,7 +3173,7 @@ function DrTestLogPanel({ companyId }: { companyId: string }) {
             {(tests ?? []).map((t) => (
               <tr key={t.id} className="border-b border-black/5 last:border-0">
                 <td className="px-3 py-2 whitespace-nowrap text-xs text-label-tertiary">
-                  {new Date(t.testedAt).toLocaleString()}
+                  {formatDateTime(t.testedAt)}
                 </td>
                 <td className="px-3 py-2">
                   <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${DR_TEST_OUTCOME_STYLES[t.outcome]}`}>
@@ -3319,7 +3306,7 @@ function DataResidencyPanel({ companyId }: { companyId: string }) {
             </p>
             {status.acknowledgedBy ? (
               <p className="text-xs text-red-800">
-                Acknowledged by {status.acknowledgedBy} on {new Date(status.acknowledgedAt!).toLocaleString()}.
+                Acknowledged by {status.acknowledgedBy} on {formatDateTime(status.acknowledgedAt)}.
               </p>
             ) : (
               <button
@@ -3517,7 +3504,7 @@ function DataExportsTab({ companyId }: { companyId: string }) {
         {keyStatus?.previousKeyExpiresAt && (
           <p className="text-xs text-label-tertiary">
             Previous key still honored for exports made just before the last rotation, until{" "}
-            {new Date(keyStatus.previousKeyExpiresAt).toLocaleString()}.
+            {formatDateTime(keyStatus.previousKeyExpiresAt)}.
           </p>
         )}
 
@@ -3638,7 +3625,7 @@ function DataExportsTab({ companyId }: { companyId: string }) {
               return (
                 <tr key={item.id} className="border-b border-black/5 last:border-0">
                   <td className="px-3 py-2 whitespace-nowrap text-xs text-label-tertiary">
-                    {new Date(item.createdAt).toLocaleString()}
+                    {formatDateTime(item.createdAt)}
                   </td>
                   <td className="px-3 py-2 text-xs capitalize">
                     {item.scope}
@@ -3658,7 +3645,7 @@ function DataExportsTab({ companyId }: { companyId: string }) {
                     </span>
                   </td>
                   <td className="px-3 py-2 text-xs text-label-tertiary">
-                    {item.expiresAt ? (expired ? "Expired" : new Date(item.expiresAt).toLocaleString()) : "—"}
+                    {item.expiresAt ? (expired ? "Expired" : formatDateTime(item.expiresAt)) : "—"}
                   </td>
                   <td className="px-3 py-2 text-right">
                     {item.status === "completed" && !expired && (
@@ -3876,7 +3863,7 @@ function ConfigurationTab({ companyId }: { companyId: string }) {
                     <div>
                       <code>{JSON.stringify(v.oldValue)}</code> → <code>{JSON.stringify(v.newValue)}</code>
                     </div>
-                    <div className="text-xs text-label-tertiary">{new Date(v.changedAt).toLocaleString()}</div>
+                    <div className="text-xs text-label-tertiary">{formatDateTime(v.changedAt)}</div>
                   </div>
                   <button
                     onClick={() => rollbackTo(v.id)}
@@ -4242,7 +4229,7 @@ function AdminsTab({
                 )}
                 <div className="text-xs text-label-tertiary">
                   Access last reviewed:{" "}
-                  {admin.lastAccessReviewedAt ? auditDateFormat.format(new Date(admin.lastAccessReviewedAt)) : "Never"}
+                  {admin.lastAccessReviewedAt ? formatDateTime(admin.lastAccessReviewedAt) : "Never"}
                 </div>
               </div>
               <div className="flex items-center gap-3">
@@ -4259,7 +4246,7 @@ function AdminsTab({
                     className={`text-xs font-medium px-2 py-0.5 rounded-full ${LOGIN_STATUS_CLASS[admin.loginStatus]}`}
                     title={
                       admin.loginStatus === "active"
-                        ? `Last signed in ${admin.lastLoginAt ? auditDateFormat.format(new Date(admin.lastLoginAt)) : ""}`
+                        ? `Last signed in ${admin.lastLoginAt ? formatDateTime(admin.lastLoginAt) : ""}`
                         : admin.loginStatus === "revoked"
                           ? "This login was revoked before it was ever used"
                           : "This login hasn't been used to sign in yet"
@@ -4620,7 +4607,7 @@ function SecurityTab({
                   {admin.email} ·{" "}
                   {isLocked ? (
                     <span className="text-danger font-medium">
-                      Locked until {new Date(admin.lockedUntil as string).toLocaleString()}
+                      Locked until {formatDateTime(admin.lockedUntil)}
                     </span>
                   ) : (
                     `${admin.failedLoginAttempts} failed attempt${admin.failedLoginAttempts === 1 ? "" : "s"}`
@@ -4681,8 +4668,8 @@ function SecurityTab({
                 )}
               </div>
               <div className="text-xs text-label-tertiary">
-                {s.email} · signed in {new Date(s.createdAt).toLocaleString()} · expires{" "}
-                {new Date(s.expiresAt).toLocaleString()}
+                {s.email} · signed in {formatDateTime(s.createdAt)} · expires{" "}
+                {formatDateTime(s.expiresAt)}
                 {s.ipAddress && <> · {s.ipAddress}</>}
               </div>
             </div>

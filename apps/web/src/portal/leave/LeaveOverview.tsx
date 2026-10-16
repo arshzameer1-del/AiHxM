@@ -18,6 +18,7 @@ import { STATUS_LABELS, leaveTypeLabel } from "./leaveLabels";
 import { approverStepLabel, approverSummary, groupApprovalSteps } from "./leaveApprovals";
 import { TeamCalendar } from "./TeamCalendar";
 import { SapSection } from "../shared/FormSections";
+import { localDayKey, todayIso } from "../shared/dates";
 
 /**
  * "My Leave Request" overview, laid out like the SAP Fiori screen the product owner asked us to match:
@@ -42,10 +43,6 @@ const CALENDAR_STATUS_CLASS: Record<LeaveRequestStatus, string> = {
 
 function describeError(err: unknown): string {
   return err instanceof ApiError ? err.message : "Something went wrong.";
-}
-
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
 }
 
 /** Requests that still occupy days on the calendar. */
@@ -144,7 +141,7 @@ export function RequestDetail({
           <dt className="text-label-tertiary">Quota Used:</dt>
           <dd className="tabular-nums">{request.daysRequested} {request.daysRequested === 1 ? "Day" : "Days"}</dd>
           <dt className="text-label-tertiary">Created on:</dt>
-          <dd className="tabular-nums">{formatDisplayDate(request.createdAt.slice(0, 10))}</dd>
+          <dd className="tabular-nums">{formatDisplayDate(localDayKey(request.createdAt))}</dd>
           {approver && (
             <>
               <dt className="text-label-tertiary">Approver:</dt>

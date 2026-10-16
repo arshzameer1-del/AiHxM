@@ -11,6 +11,7 @@ import type {
 } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { pkr } from "./payrollLabels";
+import { formatDateTime } from "../shared/dates";
 
 function errorMessage(err: unknown, fallback: string): string {
   return err instanceof ApiError ? err.message : fallback;
@@ -288,15 +289,15 @@ function PaymentBatchRow({ batch, onChanged }: { batch: PayrollPaymentBatchView;
       </div>
       <div className="text-label-tertiary">
         {batch.rowCount} row{batch.rowCount === 1 ? "" : "s"} · net pay {pkr.format(batch.totalNetPay)}
-        {batch.excludedCount > 0 ? ` · ${batch.excludedCount} excluded` : ""} · generated {new Date(batch.generatedAt).toLocaleString()}
-        {batch.approvedAt ? ` · approved ${new Date(batch.approvedAt).toLocaleString()}` : ""}
-        {batch.releasedAt ? ` · released ${new Date(batch.releasedAt).toLocaleString()}` : ""}
+        {batch.excludedCount > 0 ? ` · ${batch.excludedCount} excluded` : ""} · generated {formatDateTime(batch.generatedAt)}
+        {batch.approvedAt ? ` · approved ${formatDateTime(batch.approvedAt)}` : ""}
+        {batch.releasedAt ? ` · released ${formatDateTime(batch.releasedAt)}` : ""}
         {batch.bankReference ? ` · bank ref ${batch.bankReference}` : ""}
         {batch.rejectionReason ? ` · ${batch.rejectionReason}` : ""}
       </div>
       {batch.status === "voided" && (
         <div className="text-label-tertiary">
-          Voided {batch.voidedAt ? new Date(batch.voidedAt).toLocaleString() : ""}
+          Voided {formatDateTime(batch.voidedAt)}
           {batch.voidedReason ? `: ${batch.voidedReason}` : ""}
         </div>
       )}
@@ -481,7 +482,7 @@ export function DisbursementPanel({ runId }: { runId: string }) {
       {hasActiveBatch && (
         <div className="bg-amber-50 text-amber-800 rounded-lg p-2">
           A file was already generated for this run (batch {preview.existingBatch!.batchReference}, {" "}
-          {new Date(preview.existingBatch!.generatedAt).toLocaleString()}). Downloading again creates a SECOND
+          {formatDateTime(preview.existingBatch!.generatedAt)}). Downloading again creates a SECOND
           batch — make sure the bank hasn't already processed the first one.
         </div>
       )}

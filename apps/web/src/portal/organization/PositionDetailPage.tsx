@@ -14,6 +14,7 @@ import type {
   PositionView,
 } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
+import { formatDay } from "../shared/dates";
 
 const STATUS_LABELS: Record<PositionStatus, string> = {
   vacant: "Vacant",
@@ -222,7 +223,7 @@ export function PositionDetailPage() {
             {incumbents?.map((i) => (
               <div key={i.id} className="flex items-center gap-3 py-2 border-b border-black/5 last:border-0 text-sm">
                 <span className="font-medium">{i.employeeName ?? i.employeeId}</span>
-                <span className="text-xs text-label-tertiary">{i.fte} FTE · since {i.effectiveFrom}</span>
+                <span className="text-xs text-label-tertiary">{i.fte} FTE · since {formatDay(i.effectiveFrom)}</span>
                 <button onClick={() => endIncumbent(i.employeeId)} className="ml-auto text-xs font-semibold text-danger hover:underline">
                   End slot
                 </button>
@@ -304,8 +305,8 @@ export function PositionDetailPage() {
                   <span className="text-xs text-label-tertiary">{v.headcountFte} FTE</span>
                 </div>
                 <div className="text-xs text-label-tertiary mt-0.5">
-                  Effective {v.effectiveFrom}
-                  {v.effectiveTo ? ` – ${v.effectiveTo}` : " – present"}
+                  Effective {formatDay(v.effectiveFrom)}
+                  {v.effectiveTo ? ` – ${formatDay(v.effectiveTo)}` : " – present"}
                 </div>
               </div>
             ))}

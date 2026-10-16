@@ -1,4 +1,5 @@
 import type { OrgStructureNode } from "@aihxm/shared-types";
+import { formatDay } from "../shared/dates";
 
 /** Pure helpers behind the Staff assignments (structure) tree-table. */
 
@@ -13,7 +14,7 @@ export type StructureFilter = {
 
 export type StructureRow = { node: OrgStructureNode; depth: number; hasChildren: boolean; isOpen: boolean };
 
-/** 2024-05-01 -> 01.05.2024; no end date reads "Unlimited", no start date reads an empty cell. */
+/** 2024-05-01 -> 1 May 2024; no end date reads "Unlimited", no start date reads an empty cell. */
 export function formatValidFrom(iso: string | null): string {
   return iso ? toDisplay(iso) : "";
 }
@@ -21,8 +22,7 @@ export function formatValidTo(iso: string | null): string {
   return iso ? toDisplay(iso) : "Unlimited";
 }
 function toDisplay(iso: string): string {
-  const [y, m, d] = iso.slice(0, 10).split("-");
-  return `${d}.${m}.${y}`;
+  return formatDay(iso);
 }
 
 export function isValidOn(node: OrgStructureNode, keyDate: string): boolean {

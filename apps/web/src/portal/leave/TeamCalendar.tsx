@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Search } from "lucide-react";
 import type { TeamLeaveEntryView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { covers, dayKind, eachDate, formatDisplayDate, monthWindow, shiftWindow, weekWindow, weekdayLabels } from "./leaveCalendar";
+import { todayIso } from "../shared/dates";
 
 /**
  * The "Team" panel on a request's detail view: which colleagues (people under the same manager) are off,
@@ -106,7 +107,7 @@ export function TeamCalendar({
         <button type="button" aria-label="Previous" onClick={() => setAnchor(shiftWindow(anchor, mode, -1))} className="p-1 text-accent">
           <ChevronLeft size={16} />
         </button>
-        <button type="button" onClick={() => setAnchor(new Date().toISOString().slice(0, 10))} className="font-semibold text-accent">
+        <button type="button" onClick={() => setAnchor(todayIso())} className="font-semibold text-accent">
           Today
         </button>
         <button type="button" aria-label="Next" onClick={() => setAnchor(shiftWindow(anchor, mode, 1))} className="p-1 text-accent">

@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import type { EmployeeOffboardingView, EmployeeOnboardingView, EmploymentStatus, OffboardingReason } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { ChecklistItemsList } from "./ChecklistItems";
+import { formatDay, todayIso } from "../shared/dates";
 
 const OFFBOARDING_REASONS: OffboardingReason[] = ["resignation", "termination", "retirement", "end_of_contract", "other"];
 const OFFBOARDING_REASON_LABELS: Record<OffboardingReason, string> = {
@@ -61,7 +62,7 @@ function OnboardingSubsection({
         <h2 className="font-semibold text-sm uppercase tracking-wide text-label-tertiary">Onboarding</h2>
         {onboarding && (
           <span className="text-xs text-label-tertiary capitalize">
-            {onboarding.status.replace("_", " ")} · started {onboarding.startedAt.slice(0, 10)}
+            {onboarding.status.replace("_", " ")} · started {formatDay(onboarding.startedAt)}
           </span>
         )}
       </div>
@@ -111,7 +112,7 @@ function OffboardingSubsection({
   const [offboarding, setOffboarding] = useState<EmployeeOffboardingView | null | false | undefined>(undefined);
   const [startingForm, setStartingForm] = useState(false);
   const [reason, setReason] = useState<OffboardingReason>("resignation");
-  const [lastWorkingDay, setLastWorkingDay] = useState(new Date().toISOString().slice(0, 10));
+  const [lastWorkingDay, setLastWorkingDay] = useState(todayIso());
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -166,7 +167,7 @@ function OffboardingSubsection({
         <h2 className="font-semibold text-sm uppercase tracking-wide text-label-tertiary">Offboarding</h2>
         {offboarding && (
           <span className="text-xs text-label-tertiary capitalize">
-            {offboarding.status.replace("_", " ")} · last day {offboarding.lastWorkingDay}
+            {offboarding.status.replace("_", " ")} · last day {formatDay(offboarding.lastWorkingDay)}
           </span>
         )}
       </div>

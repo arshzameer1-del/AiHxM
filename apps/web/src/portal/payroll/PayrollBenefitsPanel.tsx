@@ -86,7 +86,7 @@ export function BenefitsPanel({ canManage }: { canManage: boolean }) {
               <tr key={p.id} className="border-t border-black/5">
                 <td className="py-1 pr-3"><span className="font-medium">{p.name}</span> <span className="font-mono text-xs text-label-tertiary">{p.code}</span></td>
                 <td className="pr-3">{TYPE_LABEL[p.benefitType]}</td>
-                <td className="pr-3">{p.effectiveFrom}{p.effectiveTo ? ` to ${p.effectiveTo}` : ""}</td>
+                <td className="pr-3">{formatDay(p.effectiveFrom)}{p.effectiveTo ? ` to ${formatDay(p.effectiveTo)}` : ""}</td>
                 <td className="pr-3 text-right">{p.enrolledCount}</td>
                 <td><Pill tone={p.status === "active" ? "good" : "neutral"}>{p.status}</Pill></td>
               </tr>
@@ -196,8 +196,8 @@ export function BenefitsPanel({ canManage }: { canManage: boolean }) {
                 <tr key={e.id} className="border-t border-black/5">
                   <td className="py-1 pr-3">{e.employeeNumber} {e.employeeName}</td>
                   <td className="pr-3">{e.planName}</td>
-                  <td className="pr-3">{e.effectiveFrom}</td>
-                  <td className="pr-3">{e.effectiveTo ?? "-"}</td>
+                  <td className="pr-3">{formatDay(e.effectiveFrom)}</td>
+                  <td className="pr-3">{formatDay(e.effectiveTo, "-")}</td>
                   <td className="pr-3"><Pill tone={e.status === "enrolled" ? "good" : "neutral"}>{e.status}</Pill></td>
                   <td className="text-right">{canManage && e.status === "enrolled" && <button type="button" className="text-xs text-danger" onClick={() => { setEnding(e); setEndDate(""); setEndReason(""); }}>End</button>}</td>
                 </tr>

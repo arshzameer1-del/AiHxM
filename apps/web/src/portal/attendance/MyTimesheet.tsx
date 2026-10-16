@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { TimesheetStatus, TimesheetView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
+import { formatPeriod, formatWeekdayAndDate, todayIso } from "../shared/dates";
 
 const STATUS_LABELS: Record<TimesheetStatus, string> = {
   draft: "Draft",
@@ -27,7 +28,7 @@ function hoursOf(minutes: number): string {
  * direct manager).
  */
 export function MyTimesheet({ employeeId }: { employeeId: string }) {
-  const [week, setWeek] = useState(() => new Date().toISOString().slice(0, 10));
+  const [week, setWeek] = useState(() => todayIso());
   const [sheet, setSheet] = useState<TimesheetView | null>(null);
   const [hours, setHours] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
@@ -78,7 +79,7 @@ export function MyTimesheet({ employeeId }: { employeeId: string }) {
         <h3 className="text-xs uppercase tracking-wide text-label-tertiary font-semibold">Timesheet</h3>
         <div className="flex items-center gap-2 text-sm">
           <button className="px-2 py-1 rounded-lg hover:bg-black/5" aria-label="Previous week" onClick={() => setWeek(addDays(sheet.periodStart, -7))}>‹</button>
-          <span className="tabular-nums">{sheet.periodStart} – {sheet.periodEnd}</span>
+          <span className="tabular-nums">{formatPeriod(sheet.periodStart, sheet.periodEnd)}</span>
           <button className="px-2 py-1 rounded-lg hover:bg-black/5" aria-label="Next week" onClick={() => setWeek(addDays(sheet.periodStart, 7))}>›</button>
           <span className="ml-2 text-xs font-semibold px-2 py-0.5 rounded-full bg-black/5">{STATUS_LABELS[sheet.status]}</span>
         </div>
@@ -89,7 +90,7 @@ export function MyTimesheet({ employeeId }: { employeeId: string }) {
         {days.map((d) => (
           <div key={d} className="text-center">
             <label htmlFor={`ts-${d}`} className="block text-xs text-label-tertiary mb-1">
-              {new Date(`${d}T00:00:00`).toLocaleDateString([], { weekday: "short", day: "numeric" })}
+              {formatWeekdayAndDate(d)}
             </label>
             <input
               id={`ts-${d}`}

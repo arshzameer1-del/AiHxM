@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import type { EmployeeTaxProfileView, TaxFilerStatus, TaxProfileView, TaxResidency } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
+import { formatDay } from "../shared/dates";
 
 const inputClass = "w-full rounded-lg border border-black/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent";
 const labelClass = "block text-sm font-medium mb-1";
@@ -111,7 +112,7 @@ export function EmployeeTaxProfilePanel({ employeeId, canManage }: { employeeId:
         <p className="text-sm mb-3">
           {current.taxProfileName ?? "No tax profile assigned (company-wide slabs apply)"} · {FILER_LABELS[current.filerStatus]} · {current.taxResidency === "resident" ? "Resident" : "Non-resident"}
           {current.provincialScheme && current.provincialScheme !== "none" ? ` · ${current.provincialScheme.toUpperCase()}` : ""}
-          <span className="text-label-tertiary"> · since {current.effectiveFrom}</span>
+          <span className="text-label-tertiary"> · since {formatDay(current.effectiveFrom)}</span>
           {current.previousEmployerIncome > 0 && (
             <span className="block text-xs text-label-secondary">
               Previous employer, tax year {current.previousEmployerTaxYear}: income {pkr.format(current.previousEmployerIncome)}, tax paid {pkr.format(current.previousEmployerTax)}

@@ -1,4 +1,5 @@
 import { ApiError } from "../../api/client";
+import { formatDateTime, formatDay } from "../shared/dates";
 
 export const inputCls = "w-full rounded-lg border border-black/10 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-accent";
 export const primaryBtn = "bg-accent text-white rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-50";
@@ -15,15 +16,11 @@ export function describeError(err: unknown, fallback = "Something went wrong."):
 }
 
 export function fmtDateTime(iso: string | null | undefined): string {
-  if (!iso) return "-";
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+  return formatDateTime(iso, "-");
 }
 
 export function fmtDate(iso: string | null | undefined): string {
-  if (!iso) return "-";
-  const d = new Date(iso.length === 10 ? `${iso}T00:00:00` : iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString();
+  return formatDay(iso, "-");
 }
 
 /** `<input type="datetime-local">` value -> ISO string with the browser's offset. */

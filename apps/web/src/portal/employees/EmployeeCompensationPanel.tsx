@@ -2,6 +2,7 @@ import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import type { CompensationCalculationType, CompensationComponentType, CompensationComponentView, CompensationView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
+import { formatDay } from "../shared/dates";
 
 const inputClass =
   "w-full rounded-lg border border-black/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent";
@@ -255,7 +256,7 @@ export function EmployeeCompensationPanel({ employeeId, canManage }: { employeeI
                 history.map((c) => (
                   <div key={c.id} className="flex justify-between text-sm bg-black/5 rounded-lg px-3 py-2">
                     <span>
-                      {c.componentName} — {c.effectiveFrom} {c.effectiveTo ? `– ${c.effectiveTo}` : "– current"}
+                      {c.componentName} — {formatDay(c.effectiveFrom)} {c.effectiveTo ? `– ${formatDay(c.effectiveTo)}` : "– current"}
                     </span>
                     <span className="font-mono font-semibold">
                       {pkr.format(c.amount)}/mo
