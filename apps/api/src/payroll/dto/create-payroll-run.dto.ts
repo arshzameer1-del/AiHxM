@@ -1,4 +1,26 @@
-import { IsBoolean, IsDateString, IsIn, IsOptional, IsString, IsUUID, MaxLength } from "class-validator";
+import { Type } from "class-transformer";
+import { ArrayMaxSize, IsArray, IsBoolean, IsDateString, IsIn, IsOptional, IsString, IsUUID, MaxLength, ValidateNested } from "class-validator";
+
+/** Payroll run selection: any mix of employees, payroll areas and employee groups; each one narrows who the run pays. */
+export class PayrollRunSelectionDto {
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(1000)
+  @IsUUID("all", { each: true })
+  employeeIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsUUID("all", { each: true })
+  payrollAreaIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsUUID("all", { each: true })
+  employeeGroupIds?: string[];
+}
 
 export class CreatePayrollRunDto {
   /** Required unless payrollPeriodId is given (then it must equal the period's start). */
@@ -43,4 +65,10 @@ export class CreatePayrollRunDto {
   @IsString()
   @MaxLength(200)
   idempotencyKey?: string;
+
+  /** Pay only a selection of the employees the run covers. Not allowed on a run for one employee. */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PayrollRunSelectionDto)
+  selection?: PayrollRunSelectionDto;
 }

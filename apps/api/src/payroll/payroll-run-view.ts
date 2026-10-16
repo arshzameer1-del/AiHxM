@@ -1,4 +1,4 @@
-import type { OffCycleReason, PayrollRunType, PayrollRunView } from "@aihxm/shared-types";
+import type { OffCycleReason, PayrollRunSelection, PayrollRunType, PayrollRunView } from "@aihxm/shared-types";
 
 export type RunSummary = { payslipCount: number; totalGrossPay: number; totalNetPay: number };
 export const ZERO_RUN_SUMMARY: RunSummary = { payslipCount: 0, totalGrossPay: 0, totalNetPay: 0 };
@@ -39,6 +39,7 @@ export function rowToRunView(row: any, summary: RunSummary = ZERO_RUN_SUMMARY): 
     payslipCount: summary.payslipCount,
     totalGrossPay: summary.totalGrossPay,
     totalNetPay: summary.totalNetPay,
+    selection: selectionView(row.selection),
     reversedAt: toIso(row.reversed_at),
     reversedByUserAccountId: row.reversed_by_user_account_id ?? null,
     reversalReason: row.reversal_reason ?? null,
@@ -72,3 +73,11 @@ export function rowToRunView(row: any, summary: RunSummary = ZERO_RUN_SUMMARY): 
   };
 }
 void numOrNull;
+
+/** The selection as the screens see it: the choices plus how many employees the chosen groups held. */
+function selectionView(raw: unknown): PayrollRunSelection | null {
+  if (!raw || typeof raw !== "object") return null;
+  const s = raw as Record<string, unknown>;
+  const list = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+  return { employeeIds: list(s.employeeIds), payrollAreaIds: list(s.payrollAreaIds), employeeGroupIds: list(s.employeeGroupIds), groupMemberCount: list(s.groupMemberIds).length };
+}

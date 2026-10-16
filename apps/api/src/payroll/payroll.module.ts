@@ -43,6 +43,7 @@ import { LeaveModule } from "../leave/leave.module";
 import { ShiftsModule } from "../shifts/shifts.module";
 import { WebhooksModule } from "../webhooks/webhooks.module";
 import { EmployeesModule } from "../employees/employees.module";
+import { EmployeeGroupsModule } from "../employee-groups/employee-groups.module";
 
 // Cross-module integration gap audit (2026-10-01) remediation:
 //  - LeaveModule: LeaveRequestsService.getApprovedUnpaidLeaveDaysInRange()
@@ -83,6 +84,7 @@ import { EmployeesModule } from "../employees/employees.module";
     WebhooksModule,
     EmployeesModule,
     HrAdministrationModule,
+    EmployeeGroupsModule,
   ],
   // Payroll Areas (0101_payroll_areas.sql) — needs only RbacModule/
   // EntitlementsModule/AuditModule, all already imported above.

@@ -20,6 +20,8 @@ import { isPayrollAreaInScope, resolvePayrollAreaAccess, type PayrollAreaAccess 
 import { FormulaExpressionEngine } from "./formula-expression.engine";
 import { rowToRunView, ZERO_RUN_SUMMARY, type RunSummary } from "./payroll-run-view";
 import { selectEmployeesByIds, selectRunPopulation } from "./payroll-population";
+import { canonicalRunSelection, normalizeRunSelection, type RunSelectionInput, type StoredRunSelection } from "./payroll-run-selection";
+import { EmployeeGroupsService } from "../employee-groups/employee-groups.service";
 import { resolvePeriodForRun } from "./payroll-periods.service";
 import { ComponentLedger, type ComponentLine, type PayslipInputSnapshot } from "./payroll-components";
 import { markRetroPaid } from "./payroll-retro-support";
@@ -420,7 +422,9 @@ export class PayrollService {
     // falls back to an identical instance built from the same collaborators.
     private readonly runControl?: PayrollRunControlService,
     // PAY-06 - background calculation. Optional for the same hand-constructed-fixture reason as the rest.
-    private readonly jobs?: BackgroundJobsService
+    private readonly jobs?: BackgroundJobsService,
+    // Payroll run selection by employee group. Optional for the same hand-constructed-fixture reason as the rest.
+    private readonly employeeGroups?: EmployeeGroupsService
   ) {
     this.workflow?.adapters?.register({
       objectKey: WORKFLOW_OBJECT_KEY,
@@ -646,6 +650,13 @@ export class PayrollService {
         throw new BadRequestException("final_settlement requires a targetEmployeeId");
       }
     }
+    // Payroll run selection (SAP payroll driver "Selection"): chosen employees, payroll areas and employee groups, each of which
+    // narrows who the run pays. Employee groups are expanded to their members now, so the run pays a fixed list.
+    const requestedSelection = normalizeRunSelection(input.selection);
+    if (requestedSelection && targetEmployeeId) {
+      throw new BadRequestException("A run for one employee cannot also have a selection");
+    }
+    const groupMemberIds = requestedSelection && requestedSelection.employeeGroupIds.length > 0 ? await this.expandEmployeeGroups(claims, requestedSelection.employeeGroupIds) : [];
     return this.db.withClaims(claims, async (client) => {
       // PAY-03 - a run created for a payroll period takes the period's dates; a tenant policy can make that mandatory.
       if (!payrollPeriodId && runType === "regular" && !isSimulation && (await this.control().policy(client, claims.company_id!)).requirePeriodForRun) {
@@ -662,7 +673,9 @@ export class PayrollService {
       }
       const periodStartIso = input.periodStart!;
       const periodEndIso = input.periodEnd!;
+      const selection = requestedSelection ? await this.validateRunSelection(client, claims, access, requestedSelection, groupMemberIds, payrollAreaId) : null;
       const fingerprint = {
+        selection: requestedSelection ? canonicalRunSelection(requestedSelection) : null,
         periodStart: periodStartIso,
         periodEnd: periodEndIso,
         payrollAreaId,
@@ -733,24 +746,32 @@ export class PayrollService {
         }
       }
       if (runType === "regular" && !isSimulation) {
-        const existing = await client.query<{ payroll_area_id: string | null }>(
-          "SELECT payroll_area_id FROM payroll_runs WHERE company_id = $1 AND period_start = $2 AND period_end = $3 AND status NOT IN ('reversed', 'cancelled') AND run_type = 'regular' AND is_simulation = false",
+        const existing = await client.query<{ payroll_area_id: string | null; is_partial: boolean }>(
+          "SELECT payroll_area_id, (selection IS NOT NULL) AS is_partial FROM payroll_runs WHERE company_id = $1 AND period_start = $2 AND period_end = $3 AND status NOT IN ('reversed', 'cancelled') AND run_type = 'regular' AND is_simulation = false",
           [claims.company_id, periodStartIso, periodEndIso]
         );
-        if (existing.rows.some((r) => (r.payroll_area_id ?? null) === payrollAreaId)) {
-          throw new BadRequestException(
-            payrollAreaId
-              ? "A payroll run for this exact period already exists for this payroll area"
-              : "A payroll run for this exact period already exists"
-          );
-        }
-        if (payrollAreaId && existing.rows.some((r) => r.payroll_area_id === null)) {
-          throw new BadRequestException("A company-wide payroll run already covers this exact period");
-        }
-        if (!payrollAreaId && existing.rows.length > 0) {
-          throw new BadRequestException(
-            "Payroll-area runs already exist for this exact period; a company-wide run would pay their employees twice"
-          );
+        if (selection) {
+          // A run that pays a selection may sit beside other selection runs of the same period (each pays its own people; the
+          // calculation refuses anyone already paid). It may not sit beside a run that pays everyone in the same scope.
+          if (existing.rows.some((r) => !r.is_partial && (r.payroll_area_id === null || payrollAreaId === null || r.payroll_area_id === payrollAreaId))) {
+            throw new BadRequestException("A payroll run that pays everyone already covers this exact period for this scope; a selection run would pay the same employees twice");
+          }
+        } else {
+          if (existing.rows.some((r) => (r.payroll_area_id ?? null) === payrollAreaId)) {
+            throw new BadRequestException(
+              payrollAreaId
+                ? "A payroll run for this exact period already exists for this payroll area"
+                : "A payroll run for this exact period already exists"
+            );
+          }
+          if (payrollAreaId && existing.rows.some((r) => r.payroll_area_id === null)) {
+            throw new BadRequestException("A company-wide payroll run already covers this exact period");
+          }
+          if (!payrollAreaId && existing.rows.length > 0) {
+            throw new BadRequestException(
+              "Payroll-area runs already exist for this exact period; a company-wide run would pay their employees twice"
+            );
+          }
         }
         // LIVE-12: two regular runs for the same people may not cover overlapping (not just identical) periods.
         const overlapping = await client.query<{ period_start: unknown; period_end: unknown }>(
@@ -758,8 +779,9 @@ export class PayrollService {
             WHERE company_id = $1 AND period_start <= $3 AND period_end >= $2
               AND status NOT IN ('reversed', 'cancelled') AND run_type = 'regular' AND is_simulation = false
               AND (payroll_area_id IS NOT DISTINCT FROM $4 OR payroll_area_id IS NULL OR $4::uuid IS NULL)
+              AND NOT ($5::boolean AND selection IS NOT NULL AND period_start = $2 AND period_end = $3)
             LIMIT 1`,
-          [claims.company_id, periodStartIso, periodEndIso, payrollAreaId]
+          [claims.company_id, periodStartIso, periodEndIso, payrollAreaId, selection !== null]
         );
         if ((overlapping.rowCount ?? 0) > 0) {
           throw new BadRequestException(
@@ -772,8 +794,8 @@ export class PayrollService {
       try {
         result = await client.query(
           `INSERT INTO payroll_runs (company_id, period_start, period_end, created_by_user_account_id, payroll_area_id, run_type, off_cycle_reason, target_employee_id,
-                                     is_simulation, idempotency_key, currency_code, correlation_id, payroll_period_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
+                                     is_simulation, idempotency_key, currency_code, correlation_id, payroll_period_id, selection)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb) RETURNING *`,
           [
             claims.company_id,
             periodStartIso,
@@ -788,6 +810,7 @@ export class PayrollService {
             currency.rows[0]?.currency ?? "PKR",
             currentCorrelationId(),
             payrollPeriodId,
+            selection ? JSON.stringify(selection) : null,
           ]
         );
       } catch (err) {
@@ -811,10 +834,53 @@ export class PayrollService {
           isSimulation: isSimulation || undefined,
           idempotencyKey: idempotencyKey ?? undefined,
           payrollPeriodId: payrollPeriodId ?? undefined,
+          selection: selection
+            ? { employees: selection.employeeIds.length, payrollAreas: selection.payrollAreaIds.length, employeeGroups: selection.employeeGroupIds.length, groupMembers: selection.groupMemberIds.length }
+            : undefined,
         },
       });
       return rowToRun(result.rows[0]);
     });
+  }
+
+  /** Members of the chosen employee groups (active employees), without duplicates. */
+  private async expandEmployeeGroups(claims: RequestClaims, groupIds: string[]): Promise<string[]> {
+    if (!this.employeeGroups) throw new Error("PayrollService was constructed without EmployeeGroupsService - a run selection by employee group needs it");
+    const members = new Set<string>();
+    for (const id of groupIds) for (const m of await this.employeeGroups.resolveGroupMembers(claims, id)) members.add(m);
+    return [...members];
+  }
+
+  /** Checks every chosen employee, payroll area and employee group exists and is allowed, and returns what is stored on the run. */
+  private async validateRunSelection(
+    client: PoolClient,
+    claims: RequestClaims,
+    access: PayrollAreaAccess,
+    requested: RunSelectionInput,
+    groupMemberIds: string[],
+    runAreaId: string | null
+  ): Promise<StoredRunSelection> {
+    if (requested.employeeIds.length > 0) {
+      const found = await client.query("SELECT id FROM employees WHERE id = ANY($1::uuid[]) AND company_id = $2", [requested.employeeIds, claims.company_id]);
+      if (found.rowCount !== requested.employeeIds.length) throw new BadRequestException(`${requested.employeeIds.length - (found.rowCount ?? 0)} of the selected employees were not found`);
+    }
+    if (requested.payrollAreaIds.length > 0) {
+      const areas = await client.query<{ id: string; is_active: boolean }>("SELECT id, is_active FROM payroll_areas WHERE id = ANY($1::uuid[]) AND company_id = $2", [requested.payrollAreaIds, claims.company_id]);
+      if (areas.rowCount !== requested.payrollAreaIds.length) throw new BadRequestException("One of the selected payroll areas was not found");
+      if (areas.rows.some((a) => !a.is_active)) throw new BadRequestException("A selected payroll area is inactive");
+      for (const areaId of requested.payrollAreaIds) {
+        if (!isPayrollAreaInScope(access, areaId)) throw new ForbiddenException("A selected payroll area is outside your data scope");
+      }
+      if (runAreaId && !requested.payrollAreaIds.includes(runAreaId)) {
+        throw new BadRequestException("The run's own payroll area must be among the selected payroll areas, or leave the payroll area selection empty");
+      }
+    }
+    if (requested.employeeGroupIds.length > 0) {
+      const groups = await client.query("SELECT id FROM employee_groups WHERE id = ANY($1::uuid[]) AND company_id = $2", [requested.employeeGroupIds, claims.company_id]);
+      if (groups.rowCount !== requested.employeeGroupIds.length) throw new BadRequestException("One of the selected employee groups was not found");
+      if (groupMemberIds.length === 0) throw new BadRequestException("The selected employee group(s) have no active members");
+    }
+    return { ...requested, groupMemberIds };
   }
 
   /** Same idempotency key + same request = the run already created; same key + a different request = conflict. */
@@ -831,7 +897,8 @@ export class PayrollService {
       (existing.off_cycle_reason ?? null) === fingerprint.offCycleReason &&
       (existing.target_employee_id ?? null) === fingerprint.targetEmployeeId &&
       existing.is_simulation === fingerprint.isSimulation &&
-      (existing.payroll_period_id ?? null) === (fingerprint.payrollPeriodId ?? null);
+      (existing.payroll_period_id ?? null) === (fingerprint.payrollPeriodId ?? null) &&
+      (existing.selection ? canonicalRunSelection(existing.selection) : null) === (fingerprint.selection ?? null);
     if (!same) throw new ConflictException("This idempotency key was already used for a different payroll run request");
     return rowToRun(existing, await this.loadRunSummary(client, existing.id));
   }
@@ -2527,8 +2594,8 @@ export class PayrollService {
       // UPDATE just above, inside this same transaction, before this
       // INSERT runs).
       const corrective = await client.query(
-        `INSERT INTO payroll_runs (company_id, period_start, period_end, created_by_user_account_id, payroll_area_id, run_type, off_cycle_reason, target_employee_id, payroll_period_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+        `INSERT INTO payroll_runs (company_id, period_start, period_end, created_by_user_account_id, payroll_area_id, run_type, off_cycle_reason, target_employee_id, payroll_period_id, selection)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb) RETURNING id`,
         [
           run.company_id,
           run.period_start,
@@ -2539,6 +2606,7 @@ export class PayrollService {
           run.off_cycle_reason ?? null,
           run.target_employee_id ?? null,
           run.payroll_period_id ?? null,
+          run.selection ? JSON.stringify(run.selection) : null,
         ]
       );
       const correctiveRunId = corrective.rows[0].id as string;

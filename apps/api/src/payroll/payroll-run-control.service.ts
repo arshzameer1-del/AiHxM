@@ -681,7 +681,7 @@ export class PayrollRunControlService {
     const periodEnd = iso(run.period_end)!.slice(0, 10);
     const people = await selectRunPopulation(client, run as Parameters<typeof selectRunPopulation>[1]);
     if (people.length === 0) {
-      findings.push({ severity: "error", code: "EMPTY_POPULATION", message: "No employee falls into this run's period and payroll area" });
+      findings.push({ severity: "error", code: "EMPTY_POPULATION", message: run.selection ? "No employee falls into this run's period, payroll area and selection" : "No employee falls into this run's period and payroll area" });
       return findings;
     }
     const ids = people.map((p) => p.id);
@@ -710,8 +710,9 @@ export class PayrollRunControlService {
         `SELECT period_start, period_end FROM payroll_runs
           WHERE company_id = $1 AND id <> $2 AND run_type = 'regular' AND is_simulation = false AND status NOT IN ('reversed', 'cancelled')
             AND COALESCE(payroll_area_id, '00000000-0000-0000-0000-000000000000'::uuid) = COALESCE($3::uuid, '00000000-0000-0000-0000-000000000000'::uuid)
-            AND daterange(period_start, period_end, '[]') && daterange($4::date, $5::date, '[]')`,
-        [run.company_id, run.id, run.payroll_area_id ?? null, periodStart, periodEnd]
+            AND daterange(period_start, period_end, '[]') && daterange($4::date, $5::date, '[]')
+            AND NOT ($6::boolean AND selection IS NOT NULL AND period_start = $4::date AND period_end = $5::date)`,
+        [run.company_id, run.id, run.payroll_area_id ?? null, periodStart, periodEnd, run.selection != null]
       );
       for (const o of overlap.rows) {
         findings.push({ severity: "error", code: "PERIOD_OVERLAP", message: `Another active run covers ${iso(o.period_start)!.slice(0, 10)} to ${iso(o.period_end)!.slice(0, 10)} for the same payroll area` });

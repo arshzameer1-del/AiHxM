@@ -32,6 +32,7 @@ import { LoanTypesPanel } from "./LoanTypesPanel";
 import { formatDay, formatPeriod } from "../shared/dates";
 import { isGatewayTimeout, waitForRunToSettle } from "./calculationPolling";
 import { MyPaystubsTable } from "./MyPaystubsTable";
+import { describeSelection } from "./runSelection";
 import { PayslipComponentsPanel } from "./PayslipComponentsPanel";
 
 function describeError(err: unknown): string {
@@ -330,6 +331,11 @@ function RunCard({
             <span className="text-xs font-normal px-2 py-0.5 rounded-full bg-black/5 text-label-secondary">
               {run.payrollAreaId ? (area ? `${area.name} (${area.code})` : "Payroll area") : "Company-wide"}
             </span>
+            {run.selection && (
+              <span className="text-xs font-normal px-2 py-0.5 rounded-full bg-accent/10 text-accent" data-testid="run-selection-badge" title="This run pays only a selection of employees">
+                Selection: {describeSelection(run.selection)}
+              </span>
+            )}
             {/* Phase P4 — an off-cycle run otherwise looks identical to a
                 regular run in this list; this is the one glance that tells
                 an approver "this is a bonus/arrears/settlement run, not the

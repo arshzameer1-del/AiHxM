@@ -3,6 +3,7 @@ import { formatDay, formatPeriod } from "../shared/dates";
 import { FormEvent, useEffect, useState } from "react";
 import type {
   AdditionalPaymentType,
+  EmployeeGroupView,
   EmployeeOffCyclePaymentView,
   EmployeeView,
   OffCycleReason,
@@ -16,6 +17,8 @@ import type {
 } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { pkr } from "./payrollLabels";
+import { EMPTY_RUN_SELECTION, RunSelectionPicker, type RunSelectionValue } from "./RunSelectionPicker";
+import { selectionRequest } from "./runSelection";
 
 const inputClass =
   "w-full rounded-lg border border-black/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent";
@@ -344,14 +347,18 @@ export function CreateRunForm({ onCreated, onCancel }: { onCreated: () => void; 
   const [payrollPeriods, setPayrollPeriods] = useState<PayrollPeriodView[]>([]);
   const [payrollPeriodId, setPayrollPeriodId] = useState("");
   const [employees, setEmployees] = useState<EmployeeView[]>([]);
+  const [groups, setGroups] = useState<EmployeeGroupView[]>([]);
+  const [employeesLoaded, setEmployeesLoaded] = useState(false);
+  const [selection, setSelection] = useState<RunSelectionValue>(EMPTY_RUN_SELECTION);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
+    api.listEmployeeGroups().then(setGroups).catch(() => setGroups([]));
     // Active areas only — PayrollService.createRun() refuses an inactive
     // one. A failure here just leaves "Company-wide" as the only choice.
     api.listPayrollAreas().then(setAreas).catch(() => setAreas([]));
-    api.listEmployees().then(setEmployees).catch(() => setEmployees([]));
+    api.listEmployees().then(setEmployees).catch(() => setEmployees([])).finally(() => setEmployeesLoaded(true));
     // PAY-03 - periods a run can still be created for (open or locked); none visible = free-form dates as before
     Promise.all([api.listPayrollPeriods({ status: "open" }), api.listPayrollPeriods({ status: "locked" })])
       .then(([open, locked]) => setPayrollPeriods([...open, ...locked].sort((a, b) => a.periodStart.localeCompare(b.periodStart))))
@@ -379,6 +386,7 @@ export function CreateRunForm({ onCreated, onCancel }: { onCreated: () => void; 
         ...(isOffCycle
           ? { runType, offCycleReason, ...(targetEmployeeId ? { targetEmployeeId } : {}) }
           : {}),
+        ...(!targetEmployeeId && selectionRequest(selection) ? { selection: selectionRequest(selection) } : {}),
       });
       onCreated();
     } catch (err) {
@@ -526,6 +534,8 @@ export function CreateRunForm({ onCreated, onCancel }: { onCreated: () => void; 
             : "Everyone employed during the period is included, whatever payroll area they belong to."}
         </p>
       </div>
+
+      {!targetEmployeeId && <RunSelectionPicker employees={employees} employeesLoaded={employeesLoaded} areas={areas} groups={groups} value={selection} onChange={setSelection} />}
 
       {error && <div className="text-danger text-sm">{error}</div>}
 

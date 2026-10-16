@@ -5886,6 +5886,8 @@ export type PayrollRunView = {
   payslipCount: number;
   totalGrossPay: number;
   totalNetPay: number;
+  /** Set when the run pays only a selection of employees; null or absent for a run that pays everyone it covers. */
+  selection?: PayrollRunSelection | null;
   /** Correction/Reversal (Phase P2). All four are null until
    * `PayrollService.reverseRun()` moves this run to `reversed` — at that
    * point they're set once and never change again, and `correctiveRunId`
@@ -6312,6 +6314,25 @@ export type CreatePayrollRunRequest = {
   /** Required for `final_settlement`; optional single-employee scoping
    * for `bonus`/`arrears`/`other`; forbidden for a `regular` run. */
   targetEmployeeId?: string;
+  /** Pay only some of the employees: any mix of employees, payroll areas and employee groups (each narrows the run).
+   * Omit or leave all three empty to pay everyone the run covers. Not allowed on a run that targets one employee. */
+  selection?: PayrollRunSelectionInput;
+};
+
+/** What the person chose when creating a run (the SAP payroll driver's "Selection" block, with several values per field). */
+export type PayrollRunSelectionInput = {
+  employeeIds?: string[];
+  payrollAreaIds?: string[];
+  employeeGroupIds?: string[];
+};
+
+/** The selection a run was created with. Employee groups are expanded to their members when the run is created. */
+export type PayrollRunSelection = {
+  employeeIds: string[];
+  payrollAreaIds: string[];
+  employeeGroupIds: string[];
+  /** How many employees the chosen groups held when the run was created. */
+  groupMemberCount: number;
 };
 
 // --- Payroll Areas (0101_payroll_areas.sql) -----------------------------
