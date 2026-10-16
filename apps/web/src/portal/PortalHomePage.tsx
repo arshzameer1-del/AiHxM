@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { hasAnyRoleKey, hasEssPortalRole, isSelfService } from "./shared/roles";
+import { formatDay, formatPeriod } from "./shared/dates";
 import { EssTiles } from "./ess/EssLaunchpad";
 import { Link } from "react-router-dom";
 import {
@@ -293,7 +294,7 @@ function UpcomingAndRecentLeave({ requests }: { requests: LeaveRequestView[] | n
             {upcoming.map((r) => (
               <div key={r.id} className="flex items-center justify-between gap-3 text-sm">
                 <span className="text-label-secondary">
-                  {leaveTypeLabel(r.leaveType)} · {r.startDate} – {r.endDate}
+                  {leaveTypeLabel(r.leaveType)} · {formatPeriod(r.startDate, r.endDate)}
                 </span>
                 <span className="font-mono text-xs text-label-tertiary shrink-0">
                   {r.daysRequested} day{r.daysRequested === 1 ? "" : "s"}
@@ -310,7 +311,7 @@ function UpcomingAndRecentLeave({ requests }: { requests: LeaveRequestView[] | n
           {recent.map((r) => (
             <div key={r.id} className="flex items-center justify-between gap-3 text-sm">
               <span className="text-label-secondary truncate">
-                {leaveTypeLabel(r.leaveType)} · {r.startDate}
+                {leaveTypeLabel(r.leaveType)} · {formatDay(r.startDate)}
               </span>
               <span className={`shrink-0 inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${STATUS_STYLES[r.status]}`}>
                 {STATUS_LABELS[r.status]}

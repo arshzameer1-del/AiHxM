@@ -1,4 +1,5 @@
 import { LoadingNote } from "../shared/PageChrome";
+import { formatPeriod } from "../shared/dates";
 import { FormEvent, useEffect, useState } from "react";
 import type {
   AdditionalPaymentType,
@@ -469,7 +470,7 @@ export function CreateRunForm({ onCreated, onCancel }: { onCreated: () => void; 
               .filter((p) => runType === "off_cycle" || p.status === "open")
               .map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.label} ({p.calendarCode}) · {p.periodStart} – {p.periodEnd}
+                  {p.label} ({p.calendarCode}) · {formatPeriod(p.periodStart, p.periodEnd)}
                   {p.status === "locked" ? " · locked" : ""}
                 </option>
               ))}

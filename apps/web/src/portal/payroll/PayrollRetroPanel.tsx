@@ -1,3 +1,4 @@
+import { formatPeriod } from "../shared/dates";
 import { useCallback, useEffect, useState } from "react";
 import type { PayrollRetroResultView, PayrollRunView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
@@ -109,7 +110,7 @@ export function PayrollRetroPanel({ run, canPrepare, onRunChanged }: { run: Payr
                   {i.employeeName ? <span className="text-label-secondary"> · {i.employeeName}</span> : null}
                   <span className={`ml-2 inline-block px-1.5 rounded ${STATUS_STYLE[i.status]}`}>{i.status}</span>
                   <div className="text-label-secondary mt-0.5">
-                    {i.componentLabel} · {i.affectedPeriodStart} to {i.affectedPeriodEnd}: paid {pkr.format(i.originalAmount)}, should be {pkr.format(i.recalculatedAmount)}
+                    {i.componentLabel} · {formatPeriod(i.affectedPeriodStart, i.affectedPeriodEnd)}: paid {pkr.format(i.originalAmount)}, should be {pkr.format(i.recalculatedAmount)}
                   </div>
                 </div>
                 <div className="text-right shrink-0">

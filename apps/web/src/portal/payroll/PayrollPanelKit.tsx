@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { formatPeriod } from "../shared/dates";
 import type { EmployeeView, PayrollRunView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { RUN_STATUS_LABELS } from "./payrollLabels";
@@ -39,7 +40,7 @@ export function RunPicker({ value, onChange, statuses }: { value: string; onChan
       <option value="">{runs ? (shown.length ? "Choose a payroll run…" : "No run in a suitable state") : "Loading…"}</option>
       {shown.map((r) => (
         <option key={r.id} value={r.id}>
-          {r.periodStart} to {r.periodEnd} · {RUN_STATUS_LABELS[r.status] ?? r.status}
+          {formatPeriod(r.periodStart, r.periodEnd)} · {RUN_STATUS_LABELS[r.status] ?? r.status}
         </option>
       ))}
     </select>

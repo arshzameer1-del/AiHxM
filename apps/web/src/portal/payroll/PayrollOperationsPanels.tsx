@@ -1,4 +1,5 @@
 import { LoadingNote } from "../shared/PageChrome";
+import { formatPeriod } from "../shared/dates";
 import { useEffect, useRef, useState } from "react";
 import type { PayrollDashboardRunView, PayrollDashboardView, PayrollEventCatalogEntry, PayrollInputBatchView, PayrollInputImportType, PayrollInputRowView, PayrollInputTemplateView } from "@aihxm/shared-types";
 import { api } from "../../api/client";
@@ -15,7 +16,7 @@ function RunRow({ r }: { r: PayrollDashboardRunView }) {
   return (
     <div className="bg-black/5 rounded-lg px-3 py-2 text-sm space-y-1">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="font-medium">{r.periodStart} to {r.periodEnd}{r.runType !== "regular" ? ` · ${r.runType.replace("_", " ")}` : ""}</span>
+        <span className="font-medium">{formatPeriod(r.periodStart, r.periodEnd)}{r.runType !== "regular" ? ` · ${r.runType.replace("_", " ")}` : ""}</span>
         <span className="flex gap-1">
           <Pill tone="accent">{RUN_STATUS_LABELS[r.status] ?? r.status}</Pill>
           {r.paymentStatus && <Pill tone="neutral">payment {r.paymentStatus}</Pill>}

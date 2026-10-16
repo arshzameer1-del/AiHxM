@@ -29,7 +29,7 @@ import { PayrollCalculationPanel } from "./PayrollCalculationPanel";
 import { PayrollRetroPanel } from "./PayrollRetroPanel";
 import { TaxProfilesPanel } from "./TaxProfilesPanel";
 import { LoanTypesPanel } from "./LoanTypesPanel";
-import { formatPeriod } from "../shared/dates";
+import { formatDay, formatPeriod } from "../shared/dates";
 import { isGatewayTimeout, waitForRunToSettle } from "./calculationPolling";
 import { PayslipComponentsPanel } from "./PayslipComponentsPanel";
 
@@ -341,7 +341,7 @@ function RunCard({
             )}
           </div>
           <div className="text-xs text-label-tertiary mt-0.5">
-            {run.cancelledAt ? `Cancelled ${new Date(run.cancelledAt).toLocaleDateString()}${run.cancelReason ? `: ${run.cancelReason}` : ""}` : run.finalizedAt ? `Finalized ${new Date(run.finalizedAt).toLocaleDateString()}` : "Not yet finalized"}
+            {run.cancelledAt ? `Cancelled ${formatDay(run.cancelledAt)}${run.cancelReason ? `: ${run.cancelReason}` : ""}` : run.finalizedAt ? `Finalized ${formatDay(run.finalizedAt)}` : "Not yet finalized"}
           </div>
           {/* Always visible — not gated behind expanding — so a Payroll
               Approver sees the actual scale of what they're deciding on
@@ -358,7 +358,7 @@ function RunCard({
               that something changed. */}
           {run.status === "reversed" && (
             <div className="text-xs text-danger mt-1">
-              Reversed{run.reversedAt ? ` ${new Date(run.reversedAt).toLocaleDateString()}` : ""}
+              Reversed{run.reversedAt ? ` ${formatDay(run.reversedAt)}` : ""}
               {run.reversalReason ? `: ${run.reversalReason}` : ""}
             </div>
           )}
@@ -862,7 +862,7 @@ function MyPayslipsCard({ refreshKey }: { refreshKey: number }) {
               <div className="text-xs uppercase tracking-wide text-label-tertiary">Current net pay</div>
               <div className="text-2xl font-bold tabular-nums">{pkr.format(current.netPay)}</div>
               <div className="text-xs text-label-tertiary mt-0.5">
-                {current.payrollRunPeriodStart} – {current.payrollRunPeriodEnd}
+                {formatPeriod(current.payrollRunPeriodStart, current.payrollRunPeriodEnd)}
               </div>
             </div>
           )}

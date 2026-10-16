@@ -1,4 +1,5 @@
 import { LoadingNote } from "../shared/PageChrome";
+import { formatDay, formatPeriod } from "../shared/dates";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import type { PayrollCalendarView, PayrollFrequency, PayrollPeriodStatus, PayrollPeriodView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
@@ -210,9 +211,9 @@ export function PayrollCalendarsSection({ canManage }: { canManage: boolean }) {
                     <div className="text-xs text-label-tertiary">{p.calendarCode}</div>
                   </td>
                   <td className="py-2 pr-4 font-mono text-xs">
-                    {p.periodStart} – {p.periodEnd}
+                    {formatPeriod(p.periodStart, p.periodEnd)}
                   </td>
-                  <td className="py-2 pr-4 font-mono text-xs">{p.cutoffDate}</td>
+                  <td className="py-2 pr-4 font-mono text-xs">{formatDay(p.cutoffDate)}</td>
                   <td className="py-2 pr-4 font-mono text-xs">{p.payDate}</td>
                   <td className="py-2 pr-4">{p.runCount}</td>
                   <td className="py-2 pr-4">

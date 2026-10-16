@@ -1,3 +1,4 @@
+import { formatDay } from "../shared/dates";
 import { useEffect, useState } from "react";
 import type { BenefitContributionView, BenefitContributionMode, BenefitEnrolmentView, BenefitPlanView, BenefitType, CompensationComponentView } from "@aihxm/shared-types";
 import { api } from "../../api/client";
@@ -216,7 +217,7 @@ export function BenefitsPanel({ canManage }: { canManage: boolean }) {
               {contribs.slice(0, 50).map((c) => (
                 <tr key={c.id} className="border-t border-black/5">
                   <td className="py-1 pr-3">{c.employeeNumber}</td>
-                  <td className="pr-3">{c.periodEnd}</td>
+                  <td className="pr-3">{formatDay(c.periodEnd)}</td>
                   <td className="pr-3 text-right">{pkr.format(c.employeeAmount)}</td>
                   <td className="pr-3 text-right">{pkr.format(c.employerAmount)}</td>
                   <td><Pill tone={c.status === "accrued" ? "good" : "neutral"}>{c.status}</Pill></td>
