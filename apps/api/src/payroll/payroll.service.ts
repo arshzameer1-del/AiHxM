@@ -750,6 +750,20 @@ export class PayrollService {
             "Payroll-area runs already exist for this exact period; a company-wide run would pay their employees twice"
           );
         }
+        // LIVE-12: two regular runs for the same people may not cover overlapping (not just identical) periods.
+        const overlapping = await client.query<{ period_start: unknown; period_end: unknown }>(
+          `SELECT period_start, period_end FROM payroll_runs
+            WHERE company_id = $1 AND period_start <= $3 AND period_end >= $2
+              AND status NOT IN ('reversed', 'cancelled') AND run_type = 'regular' AND is_simulation = false
+              AND (payroll_area_id IS NOT DISTINCT FROM $4 OR payroll_area_id IS NULL OR $4::uuid IS NULL)
+            LIMIT 1`,
+          [claims.company_id, periodStartIso, periodEndIso, payrollAreaId]
+        );
+        if ((overlapping.rowCount ?? 0) > 0) {
+          throw new BadRequestException(
+            `This period overlaps an existing regular payroll run (${toIsoDateOrNull(overlapping.rows[0].period_start)} to ${toIsoDateOrNull(overlapping.rows[0].period_end)}); the same employees would be paid twice. Cancel or reverse that run first, or choose a period that does not overlap it.`
+          );
+        }
       }
       const currency = await client.query<{ currency: string | null }>("SELECT currency FROM companies WHERE id = $1", [claims.company_id]);
       let result;
@@ -1576,6 +1590,11 @@ export class PayrollService {
             ? "This payroll run is still awaiting approval"
             : "This payroll run must be calculated, submitted for approval, and approved before it can be finalized"
         );
+      }
+      // LIVE-12: with the payroll policy switched on, payslips cannot be locked for a period that has not started.
+      const periodStartDay = toIsoDateOrNull(run.period_start);
+      if (periodStartDay && periodStartDay > new Date().toISOString().slice(0, 10) && (await this.control().policy(client, claims.company_id!)).blockFinalizeBeforePeriodStart) {
+        throw new BadRequestException(`This payroll run cannot be finalized yet: its period starts on ${periodStartDay}`);
       }
       // Phase P3 — commit the loan-repayment ledger and mark consumed
       // additional payments, reading back the structured PREVIEWS

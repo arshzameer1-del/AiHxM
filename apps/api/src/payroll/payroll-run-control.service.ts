@@ -609,11 +609,12 @@ export class PayrollRunControlService {
 
   // ------------------------------------------------------------------ policy
 
-  async policy(client: PoolClient, companyId: string): Promise<{ requireValidationBeforeApproval: boolean; requirePeriodForRun: boolean }> {
+  async policy(client: PoolClient, companyId: string): Promise<{ requireValidationBeforeApproval: boolean; requirePeriodForRun: boolean; blockFinalizeBeforePeriodStart: boolean }> {
     const rules = this.businessPolicy ? await this.businessPolicy.resolveEffectivePolicy(client, companyId, "payroll", {}) : null;
     return {
       requireValidationBeforeApproval: rules?.requireValidationBeforeApproval === true,
       requirePeriodForRun: rules?.requirePeriodForRun === true,
+      blockFinalizeBeforePeriodStart: rules?.blockFinalizeBeforePeriodStart === true,
     };
   }
 

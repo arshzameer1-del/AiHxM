@@ -30,6 +30,7 @@ import { PayrollRetroPanel } from "./PayrollRetroPanel";
 import { TaxProfilesPanel } from "./TaxProfilesPanel";
 import { LoanTypesPanel } from "./LoanTypesPanel";
 import { formatPeriod } from "../shared/dates";
+import { isGatewayTimeout, waitForRunToSettle } from "./calculationPolling";
 import { PayslipComponentsPanel } from "./PayslipComponentsPanel";
 
 function describeError(err: unknown): string {
@@ -200,9 +201,27 @@ function RunCard({
       }
       onRunChanged(result.run);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not calculate this run.");
+      // LIVE-10: a proxy timeout does not mean the calculation failed; it keeps running on the server.
+      if (!(err instanceof ApiError) || isGatewayTimeout(err.status)) {
+        await followCalculation();
+      } else {
+        setError(err.message);
+      }
     } finally {
       setBusy(false);
+    }
+  }
+
+  /** Watches the run until the server has finished calculating it, then shows the real result. */
+  async function followCalculation() {
+    setCalcSummary("This run is large, so the browser stopped waiting, but the calculation is still going on the server. Checking every few seconds…");
+    const settled = await waitForRunToSettle(() => api.getPayrollRun(run.id), run.status, { onTick: (r) => onRunChanged(r) });
+    if (settled) {
+      setCalcSummary(`The calculation has finished (status: ${RUN_STATUS_LABELS[settled.status]}).`);
+      if (expanded) setPayslips(await api.listPayslips({ payrollRunId: run.id }));
+      onRunChanged(settled);
+    } else {
+      setCalcSummary("The calculation is still running. Leave this page open or come back in a few minutes; the status above updates when it finishes.");
     }
   }
 
@@ -214,6 +233,7 @@ function RunCard({
       const started = await api.calculatePayrollRunInBackground(run.id);
       setCalcSummary("Calculation started in the background. You can leave this page; progress is shown below.");
       onRunChanged(started.run);
+      void followCalculation();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not start the calculation.");
     } finally {

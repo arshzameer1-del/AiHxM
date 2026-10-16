@@ -102,9 +102,9 @@ export const BUSINESS_POLICY_REGISTRY: BusinessPolicyTypeDefinition[] = [
     policyType: "payroll",
     label: "Payroll Run Policy",
     description: "Controls on how a payroll run moves through its lifecycle.",
-    rulesShape: "requireValidationBeforeApproval (boolean), requirePeriodForRun (boolean)",
+    rulesShape: "requireValidationBeforeApproval (boolean), requirePeriodForRun (boolean), blockFinalizeBeforePeriodStart (boolean)",
     wiredInto:
-      "PayrollService.submitForApproval() - when requireValidationBeforeApproval is true a run must pass validation (POST payroll/runs/:id/validate) before it can be submitted. PayrollService.createRun() - when requirePeriodForRun is true a regular run must be created from an open payroll period (PAY-03). Default (no policy): neither is required.",
+      "PayrollService.submitForApproval() - when requireValidationBeforeApproval is true a run must pass validation (POST payroll/runs/:id/validate) before it can be submitted. PayrollService.createRun() - when requirePeriodForRun is true a regular run must be created from an open payroll period (PAY-03). PayrollService.finalizeRun() - when blockFinalizeBeforePeriodStart is true a run cannot be finalized before its period has started (LIVE-12). Default (no policy): none is required.",
   },
   {
     policyType: "approval_controls",
