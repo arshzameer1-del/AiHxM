@@ -1,10 +1,12 @@
 import { LoadingNote } from "../shared/PageChrome";
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import type { AttendanceCorrectionRequestView, AttendanceRecordView, EmployeeView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { AttendanceCorrectionForm } from "./AttendanceCorrectionForm";
 import { SapSection } from "../shared/FormSections";
 import { describeError } from "../shared/describeError";
+import { staleClockInHours, staleClockInMessage } from "./openClockIn";
 import { ATTENDANCE_STATUS_LABELS, ATTENDANCE_STATUS_STYLES, CORRECTION_STATUS_LABELS, CORRECTION_STATUS_STYLES } from "./attendanceLabels";
 
 /**
@@ -80,6 +82,12 @@ export function ClockPanel({ employeeId, refreshKey, onChanged }: { employeeId: 
           )}
           {!clockedIn && attendance && <p className="text-xs text-label-secondary">You are not clocked in.</p>}
         </div>
+        {clockedIn && attendance && staleClockInHours(attendance[0].clockInAt) !== null && (
+          <p className="text-xs text-warning mt-3" role="alert" data-testid="stale-clock-in">
+            {staleClockInMessage(staleClockInHours(attendance[0].clockInAt) as number)}{" "}
+            <Link to="/app/attendance/corrections" className="font-semibold underline">Ask for a correction</Link>
+          </p>
+        )}
         {clockError && <p className="text-xs text-danger mt-3">{clockError}</p>}
       </SapSection>
 
