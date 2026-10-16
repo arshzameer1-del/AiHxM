@@ -6404,6 +6404,9 @@ export type PayslipView = {
    * new permission — see PayrollService's `rowToPayslip()`. */
   payrollRunPeriodStart: string;
   payrollRunPeriodEnd: string;
+  /** My Paystubs — 'regular' or 'off_cycle', and when the run was finalized (the pay date shown in the list). */
+  payrollRunType: PayrollRunType;
+  payrollRunFinalizedAt: string | null;
   employeeId: string;
   /** Denormalized snapshot at calculation time — see 0022_payroll.sql's
    * header comment for why these don't just join to `employees` live. */

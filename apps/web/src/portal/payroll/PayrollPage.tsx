@@ -31,6 +31,7 @@ import { TaxProfilesPanel } from "./TaxProfilesPanel";
 import { LoanTypesPanel } from "./LoanTypesPanel";
 import { formatDay, formatPeriod } from "../shared/dates";
 import { isGatewayTimeout, waitForRunToSettle } from "./calculationPolling";
+import { MyPaystubsTable } from "./MyPaystubsTable";
 import { PayslipComponentsPanel } from "./PayslipComponentsPanel";
 
 function describeError(err: unknown): string {
@@ -822,62 +823,6 @@ function SettingsAndSlabsSection() {
 }
 
 /**
- * `payroll_review.view.self` (employee_self_service only) — the server
- * scopes `GET /payslips` with no params to the caller's own record AND
- * only once its run is finalized (PayrollService.listPayslips), so this
- * is a plain render of whatever comes back, same "server already
- * scopes it" posture as MyLeaveCard.
- */
-function MyPayslipsCard({ refreshKey }: { refreshKey: number }) {
-  const [payslips, setPayslips] = useState<PayslipView[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    api
-      .listPayslips()
-      .then(setPayslips)
-      .catch((err) => setError(describeError(err)));
-  }, [refreshKey]);
-
-  // listPayslips() orders newest-first (`ORDER BY p.created_at DESC`), so
-  // the first row is this employee's current/most recent finalized
-  // payslip — Part 2 category 5's "Current net pay KPI with pay period
-  // and pay date" header, same data the historical list below already
-  // has, just surfaced once up top.
-  const current = payslips && payslips.length > 0 ? payslips[0] : null;
-
-  return (
-    <section className="bg-card rounded-card p-5 shadow-sm mb-6">
-      <h2 className="font-semibold text-sm uppercase tracking-wide text-label-tertiary mb-4">My Payslips</h2>
-      {error ? (
-        <p className="text-sm text-label-secondary">{error}</p>
-      ) : !payslips ? (
-        <LoadingNote />
-      ) : payslips.length === 0 ? (
-        <p className="text-sm text-label-tertiary">No finalized payslips yet.</p>
-      ) : (
-        <>
-          {current && (
-            <div className="bg-surface border border-black/5 rounded-lg px-4 py-3.5 mb-4">
-              <div className="text-xs uppercase tracking-wide text-label-tertiary">Current net pay</div>
-              <div className="text-2xl font-bold tabular-nums">{pkr.format(current.netPay)}</div>
-              <div className="text-xs text-label-tertiary mt-0.5">
-                {formatPeriod(current.payrollRunPeriodStart, current.payrollRunPeriodEnd)}
-              </div>
-            </div>
-          )}
-          <div className="space-y-2">
-            {payslips.map((p) => (
-              <PayslipRow key={p.id} payslip={p} />
-            ))}
-          </div>
-        </>
-      )}
-    </section>
-  );
-}
-
-/**
  * Task — Compensation & Payroll (Phase 12, Decision #14; run approval
  * added Phase P2). hr_admin still gets the whole object graph
  * (compensation, settings, tax slabs, run lifecycle, every payslip) and
@@ -909,7 +854,7 @@ export function PayrollPage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold tracking-tight mb-1">Payroll</h1>
+      <h1 className="text-2xl font-bold tracking-tight mb-1">{isSelfService && !isHrAdmin && !isPayrollApprover && !isRegionalPayroll ? "My Paystubs" : "Payroll"}</h1>
       <p className="text-label-tertiary text-sm mb-6">
         {isHrAdmin
           ? "Manage compensation, statutory rates, and run payroll end to end."
@@ -917,10 +862,10 @@ export function PayrollPage() {
             ? "Prepare and finalize payroll runs for your payroll areas."
             : isPayrollApprover
             ? "Review and decide on payroll runs submitted for your approval."
-            : "View your own payslips once a run has been finalized."}
+            : "Your paystubs appear here once a payroll run has been finalized."}
       </p>
 
-      {isSelfService && <MyPayslipsCard refreshKey={refreshKey} />}
+      {isSelfService && <MyPaystubsTable />}
       {isSelfService && <MyPayrollDocumentsCard />}
 
       {(isHrAdmin || isPayrollApprover || isRegionalPayroll) && (

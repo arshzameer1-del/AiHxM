@@ -272,6 +272,9 @@ const PerformancePage = lazy(() =>
 const PayrollPage = lazy(() =>
   import("./portal/payroll/PayrollPage").then((m) => ({ default: m.PayrollPage })),
 );
+const PaystubViewPage = lazy(() =>
+  import("./portal/payroll/PaystubViewPage").then((m) => ({ default: m.PaystubViewPage })),
+);
 // Phase 3 item #1 (OIDC slice) — reached only once, right after an IdP
 // redirect (SsoService.handleCallback's fixed `/sso/complete#...` landing
 // point), never on a cold first visit like LoginPage — so unlike LoginPage
@@ -516,6 +519,7 @@ export default function App() {
                     gets only their own finalized payslips, both from this
                     one route. */}
                   <Route path="payroll" element={<PayrollPage />} />
+                  <Route path="payroll/paystub/:id" element={<PaystubViewPage />} />
                 </Route>
               </Route>
             </Route>

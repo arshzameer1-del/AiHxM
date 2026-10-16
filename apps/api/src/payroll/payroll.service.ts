@@ -304,6 +304,8 @@ function rowToPayslip(row: any): PayslipView {
     // there — not a new permission or a new query.
     payrollRunPeriodStart: row.run_period_start,
     payrollRunPeriodEnd: row.run_period_end,
+    payrollRunType: row.run_type ?? "regular",
+    payrollRunFinalizedAt: row.run_finalized_at ? new Date(row.run_finalized_at).toISOString() : null,
     employeeId: row.employee_id,
     employeeNumber: row.employee_number,
     // SEC-02: the payslip snapshot is stored encrypted (legacy plaintext passes through).
@@ -1792,7 +1794,7 @@ export class PayrollService {
     return this.db.withClaims(claims, async (client) => {
       const hasAll = await this.hasAnyPayrollStaffPermission(claims);
       const result = await client.query(
-        `SELECT p.*, e.user_account_id AS employee_user_account_id, pr.status AS run_status, pr.payroll_area_id AS run_payroll_area_id, pr.period_start AS run_period_start, pr.period_end AS run_period_end
+        `SELECT p.*, e.user_account_id AS employee_user_account_id, pr.status AS run_status, pr.payroll_area_id AS run_payroll_area_id, pr.period_start AS run_period_start, pr.period_end AS run_period_end, pr.run_type AS run_type, pr.finalized_at AS run_finalized_at
          FROM payslips p
          JOIN employees e ON e.id = p.employee_id
          JOIN payroll_runs pr ON pr.id = p.payroll_run_id
@@ -1832,7 +1834,7 @@ export class PayrollService {
     await this.requireModule(claims);
     return this.db.withClaims(claims, async (client) => {
       const result = await client.query(
-        `SELECT p.*, e.user_account_id AS employee_user_account_id, pr.status AS run_status, pr.payroll_area_id AS run_payroll_area_id, pr.period_start AS run_period_start, pr.period_end AS run_period_end
+        `SELECT p.*, e.user_account_id AS employee_user_account_id, pr.status AS run_status, pr.payroll_area_id AS run_payroll_area_id, pr.period_start AS run_period_start, pr.period_end AS run_period_end, pr.run_type AS run_type, pr.finalized_at AS run_finalized_at
          FROM payslips p
          JOIN employees e ON e.id = p.employee_id
          JOIN payroll_runs pr ON pr.id = p.payroll_run_id
