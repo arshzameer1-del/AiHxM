@@ -76,6 +76,11 @@ const EssLaunchpadPage = lazy(() =>
     default: m.EssLaunchpadPage,
   })),
 );
+const MyOrgChartPage = lazy(() =>
+  import("./portal/ess/MyOrgChartPage").then((m) => ({
+    default: m.MyOrgChartPage,
+  })),
+);
 const MyProfilePage = lazy(() =>
   import("./portal/employees/MyProfilePage").then((m) => ({
     default: m.MyProfilePage,
@@ -359,6 +364,7 @@ export default function App() {
                     a route guard) is what actually scopes each one. */}
                   <Route path="profile" element={<MyProfilePage />} />
                   <Route path="ess" element={<EssLaunchpadPage />} />
+                  <Route path="ess/org-chart" element={<MyOrgChartPage />} />
                   <Route path="employees" element={<EmployeeListPage />} />
                   <Route
                     path="employees/new"

@@ -59,6 +59,7 @@ export function buildEssTileGroups(enabledModules: readonly ModuleKey[]): EssTil
   if (has("employee")) {
     hcm.push({ to: `${PROFILE}?tab=contact`, title: "My Communication Data", description: "View my contact details", icon: Phone });
     hcm.push({ to: `${PROFILE}?tab=job`, title: "My Internal Data", description: "View my job and internal data", icon: Network });
+    hcm.push({ to: "/app/ess/org-chart", title: "My Org Chart", description: "My manager, my colleagues and my team", icon: Network });
   }
   if (has("leave")) hcm.push({ to: "/app/attendance/timesheet", title: "My Timesheet", description: "Manage working time and time statements", icon: ClipboardList });
   hcm.push(soon("My Medical Information", "Manage my medical information", HeartPulse));

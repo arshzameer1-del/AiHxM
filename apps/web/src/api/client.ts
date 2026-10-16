@@ -1,4 +1,5 @@
 import type {
+  MyOrgChart,
   BenefitContributionView,
   BenefitEligibilityView,
   BenefitEnrolmentView,
@@ -1411,6 +1412,9 @@ export const api = {
   listEmployees: () => request<EmployeeView[]>("/employees"),
 
   getEmployee: (id: string) => request<EmployeeView>(`/employees/${id}`),
+
+  /** The signed-in person's own place in the organization (Employee Self Service "My Org Chart"). */
+  getMyOrgChart: () => request<MyOrgChart>("/employees/me/org-chart"),
 
   createEmployee: (input: CreateEmployeeRequest) =>
     request<EmployeeView>("/employees", { method: "POST", body: JSON.stringify(input) }),

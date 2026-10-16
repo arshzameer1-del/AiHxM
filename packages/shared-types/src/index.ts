@@ -2603,6 +2603,34 @@ export type OrgChartNode = {
   directReports: OrgChartNode[];
 };
 
+/**
+ * "My Org Chart" (Employee Self Service, 2026-10): a person's own place in the organization, like the SAP ESS org chart.
+ * Public fields only (name, designation, department); nothing about pay, contact or personal data.
+ * An employee sees their manager chain, peers (same manager) and direct reports. A manager's `downline` spans every
+ * department their people sit in, and `departments` lists each department they cover or head.
+ */
+export type MyOrgChartPerson = {
+  id: string;
+  employeeNumber: string;
+  fullName: string;
+  designation: string | null;
+  department: string | null;
+};
+export type MyOrgChartNode = MyOrgChartPerson & { directReports: MyOrgChartNode[] };
+export type MyOrgChart = {
+  me: MyOrgChartPerson;
+  /** From the top of the line down to the person's own manager (empty for the top person). */
+  managerChain: MyOrgChartPerson[];
+  /** People who report to the same manager. */
+  peers: MyOrgChartPerson[];
+  /** The person's own reports with their reports below them, across every department. */
+  downline: MyOrgChartNode[];
+  /** Departments the person belongs to, heads, or whose people report to them. */
+  departments: string[];
+  /** True when the downline was cut at the size limit. */
+  truncated: boolean;
+};
+
 export type EmployeeDocumentView = {
   id: string;
   employeeId: string;

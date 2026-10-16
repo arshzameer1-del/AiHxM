@@ -111,3 +111,20 @@ test("Employee Performance shows only Goals, Performance Reviews, Feedback and D
   await page.goto("/app/attendance/approvals");
   await expect(page.getByText("Only approvers can use this page")).toBeVisible();
 });
+
+test("My Org Chart tile opens a page showing the person's own position, and the old pages are untouched", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await loginToApp(page, essToken);
+  await page.goto("/app/ess");
+  await page.getByTestId("ess-launchpad").getByRole("link", { name: /My Org Chart/ }).click();
+  await expect(page).toHaveURL(/\/app\/ess\/org-chart$/);
+  await expect(page.getByRole("heading", { name: "My Org Chart" })).toBeVisible();
+  const me = page.getByTestId("org-me");
+  await expect(me).toContainText("E2E");
+  await expect(me).toContainText("You");
+  await expect(page.getByText("You are at the top of your reporting line.")).toBeVisible();
+  await expect(page.getByText("No one reports to you.")).toBeVisible();
+  await page.screenshot({ path: SHOTS ? `${SHOTS}/ess-org-chart.png` : undefined, fullPage: true });
+  await page.getByRole("link", { name: /Back to Employee Self Service/ }).click();
+  await expect(page).toHaveURL(/\/app\/ess$/);
+});

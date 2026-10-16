@@ -13,6 +13,7 @@ import {
 import { FileInterceptor } from "@nestjs/platform-express";
 import type { Response } from "express";
 import { SessionGuard } from "../auth/session.guard";
+import { MyOrgChartService } from "./my-org-chart.service";
 import { CurrentClaims } from "../auth/current-claims.decorator";
 import type { RequestClaims } from "../database/tenant-context";
 import { EmployeesService } from "./employees.service";
@@ -35,7 +36,7 @@ import { BulkImportEmployeesDto } from "./dto/bulk-import-employees.dto";
 @Controller("employees")
 @UseGuards(SessionGuard)
 export class EmployeesController {
-  constructor(private readonly employees: EmployeesService) {}
+  constructor(private readonly employees: EmployeesService, private readonly myOrgChartService: MyOrgChartService) {}
 
   @Post()
   create(@CurrentClaims() claims: RequestClaims, @Body() dto: CreateEmployeeDto) {
@@ -45,6 +46,12 @@ export class EmployeesController {
   @Get()
   list(@CurrentClaims() claims: RequestClaims) {
     return this.employees.list(claims);
+  }
+
+  // "My Org Chart" (Employee Self Service): the caller's own manager chain, peers and reports. Declared before `:id`.
+  @Get("me/org-chart")
+  myOrgChart(@CurrentClaims() claims: RequestClaims) {
+    return this.myOrgChartService.get(claims);
   }
 
   @Get("org-chart")
