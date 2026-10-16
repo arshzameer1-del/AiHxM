@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { hasEssPortalRole, isSelfService } from "./shared/roles";
+import { hasAnyRoleKey, hasEssPortalRole, isSelfService } from "./shared/roles";
 import { EssTiles } from "./ess/EssLaunchpad";
 import { Link } from "react-router-dom";
 import {
@@ -56,13 +56,13 @@ function buildHomeCards(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]):
   const hasModule = (key: ModuleKey) => enabledModules.includes(key);
   const cards: HomeCard[] = [];
 
-  if (hasRole("hr_admin", "line_manager") && hasModule("employee")) {
+  if ((hasRole("hr_admin", "line_manager") || hasAnyRoleKey(roleKeys, "regional_hr")) && hasModule("employee")) {
     cards.push({ to: "/app/employees", label: "Employees", description: "Directory, records & profiles", icon: Users });
   } else if (roleKeys.length > 0 && hasModule("employee")) {
     cards.push({ to: "/app/profile", label: "My Profile", description: "Your own employee record", icon: User });
   }
 
-  if (hasModule("employee") && roleKeys.length > 0) {
+  if (hasModule("employee") && (hasRole("hr_admin") || hasRole("employee_self_service", "ess_portal", "line_manager"))) {
     if (hasRole("hr_admin")) cards.push({ to: "/app/organization", label: "Organization", description: "Org chart, positions & structure", icon: Network });
     else cards.push({ to: "/app/ess/org-chart", label: "My Org Chart", description: "My manager, colleagues and team", icon: Network });
   }
@@ -92,7 +92,7 @@ function buildHomeCards(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]):
     cards.push({ to: "/app/performance", label: "Performance", description: "Goals & review cycles", icon: Target });
   }
 
-  if (hasModule("payroll") && hasRole("hr_admin", "employee_self_service", "ess_portal")) {
+  if (hasModule("payroll") && (hasRole("hr_admin", "employee_self_service", "ess_portal", "payroll_approver") || hasAnyRoleKey(roleKeys, "regional_payroll"))) {
     cards.push({ to: "/app/payroll", label: "Payroll", description: "Payslips & statutory calculations", icon: Wallet });
   }
 

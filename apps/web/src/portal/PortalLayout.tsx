@@ -1,3 +1,4 @@
+import { hasAnyRoleKey } from "./shared/roles";
 import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import {
@@ -73,7 +74,7 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): 
     items.push({ to: "/app/ess", label: "Employee Self Service", icon: LayoutGrid });
   }
 
-  if (hasRole("hr_admin", "line_manager") && hasModule("employee")) {
+  if ((hasRole("hr_admin", "line_manager") || hasAnyRoleKey(roleKeys, "regional_hr")) && hasModule("employee")) {
     // Core Employee Enterprise Phases 2/12's frontend catch-up (2026-09-27)
     // — Hiring Wizard, Bulk Hiring and Workforce Analytics all had no way
     // to reach them from the sidebar at all. Grouped under "Employees"
@@ -114,7 +115,7 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): 
   // actions the page itself renders.
   // Organization management is HR Admin only (Kumail, 2026-10-16). Everyone else uses "My Org Chart", which shows only
   // their own manager chain, colleagues and team.
-  if (hasModule("employee") && roleKeys.length > 0 && !hasRole("hr_admin")) {
+  if (hasModule("employee") && !hasRole("hr_admin") && hasRole("employee_self_service", "ess_portal", "line_manager")) {
     items.push({ to: "/app/ess/org-chart", label: "My Org Chart", end: true, icon: Network });
   } else if (hasModule("employee") && hasRole("hr_admin")) {
     items.push({
@@ -216,7 +217,8 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): 
   // employee_self_service respectively (no partial-admin role), so
   // those are the only two role keys that ever have anything to see on
   // this route; a line_manager-only session gets no nav entry here.
-  if (hasModule("payroll") && hasRole("hr_admin", "employee_self_service", "ess_portal")) {
+  // Parked A3/B5 (2026-10-16): the Payroll Approver and the Regional Payroll role have their own page content now.
+  if (hasModule("payroll") && (hasRole("hr_admin", "employee_self_service", "ess_portal", "payroll_approver") || hasAnyRoleKey(roleKeys, "regional_payroll"))) {
     items.push({ to: "/app/payroll", label: "Payroll", icon: Wallet });
   }
 

@@ -1,6 +1,6 @@
 import { LoadingNote } from "../shared/PageChrome";
 import { useEffect, useRef, useState } from "react";
-import { isSelfService as isSelfServiceRole } from "../shared/roles";
+import { hasAnyRoleKey, isSelfService as isSelfServiceRole } from "../shared/roles";
 import { useSearchParams } from "react-router-dom";
 import type {
   EmployeeView,
@@ -903,6 +903,8 @@ export function PayrollPage() {
   const roleKeys = identity?.roleKeys ?? [];
   const isHrAdmin = roleKeys.includes("hr_admin");
   const isPayrollApprover = roleKeys.includes("payroll_approver");
+  // Regional Payroll prepares, finalizes and disburses runs of its own payroll areas only; the server enforces the scope.
+  const isRegionalPayroll = hasAnyRoleKey(roleKeys, "regional_payroll") && !isHrAdmin;
   const isSelfService = isSelfServiceRole(roleKeys);
 
   return (
@@ -911,7 +913,9 @@ export function PayrollPage() {
       <p className="text-label-tertiary text-sm mb-6">
         {isHrAdmin
           ? "Manage compensation, statutory rates, and run payroll end to end."
-          : isPayrollApprover
+          : isRegionalPayroll
+            ? "Prepare and finalize payroll runs for your payroll areas."
+            : isPayrollApprover
             ? "Review and decide on payroll runs submitted for your approval."
             : "View your own payslips once a run has been finalized."}
       </p>
@@ -919,13 +923,13 @@ export function PayrollPage() {
       {isSelfService && <MyPayslipsCard refreshKey={refreshKey} />}
       {isSelfService && <MyPayrollDocumentsCard />}
 
-      {(isHrAdmin || isPayrollApprover) && (
+      {(isHrAdmin || isPayrollApprover || isRegionalPayroll) && (
         <div className="space-y-6">
           <CollapsibleSection title="Payroll Dashboard" defaultOpen forceOpen={focusSection === "payroll-dashboard"} sectionId="payroll-dashboard">
             <PayrollDashboardPanel />
           </CollapsibleSection>
 
-          <RunsSection refreshKey={refreshKey} canPrepare={isHrAdmin} canApprove={isPayrollApprover} onChanged={bump} />
+          <RunsSection refreshKey={refreshKey} canPrepare={isHrAdmin || isRegionalPayroll} canApprove={isPayrollApprover} onChanged={bump} />
 
           {isHrAdmin && focusSection === "compensation" && (
             <div className="bg-card rounded-card p-5 shadow-sm text-sm text-label-tertiary">
@@ -1026,7 +1030,7 @@ export function PayrollPage() {
         </div>
       )}
 
-      {!isHrAdmin && !isPayrollApprover && !isSelfService && (
+      {!isHrAdmin && !isPayrollApprover && !isRegionalPayroll && !isSelfService && (
         <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-tertiary">
           Nothing to show for your role here.
         </div>

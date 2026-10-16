@@ -13,3 +13,11 @@ export function isSelfService(roleKeys: readonly TenantRoleKey[]): boolean {
 export function hasEssPortalRole(roleKeys: readonly TenantRoleKey[]): boolean {
   return roleKeys.includes("ess_portal");
 }
+
+/**
+ * Role-key check that also accepts keys outside the TenantRoleKey list (the scoped Regional roles are granted by
+ * System Admin and come back in the session's role list as plain keys).
+ */
+export function hasAnyRoleKey(roleKeys: readonly string[], ...keys: string[]): boolean {
+  return keys.some((k) => roleKeys.includes(k));
+}
