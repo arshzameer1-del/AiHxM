@@ -1,3 +1,4 @@
+import { sequentially } from "../database/sequentially";
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { DatabaseService } from "../database/database.service";
@@ -144,8 +145,8 @@ export class LegacyReconciliationService {
     return this.db.withClaims(claims, async (client) => {
       const companyId = claims.company_id;
 
-      const [gapRows, orgUnitCandidates, locationCandidates, positionCandidates] = await Promise.all([
-        client.query<GapRow>(
+      const [gapRows, orgUnitCandidates, locationCandidates, positionCandidates] = await sequentially([
+        () => client.query<GapRow>(
           `SELECT e.id, e.employee_number, e.first_name, e.last_name,
                   e.department, e.org_unit_id, e.location, e.location_id, e.manager_id,
                   e.designation, e.position_id,
@@ -171,18 +172,18 @@ export class LegacyReconciliationService {
            ORDER BY e.employee_number`,
           [companyId]
         ),
-        client.query<NameCandidate>(
+        () => client.query<NameCandidate>(
           `SELECT id, name FROM org_units WHERE company_id = $1 AND status <> 'archived'`,
           [companyId]
         ),
-        client.query<NameCandidate>(
+        () => client.query<NameCandidate>(
           `SELECT id, name FROM locations WHERE company_id = $1 AND status <> 'archived'`,
           [companyId]
         ),
         // Phase 11 — only VACANT positions are real candidates, since
         // `linkPosition()` delegates to `PositionsService.assignEmployee()`,
         // which rejects a non-vacant one outright.
-        client.query<NameCandidate>(
+        () => client.query<NameCandidate>(
           `SELECT id, position_title AS name FROM positions WHERE company_id = $1 AND status = 'vacant'`,
           [companyId]
         ),

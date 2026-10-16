@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { hasAnyRoleKey, hasEssPortalRole, isSelfService } from "./shared/roles";
 import { formatDay, formatPeriod, formatTime, todayIso } from "./shared/dates";
+import { StarterSetupNudge } from "./admin/StarterSetupNudge";
 import { EssTiles } from "./ess/EssLaunchpad";
 import { Link } from "react-router-dom";
 import {
@@ -378,6 +379,8 @@ export function PortalHomePage() {
     <div>
       <h1 className="text-2xl font-bold tracking-tight mb-1">Good to see you, {fullName}</h1>
       <p className="text-sm text-label-tertiary mb-6">{companyName}</p>
+
+      {roleKeys.includes("hr_admin") && <StarterSetupNudge />}
 
       {identity.employeeId && enabledModules.includes("leave") && (
         <MyDaySection employeeId={identity.employeeId} enabledModules={enabledModules} roleKeys={roleKeys} />
