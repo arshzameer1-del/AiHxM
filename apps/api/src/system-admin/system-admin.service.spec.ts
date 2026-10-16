@@ -146,11 +146,12 @@ describe("SystemAdminService", () => {
   });
 
   describe("listAssignableRoles", () => {
-    it("returns the five real tenant roles, never the Phase 4 rbac_demo_* roles", async () => {
+    it("returns the six real tenant roles, never the Phase 4 rbac_demo_* roles", async () => {
       const roles = await systemAdmin.listAssignableRoles(bilalClaims);
       const keys = roles.map((r) => r.key).sort();
       expect(keys).toEqual([
         "employee_self_service",
+        "ess_portal",
         "hr_admin",
         "line_manager",
         "payroll_approver",
