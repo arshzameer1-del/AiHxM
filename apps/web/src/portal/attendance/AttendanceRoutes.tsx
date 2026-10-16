@@ -6,6 +6,7 @@ import { ClockPanel, CorrectionsPanel } from "./AttendancePanels";
 import { PendingCorrectionsSection } from "./CorrectionApprovals";
 import { MyAttendanceDays } from "./MyAttendanceDays";
 import { MyTimesheet } from "./MyTimesheet";
+import { TeamAttendancePage } from "./TeamAttendancePage";
 
 /**
  * Time & Attendance is its own module: it opens on tiles and every tile is its own page.
@@ -16,6 +17,7 @@ import { MyTimesheet } from "./MyTimesheet";
  *   /app/attendance/timesheet        weekly timesheet
  *   /app/attendance/corrections      request and follow attendance corrections
  *   /app/attendance/approvals        attendance corrections waiting for the signed-in approver
+ *   /app/attendance/team             how the signed-in manager's reports did (Line Manager)
  *
  * Which actions exist is decided by the roles plus the server; the client only chooses what to show.
  */
@@ -30,6 +32,7 @@ export function AttendanceRoutes() {
         <Route path="timesheet" element={<TimesheetPage />} />
         <Route path="corrections" element={<CorrectionsPage />} />
         <Route path="approvals" element={<CorrectionApprovalsPage />} />
+        <Route path="team" element={<TeamAttendancePage />} />
       </Route>
     </Routes>
   );

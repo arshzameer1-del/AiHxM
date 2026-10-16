@@ -1,5 +1,6 @@
 import type {
   MyOrgChart,
+  TeamAttendanceView,
   BenefitContributionView,
   BenefitEligibilityView,
   BenefitEnrolmentView,
@@ -2368,6 +2369,8 @@ export const api = {
     request<AttendanceDailyResultView[]>(`/employees/${employeeId}/attendance-results?from=${from}&to=${to}`),
   attendanceSummary: (employeeId: string, from: string, to: string) =>
     request<AttendancePeriodSummary>(`/employees/${employeeId}/attendance-summary?from=${from}&to=${to}`),
+  /** The caller's own team: processed-day summary, last-day status and who is clocked in now (parked B1). */
+  getTeamAttendance: (from: string, to: string) => request<TeamAttendanceView>(`/attendance-team?from=${from}&to=${to}`),
   overrideAttendanceDay: (input: OverrideAttendanceDayRequest) =>
     request<AttendanceDailyResultView>("/attendance-results/override", { method: "POST", body: JSON.stringify(input) }),
   listAttendanceDevices: () => request<AttendanceDeviceView[]>("/attendance-devices"),

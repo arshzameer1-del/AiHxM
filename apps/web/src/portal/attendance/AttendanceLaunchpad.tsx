@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { CalendarCheck, ClipboardList, Clock, FileClock, Hourglass, Timer } from "lucide-react";
+import { CalendarCheck, ClipboardList, Clock, FileClock, Hourglass, Timer, Users } from "lucide-react";
+import { useAuth } from "../../auth/AuthContext";
 import { api } from "../../api/client";
 import { useModuleContext } from "../shared/ModuleContext";
 import { PageHeader } from "../shared/PageChrome";
@@ -8,6 +9,7 @@ import { TileGrid, TileGroup, type TileSpec } from "../shared/Tiles";
 /** Time & Attendance launchpad: clock, attendance days, timesheet and corrections, each on its own page. */
 export function AttendanceLaunchpad() {
   const { employeeId, canSubmitSelf, canDecide, refreshKey } = useModuleContext();
+  const { identity } = useAuth();
   const [clockedIn, setClockedIn] = useState<boolean | null>(null);
   const [waiting, setWaiting] = useState(0);
 
@@ -38,6 +40,10 @@ export function AttendanceLaunchpad() {
   const manage: TileSpec[] = [];
   if (canDecide) {
     manage.push({ to: "/app/attendance/approvals", title: "Correction Approvals", description: "Corrections waiting for your decision", icon: ClipboardList, badge: waiting, testId: "tile-correction-approvals" });
+  }
+
+  if (identity?.roleKeys.includes("line_manager")) {
+    manage.push({ to: "/app/attendance/team", title: "Team Attendance", description: "How your team did over the last 14 days", icon: Users, testId: "tile-team-attendance" });
   }
 
   return (

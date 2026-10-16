@@ -3852,6 +3852,20 @@ export type AttendancePeriodSummary = {
   earlyLeaveMinutes: number;
 };
 
+/** One person on a manager's team, for the Team Attendance page. */
+export type TeamAttendanceMember = {
+  employeeId: string;
+  employeeName: string;
+  employeeNumber: string;
+  /** Processed status of the last day of the window, if that day has been processed. */
+  lastDayStatus: AttendanceDailyStatus | null;
+  /** Set when the person is clocked in right now (no clock-out yet). */
+  clockedInSince: string | null;
+  summary: AttendancePeriodSummary;
+};
+
+export type TeamAttendanceView = { from: string; to: string; members: TeamAttendanceMember[] };
+
 export type OverrideAttendanceDayRequest = { employeeId: string; workDate: string; status: AttendanceDailyStatus; reason: string };
 
 export type EvaluateAttendanceRequest = { from: string; to: string; employeeId?: string };

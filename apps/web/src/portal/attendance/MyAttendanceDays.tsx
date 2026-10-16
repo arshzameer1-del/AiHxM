@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { AttendanceDailyResultView, AttendanceDailyStatus, AttendancePeriodSummary } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 
-const STATUS_LABELS: Record<AttendanceDailyStatus, string> = {
+export const STATUS_LABELS: Record<AttendanceDailyStatus, string> = {
   present: "Present",
   absent: "Absent",
   late: "Late",
@@ -16,7 +16,7 @@ const STATUS_LABELS: Record<AttendanceDailyStatus, string> = {
   no_schedule: "No schedule",
 };
 
-const STATUS_STYLES: Record<AttendanceDailyStatus, string> = {
+export const STATUS_STYLES: Record<AttendanceDailyStatus, string> = {
   present: "bg-success/10 text-success",
   absent: "bg-danger/10 text-danger",
   late: "bg-warning/10 text-warning",

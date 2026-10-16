@@ -29,6 +29,12 @@ export class AttendanceOpsController {
     return this.evaluation.list(claims, { employeeId, from, to });
   }
 
+  /** Declared before the `:employeeId` routes' siblings; the path has no parameter so it cannot be mistaken for one. */
+  @Get("attendance-team")
+  team(@CurrentClaims() claims: RequestClaims, @Query("from") from: string, @Query("to") to: string) {
+    return this.evaluation.team(claims, from, to);
+  }
+
   @Get("employees/:employeeId/attendance-summary")
   summary(@CurrentClaims() claims: RequestClaims, @Param("employeeId") employeeId: string, @Query("from") from: string, @Query("to") to: string) {
     return this.evaluation.summary(claims, employeeId, from, to);

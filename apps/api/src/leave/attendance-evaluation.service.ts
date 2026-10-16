@@ -15,6 +15,8 @@ import type {
   EvaluateAttendanceRequest,
   OverrideAttendanceDayRequest,
   ResolvedWorkScheduleView,
+  TeamAttendanceMember,
+  TeamAttendanceView,
 } from "@aihxm/shared-types";
 
 const MODULE_KEY = "leave" as const;
@@ -333,6 +335,49 @@ export class AttendanceEvaluationService {
         [filter.employeeId, filter.from, filter.to]
       );
       return r.rows.map(toView);
+    });
+  }
+
+  /**
+   * Team Attendance (parked B1): the people who report to the caller, with their processed-day summary for the window,
+   * the status of its last day and whether they are clocked in right now. Same rule as `requireAccess`: a manager reads
+   * the attendance of their own reports; nobody else's. A caller with no reports gets an empty list.
+   */
+  async team(claims: RequestClaims, from: string, to: string): Promise<TeamAttendanceView> {
+    await this.requireModule(claims);
+    const day = /^\d{4}-\d{2}-\d{2}$/;
+    if (!day.test(from) || !day.test(to)) throw new BadRequestException("from and to must be dates (YYYY-MM-DD)");
+    if (to < from) throw new BadRequestException("to cannot be before from");
+    if ((Date.parse(to) - Date.parse(from)) / 86400000 > 92) throw new BadRequestException("The window can be at most 93 days");
+    return this.db.withClaims(claims, async (client) => {
+      const reports = await client.query<{ id: string; first_name: string; last_name: string; employee_number: string }>(
+        `SELECT e.id, e.first_name, e.last_name, e.employee_number
+           FROM employees e JOIN employees m ON m.id = e.manager_id
+          WHERE m.user_account_id = $1 AND e.employment_status <> 'terminated'
+          ORDER BY e.first_name, e.last_name LIMIT 200`,
+        [claims.sub]
+      );
+      const members: TeamAttendanceMember[] = [];
+      for (const r of reports.rows) {
+        const summary = await this.getPeriodSummary(client, r.id, from, to);
+        const last = await client.query<{ status: AttendanceDailyStatus }>(
+          "SELECT status FROM attendance_daily_results WHERE employee_id = $1 AND work_date = $2::date",
+          [r.id, to]
+        );
+        const open = await client.query<{ clock_in_at: unknown }>(
+          "SELECT clock_in_at FROM attendance_records WHERE employee_id = $1 AND clock_out_at IS NULL ORDER BY clock_in_at DESC LIMIT 1",
+          [r.id]
+        );
+        members.push({
+          employeeId: r.id,
+          employeeName: `${r.first_name} ${r.last_name}`.trim(),
+          employeeNumber: r.employee_number,
+          lastDayStatus: last.rows[0]?.status ?? null,
+          clockedInSince: open.rows[0] ? new Date(open.rows[0].clock_in_at as string | Date).toISOString() : null,
+          summary,
+        });
+      }
+      return { from, to, members };
     });
   }
 

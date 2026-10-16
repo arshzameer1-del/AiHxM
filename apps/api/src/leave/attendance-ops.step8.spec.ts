@@ -223,6 +223,20 @@ describe("Attendance daily results, devices and timesheets (Step 8B)", () => {
       await expect(evaluation.evaluate(staffClaims, { from: "2027-03-01", to: "2027-03-02" })).rejects.toBeInstanceOf(ForbiddenException);
       await expect(evaluation.evaluate(hr, { from: "2027-01-01", to: "2027-12-31" })).rejects.toThrow(/limited/);
     });
+
+    it("Team Attendance (B1): a manager sees their reports with summary and last-day status; others see nobody; bad windows are refused", async () => {
+      const view = await evaluation.team(managerClaims, "2027-03-01", "2027-03-10");
+      const mine = view.members.find((m) => m.employeeId === staffEmployeeId);
+      expect(mine).toBeDefined();
+      expect(mine!.employeeNumber).toBe(staffNumber);
+      expect(mine!.summary.days).toBe(10);
+      expect(mine!.lastDayStatus).not.toBeNull();
+      // nobody reports to the colleague, so their team is empty and they cannot see someone else's team
+      expect((await evaluation.team(otherClaims, "2027-03-01", "2027-03-10")).members.find((m) => m.employeeId === staffEmployeeId)).toBeUndefined();
+      await expect(evaluation.team(managerClaims, "2027-03-10", "2027-03-01")).rejects.toThrow(/before/);
+      await expect(evaluation.team(managerClaims, "2027-01-01", "2027-12-31")).rejects.toThrow(/93 days/);
+      await expect(evaluation.team(managerClaims, "garbage", "2027-03-01")).rejects.toThrow(/YYYY-MM-DD/);
+    });
   });
 
   describe("TLM-05 devices and punch ingestion", () => {
