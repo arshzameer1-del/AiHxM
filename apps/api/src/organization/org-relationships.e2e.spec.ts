@@ -217,11 +217,11 @@ describe("Org Relationships HTTP surface (e2e)", () => {
       expect(res.body.map((r: { id: string }) => r.id)).toContain(relationshipId);
     });
 
-    it("a Line Manager can read (view.all) even though they can't mutate", async () => {
+    it("a Line Manager can no longer list everyone's reporting lines (parked B4, 0156); HR can", async () => {
       const res = await request(app.getHttpServer())
         .get("/organization/relationships")
         .set("Authorization", `Bearer ${managerToken}`);
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(403);
     });
 
     it("returns one relationship by id", async () => {

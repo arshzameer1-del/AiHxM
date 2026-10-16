@@ -319,9 +319,8 @@ describe("EmployeeOrgAssignmentsService", () => {
       });
     });
 
-    it("a Line Manager (employee_org_assignment.view.all only) can read but not mutate", async () => {
-      const list = await assignments.list(managerClaims);
-      expect(Array.isArray(list)).toBe(true);
+    it("a Line Manager can neither read nor mutate assignments (0156)", async () => {
+      await expect(assignments.list(managerClaims)).rejects.toThrow(ForbiddenException);
       await expect(
         assignments.create(managerClaims, { employeeId, assignmentType: "secondary", orgUnitId: engineeringUnitId })
       ).rejects.toThrow(ForbiddenException);

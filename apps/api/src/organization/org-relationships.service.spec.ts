@@ -303,9 +303,8 @@ describe("OrgRelationshipsService", () => {
       });
     });
 
-    it("a Line Manager (org_relationship.view.all only) can read but not mutate", async () => {
-      const list = await relationships.list(managerClaims);
-      expect(Array.isArray(list)).toBe(true);
+    it("a Line Manager can neither read nor mutate reporting-line relationships (0156)", async () => {
+      await expect(relationships.list(managerClaims)).rejects.toThrow(ForbiddenException);
       await expect(
         relationships.create(managerClaims, { employeeId: alice, managerEmployeeId: bob, relationshipType: "dotted_line" })
       ).rejects.toThrow(ForbiddenException);

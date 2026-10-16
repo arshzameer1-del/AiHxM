@@ -164,11 +164,11 @@ describe("Employee Org Assignments HTTP surface (e2e)", () => {
       expect(res.body.map((a: { id: string }) => a.id)).toContain(assignmentId);
     });
 
-    it("a Line Manager can read (view.all) even though they can't mutate", async () => {
+    it("a Line Manager can no longer list everyone's assignments (parked B4, 0156); HR can", async () => {
       const res = await request(app.getHttpServer())
         .get("/organization/employee-assignments")
         .set("Authorization", `Bearer ${managerToken}`);
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(403);
     });
 
     it("returns one assignment by id", async () => {

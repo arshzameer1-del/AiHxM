@@ -35,6 +35,12 @@ describe("least privilege for organization finance data", () => {
     expect(await holders(key)).toContain("hr_admin");
   });
 
+  it.each(["employee_org_assignment.view.all", "org_relationship.view.all"])("%s (who sits where, who reports to whom) is HR Admin only (B4, 0156)", async (key) => {
+    const keys = await holders(key);
+    for (const forbidden of ["employee_self_service", "ess_portal", "line_manager"]) expect(keys).not.toContain(forbidden);
+    expect(keys).toContain("hr_admin");
+  });
+
   it("the org chart itself (units, jobs, positions, locations) is still visible to Employee and Line Manager", async () => {
     for (const key of ["org_unit.view.all", "job.view.all", "position.view.all", "location.view.all"]) {
       const keys = await holders(key);
