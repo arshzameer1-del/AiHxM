@@ -28,6 +28,7 @@ import { PayrollCalculationPanel } from "./PayrollCalculationPanel";
 import { PayrollRetroPanel } from "./PayrollRetroPanel";
 import { TaxProfilesPanel } from "./TaxProfilesPanel";
 import { LoanTypesPanel } from "./LoanTypesPanel";
+import { formatPeriod } from "../shared/dates";
 import { PayslipComponentsPanel } from "./PayslipComponentsPanel";
 
 function describeError(err: unknown): string {
@@ -77,7 +78,7 @@ function PayslipRow({ payslip }: { payslip: PayslipView }) {
     <div className="bg-card rounded-lg px-4 py-3 shadow-sm border border-black/5">
       <button className="w-full flex items-center justify-between text-left" onClick={() => setExpanded((e) => !e)}>
         <span className="text-sm font-medium">
-          {payslip.payrollRunPeriodStart} – {payslip.payrollRunPeriodEnd}
+          {formatPeriod(payslip.payrollRunPeriodStart, payslip.payrollRunPeriodEnd)}
         </span>
         <span className="flex items-center gap-4">
           <span className="text-sm font-mono tabular-nums">{pkr.format(payslip.netPay)}</span>
@@ -296,7 +297,7 @@ function RunCard({
         <button className="text-left" onClick={toggleExpanded}>
           <div className="font-medium text-sm flex items-center gap-2 flex-wrap">
             <span>
-              {run.periodStart} – {run.periodEnd}
+              {formatPeriod(run.periodStart, run.periodEnd)}
             </span>
             {/* Payroll Areas — which slice of the company this run pays, so
                 two runs for the same period (one per area) are never
@@ -428,7 +429,7 @@ function RunCard({
       {deciding && (
         <div className="mt-3 pt-3 border-t border-black/5 space-y-2">
           <div className="text-xs text-label-secondary">
-            {deciding === "approved" ? "Approving" : "Rejecting"} {run.periodStart} – {run.periodEnd}:{" "}
+            {deciding === "approved" ? "Approving" : "Rejecting"} {formatPeriod(run.periodStart, run.periodEnd)}:{" "}
             <span className="font-mono">
               {run.payslipCount} {run.payslipCount === 1 ? "employee" : "employees"}, net pay {pkr.format(run.totalNetPay)}
             </span>
@@ -459,7 +460,7 @@ function RunCard({
       {reversing && (
         <div className="mt-3 pt-3 border-t border-black/5 space-y-2">
           <div className="text-xs text-label-secondary">
-            Reversing {run.periodStart} – {run.periodEnd} — this cannot be undone. The original payslips are kept
+            Reversing {formatPeriod(run.periodStart, run.periodEnd)} — this cannot be undone. The original payslips are kept
             for the record; a new draft run opens for the same period so you can correct and refinalize it.
           </div>
           <input
