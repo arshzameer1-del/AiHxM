@@ -265,7 +265,7 @@ function PortalMark({ companySlug, companyName }: { companySlug: string | null; 
     );
   }
 
-  return <div className="text-lg font-bold tracking-tight text-white">AI HXM</div>;
+  return <div className="text-lg font-bold tracking-tight text-sidebar-strong">AI HXM</div>;
 }
 
 /**
@@ -415,7 +415,7 @@ export function PortalLayout() {
         <aside className={SIDEBAR_CONTAINER_CLASS}>
           <div className="px-3 mb-8">
             <PortalMark companySlug={identity?.companySlug ?? null} companyName={identity?.companyName ?? null} />
-            <div className="text-xs text-slate-400 truncate mt-1.5">{identity?.companyName ?? "Your company"}</div>
+            <div className="text-xs text-sidebar-muted truncate mt-1.5">{identity?.companyName ?? "Your company"}</div>
           </div>
 
           <nav className="flex flex-col gap-1">

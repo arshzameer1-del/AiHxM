@@ -19,8 +19,8 @@ export function Layout() {
     <div className="min-h-screen flex">
       <aside className={SIDEBAR_CONTAINER_CLASS}>
         <div className="px-3 mb-8">
-          <AihxmLogo size={40} className="text-white" />
-          <div className="text-xs text-slate-400 mt-1.5">Platform Admin</div>
+          <AihxmLogo size={40} className="text-sidebar-strong" />
+          <div className="text-xs text-sidebar-muted mt-1.5">Platform Admin</div>
         </div>
 
         <nav className="flex flex-col gap-1">

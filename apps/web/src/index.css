@@ -2,6 +2,107 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Themes. Every colour token in tailwind.config.js reads one of these variables
+ * (as space-separated RGB channels, so opacity modifiers like bg-accent/10 work).
+ * The default is "enterprise": the AiHxM Enterprise Master Design System (dark
+ * sidebar, #2563EB). "boostfactor" is the iOS-style look from the BoostFactor
+ * prototype (#F2F2F7 page, #007AFF, white sidebar, pill buttons, 9px fields).
+ * Both are light themes. The active one is set on <html data-theme="…"> by
+ * src/theme/theme.ts.
+ */
+:root {
+  color-scheme: light;
+
+  --c-surface: 248 250 252;
+  --c-card: 255 255 255;
+  --c-border: 226 232 240;
+  --c-accent: 37 99 235;
+  --c-accent-dark: 29 78 216;
+  --c-brand-secondary: 124 58 237;
+  --c-brand-dark: 15 23 42;
+  --c-success: 22 163 74;
+  --c-danger: 220 38 38;
+  --c-warning: 217 119 6;
+  --c-info: 2 132 199;
+  --c-ai: 124 58 237;
+  --c-label-primary: 15 23 42;
+  --c-label-secondary: 71 85 105;
+  --c-label-tertiary: 148 163 184;
+
+  /* sidebar */
+  --c-sidebar: 15 23 42;
+  --c-sidebar-fg: 203 213 225;
+  --c-sidebar-fg-hover: 255 255 255;
+  --c-sidebar-muted: 148 163 184;
+  --c-sidebar-strong: 255 255 255;
+  --c-sidebar-active: 255 255 255; /* used at 10% */
+  --c-sidebar-active-fg: 255 255 255;
+  --c-sidebar-hover: 255 255 255; /* used at 5% */
+  --c-sidebar-line: 255 255 255; /* used at 10% */
+  --c-sidebar-edge: 15 23 42;
+
+  --radius-control: 0.5rem;
+  --radius-button: 0.5rem;
+}
+
+:root[data-theme="boostfactor"] {
+  --c-surface: 242 242 247;
+  --c-card: 255 255 255;
+  --c-border: 229 229 234;
+  --c-accent: 0 122 255;
+  --c-accent-dark: 0 98 204;
+  --c-brand-secondary: 137 68 171;
+  --c-brand-dark: 28 28 30;
+  --c-success: 36 138 61;
+  --c-danger: 215 0 21;
+  --c-warning: 178 80 0;
+  --c-info: 0 113 164;
+  --c-ai: 137 68 171;
+  --c-label-primary: 28 28 30;
+  --c-label-secondary: 99 99 102;
+  --c-label-tertiary: 142 142 147;
+
+  --c-sidebar: 255 255 255;
+  --c-sidebar-fg: 28 28 30;
+  --c-sidebar-fg-hover: 28 28 30;
+  --c-sidebar-muted: 99 99 102;
+  --c-sidebar-strong: 28 28 30;
+  --c-sidebar-active: 0 122 255;
+  --c-sidebar-active-fg: 0 122 255;
+  --c-sidebar-hover: 0 0 0;
+  --c-sidebar-line: 0 0 0;
+  --c-sidebar-edge: 229 229 234;
+
+  --radius-control: 9px;
+  --radius-button: 999px;
+}
+
 body {
   @apply bg-surface text-label-primary font-sans;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---- BoostFactor look: shape rules the colour tokens alone cannot express ---- */
+
+/* Primary and outlined buttons are pills. */
+:root[data-theme="boostfactor"] :is(button, a, label).bg-accent.text-white,
+:root[data-theme="boostfactor"] :is(button, a, label).border-accent.text-accent {
+  border-radius: var(--radius-button);
+}
+
+/* Text fields, selects and text areas: 9px corners on a faintly tinted field. */
+:root[data-theme="boostfactor"] :is(input, select, textarea):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not(.rounded-full) {
+  border-radius: var(--radius-control);
+}
+
+/* Tabs and segmented switches read as light grey capsules with a white active item. */
+:root[data-theme="boostfactor"] [role="tablist"] [role="tab"] {
+  border-radius: 8px;
+}
+
+/* A quiet focus ring that follows the accent. */
+:root[data-theme="boostfactor"] :is(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid rgb(var(--c-accent) / 0.55);
+  outline-offset: 2px;
 }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronDown, LogOut, Search } from "lucide-react";
+import { Check, ChevronDown, LogOut, Search } from "lucide-react";
+import { applyTheme, currentTheme, THEMES, type ThemeKey } from "../../theme/theme";
 
 export type QuickJumpItem = { to: string; label: string; group?: string };
 
@@ -38,6 +39,7 @@ export function Topbar({
 }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [theme, setTheme] = useState<ThemeKey>(() => currentTheme());
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -59,6 +61,7 @@ export function Topbar({
         setPaletteOpen(true);
       } else if (event.key === "Escape") {
         setPaletteOpen(false);
+        setProfileOpen(false);
       }
     }
     window.addEventListener("keydown", onKeyDown);
@@ -142,10 +145,29 @@ export function Topbar({
           </button>
 
           {profileOpen && (
-            <div className="absolute right-0 mt-2 w-56 bg-card border border-border rounded-xl shadow-lg py-1.5 z-30">
+            <div className="absolute right-0 mt-2 w-64 bg-card border border-border rounded-xl shadow-lg py-1.5 z-30">
               <div className="px-3.5 py-2 border-b border-border">
                 <div className="text-sm font-medium text-label-primary truncate">{userName}</div>
                 <div className="text-xs text-label-secondary truncate">{userEmail}</div>
+              </div>
+              <div role="group" aria-label="Theme" className="px-1.5 py-1.5 border-b border-border">
+                <div className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-label-tertiary">Theme</div>
+                {THEMES.map((t) => (
+                  <button
+                    key={t.key}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={theme === t.key}
+                    onClick={() => setTheme(applyTheme(t.key))}
+                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left text-sm hover:bg-surface transition-colors"
+                  >
+                    <span className="w-4 shrink-0 text-accent">{theme === t.key && <Check size={15} strokeWidth={2.25} aria-hidden />}</span>
+                    <span className="min-w-0">
+                      <span className="block text-label-primary">{t.label}</span>
+                      <span className="block text-xs text-label-secondary">{t.hint}</span>
+                    </span>
+                  </button>
+                ))}
               </div>
               <button
                 type="button"

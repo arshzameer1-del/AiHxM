@@ -1,4 +1,6 @@
 /** @type {import('tailwindcss').Config} */
+const color = (name) => `rgb(var(--c-${name}) / <alpha-value>)`;
+
 export default {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   theme: {
@@ -20,36 +22,47 @@ export default {
       // utilities are untouched for now (visually close, not worth a
       // mass find-replace in this pass) but new shell/component work
       // should reach for `border-border` instead.
+      // Theming (2026-10): every colour token resolves to a CSS variable, so the
+      // same class names (bg-accent, text-label-secondary, …) follow whichever
+      // theme is active. The values live in src/index.css — "enterprise" (the
+      // AiHxM Master Design System, default) and "boostfactor" (iOS style from the
+      // BoostFactor prototype). `<alpha-value>` keeps bg-accent/10-style
+      // modifiers working.
       colors: {
-        surface: "#F8FAFC",
-        card: "#FFFFFF",
-        border: "#E2E8F0",
+        surface: color("surface"),
+        card: color("card"),
+        border: color("border"),
         accent: {
-          DEFAULT: "#2563EB",
-          dark: "#1D4ED8",
+          DEFAULT: color("accent"),
+          dark: color("accent-dark"),
         },
         brand: {
-          secondary: "#7C3AED",
-          dark: "#0F172A",
+          secondary: color("brand-secondary"),
+          dark: color("brand-dark"),
         },
-        success: "#16A34A",
-        danger: "#DC2626",
-        // Tenant Management gap-fill Phase 1 item #4 — the persistent
-        // "you're impersonating X" banner. Still the warning token,
-        // just the master design system's amber instead of Apple HIG's
-        // system orange.
-        warning: "#D97706",
-        info: "#0284C7",
-        // AI assistant surfaces, AI-generated badges/insights, AI-driven
-        // actions (Section 14, "AI-Native UI Rules") — same hex as
-        // brand.secondary by the doc's own spec, kept as its own token
-        // name so "this is AI" reads as a distinct semantic meaning in
-        // the markup, not just "the secondary brand color."
-        ai: "#7C3AED",
+        success: color("success"),
+        danger: color("danger"),
+        warning: color("warning"),
+        info: color("info"),
+        // AI assistant surfaces and AI-generated badges/insights.
+        ai: color("ai"),
         label: {
-          primary: "#0F172A",
-          secondary: "#475569",
-          tertiary: "#94A3B8",
+          primary: color("label-primary"),
+          secondary: color("label-secondary"),
+          tertiary: color("label-tertiary"),
+        },
+        // Sidebar chrome: dark in "enterprise", white in "boostfactor".
+        sidebar: {
+          DEFAULT: color("sidebar"),
+          fg: color("sidebar-fg"),
+          "fg-hover": color("sidebar-fg-hover"),
+          muted: color("sidebar-muted"),
+          strong: color("sidebar-strong"),
+          active: color("sidebar-active"),
+          "active-fg": color("sidebar-active-fg"),
+          hover: color("sidebar-hover"),
+          line: color("sidebar-line"),
+          edge: color("sidebar-edge"),
         },
       },
       fontFamily: {
