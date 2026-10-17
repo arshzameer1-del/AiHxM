@@ -247,3 +247,63 @@ describe("HrReferenceCatalogService", () => {
     );
   });
 });
+
+/** UIFIELDS: the nationality dropdown lists every country, also for a company that was seeded with only "Pakistani" and "Other". */
+describe("HrReferenceCatalogService nationality list", () => {
+  let pool: Pool;
+  let db: DatabaseService;
+  let catalog: HrReferenceCatalogService;
+  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  let oldCompanyId: string;
+  let newCompanyId: string;
+
+  let hrAdminUserId: string;
+  const claimsFor = (companyId: string): RequestClaims => ({ is_platform_admin: false, company_id: companyId, sub: hrAdminUserId });
+
+  beforeAll(async () => {
+    pool = new Pool({ connectionString: process.env.APP_DATABASE_URL });
+    db = new DatabaseService(pool);
+    catalog = new HrReferenceCatalogService(db, new RbacService(db), new EntitlementsService(db), new AuditService());
+    await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+      const make = async (tag: string) => {
+        const id = (await client.query("INSERT INTO companies (name, slug) VALUES ($1,$2) RETURNING id", [`Nat ${tag} ${stamp}`, `nat-${tag}-${stamp}`])).rows[0].id as string;
+        await client.query(`INSERT INTO company_config (company_id, enabled_modules) VALUES ($1, '["employee"]'::jsonb)`, [id]);
+        await client.query("INSERT INTO tenant_module_entitlement (company_id, module_key, enabled) VALUES ($1,'employee',true)", [id]);
+        return id;
+      };
+      oldCompanyId = await make("old");
+      newCompanyId = await make("new");
+      hrAdminUserId = (await client.query("INSERT INTO user_accounts (email, password_hash) VALUES ($1,'x') RETURNING id", [`nat-admin-${stamp}@example.com`])).rows[0].id;
+      const role = (await client.query("SELECT id FROM roles WHERE key = 'hr_admin'")).rows[0].id;
+      for (const cid of [oldCompanyId, newCompanyId]) {
+        await client.query("INSERT INTO user_role_assignments (user_account_id, company_id, role_id) VALUES ($1,$2,$3)", [hrAdminUserId, cid, role]);
+      }
+      // the old shape: only the two original items
+      await client.query(
+        `INSERT INTO hr_reference_catalog_items (company_id, catalog_type, code, label, sort_order) VALUES
+           ($1,'nationality','pk','Pakistani',0), ($1,'nationality','other','Other',1)`,
+        [oldCompanyId]
+      );
+    });
+  });
+
+  afterAll(async () => {
+    await pool.end();
+  });
+
+  it("adds the full list once to a company that only had Pakistani and Other, Pakistani first and Other last", async () => {
+    const items = await catalog.listItems(claimsFor(oldCompanyId), "nationality");
+    expect(items.length).toBeGreaterThan(150);
+    expect(items[0].label).toBe("Pakistani");
+    expect(items[items.length - 1].label).toBe("Other");
+    expect(items.map((i) => i.label)).toEqual(expect.arrayContaining(["Indian", "Afghan", "British", "American", "Saudi", "Emirati"]));
+    const again = await catalog.listItems(claimsFor(oldCompanyId), "nationality");
+    expect(again.length).toBe(items.length);
+  });
+
+  it("seeds a brand-new company with the full list too", async () => {
+    const items = await catalog.listItems(claimsFor(newCompanyId), "nationality");
+    expect(items.length).toBeGreaterThan(150);
+    expect(items[0].label).toBe("Pakistani");
+  });
+});

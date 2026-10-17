@@ -7,6 +7,7 @@ import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
 import { HR_CATALOG_REGISTRY, getCatalogTypeDefinition, isRegisteredCatalogType } from "./catalog-type-registry";
 import { DEFAULT_CATALOG_SEED } from "./default-catalog-seed";
+import { NATIONALITY_OTHER_SORT_ORDER, NATIONALITY_SEED } from "./nationality-seed";
 import type {
   CreateHrReferenceCatalogItemRequest,
   HrReferenceCatalogItemUsage,
@@ -119,6 +120,24 @@ export class HrReferenceCatalogService {
          ON CONFLICT (company_id, catalog_type, code) DO NOTHING`,
         [companyId, item.catalogType, item.code, item.label, item.sortOrder]
       );
+    }
+    // A company seeded when the nationality catalog held only "Pakistani" and "Other" gets the full country list added once
+    // (nothing is removed or renamed; "Other" just moves to the end of the list).
+    if (have.has("nationality")) {
+      const full = await client.query("SELECT 1 FROM hr_reference_catalog_items WHERE company_id = $1 AND catalog_type = 'nationality' AND code = 'af' LIMIT 1", [companyId]);
+      if (full.rowCount === 0) {
+        await client.query(
+          `INSERT INTO hr_reference_catalog_items (company_id, catalog_type, code, label, sort_order)
+           SELECT $1, 'nationality', v.code, v.label, v.sort_order
+             FROM unnest($2::text[], $3::text[], $4::int[]) AS v(code, label, sort_order)
+           ON CONFLICT (company_id, catalog_type, code) DO NOTHING`,
+          [companyId, NATIONALITY_SEED.map((n) => n.code), NATIONALITY_SEED.map((n) => n.label), NATIONALITY_SEED.map((n) => n.sortOrder)]
+        );
+        await client.query(
+          "UPDATE hr_reference_catalog_items SET sort_order = $2 WHERE company_id = $1 AND catalog_type = 'nationality' AND code = 'other' AND sort_order = 1",
+          [companyId, NATIONALITY_OTHER_SORT_ORDER]
+        );
+      }
     }
   }
 

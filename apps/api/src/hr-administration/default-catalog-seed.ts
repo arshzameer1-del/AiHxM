@@ -10,6 +10,8 @@
  * this migration's own seed and this file never need to be kept in sync
  * by hand at more than this one list.
  */
+import { NATIONALITY_SEED } from "./nationality-seed";
+
 export const DEFAULT_CATALOG_SEED: { catalogType: string; code: string; label: string; sortOrder: number }[] = [
   { catalogType: "employment_type", code: "permanent", label: "Permanent", sortOrder: 0 },
   { catalogType: "employment_type", code: "contract", label: "Contract", sortOrder: 1 },
@@ -147,8 +149,7 @@ export const DEFAULT_CATALOG_SEED: { catalogType: string; code: string; label: s
   { catalogType: "marital_status", code: "divorced", label: "Divorced", sortOrder: 2 },
   { catalogType: "marital_status", code: "widowed", label: "Widowed", sortOrder: 3 },
 
-  { catalogType: "nationality", code: "pk", label: "Pakistani", sortOrder: 0 },
-  { catalogType: "nationality", code: "other", label: "Other", sortOrder: 1 },
+  ...NATIONALITY_SEED,
 
   { catalogType: "language", code: "ur", label: "Urdu", sortOrder: 0 },
   { catalogType: "language", code: "en", label: "English", sortOrder: 1 },

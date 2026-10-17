@@ -46,6 +46,8 @@ export type HiringPickerOptions = {
   maritalStatuses: HrReferenceCatalogItemView[];
   /** This company's `nationality` catalog (empty = the Nationality field is a text box). */
   nationalities?: HrReferenceCatalogItemView[];
+  /** This company's `language` catalog (empty = the Language field is a text box). */
+  languages?: HrReferenceCatalogItemView[];
   contactTypes: HrReferenceCatalogItemView[];
   addressTypes: HrReferenceCatalogItemView[];
   relationshipTypes: HrReferenceCatalogItemView[];
@@ -316,7 +318,9 @@ const FALLBACK_MARITAL_STATUSES = [
 
 function PersonalIdentityForm({ data, onChange, options, fieldConfig }: CardFormProps) {
   const maritalStatusOptions = catalogOptions(options.maritalStatuses, FALLBACK_MARITAL_STATUSES);
-  const nationalityOptions = catalogOptions(options.nationalities ?? [], []);
+  // The person record keeps the readable name ("Pakistani"), not the catalog code ("pk"), so the value of each option is its label.
+  const nationalityOptions = (options.nationalities ?? []).map((n) => ({ value: n.label, label: n.label }));
+  const languageOptions = (options.languages ?? []).map((l) => ({ value: l.label, label: l.label }));
   // The extra Personal Identity fields (UIFIELDS) are plain inputs; the six original ones below are unchanged.
   const extra = (key: string, label: string, type: "text" | "date" = "text") => (
     <FieldGate fieldConfig={fieldConfig} fieldKey={key}>
@@ -458,7 +462,28 @@ function PersonalIdentityForm({ data, onChange, options, fieldConfig }: CardForm
           )}
         </Labeled>
       </FieldGate>
-      {extra("language", "Language")}
+      {languageOptions.length > 0 ? (
+        <FieldGate fieldConfig={fieldConfig} fieldKey="language">
+          <Labeled label="Language">
+            <select
+              required={fieldRequired(fieldConfig, "language", false)}
+              value={str(data, "language")}
+              onChange={(e) => set(data, onChange, "language", e.target.value)}
+              className={inputClass()}
+              data-testid="pi-language"
+            >
+              <option value="">Select…</option>
+              {languageOptions.map((l) => (
+                <option key={l.value} value={l.value}>
+                  {l.label}
+                </option>
+              ))}
+            </select>
+          </Labeled>
+        </FieldGate>
+      ) : (
+        extra("language", "Language")
+      )}
       {extra("passportNumber", "Passport number")}
       {extra("passportExpiry", "Passport expiry", "date")}
       {extra("ntn", "NTN")}
