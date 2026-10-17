@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import type { ImpersonateResponse, MeResponse } from "@aihxm/shared-types";
 import {
@@ -68,7 +68,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // this logout fires before identity ever loaded this session (a stale tab
   // whose token was already expired) — set from a PRIOR successful load,
   // by fetchIdentity below.
+  //
+  // Second real bug from production (a company login's "Log out" still ended on the shared aihxm.com login page): the
+  // screens that were still waiting on the server when the person clicked "Log out" get a 401 once the token is gone,
+  // and each 401 called logout() AGAIN. By then the remembered company was already cleared, so the second call sent
+  // the person on to the shared /login. One sign-out is now final: while signed out, later calls do nothing.
+  const signedOut = useRef(!getToken());
   const logout = useCallback(() => {
+    if (signedOut.current) return;
+    signedOut.current = true;
     const tenantSlug = identity?.companySlug ?? getLastTenantSlug();
     clearToken();
     clearImpersonationStash();
@@ -134,6 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (stash) {
         clearImpersonationStash();
         setImpersonation(null);
+        signedOut.current = false;
         setToken(stash.adminToken);
         setIsAuthenticated(true);
         fetchIdentity()
@@ -152,6 +161,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const setSessionToken = useCallback(
     async (token: string): Promise<MeResponse> => {
+      signedOut.current = false;
       setToken(token);
       setIsAuthenticated(true);
       return fetchIdentity();
@@ -192,6 +202,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const endImpersonation = useCallback(async (): Promise<void> => {
     const stash = getImpersonationStash();
     if (!stash) return;
+    signedOut.current = false;
     setToken(stash.adminToken);
     try {
       await api.revokeSession(stash.sessionId);
