@@ -2586,8 +2586,9 @@ export const api = {
   clockOut: (input: ClockOutRequest) =>
     request<AttendanceRecordView>("/attendance/clock-out", { method: "POST", body: JSON.stringify(input) }),
 
-  listAttendance: (employeeId: string) =>
-    request<AttendanceRecordView[]>(`/employees/${employeeId}/attendance`),
+  /** Newest first. `limit` keeps the answer (and the server's work) small; the server default is 200. */
+  listAttendance: (employeeId: string, limit?: number) =>
+    request<AttendanceRecordView[]>(`/employees/${employeeId}/attendance${limit ? `?limit=${limit}` : ""}`),
 
   submitAttendanceCorrection: (input: SubmitAttendanceCorrectionRequest) =>
     request<AttendanceCorrectionRequestView>("/attendance-corrections", { method: "POST", body: JSON.stringify(input) }),

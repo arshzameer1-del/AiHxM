@@ -4,7 +4,8 @@ import { BackLink, PageHeader } from "../shared/PageChrome";
 import { AttendanceLaunchpad } from "./AttendanceLaunchpad";
 import { ClockPanel, CorrectionsPanel } from "./AttendancePanels";
 import { PendingCorrectionsSection } from "./CorrectionApprovals";
-import { MyAttendanceDays } from "./MyAttendanceDays";
+import { MyAttendanceCard } from "./AttendanceCards";
+import { useMyAttendance } from "./useMyAttendance";
 import { MyTimesheet } from "./MyTimesheet";
 import { TeamAttendancePage } from "./TeamAttendancePage";
 
@@ -55,17 +56,12 @@ function ClockPage() {
 
 function DaysPage() {
   const { employeeId, refreshKey } = useModuleContext();
+  const data = useMyAttendance(employeeId, refreshKey);
   return (
     <div>
       <BackLink to="/app/attendance">Back to Time & Attendance</BackLink>
-      <PageHeader title="My Attendance" subtitle="Your last 14 days." />
-      {employeeId ? (
-        <section className="bg-white rounded-md shadow-sm p-4" aria-label="My attendance">
-          <MyAttendanceDays employeeId={employeeId} refreshKey={refreshKey} />
-        </section>
-      ) : (
-        <NoRecord />
-      )}
+      <PageHeader title="My Attendance" subtitle="The last 30 days, day by day." />
+      {employeeId ? <MyAttendanceCard data={data} /> : <NoRecord />}
     </div>
   );
 }

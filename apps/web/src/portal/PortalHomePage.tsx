@@ -21,7 +21,6 @@ import {
   FileText,
 } from "lucide-react";
 import type {
-  AttendanceRecordView,
   LeaveBalanceView,
   LeaveRequestView,
   ModuleKey,
@@ -31,6 +30,10 @@ import type {
 import { useAuth } from "../auth/AuthContext";
 import { api } from "../api/client";
 import { leaveTypeLabel, STATUS_LABELS, STATUS_STYLES } from "./leave/leaveLabels";
+import { MyAttendanceCard, MyTimesheetCard } from "./attendance/AttendanceCards";
+import { DAY_KIND_LABELS, minutesText } from "./attendance/attendanceDays";
+import { summariseShift } from "./attendance/scheduleText";
+import { useMyAttendance, type MyAttendance } from "./attendance/useMyAttendance";
 
 const ROLE_LABELS: Record<string, string> = {
   hr_admin: "HR Admin",
@@ -132,18 +135,9 @@ function HomeCardTile({ card }: { card: HomeCard }) {
 // to anyone with an employeeId (every role is also a person with their
 // own leave/attendance — not employee_self_service-only), never company-
 // wide figures.
-const ATTENDANCE_STATUS_LABELS: Record<string, string> = {
-  on_time: "Present",
-  late: "Late",
-  early_departure: "Left early",
-  no_shift_assigned: "No shift today",
-  rest_day: "Rest day",
-  holiday: "Holiday",
-};
 
 function useMyLeaveAndAttendanceSnapshot(employeeId: string | null) {
   const [balances, setBalances] = useState<LeaveBalanceView[] | null>(null);
-  const [attendance, setAttendance] = useState<AttendanceRecordView[] | null>(null);
   const [requests, setRequests] = useState<LeaveRequestView[] | null>(null);
 
   useEffect(() => {
@@ -151,12 +145,10 @@ function useMyLeaveAndAttendanceSnapshot(employeeId: string | null) {
     let cancelled = false;
     Promise.all([
       api.getLeaveBalances(employeeId).catch(() => [] as LeaveBalanceView[]),
-      api.listAttendance(employeeId).catch(() => [] as AttendanceRecordView[]),
       api.listLeaveRequests(employeeId).catch(() => [] as LeaveRequestView[]),
-    ]).then(([b, a, r]) => {
+    ]).then(([b, r]) => {
       if (cancelled) return;
       setBalances(b);
-      setAttendance(a);
       setRequests(r);
     });
     return () => {
@@ -166,40 +158,62 @@ function useMyLeaveAndAttendanceSnapshot(employeeId: string | null) {
 
   const pendingLeaveCount = requests ? requests.filter((r) => r.status === "pending").length : null;
 
-  return { balances, attendance, requests, pendingLeaveCount };
+  return { balances, requests, pendingLeaveCount };
 }
 
 function MyDayKpiRow({
   balances,
   attendance,
   pendingLeaveCount,
+  attendanceLink,
 }: {
   balances: LeaveBalanceView[] | null;
-  attendance: AttendanceRecordView[] | null;
+  attendance: MyAttendance;
   pendingLeaveCount: number | null;
+  /** Where the attendance tile opens (the Clock In / Out page for people who can punch, the module otherwise). */
+  attendanceLink: string;
 }) {
   const totalRemainingLeave = balances?.reduce((sum, b) => sum + b.remainingDays, 0) ?? null;
-  const today = new Date().toDateString();
-  const todayRecord = attendance?.find((a) => new Date(a.clockInAt).toDateString() === today) ?? null;
+  const todayRow = attendance.days.get(attendance.today);
+  const shift = summariseShift(attendance.schedule);
+  const clockedIn = Boolean(todayRow?.open);
 
-  const cards: { label: string; value: string; icon: LucideIcon; tone: "accent" | "success" | "warning" }[] = [
+  let attendanceValue = "…";
+  if (!attendance.loading) {
+    if (attendance.error) attendanceValue = "Unavailable";
+    else if (clockedIn && todayRow?.firstIn) attendanceValue = `Clocked in ${formatTime(todayRow.firstIn)}`;
+    else if (todayRow?.firstIn) attendanceValue = `${DAY_KIND_LABELS[todayRow.kind]} · ${minutesText(todayRow.workedMinutes)}`;
+    else if (!shift.working && attendance.schedule) attendanceValue = shift.title;
+    else attendanceValue = "Not clocked in";
+  }
+  const attendanceSub = shift.hours ? `${shift.title} · ${shift.hours}` : shift.title;
+  const lateToday = todayRow?.kind === "late" || todayRow?.kind === "early";
+
+  const cards: { label: string; value: string; sub?: string; to: string; icon: LucideIcon; tone: "accent" | "success" | "warning"; testId: string }[] = [
     {
       label: "Leave balance",
       value: totalRemainingLeave === null ? "…" : `${totalRemainingLeave} days`,
+      to: "/app/leave",
       icon: CalendarDays,
       tone: "accent",
+      testId: "kpi-leave",
     },
     {
       label: "Today's attendance",
-      value: !attendance ? "…" : todayRecord ? ATTENDANCE_STATUS_LABELS[todayRecord.status] ?? todayRecord.status : "Not marked",
+      value: attendanceValue,
+      sub: attendance.loading || attendance.error ? undefined : attendanceSub,
+      to: attendanceLink,
       icon: Clock,
-      tone: todayRecord?.status === "late" ? "warning" : "success",
+      tone: lateToday ? "warning" : "success",
+      testId: "kpi-attendance",
     },
     {
       label: "Pending requests",
       value: pendingLeaveCount === null ? "…" : String(pendingLeaveCount),
+      to: "/app/leave",
       icon: Hourglass,
       tone: pendingLeaveCount && pendingLeaveCount > 0 ? "warning" : "accent",
+      testId: "kpi-pending",
     },
   ];
 
@@ -214,15 +228,21 @@ function MyDayKpiRow({
       {cards.map((card) => {
         const Icon = card.icon;
         return (
-          <div key={card.label} className="bg-card rounded-card p-4 shadow-sm border border-black/5 flex items-center gap-3">
+          <Link
+            key={card.label}
+            to={card.to}
+            data-testid={card.testId}
+            className="bg-card rounded-card p-4 shadow-sm border border-black/5 hover:border-accent/30 flex items-center gap-3 transition-colors"
+          >
             <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${toneClasses[card.tone]}`}>
               <Icon size={20} strokeWidth={1.75} />
             </div>
             <div className="min-w-0">
               <div className="text-lg font-bold tabular-nums truncate">{card.value}</div>
               <div className="text-xs text-label-tertiary truncate">{card.label}</div>
+              {card.sub && <div className="text-xs text-label-secondary truncate" data-testid="kpi-attendance-shift">{card.sub}</div>}
             </div>
-          </div>
+          </Link>
         );
       })}
     </div>
@@ -326,12 +346,18 @@ function UpcomingAndRecentLeave({ requests }: { requests: LeaveRequestView[] | n
 }
 
 function MyDaySection({ employeeId, enabledModules, roleKeys }: { employeeId: string; enabledModules: ModuleKey[]; roleKeys: TenantRoleKey[] }) {
-  const { balances, attendance, requests, pendingLeaveCount } = useMyLeaveAndAttendanceSnapshot(employeeId);
+  const { balances, requests, pendingLeaveCount } = useMyLeaveAndAttendanceSnapshot(employeeId);
+  const attendance = useMyAttendance(employeeId);
+  const canPunch = isSelfService(roleKeys);
 
   return (
     <>
-      <MyDayKpiRow balances={balances} attendance={attendance} pendingLeaveCount={pendingLeaveCount} />
+      <MyDayKpiRow balances={balances} attendance={attendance} pendingLeaveCount={pendingLeaveCount} attendanceLink={canPunch ? "/app/attendance/clock" : "/app/attendance"} />
       <QuickActionsRow enabledModules={enabledModules} roleKeys={roleKeys} />
+      <div className={`grid gap-4 mb-6 ${canPunch ? "xl:grid-cols-2" : ""}`}>
+        {canPunch && <MyTimesheetCard employeeId={employeeId} />}
+        <MyAttendanceCard data={attendance} expandTo={canPunch ? "/app/attendance/clock" : "/app/attendance"} />
+      </div>
       <UpcomingAndRecentLeave requests={requests} />
     </>
   );

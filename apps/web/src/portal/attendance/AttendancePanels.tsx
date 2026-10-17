@@ -1,6 +1,7 @@
 import { LoadingNote } from "../shared/PageChrome";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { Clock } from "lucide-react";
 import type { AttendanceCorrectionRequestView, AttendanceRecordView, EmployeeView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { AttendanceCorrectionForm } from "./AttendanceCorrectionForm";
@@ -8,7 +9,11 @@ import { SapSection } from "../shared/FormSections";
 import { describeError } from "../shared/describeError";
 import { staleClockInHours, staleClockInMessage } from "./openClockIn";
 import { ATTENDANCE_STATUS_LABELS, ATTENDANCE_STATUS_STYLES, CORRECTION_STATUS_LABELS, CORRECTION_STATUS_STYLES } from "./attendanceLabels";
-import { formatDateTime, formatDay, localDayKey } from "../shared/dates";
+import { formatDay, formatTime } from "../shared/dates";
+import { minutesText, runningText } from "./attendanceDays";
+import { MyAttendanceCard } from "./AttendanceCards";
+import { summariseShift } from "./scheduleText";
+import { useMyAttendance } from "./useMyAttendance";
 
 /**
  * Pages of the Time & Attendance module. Each is one task on its own page (the launchpad tiles link here):
@@ -22,7 +27,7 @@ function useAttendance(employeeId: string, refreshKey: number) {
   const [corrections, setCorrections] = useState<AttendanceCorrectionRequestView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    Promise.all([api.getEmployee(employeeId), api.listAttendance(employeeId), api.listAttendanceCorrections(employeeId)])
+    Promise.all([api.getEmployee(employeeId), api.listAttendance(employeeId, 1), api.listAttendanceCorrections(employeeId)])
       .then(([emp, att, corr]) => {
         setEmployee(emp);
         setAttendance(att);
@@ -33,11 +38,38 @@ function useAttendance(employeeId: string, refreshKey: number) {
   return { employee, attendance, corrections, error };
 }
 
+function useNow(active: boolean): Date {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    if (!active) return;
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, [active]);
+  return now;
+}
+
+/**
+ * Clock In / Out, laid out like the reference dashboard: today's shift, a live running time while clocked in, the
+ * day's punches with first in / last out / worked, and the month of attendance below. The punch itself is the same
+ * API call as before (clock-in / clock-out by employee number).
+ */
 export function ClockPanel({ employeeId, refreshKey, onChanged }: { employeeId: string; refreshKey: number; onChanged: () => void }) {
-  const { employee, attendance, error } = useAttendance(employeeId, refreshKey);
+  const data = useMyAttendance(employeeId, refreshKey);
+  const [employee, setEmployee] = useState<EmployeeView | null>(null);
+  const [employeeError, setEmployeeError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [clockError, setClockError] = useState<string | null>(null);
-  const clockedIn = Boolean(attendance && attendance.length > 0 && attendance[0].clockOutAt === null);
+
+  useEffect(() => {
+    api.getEmployee(employeeId).then(setEmployee).catch((err) => setEmployeeError(describeError(err)));
+  }, [employeeId]);
+
+  const latest = data.records[0] ?? null;
+  const clockedIn = Boolean(latest && latest.clockOutAt === null);
+  const now = useNow(clockedIn);
+  const todayRow = data.days.get(data.today);
+  const shift = summariseShift(data.schedule);
+  const staleHours = clockedIn && latest ? staleClockInHours(latest.clockInAt) : null;
 
   async function handleClock() {
     if (!employee) return;
@@ -46,6 +78,7 @@ export function ClockPanel({ employeeId, refreshKey, onChanged }: { employeeId: 
     try {
       if (clockedIn) await api.clockOut({ employeeNumber: employee.employeeNumber });
       else await api.clockIn({ employeeNumber: employee.employeeNumber, source: "manual" });
+      data.reload();
       onChanged();
     } catch (err) {
       setClockError(err instanceof ApiError ? err.message : "Could not record attendance.");
@@ -54,63 +87,102 @@ export function ClockPanel({ employeeId, refreshKey, onChanged }: { employeeId: 
     }
   }
 
-  if (error) return <div className="bg-white rounded-md p-5 shadow-sm text-sm text-label-secondary">{error}</div>;
+  if (employeeError) return <div className="bg-white rounded-md p-5 shadow-sm text-sm text-label-secondary">{employeeError}</div>;
+
+  const todaySessions = todayRow?.sessions ?? [];
 
   return (
-    <div className="grid lg:grid-cols-2 gap-x-4 items-start">
-      <SapSection title="Clock In / Out" collapsible={false}>
-        <div className="flex items-center gap-4 flex-wrap">
-          {employee && (
+    <div className="grid xl:grid-cols-2 gap-4 items-start">
+      <section className="bg-card rounded-card shadow-sm border border-black/5 overflow-hidden" data-testid="clock-card">
+        <header className="flex items-center gap-2 px-4 py-3 border-b border-black/5">
+          <Clock size={18} strokeWidth={1.75} className="text-accent" aria-hidden />
+          <h2 className="text-base font-bold">Clock In / Out</h2>
+        </header>
+        <div className="p-4 space-y-4">
+          <div className="rounded-lg bg-black/[0.03] border border-black/5 px-4 py-3" data-testid="shift-today">
+            <div className="text-xs uppercase tracking-wide text-label-tertiary">Today's shift</div>
+            <div className="text-base font-bold mt-0.5">{shift.title}</div>
+            {shift.hours && <div className="text-sm tabular-nums mt-0.5" data-testid="shift-hours">{shift.hours}</div>}
+            {shift.detail && <div className="text-xs text-label-secondary mt-0.5">{shift.detail}</div>}
+          </div>
+
+          <div className="flex items-center gap-4 flex-wrap">
             <button
               type="button"
               onClick={handleClock}
-              disabled={busy}
-              className={`text-sm font-semibold rounded px-5 py-2 disabled:opacity-50 ${clockedIn ? "bg-danger/10 text-danger" : "bg-accent text-white"}`}
+              disabled={busy || !employee || data.loading}
+              className={`text-sm font-semibold rounded-lg px-6 py-2.5 disabled:opacity-50 ${clockedIn ? "bg-danger/10 text-danger" : "bg-accent text-white"}`}
             >
               {busy ? "…" : clockedIn ? "Clock out" : "Clock in"}
             </button>
-          )}
-          {clockedIn && attendance && (
-            <div className="flex items-center gap-2 flex-wrap">
-              <p className="text-xs text-label-secondary">
-                Clocked in since {formatDateTime(attendance[0].clockInAt)}
-                {attendance[0].shiftName && ` · ${attendance[0].shiftName} shift`}
-              </p>
-              <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${ATTENDANCE_STATUS_STYLES[attendance[0].status]}`}>
-                {ATTENDANCE_STATUS_LABELS[attendance[0].status]}
-              </span>
+            <div className="min-w-0">
+              {data.loading ? (
+                <p className="text-xs text-label-secondary">Checking your attendance…</p>
+              ) : clockedIn && latest ? (
+                <>
+                  <p className="text-xs text-label-secondary">
+                    Clocked in since {formatTime(latest.clockInAt)}
+                    {latest.shiftName && ` · ${latest.shiftName}`}
+                  </p>
+                  <p className="text-xl font-bold tabular-nums" aria-live="off" data-testid="running-time">
+                    {runningText(latest.clockInAt, now)}
+                  </p>
+                </>
+              ) : todayRow?.lastOut ? (
+                <p className="text-xs text-label-secondary">You are not clocked in. Last clock-out today at {formatTime(todayRow.lastOut)}.</p>
+              ) : (
+                <p className="text-xs text-label-secondary">You are not clocked in.</p>
+              )}
             </div>
-          )}
-          {!clockedIn && attendance && <p className="text-xs text-label-secondary">You are not clocked in.</p>}
-        </div>
-        {clockedIn && attendance && staleClockInHours(attendance[0].clockInAt) !== null && (
-          <p className="text-xs text-warning mt-3" role="alert" data-testid="stale-clock-in">
-            {staleClockInMessage(staleClockInHours(attendance[0].clockInAt) as number)}{" "}
-            <Link to="/app/attendance/corrections" className="font-semibold underline">Ask for a correction</Link>
-          </p>
-        )}
-        {clockError && <p className="text-xs text-danger mt-3">{clockError}</p>}
-      </SapSection>
-
-      <SapSection title="Recent attendance" count={attendance?.length}>
-        {!attendance ? (
-          <LoadingNote />
-        ) : attendance.length === 0 ? (
-          <p className="text-sm text-label-tertiary">No attendance recorded yet.</p>
-        ) : (
-          <div className="space-y-2">
-            {attendance.slice(0, 10).map((rec) => (
-              <div key={rec.id} className="flex items-center justify-between gap-3 text-sm">
-                <span className="text-label-secondary">
-                  {formatDay(localDayKey(rec.clockInAt))}
-                  {rec.shiftName && <span className="text-label-tertiary"> · {rec.shiftName}</span>}
-                </span>
-                <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${ATTENDANCE_STATUS_STYLES[rec.status]}`}>{ATTENDANCE_STATUS_LABELS[rec.status]}</span>
-              </div>
-            ))}
+            {clockedIn && latest && (
+              <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${ATTENDANCE_STATUS_STYLES[latest.status]}`}>{ATTENDANCE_STATUS_LABELS[latest.status]}</span>
+            )}
           </div>
-        )}
-      </SapSection>
+          {staleHours !== null && latest && (
+            <p className="text-xs text-warning" role="alert" data-testid="stale-clock-in">
+              {staleClockInMessage(staleHours)}{" "}
+              <Link to="/app/attendance/corrections" className="font-semibold underline">Ask for a correction</Link>
+            </p>
+          )}
+          {clockError && <p className="text-xs text-danger">{clockError}</p>}
+
+          <div className="grid grid-cols-3 gap-2 text-center rounded-lg border border-black/5 px-3 py-3" data-testid="today-summary">
+            <TodayStat label="Check-in" value={todayRow?.firstIn ? formatTime(todayRow.firstIn) : "—"} />
+            <TodayStat label="Check-out" value={clockedIn ? "Working…" : todayRow?.lastOut ? formatTime(todayRow.lastOut) : "—"} />
+            <TodayStat label="Worked" value={todayRow ? minutesText(todayRow.workedMinutes) : "—"} />
+          </div>
+
+          <div>
+            <h3 className="text-xs uppercase tracking-wide text-label-tertiary font-semibold mb-1.5">Today's punches{todaySessions.length > 0 && ` (${todaySessions.length})`}</h3>
+            {todaySessions.length === 0 ? (
+              <p className="text-sm text-label-tertiary">No punches yet today.</p>
+            ) : (
+              <ul className="divide-y divide-black/5 text-sm tabular-nums" data-testid="today-punches">
+                {todaySessions.map((s, i) => (
+                  <li key={s.inAt} className="flex items-center justify-between py-1.5">
+                    <span>
+                      <span className="text-label-tertiary mr-2">{i + 1}.</span>
+                      {formatTime(s.inAt)} – {s.outAt ? formatTime(s.outAt) : "now"}
+                    </span>
+                    <span className="text-label-secondary">{s.outAt ? minutesText(Math.round((new Date(s.outAt).getTime() - new Date(s.inAt).getTime()) / 60000)) : "running"}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <MyAttendanceCard data={data} />
+    </div>
+  );
+}
+
+function TodayStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-[11px] uppercase tracking-wide text-label-tertiary">{label}</div>
+      <div className="text-base font-bold mt-0.5">{value}</div>
     </div>
   );
 }

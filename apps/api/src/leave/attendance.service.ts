@@ -7,9 +7,10 @@ import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
 import { WorkScheduleResolutionService } from "../shifts/work-schedule-resolution.service";
 import { localParts } from "./attendance-evaluation.service";
-import type { AttendanceRecordView, ClockInRequest, ClockOutRequest } from "@aihxm/shared-types";
+import type { AttendanceRecordView, ClockInRequest, ClockOutRequest, ResolvedWorkScheduleView } from "@aihxm/shared-types";
 
 const LEAVE_MODULE_KEY = "leave" as const;
+const DEFAULT_SCHEDULE_TIMEZONE = "Asia/Karachi";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toIso(value: any): string | null {
@@ -31,11 +32,23 @@ function toIso(value: any): string | null {
  * read-time computation.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function rowToRecord(client: PoolClient, workSchedule: WorkScheduleResolutionService, row: any): Promise<AttendanceRecordView> {
+async function rowToRecord(
+  client: PoolClient,
+  workSchedule: WorkScheduleResolutionService,
+  row: any,
+  /** A list passes one shared cache so each calendar day is resolved once instead of once per punch. */
+  resolvedByDay?: Map<string, ResolvedWorkScheduleView>
+): Promise<AttendanceRecordView> {
   const clockInAt: Date = row.clock_in_at;
   const clockOutAt: Date | null = row.clock_out_at;
-  const dateIso = clockInAt.toISOString().slice(0, 10);
-  const { status, shiftName } = await workSchedule.resolveAttendanceStatus(client, row.employee_id, dateIso, clockInAt, clockOutAt);
+  // The calendar day of the punch where the shift lives (not the UTC day: a 7 AM Karachi punch is still "yesterday" in UTC).
+  const dateIso = localParts(clockInAt, DEFAULT_SCHEDULE_TIMEZONE).date;
+  let resolved = resolvedByDay?.get(dateIso);
+  if (!resolved) {
+    resolved = await workSchedule.resolve(client, row.employee_id, dateIso);
+    resolvedByDay?.set(dateIso, resolved);
+  }
+  const { status, shiftName } = workSchedule.statusFromResolved(resolved, clockInAt, clockOutAt);
 
   return {
     id: row.id,
@@ -100,8 +113,9 @@ export class AttendanceService {
       }
 
       // TLM-04: stamp the work date (in the schedule's own time zone) and the shift in force.
-      const schedule = await this.workSchedule.resolve(client, employee.id, new Date().toISOString().slice(0, 10));
-      const workDate = localParts(new Date(), schedule.timezone ?? "Asia/Karachi").date;
+      const now = new Date();
+      const schedule = await this.workSchedule.resolve(client, employee.id, localParts(now, DEFAULT_SCHEDULE_TIMEZONE).date);
+      const workDate = localParts(now, schedule.timezone ?? DEFAULT_SCHEDULE_TIMEZONE).date;
       const result = await client.query(
         `INSERT INTO attendance_records (company_id, employee_id, employee_number, source, gps_lat, gps_lng, shift_id, work_date)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -165,7 +179,7 @@ export class AttendanceService {
     });
   }
 
-  async listForEmployee(claims: RequestClaims, employeeId: string): Promise<AttendanceRecordView[]> {
+  async listForEmployee(claims: RequestClaims, employeeId: string, limit = 200): Promise<AttendanceRecordView[]> {
     if (!(await this.entitlements.isModuleEnabled(claims, LEAVE_MODULE_KEY))) {
       throw new NotFoundException();
     }
@@ -186,10 +200,14 @@ export class AttendanceService {
       }
 
       const result = await client.query(
-        `SELECT * FROM attendance_records WHERE employee_id = $1 ORDER BY clock_in_at DESC`,
-        [employeeId]
+        `SELECT * FROM attendance_records WHERE employee_id = $1 ORDER BY clock_in_at DESC LIMIT $2`,
+        [employeeId, Math.max(1, Math.min(limit, 1000))]
       );
-      return Promise.all(result.rows.map((row) => rowToRecord(client, this.workSchedule, row)));
+      // One at a time: they share one transaction connection (and the day cache).
+      const resolvedByDay = new Map<string, ResolvedWorkScheduleView>();
+      const views: AttendanceRecordView[] = [];
+      for (const row of result.rows) views.push(await rowToRecord(client, this.workSchedule, row, resolvedByDay));
+      return views;
     });
   }
 }

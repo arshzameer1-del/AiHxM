@@ -154,8 +154,9 @@ export class LeaveController {
   }
 
   @Get("employees/:employeeId/attendance")
-  listAttendance(@CurrentClaims() claims: RequestClaims, @Param("employeeId") employeeId: string) {
-    return this.attendance.listForEmployee(claims, employeeId);
+  listAttendance(@CurrentClaims() claims: RequestClaims, @Param("employeeId") employeeId: string, @Query("limit") limit?: string) {
+    const n = limit ? Number(limit) : undefined;
+    return this.attendance.listForEmployee(claims, employeeId, n !== undefined && Number.isFinite(n) ? n : undefined);
   }
 
   @Post("attendance-corrections")

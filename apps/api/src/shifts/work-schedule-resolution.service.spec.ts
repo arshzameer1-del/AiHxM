@@ -139,12 +139,12 @@ describe("WorkScheduleResolutionService", () => {
 
     it("still computes on_time/late normally on an ordinary working day", async () => {
       const onTime = await db.withClaims(hrAdminClaims, (client) =>
-        workSchedule.resolveAttendanceStatus(client, employeeId, "2026-03-24", new Date(2026, 2, 24, 9, 5), null)
+        workSchedule.resolveAttendanceStatus(client, employeeId, "2026-03-24", new Date("2026-03-24T04:05:00Z"), null) // 9:05 AM in Karachi (UTC+5)
       );
       expect(onTime.status).toBe("on_time");
 
       const late = await db.withClaims(hrAdminClaims, (client) =>
-        workSchedule.resolveAttendanceStatus(client, employeeId, "2026-03-24", new Date(2026, 2, 24, 9, 45), null)
+        workSchedule.resolveAttendanceStatus(client, employeeId, "2026-03-24", new Date("2026-03-24T04:45:00Z"), null) // 9:45 AM in Karachi
       );
       expect(late.status).toBe("late");
     });

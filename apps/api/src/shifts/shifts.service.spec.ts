@@ -508,5 +508,22 @@ describe("ShiftsService", () => {
       const clockIn = new Date(2026, 0, 1, 9, 30);
       expect(computeAttendanceStatus(clockIn, null, null)).toBe("no_shift_assigned");
     });
+
+    // The server runs in UTC; shifts are Karachi wall-clock (UTC+5). These instants are given in UTC on purpose.
+    describe("with the schedule's time zone", () => {
+      const karachi = { ...shift, startTime: "09:00", endTime: "18:00", timezone: "Asia/Karachi" };
+      it("reads a 9:05 AM Karachi punch as on time (04:05 UTC)", () => {
+        expect(computeAttendanceStatus(new Date("2026-10-15T04:05:00Z"), null, karachi)).toBe("on_time");
+      });
+      it("reads a 10:57 AM Karachi punch as late (05:57 UTC)", () => {
+        expect(computeAttendanceStatus(new Date("2026-10-15T05:57:00Z"), null, karachi)).toBe("late");
+      });
+      it("does not call a 6:10 PM Karachi clock-out early (13:10 UTC)", () => {
+        expect(computeAttendanceStatus(new Date("2026-10-15T04:00:00Z"), new Date("2026-10-15T13:10:00Z"), karachi)).toBe("on_time");
+      });
+      it("calls a 4:00 PM Karachi clock-out early (11:00 UTC)", () => {
+        expect(computeAttendanceStatus(new Date("2026-10-15T04:00:00Z"), new Date("2026-10-15T11:00:00Z"), karachi)).toBe("early_departure");
+      });
+    });
   });
 });

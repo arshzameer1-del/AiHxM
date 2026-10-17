@@ -191,6 +191,15 @@ export class WorkScheduleResolutionService {
     clockOutAt: Date | null
   ): Promise<{ status: AttendanceStatus; shiftName: string | null }> {
     const resolved = await this.resolve(client, employeeId, dateIso);
+    return this.statusFromResolved(resolved, clockInAt, clockOutAt);
+  }
+
+  /** The status of one punch against an already-resolved day (lets a list resolve each calendar day once, not once per punch). */
+  statusFromResolved(
+    resolved: ResolvedWorkScheduleView,
+    clockInAt: Date,
+    clockOutAt: Date | null
+  ): { status: AttendanceStatus; shiftName: string | null } {
     if (!resolved.hasSchedule) {
       return { status: "no_shift_assigned", shiftName: null };
     }
@@ -205,6 +214,7 @@ export class WorkScheduleResolutionService {
       endTime: resolved.endTime!,
       graceMinutesLate: resolved.graceMinutesLate,
       graceMinutesEarly: resolved.graceMinutesEarly,
+      timezone: resolved.timezone ?? "Asia/Karachi",
     });
     return { status, shiftName: resolved.scheduleName };
   }

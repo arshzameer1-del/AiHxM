@@ -779,11 +779,21 @@ function countConditions(expr: RuleExpression): number {
 export function computeAttendanceStatus(
   clockInAt: Date,
   clockOutAt: Date | null,
-  shift: { startTime: string; graceMinutesLate: number; endTime: string; graceMinutesEarly: number } | null
+  shift: { startTime: string; graceMinutesLate: number; endTime: string; graceMinutesEarly: number; timezone?: string | null } | null
 ): AttendanceStatus {
   if (!shift) return "no_shift_assigned";
 
-  const clockInMinutes = clockInAt.getHours() * 60 + clockInAt.getMinutes();
+  // The shift times are wall-clock time in the schedule's time zone (Asia/Karachi by default). Reading the server's own
+  // getHours() (the server runs in UTC) made every Pakistan morning punch look five hours early and every clock-out
+  // "left early". With a time zone the minute of the day is read there; without one the old local-clock reading is kept.
+  const minuteOfDay = (d: Date): number => {
+    if (!shift.timezone) return d.getHours() * 60 + d.getMinutes();
+    const parts = new Intl.DateTimeFormat("en-GB", { timeZone: shift.timezone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(d);
+    const hour = Number(parts.find((p) => p.type === "hour")?.value ?? 0);
+    const minute = Number(parts.find((p) => p.type === "minute")?.value ?? 0);
+    return hour * 60 + minute;
+  };
+  const clockInMinutes = minuteOfDay(clockInAt);
   const [startH, startM] = shift.startTime.split(":").map(Number);
   const shiftStartMinutes = startH * 60 + startM;
   if (clockInMinutes > shiftStartMinutes + shift.graceMinutesLate) {
@@ -791,7 +801,7 @@ export function computeAttendanceStatus(
   }
 
   if (clockOutAt) {
-    const clockOutMinutes = clockOutAt.getHours() * 60 + clockOutAt.getMinutes();
+    const clockOutMinutes = minuteOfDay(clockOutAt);
     const [endH, endM] = shift.endTime.split(":").map(Number);
     const shiftEndMinutes = endH * 60 + endM;
     if (clockOutMinutes < shiftEndMinutes - shift.graceMinutesEarly) {
