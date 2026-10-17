@@ -2120,12 +2120,18 @@ export type CreateEmployeeRequest = {
   employeeNumber?: string;
 };
 
+/** Optional employee fields an update may empty. An empty value in the normal fields means "unchanged", so emptying is asked for by name. */
+export const EMPLOYEE_CLEARABLE_FIELDS = ["designation", "phone", "salaryBand", "maritalStatus", "department", "location"] as const;
+export type EmployeeClearableField = (typeof EMPLOYEE_CLEARABLE_FIELDS)[number];
+
 export type UpdateEmployeeRequest = Partial<
   Omit<CreateEmployeeRequest, "employeeNumber" | "userAccountId">
 > & {
   employmentStatus?: EmploymentStatus;
   terminationDate?: string;
   terminationReason?: string;
+  /** Fields to empty. `department` and `location` can only be emptied while they are typed text, not linked to an organization unit or location. */
+  clearFields?: EmployeeClearableField[];
 };
 
 /**

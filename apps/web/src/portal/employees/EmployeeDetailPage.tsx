@@ -1,5 +1,5 @@
 import { LoadingNote } from "../shared/PageChrome";
-import { FormEvent, ReactNode, useEffect, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useId, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import type {
   CostCenterView,
@@ -14,6 +14,7 @@ import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { EmployeeFields } from "./EmployeeFields";
 import { PersonDetailsPanel } from "./PersonDetailsPanel";
+import { emptiedFields } from "./employeeEditDiff";
 import { OnboardingOffboardingSection } from "../onboarding-offboarding/OnboardingOffboardingSection";
 import { LifecycleActionsPanel } from "./LifecycleActionsPanel";
 import { EmployeeCustomFieldsPanel } from "./EmployeeCustomFieldsPanel";
@@ -50,7 +51,9 @@ const TABS = ["Overview", "Personal Details", "Contact & Address", "Family & Edu
 type Tab = (typeof TABS)[number];
 
 const EMPLOYMENT_TYPES: EmploymentType[] = ["permanent", "contract", "probation", "intern"];
-const EMPLOYMENT_STATUSES: EmploymentStatus[] = ["active", "on_leave", "terminated"];
+// Ending employment goes through Lifecycle Actions (dated, with reason and the follow-up steps); the edit form only offers it
+// for someone who is already terminated so their status still shows correctly.
+const EDITABLE_STATUSES: EmploymentStatus[] = ["active", "on_leave"];
 const ROLE_LABELS: Record<TenantRoleKey, string> = {
   hr_admin: "HR Admin",
   line_manager: "Line Manager",
@@ -355,6 +358,10 @@ function EditForm({
   const [dateOfJoining, setDateOfJoining] = useState(employee.dateOfJoining ?? "");
   const [maritalOptions, setMaritalOptions] = useState<HrReferenceCatalogItemView[]>([]);
   const [typeOptions, setTypeOptions] = useState<HrReferenceCatalogItemView[]>([]);
+  // Suggestions from the company's own organization (department names, job titles); anything else can still be typed.
+  const [unitNames, setUnitNames] = useState<string[]>([]);
+  const [jobTitles, setJobTitles] = useState<string[]>([]);
+  const listId = useId();
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   // Date of birth is hidden by field rules from some callers: when the API did not send it, it is not offered either.
@@ -364,12 +371,15 @@ function EditForm({
     // Same company lists the hiring wizard uses, so what is picked here matches what a hire could pick.
     api.listHrCatalogItems("marital_status").then(setMaritalOptions).catch(() => setMaritalOptions([]));
     api.listHrCatalogItems("employment_type").then(setTypeOptions).catch(() => setTypeOptions([]));
+    api.listOrgUnits().then((u) => setUnitNames(u.filter((x) => x.status === "active").map((x) => x.name))).catch(() => setUnitNames([]));
+    api.listJobs().then((j) => setJobTitles(j.filter((x) => x.status === "active").map((x) => x.title))).catch(() => setJobTitles([]));
   }, []);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setSaving(true);
+    const clearFields = emptiedFields(employee, { phone, department, designation, location, salaryBand, maritalStatus });
     try {
       const updated = await api.updateEmployee(employee.id, {
         firstName,
@@ -379,6 +389,8 @@ function EditForm({
         department: department || undefined,
         designation: designation || undefined,
         location: location || undefined,
+        // Emptying a field that had a value is asked for by name; an empty value alone means "unchanged".
+        ...(clearFields.length > 0 ? { clearFields } : {}),
         employmentType,
         employmentStatus,
         cnic: cnic || undefined,
@@ -433,8 +445,10 @@ function EditForm({
             className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
           />
         </Field>
-        <Field label="Department">
+        <Field label="Department" hint={employee.orgUnitId ? "Comes from the organization unit. Move the employee to change it." : undefined}>
           <input
+            disabled={!!employee.orgUnitId}
+            list={`${listId}-dept`}
             value={department}
             onChange={(e) => setDepartment(e.target.value)}
             className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
@@ -442,13 +456,15 @@ function EditForm({
         </Field>
         <Field label="Designation">
           <input
+            list={`${listId}-job`}
             value={designation}
             onChange={(e) => setDesignation(e.target.value)}
             className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
           />
         </Field>
-        <Field label="Location">
+        <Field label="Location" hint={employee.locationId ? "Comes from the linked location." : undefined}>
           <input
+            disabled={!!employee.locationId}
             value={location}
             onChange={(e) => setLocation(e.target.value)}
             className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
@@ -483,7 +499,7 @@ function EditForm({
             onChange={(e) => setEmploymentStatus(e.target.value as EmploymentStatus)}
             className="w-full rounded-lg border border-black/10 px-3 py-2 capitalize focus:outline-none focus:ring-2 focus:ring-accent"
           >
-            {EMPLOYMENT_STATUSES.map((s) => (
+            {(employee.employmentStatus === "terminated" ? [...EDITABLE_STATUSES, "terminated" as EmploymentStatus] : EDITABLE_STATUSES).map((s) => (
               <option key={s} value={s}>
                 {s.replace("_", " ")}
               </option>
@@ -499,6 +515,16 @@ function EditForm({
             />
           </Field>
         )}
+        <datalist id={`${listId}-dept`}>
+          {unitNames.map((n) => (
+            <option key={n} value={n} />
+          ))}
+        </datalist>
+        <datalist id={`${listId}-job`}>
+          {jobTitles.map((n) => (
+            <option key={n} value={n} />
+          ))}
+        </datalist>
         <Field label="Gender">
           <select value={gender} onChange={(e) => setGender(e.target.value)} className="w-full rounded-lg border border-black/10 px-3 py-2 capitalize focus:outline-none focus:ring-2 focus:ring-accent">
             <option value="">—</option>
@@ -576,7 +602,7 @@ function EditForm({
   );
 }
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
     <div>
       {/* The control sits inside its label, so the pairing is real (screen readers, click-the-label, tests). */}
@@ -584,6 +610,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
         <span className="block text-sm font-medium mb-1">{label}</span>
         {children}
       </label>
+      {hint && <p className="mt-1 text-xs text-label-tertiary">{hint}</p>}
     </div>
   );
 }

@@ -120,7 +120,7 @@ test.describe("Recruitment Portal (Task #51)", () => {
     // this message on every company today (Decision #18's tracked P0
     // gap) — a genuine, pre-existing limitation, not something this
     // test suite broke.
-    await expect(card.locator("text=/no active workflow template/i")).toBeVisible({ timeout: 5000 });
+    await expect(card.locator("text=/no active (approval route|workflow template)/i")).toBeVisible({ timeout: 5000 });
   });
 
   test("HR can add a candidate to the pool", async ({ page }) => {

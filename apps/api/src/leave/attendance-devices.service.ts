@@ -7,6 +7,7 @@ import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
 import { localParts } from "./attendance-evaluation.service";
+import { STALE_OPEN_CLOCK_IN_HOURS } from "./attendance.service";
 import type {
   AttendanceDeviceView,
   AttendanceDeviceWithKey,
@@ -308,7 +309,10 @@ export class AttendanceDevicesService {
     );
     if ((near.rowCount ?? 0) > 0) return finish("duplicate", "Within the double-tap window of an existing punch", emp.employee_id, near.rows[0].id);
 
-    const open = (await client.query("SELECT * FROM attendance_records WHERE employee_id = $1 AND clock_out_at IS NULL ORDER BY clock_in_at DESC LIMIT 1", [emp.employee_id])).rows[0];
+    const openRow = (await client.query("SELECT * FROM attendance_records WHERE employee_id = $1 AND clock_out_at IS NULL ORDER BY clock_in_at DESC LIMIT 1", [emp.employee_id])).rows[0];
+    // LIVE-13: a clock-in left open since before the staleness window is a forgotten clock-out; today's punch starts a new
+    // shift and the old record waits for an attendance correction (its hours are never invented).
+    const open = openRow && at.getTime() - new Date(openRow.clock_in_at).getTime() < STALE_OPEN_CLOCK_IN_HOURS * 3600000 ? openRow : undefined;
     const direction: "in" | "out" = punch.direction === "unknown" ? (open ? "out" : "in") : punch.direction;
 
     if (direction === "in") {

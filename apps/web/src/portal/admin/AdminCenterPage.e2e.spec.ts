@@ -161,12 +161,7 @@ test.describe("Admin Center Accessibility", () => {
     const form = page.locator("form");
     await expect(form).toBeVisible();
 
-    // Genuine, pre-existing accessibility gap — same pattern already
-    // found and deliberately left failing in EmployeeCreatePage's,
-    // LeaveRequestForm's, and RequisitionForm's own e2e specs:
-    // GroupForm's <label> elements have no `htmlFor`/`id`, and its
-    // <input>/<select> elements have no `name` or `aria-label`. Left
-    // failing on purpose so it keeps reporting the real gap.
+    // Was a real accessibility gap (GroupForm's labels had no htmlFor/id); fixed, so this now guards it.
     const firstInput = form.locator("input, select").first();
     const id = await firstInput.getAttribute("id");
     const hasAriaLabel = await firstInput.evaluate((el) => el.hasAttribute("aria-label"));

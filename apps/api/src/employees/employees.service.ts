@@ -925,6 +925,20 @@ export class EmployeesService {
       await this.validateEmploymentType(client, claims.company_id!, patch.employmentType);
       await this.validateMaritalStatus(client, claims.company_id!, patch.maritalStatus);
 
+      // An empty value in the patch means "unchanged"; emptying a field is asked for by name (clearFields).
+      const clear = new Set<string>(patch.clearFields ?? []);
+      for (const f of clear) {
+        if ((patch as Record<string, unknown>)[f] !== undefined) {
+          throw new BadRequestException(`Give either a new ${f} or ask to clear it, not both`);
+        }
+      }
+      if (clear.has("department") && before.org_unit_id && patch.orgUnitId === undefined) {
+        throw new BadRequestException("The department comes from the organization unit - move the employee to another unit instead of clearing it");
+      }
+      if (clear.has("location") && before.location_id && patch.locationId === undefined) {
+        throw new BadRequestException("The location comes from the linked location - change the location instead of clearing it");
+      }
+
       const nextOrgUnitId = patch.orgUnitId ?? before.org_unit_id;
       // Organization Management Phase 1: whenever an org unit is linked
       // (new or pre-existing), `department` is DERIVED from it, not typed
@@ -932,7 +946,7 @@ export class EmployeesService {
       // linked employee would otherwise silently drift out of sync with
       // the canonical hierarchy. An employee with no org unit at all keeps
       // the legacy free-text behavior unchanged.
-      const department = await this.resolveDepartment(client, claims.company_id!, nextOrgUnitId, patch.department ?? before.department);
+      const department = clear.has("department") ? null : await this.resolveDepartment(client, claims.company_id!, nextOrgUnitId, patch.department ?? before.department);
 
       const nextLocationId = patch.locationId ?? before.location_id;
       // Organization Management Phase 4: whenever a location is linked (new
@@ -940,7 +954,7 @@ export class EmployeesService {
       // independently — the same `department`/`orgUnitId` relationship
       // established above. An employee with no location link at all keeps
       // the legacy free-text behavior unchanged.
-      const location = await this.resolveLocation(client, claims.company_id!, nextLocationId, patch.location ?? before.location);
+      const location = clear.has("location") ? null : await this.resolveLocation(client, claims.company_id!, nextLocationId, patch.location ?? before.location);
 
       // Core Employee Enterprise Phase 1 (0081_person_identity.sql) — keep
       // the derived `persons` shadow record in sync whenever an identity
@@ -985,14 +999,14 @@ export class EmployeesService {
         first_name: nextFirstName,
         last_name: nextLastName,
         email: patch.email ?? before.email,
-        phone: patch.phone ?? before.phone,
+        phone: clear.has("phone") ? null : patch.phone ?? before.phone,
         cnic: nextCnic,
         date_of_birth: nextDateOfBirth,
         gender: nextGender,
-        marital_status: patch.maritalStatus ?? before.marital_status,
+        marital_status: clear.has("maritalStatus") ? null : patch.maritalStatus ?? before.marital_status,
         department,
         org_unit_id: nextOrgUnitId,
-        designation: patch.designation ?? before.designation,
+        designation: clear.has("designation") ? null : patch.designation ?? before.designation,
         location,
         location_id: nextLocationId,
         employment_type: patch.employmentType ?? before.employment_type,
@@ -1001,7 +1015,7 @@ export class EmployeesService {
         date_of_joining: patch.dateOfJoining ?? before.date_of_joining,
         termination_date: patch.terminationDate ?? before.termination_date,
         termination_reason: patch.terminationReason ?? before.termination_reason,
-        salary_band: patch.salaryBand ?? before.salary_band,
+        salary_band: clear.has("salaryBand") ? null : patch.salaryBand ?? before.salary_band,
         bank_account_number: beforeBankAccount, // EMP-07: changed only via employee_payment_accounts below
       };
       // A scoped caller may not move an employee's org unit/location to

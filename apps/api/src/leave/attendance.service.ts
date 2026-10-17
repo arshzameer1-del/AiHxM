@@ -11,6 +11,8 @@ import type { AttendanceRecordView, ClockInRequest, ClockOutRequest, ResolvedWor
 
 const LEAVE_MODULE_KEY = "leave" as const;
 const DEFAULT_SCHEDULE_TIMEZONE = "Asia/Karachi";
+/** An open clock-in older than this is a forgotten clock-out (LIVE-13); the web warning uses the same number. */
+export const STALE_OPEN_CLOCK_IN_HOURS = 16;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toIso(value: any): string | null {
@@ -104,9 +106,13 @@ export class AttendanceService {
         throw new ForbiddenException("Not permitted to record attendance for this employee");
       }
 
+      // LIVE-13: a clock-in left open for a day or more is a forgotten clock-out, not a live shift. It must not
+      // stop the person starting today's work; it stays open (hours are never invented) and is fixed with an
+      // attendance correction, which can set its clock-out.
       const open = await client.query(
-        `SELECT id FROM attendance_records WHERE employee_id = $1 AND clock_out_at IS NULL`,
-        [employee.id]
+        `SELECT id FROM attendance_records WHERE employee_id = $1 AND clock_out_at IS NULL
+            AND clock_in_at > now() - make_interval(hours => $2::int)`,
+        [employee.id, STALE_OPEN_CLOCK_IN_HOURS]
       );
       if ((open.rowCount ?? 0) > 0) {
         throw new ConflictException("This employee is already clocked in — clock out first");
@@ -155,10 +161,18 @@ export class AttendanceService {
       }
 
       const open = await client.query(
-        `SELECT id FROM attendance_records WHERE employee_id = $1 AND clock_out_at IS NULL ORDER BY clock_in_at DESC LIMIT 1`,
-        [employee.id]
+        `SELECT id FROM attendance_records WHERE employee_id = $1 AND clock_out_at IS NULL
+            AND clock_in_at > now() - make_interval(hours => $2::int)
+          ORDER BY clock_in_at DESC LIMIT 1`,
+        [employee.id, STALE_OPEN_CLOCK_IN_HOURS]
       );
       if (open.rowCount === 0) {
+        const forgotten = await client.query(`SELECT 1 FROM attendance_records WHERE employee_id = $1 AND clock_out_at IS NULL LIMIT 1`, [employee.id]);
+        if ((forgotten.rowCount ?? 0) > 0) {
+          throw new BadRequestException(
+            "The last clock-in is more than a day old, so clocking out now would count the whole time as work. Ask for an attendance correction to set the real clock-out time, then clock in again."
+          );
+        }
         throw new BadRequestException("This employee is not currently clocked in");
       }
 

@@ -1,5 +1,5 @@
 import { LoadingNote } from "../shared/PageChrome";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useId, useState } from "react";
 import type { EmployeeGroupCondition, EmployeeGroupView, LeavePolicyView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { CONDITION_FIELDS, CONDITION_FIELD_LABELS } from "./conditionLabels";
@@ -45,6 +45,7 @@ function GroupForm({
   const [value, setValue] = useState<GroupFormValue>(() => emptyForm(initial));
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const uid = useId();
 
   function updateCondition(index: number, patch: Partial<EmployeeGroupCondition>) {
     setValue((v) => ({
@@ -84,8 +85,9 @@ function GroupForm({
     <form onSubmit={handleSubmit} className="space-y-4 bg-black/5 rounded-lg p-4">
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm font-medium mb-1">Name</label>
+          <label htmlFor={`${uid}-name`} className="block text-sm font-medium mb-1">Name</label>
           <input
+            id={`${uid}-name`}
             required
             value={value.name}
             onChange={(e) => setValue((v) => ({ ...v, name: e.target.value }))}
@@ -93,8 +95,9 @@ function GroupForm({
           />
         </div>
         <div>
-          <label className="block text-sm font-medium mb-1">Description (optional)</label>
+          <label htmlFor={`${uid}-description`} className="block text-sm font-medium mb-1">Description (optional)</label>
           <input
+            id={`${uid}-description`}
             value={value.description}
             onChange={(e) => setValue((v) => ({ ...v, description: e.target.value }))}
             className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
@@ -115,6 +118,7 @@ function GroupForm({
           {value.conditions.map((condition, i) => (
             <div key={i} className="flex gap-2 items-center">
               <select
+                aria-label={`Condition ${i + 1} field`}
                 value={condition.field}
                 onChange={(e) => updateCondition(i, { field: e.target.value as EmployeeGroupCondition["field"] })}
                 className="rounded-lg border border-black/10 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
@@ -127,6 +131,7 @@ function GroupForm({
               </select>
               <span className="text-sm text-label-tertiary">equals</span>
               <input
+                aria-label={`Condition ${i + 1} value`}
                 required
                 value={condition.equals}
                 onChange={(e) => updateCondition(i, { equals: e.target.value })}

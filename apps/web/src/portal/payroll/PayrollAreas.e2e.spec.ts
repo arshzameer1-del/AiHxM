@@ -31,6 +31,10 @@ function area(overrides: Partial<PayrollAreaView>): PayrollAreaView {
     description: "All Karachi staff",
     isActive: true,
     employeeCount: 12,
+    frequency: "monthly",
+    currencyCode: "PKR",
+    calendarId: null,
+    jurisdiction: null,
     scopeLinks: [],
     createdAt: "2026-09-01T00:00:00.000Z",
     updatedAt: "2026-09-01T00:00:00.000Z",
@@ -74,6 +78,7 @@ async function mockApi(page: Page, roleKeys: string[], state: MockState) {
       route.fulfill({ status, contentType: "application/json", body: JSON.stringify(data) });
 
     if (path === "/auth/me") return json(identity(roleKeys));
+    if (path === "/payroll/calendars") return json([]);
     if (path === "/payroll/runs" && method === "GET") return json(state.runs);
     if (path === "/payroll/runs" && method === "POST") {
       const run: PayrollRunView = {
@@ -110,6 +115,8 @@ async function mockApi(page: Page, roleKeys: string[], state: MockState) {
         name: body.name,
         description: body.description,
         employeeCount: 0,
+        frequency: body.frequency ?? "monthly",
+        currencyCode: body.currencyCode ?? "PKR",
       });
       state.areas.push(created);
       return json(created, 201);
@@ -219,7 +226,8 @@ test.describe("Payroll Areas", () => {
     await page.goto("/app/payroll");
 
     await page.getByRole("button", { name: "New run" }).click();
-    const areaSelect = page.locator("form").filter({ hasText: "Payroll area" }).locator("select");
+    // The form has other selects (run type, period); the area picker is the one that offers "Company-wide".
+    const areaSelect = page.locator("select").filter({ has: page.getByRole("option", { name: /Company-wide/ }) });
     await expect(areaSelect).toHaveValue("");
     await expect(page.getByText("Everyone employed during the period is included")).toBeVisible();
 

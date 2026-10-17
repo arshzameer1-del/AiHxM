@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import type { EmployeeView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
+import { compareEmployeeNumbers } from "./employeeNumberOrder";
 
 /**
  * Employees = maintenance of the people already hired (directory, records, profiles, lifecycle). Hiring itself (guided
@@ -35,7 +36,7 @@ export function EmployeeListPage() {
   const [status, setStatus] = useState("all");
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return (employees ?? []).filter((e) => {
+    return [...(employees ?? [])].sort((a, b) => compareEmployeeNumbers(a.employeeNumber, b.employeeNumber)).filter((e) => {
       if (status !== "all" && e.employmentStatus !== status) return false;
       if (!q) return true;
       return [e.employeeNumber, `${e.firstName} ${e.lastName}`, e.department, e.designation].some((v) => (v ?? "").toLowerCase().includes(q));

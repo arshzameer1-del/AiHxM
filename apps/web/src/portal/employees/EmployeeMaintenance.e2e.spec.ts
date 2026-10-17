@@ -217,5 +217,25 @@ test.describe("Employee maintenance - lists, details and sub-sections", () => {
     await expect(page.getByTestId("reports-to")).toContainText("Reports to");
     await expect(page.getByTestId("reports-to")).toContainText(/no manager set/i);
   });
-});
 
+  test("a value can be emptied again, and the edit form does not offer Terminated", async ({ page }) => {
+    await loginAsHrAdmin(page);
+    await quickHire(page, `Clear${Date.now()}`);
+    await page.getByRole("button", { name: "Edit" }).click();
+    await page.getByLabel("Designation").fill("Temporary title");
+    await page.getByLabel("Phone").fill("0300-1234567");
+    await page.getByRole("button", { name: /save/i }).click();
+    await expect(page.getByText("Temporary title")).toBeVisible();
+
+    await page.getByRole("button", { name: "Edit" }).click();
+    // ending employment is a Lifecycle Action, not a status choice here
+    const statuses = await page.locator("label").filter({ has: page.locator("span", { hasText: /^Status$/ }) }).locator("option").allTextContents();
+    expect(statuses.map((t) => t.toLowerCase())).toEqual(["active", "on leave"]);
+    await page.getByLabel("Designation").fill("");
+    await page.getByLabel("Phone").fill("");
+    await page.getByRole("button", { name: /save/i }).click();
+    await expect(page.getByRole("button", { name: "Edit" })).toBeVisible();
+    await expect(page.getByText("Temporary title")).toHaveCount(0);
+    await expect(page.getByText("0300-1234567")).toHaveCount(0);
+  });
+});

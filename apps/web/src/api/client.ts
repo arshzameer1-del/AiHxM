@@ -1,5 +1,6 @@
 import { createResponseCache, isCacheablePath } from "./responseCache";
 import { WARM_READS_BY_ROLE } from "./warmReads";
+import { createForegroundGate } from "./foregroundGate";
 import type {
   HireManagerSuggestion,
   PersonVersionView,
@@ -561,6 +562,9 @@ function safeSessionStorage(): Storage | null {
   }
 }
 
+/** Calls made for the page in front of the person; background warming waits for them (see foregroundGate.ts). */
+const foreground = createForegroundGate();
+
 const swr = createResponseCache({
   now: () => Date.now(),
   storage: safeSessionStorage(),
@@ -664,6 +668,7 @@ export function startKeepWarm(): void {
         for (;;) {
           const next = work.shift();
           if (!next) return;
+          await foreground.idle();
           await swr.refresh(next, () => fetchText(next, {}), 45_000);
         }
       }
@@ -675,7 +680,7 @@ export function startKeepWarm(): void {
 }
 
 /**
- * Right after sign-in: loads, one after another with at most three requests in flight, the data of every module
+ * Right after sign-in: loads, one after another with at most two requests in flight, and only while no call for the open page is waiting, the data of every module
  * this login can open (the recorded list for its roles, plus whatever this browser learned) so a click finds it ready.
  */
 export async function warmForRoles(roleKeys: string[], max = 120): Promise<void> {
@@ -693,10 +698,12 @@ export async function warmForRoles(roleKeys: string[], max = 120): Promise<void>
     for (;;) {
       const next = work.shift();
       if (!next) return;
+      await foreground.idle();
       await swr.prefetch(next, () => fetchText(next, {}));
     }
   }
-  await Promise.all([lane(), lane(), lane()]);
+  // Two lanes: the page the person opens next must not queue behind a crowd of background reads.
+  await Promise.all([lane(), lane()]);
 }
 
 // Which tenant's own /:companySlug/login this session's identity last
@@ -919,11 +926,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   swr.setOwner(cacheOwnerOf(getToken()));
   if (method === "GET" && isCacheablePath(path)) {
     noteRouteRead(path);
-    const cached = await swr.get(path, () => fetchText(path, options), { bypass });
+    const cached = await swr.get(path, () => foreground.track(() => fetchText(path, options)), { bypass });
     return cached ? (JSON.parse(cached) as T) : (undefined as T);
   }
   try {
-    const text = await fetchText(path, options);
+    const text = await foreground.track(() => fetchText(path, options));
     return text ? (JSON.parse(text) as T) : (undefined as T);
   } finally {
     // A save (or anything that is not a plain read) may have changed what other screens show.

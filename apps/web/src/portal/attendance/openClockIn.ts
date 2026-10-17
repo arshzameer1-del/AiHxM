@@ -12,5 +12,5 @@ export function staleClockInHours(clockInAt: string, now: Date = new Date()): nu
 export function staleClockInMessage(hours: number): string {
   const days = Math.floor(hours / 24);
   const length = days >= 1 ? `${days} day${days === 1 ? "" : "s"}` : `${hours} hours`;
-  return `You have been clocked in for ${length}. If you already left, clock out and ask for a correction so your hours are right.`;
+  return `You have been clocked in for ${length}. If you already left, ask for an attendance correction to set your real clock-out time; you can clock in again for today without waiting.`;
 }

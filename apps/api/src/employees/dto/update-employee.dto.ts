@@ -1,5 +1,6 @@
-import { IsDateString, IsIn, IsOptional, IsString, IsUUID, MaxLength } from "class-validator";
-import type { EmploymentStatus, EmploymentType } from "@aihxm/shared-types";
+import { IsArray, IsDateString, IsIn, IsOptional, IsString, IsUUID, MaxLength } from "class-validator";
+import { EMPLOYEE_CLEARABLE_FIELDS } from "@aihxm/shared-types";
+import type { EmployeeClearableField, EmploymentStatus, EmploymentType } from "@aihxm/shared-types";
 
 export class UpdateEmployeeDto {
   @IsOptional()
@@ -92,4 +93,10 @@ export class UpdateEmployeeDto {
   @IsOptional()
   @IsString()
   terminationReason?: string;
+
+  /** Names of optional fields to empty (an empty value elsewhere means "unchanged"). */
+  @IsOptional()
+  @IsArray()
+  @IsIn(EMPLOYEE_CLEARABLE_FIELDS, { each: true })
+  clearFields?: EmployeeClearableField[];
 }

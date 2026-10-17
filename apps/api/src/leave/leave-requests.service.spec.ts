@@ -515,6 +515,32 @@ describe("LeaveRequestsService + AttendanceService", () => {
       await attendance.clockOut(staffClaims, { employeeNumber });
     });
 
+    it("LIVE-13: a clock-in forgotten two days ago does not stop today's clock-in and keeps its hours uninvented", async () => {
+      const employeeNumber = (await employees.get(hrAdminClaims, teammateEmployeeId)).employeeNumber;
+      const stale = await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const r = await client.query(
+          `INSERT INTO attendance_records (company_id, employee_id, employee_number, source, clock_in_at)
+           VALUES ($1, $2, $3, 'manual', now() - interval '2 days') RETURNING id`,
+          [companyId, teammateEmployeeId, employeeNumber]
+        );
+        return r.rows[0].id as string;
+      });
+      const today = await attendance.clockIn(teammateClaims, { employeeNumber, source: "manual" });
+      expect(today.id).not.toBe(stale);
+      // a second clock-in today is still refused
+      await expect(attendance.clockIn(teammateClaims, { employeeNumber, source: "manual" })).rejects.toThrow(ConflictException);
+      // clock-out closes today's shift, not the forgotten one
+      const out = await attendance.clockOut(teammateClaims, { employeeNumber });
+      expect(out.id).toBe(today.id);
+      const still = await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query("SELECT clock_out_at FROM attendance_records WHERE id = $1", [stale])
+      );
+      expect(still.rows[0].clock_out_at).toBeNull();
+      // with only the forgotten record left, clock-out is refused with the correction hint instead of booking two days
+      await expect(attendance.clockOut(teammateClaims, { employeeNumber })).rejects.toThrow(/attendance correction/);
+      await db.withClaims(FIXTURE_CLAIMS, (client) => client.query("DELETE FROM attendance_records WHERE id = $1", [stale]));
+    });
+
     it("rejects clocking out an employee who isn't currently clocked in", async () => {
       const employeeNumber = (await employees.get(hrAdminClaims, teammateEmployeeId)).employeeNumber;
       await expect(attendance.clockOut(teammateClaims, { employeeNumber })).rejects.toThrow(BadRequestException);

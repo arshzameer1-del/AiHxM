@@ -113,6 +113,29 @@ describe("EmployeesService", () => {
       const updated = await employees.update(hrAdminClaims, created.id, { department: "Ops" });
       expect(updated.employeeNumber).toBe(created.employeeNumber);
     });
+
+    it("clearFields empties named optional fields; an empty value alone never does", async () => {
+      const created = await employees.create(hrAdminClaims, {
+        firstName: "Clear",
+        lastName: "Me",
+        department: "Ops",
+        designation: "Clerk",
+        phone: "0300-0000000",
+        location: "Karachi",
+      });
+      expect(created.designation).toBe("Clerk");
+      // an update that does not mention a field leaves it alone
+      const untouched = await employees.update(hrAdminClaims, created.id, { firstName: "Clear2" });
+      expect(untouched.designation).toBe("Clerk");
+      // naming it empties it (free-text department/location are allowed while no unit/location is linked)
+      const cleared = await employees.update(hrAdminClaims, created.id, { clearFields: ["designation", "phone", "department", "location"] });
+      expect(cleared.designation).toBeNull();
+      expect(cleared.phone).toBeNull();
+      expect(cleared.department).toBeNull();
+      expect(cleared.location).toBeNull();
+      // a new value and a clear request for the same field is ambiguous
+      await expect(employees.update(hrAdminClaims, created.id, { designation: "X", clearFields: ["designation"] })).rejects.toThrow(BadRequestException);
+    });
   });
 
   /**
