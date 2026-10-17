@@ -164,6 +164,8 @@ button.ui-card:focus-visible {
 /* Form fields: text, number, date, select and text areas (checkboxes, radios, ranges and files keep their own look;
    an invalid field keeps its red border) */
 :is(input, select, textarea):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]):not([type="hidden"]):not([aria-invalid="true"]):not(.border-danger) {
+  border-width: 1px;
+  border-style: solid;
   border-color: rgb(var(--c-accent) / 0.3);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
@@ -175,4 +177,23 @@ button.ui-card:focus-visible {
   border-color: rgb(var(--c-accent));
   box-shadow: 0 0 0 3px rgb(var(--c-accent) / 0.22);
   outline: none;
+}
+
+/* Panels and cards that are not tiles: every "rounded-card" panel and every bordered rounded box (dropdowns, mini panels,
+   chips, secondary buttons) gets the same thin light-blue outline, and a clear blue one while the cursor is on it.
+   Boxes that carry their own accent/status border (outlined primary buttons, error boxes) keep it. */
+.rounded-card:not(.shadow-lg):not(.shadow-2xl):not(.ui-card) {
+  box-shadow: 0 0 0 1px rgb(var(--c-accent) / 0.28), 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  transition: box-shadow 0.15s ease;
+}
+.rounded-card:not(.shadow-lg):not(.shadow-2xl):not(.ui-card):hover {
+  box-shadow: 0 0 0 1px rgb(var(--c-accent) / 0.85), 0 6px 18px -8px rgb(var(--c-accent) / 0.4);
+}
+:is(.rounded, .rounded-md, .rounded-lg, .rounded-xl, .rounded-2xl).border:not(input):not(select):not(textarea):not(.ui-card):not([class*="border-accent"]):not([class*="border-danger"]):not([class*="border-success"]):not([class*="border-warning"]):not([class*="border-info"]):not([class*="border-transparent"]):not([class*="border-white"]) {
+  border-color: rgb(var(--c-accent) / 0.28);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+:is(.rounded, .rounded-md, .rounded-lg, .rounded-xl, .rounded-2xl).border:not(input):not(select):not(textarea):not(.ui-card):not([class*="border-accent"]):not([class*="border-danger"]):not([class*="border-success"]):not([class*="border-warning"]):not([class*="border-info"]):not([class*="border-transparent"]):not([class*="border-white"]):hover {
+  border-color: rgb(var(--c-accent) / 0.85);
+  box-shadow: 0 0 0 1px rgb(var(--c-accent) / 0.25);
 }
