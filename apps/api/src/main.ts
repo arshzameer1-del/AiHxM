@@ -27,7 +27,10 @@ async function bootstrap() {
 
   // Standard security headers (HSTS, no-sniff, frame-deny, etc.) — cheap,
   // framework-agnostic, and there was previously nothing here at all.
-  app.use(helmet());
+  // crossOriginResourcePolicy is relaxed to "cross-origin": the web app now lives on a different origin than this API
+  // (Cloudflare Pages vs Render), and <img> tags (platform logo, tenant logos, avatars) load straight from here. helmet's
+  // default "same-origin" makes the browser block them. Data endpoints stay protected by auth + the CORS allowlist.
+  app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
 
   // Compress responses (employee lists and exports are large, the text compresses to a fraction): less to send over the
   // slow hop between Render and the browser.
