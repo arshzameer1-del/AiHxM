@@ -206,6 +206,7 @@ export function HiringWizardPage() {
       api.listHrCatalogItems("address_type").catch(() => []),
       api.listHrCatalogItems("family_relationship_type").catch(() => []),
       api.listHrCatalogItems("qualification_type").catch(() => []),
+      api.listHrCatalogItems("nationality").catch(() => []),
     ]).then(
       ([
         orgUnits,
@@ -220,6 +221,7 @@ export function HiringWizardPage() {
         addressTypes,
         relationshipTypes,
         qualificationTypes,
+        nationalities,
       ]: [
         OrgUnitView[],
         LocationView[],
@@ -227,6 +229,7 @@ export function HiringWizardPage() {
         EmployeeView[],
         ShiftView[],
         PositionView[],
+        HrReferenceCatalogItemView[],
         HrReferenceCatalogItemView[],
         HrReferenceCatalogItemView[],
         HrReferenceCatalogItemView[],
@@ -247,6 +250,7 @@ export function HiringWizardPage() {
           addressTypes,
           relationshipTypes,
           qualificationTypes,
+          nationalities,
         });
       }
     );

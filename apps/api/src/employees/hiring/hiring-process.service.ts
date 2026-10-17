@@ -1,5 +1,6 @@
 import { assertValidCnic, assertValidIban } from "../../crypto/identifier-validation";
 import { decryptDraftData, encryptDraftData, scrubHireProcessDrafts } from "./draft-sensitive-data";
+import { applyPersonExtras } from "./hire-person-extras";
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { DatabaseService } from "../../database/database.service";
@@ -901,6 +902,11 @@ export class HiringProcessService {
         locationId: orgAssignment.locationId as string | undefined,
         managerId: reporting.directManagerEmployeeId as string | undefined,
       });
+
+      // UIFIELDS — the extra Personal Identity answers (name parts, title, nationality, language, place of birth, passport, NTN)
+      // go onto the person record, same transaction.
+      const personRow = await client.query<{ person_id: string | null }>("SELECT person_id FROM employees WHERE id = $1", [employee.id]);
+      if (personRow.rows[0]?.person_id) await applyPersonExtras(client, processRow.company_id, personRow.rows[0].person_id, personal);
 
       // Item 1 — Organization Management occupancy, same transaction. The
       // assignment's effective date is the card's own `effectiveFrom`

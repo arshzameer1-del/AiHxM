@@ -11,7 +11,7 @@ import { fieldCrypto, isEncrypted } from "../../crypto/field-crypto";
  * lives on the employee, the draft copy only widens the exposure.
  */
 const SENSITIVE_DRAFT_KEY =
-  /^(cnic|dateOfBirth|dob|accountNumber|bankAccountNumber|iban|monthlySalary|basicSalary|grossSalary|salary|salaryAmount|amount)$/i;
+  /^(cnic|dateOfBirth|dob|passportNumber|ntn|accountNumber|bankAccountNumber|iban|monthlySalary|basicSalary|grossSalary|salary|salaryAmount|amount)$/i;
 
 export function encryptDraftData<T>(companyId: string, value: T, depth = 0): T {
   if (depth > 10 || value === null || typeof value !== "object") return value;

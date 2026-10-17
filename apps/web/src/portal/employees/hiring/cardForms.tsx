@@ -44,6 +44,8 @@ export type HiringPickerOptions = {
    * with-hardcoded-fallback treatment as `employmentTypes` above, for the
    * 5 personal/reference catalogs this phase wires into the hiring cards. */
   maritalStatuses: HrReferenceCatalogItemView[];
+  /** This company's `nationality` catalog (empty = the Nationality field is a text box). */
+  nationalities?: HrReferenceCatalogItemView[];
   contactTypes: HrReferenceCatalogItemView[];
   addressTypes: HrReferenceCatalogItemView[];
   relationshipTypes: HrReferenceCatalogItemView[];
@@ -314,6 +316,22 @@ const FALLBACK_MARITAL_STATUSES = [
 
 function PersonalIdentityForm({ data, onChange, options, fieldConfig }: CardFormProps) {
   const maritalStatusOptions = catalogOptions(options.maritalStatuses, FALLBACK_MARITAL_STATUSES);
+  const nationalityOptions = catalogOptions(options.nationalities ?? [], []);
+  // The extra Personal Identity fields (UIFIELDS) are plain inputs; the six original ones below are unchanged.
+  const extra = (key: string, label: string, type: "text" | "date" = "text") => (
+    <FieldGate fieldConfig={fieldConfig} fieldKey={key}>
+      <Labeled label={label}>
+        <input
+          type={type}
+          required={fieldRequired(fieldConfig, key, false)}
+          value={str(data, key)}
+          onChange={(e) => set(data, onChange, key, e.target.value)}
+          className={inputClass()}
+          data-testid={`pi-${key}`}
+        />
+      </Labeled>
+    </FieldGate>
+  );
   return (
     <div className="grid grid-cols-2 gap-3">
       <FieldGate fieldConfig={fieldConfig} fieldKey="firstName">
@@ -326,6 +344,7 @@ function PersonalIdentityForm({ data, onChange, options, fieldConfig }: CardForm
           />
         </Labeled>
       </FieldGate>
+      {extra("middleName", "Middle name")}
       <FieldGate fieldConfig={fieldConfig} fieldKey="lastName">
         <Labeled label="Last name">
           <input
@@ -334,6 +353,25 @@ function PersonalIdentityForm({ data, onChange, options, fieldConfig }: CardForm
             onChange={(e) => set(data, onChange, "lastName", e.target.value)}
             className={inputClass()}
           />
+        </Labeled>
+      </FieldGate>
+      {extra("preferredName", "Preferred name")}
+      <FieldGate fieldConfig={fieldConfig} fieldKey="title">
+        <Labeled label="Title">
+          <select
+            required={fieldRequired(fieldConfig, "title", false)}
+            value={str(data, "title")}
+            onChange={(e) => set(data, onChange, "title", e.target.value)}
+            className={inputClass()}
+            data-testid="pi-title"
+          >
+            <option value="">Select…</option>
+            {["Mr", "Ms", "Mrs", "Miss", "Dr", "Engr", "Prof"].map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
         </Labeled>
       </FieldGate>
       <FieldGate fieldConfig={fieldConfig} fieldKey="cnic">
@@ -357,6 +395,7 @@ function PersonalIdentityForm({ data, onChange, options, fieldConfig }: CardForm
           />
         </Labeled>
       </FieldGate>
+      {extra("placeOfBirth", "Place of birth")}
       <FieldGate fieldConfig={fieldConfig} fieldKey="gender">
         <Labeled label="Gender">
           <select
@@ -391,6 +430,38 @@ function PersonalIdentityForm({ data, onChange, options, fieldConfig }: CardForm
           </select>
         </Labeled>
       </FieldGate>
+      <FieldGate fieldConfig={fieldConfig} fieldKey="nationality">
+        <Labeled label="Nationality">
+          {nationalityOptions.length > 0 ? (
+            <select
+              required={fieldRequired(fieldConfig, "nationality", false)}
+              value={str(data, "nationality")}
+              onChange={(e) => set(data, onChange, "nationality", e.target.value)}
+              className={inputClass()}
+              data-testid="pi-nationality"
+            >
+              <option value="">Select…</option>
+              {nationalityOptions.map((n) => (
+                <option key={n.value} value={n.value}>
+                  {n.label}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              required={fieldRequired(fieldConfig, "nationality", false)}
+              value={str(data, "nationality")}
+              onChange={(e) => set(data, onChange, "nationality", e.target.value)}
+              className={inputClass()}
+              data-testid="pi-nationality"
+            />
+          )}
+        </Labeled>
+      </FieldGate>
+      {extra("language", "Language")}
+      {extra("passportNumber", "Passport number")}
+      {extra("passportExpiry", "Passport expiry", "date")}
+      {extra("ntn", "NTN")}
     </div>
   );
 }
@@ -645,7 +716,10 @@ function AddressesForm({ data, onChange, options, fieldConfig }: CardFormProps) 
       options: catalogOptions(options.addressTypes, FALLBACK_ADDRESS_TYPES),
     },
     { key: "line1", label: "Address line 1", type: "text", required: true },
+    { key: "line2", label: "Address line 2", type: "text" },
     { key: "city", label: "City", type: "text" },
+    { key: "stateProvince", label: "State / Province", type: "text" },
+    { key: "postalCode", label: "Postal code", type: "text" },
     { key: "country", label: "Country", type: "text" },
   ];
   return (
@@ -758,6 +832,11 @@ function PaymentBankForm({ data, onChange, fieldConfig }: CardFormProps) {
           <input value={str(data, "iban")} onChange={(e) => set(data, onChange, "iban", e.target.value)} className={inputClass()} />
         </Labeled>
       </FieldGate>
+      <FieldGate fieldConfig={fieldConfig} fieldKey="branchCode">
+        <Labeled label="Branch code">
+          <input value={str(data, "branchCode")} onChange={(e) => set(data, onChange, "branchCode", e.target.value)} className={inputClass()} />
+        </Labeled>
+      </FieldGate>
     </div>
   );
 }
@@ -841,6 +920,7 @@ function FamilyDependentsForm({ data, onChange, options, fieldConfig }: CardForm
     },
     { key: "fullName", label: "Full name", type: "text", required: true },
     { key: "dateOfBirth", label: "Date of birth", type: "date" },
+    { key: "cnic", label: "CNIC", type: "text" },
     { key: "isDependent", label: "Dependent", type: "checkbox", defaultChecked: true },
     { key: "isBeneficiary", label: "Beneficiary", type: "checkbox" },
   ];
@@ -861,6 +941,9 @@ const EDUCATION_FIELDS: SubEntityFieldSpec[] = [
   { key: "degreeTitle", label: "Degree / Title", type: "text", required: true },
   { key: "institution", label: "Institution", type: "text" },
   { key: "fieldOfStudy", label: "Field of study", type: "text" },
+  { key: "startDate", label: "Start date", type: "date" },
+  { key: "endDate", label: "End date", type: "date" },
+  { key: "grade", label: "Grade / CGPA", type: "text" },
 ];
 
 function EducationForm({ data, onChange, fieldConfig }: CardFormProps) {
@@ -897,6 +980,9 @@ function QualificationsSkillsForm({ data, onChange, options, fieldConfig }: Card
     },
     { key: "title", label: "Title", type: "text", required: true },
     { key: "issuingAuthority", label: "Issuing authority", type: "text" },
+    { key: "issueDate", label: "Issue date", type: "date" },
+    { key: "expiryDate", label: "Expiry date", type: "date" },
+    { key: "proficiencyLevel", label: "Proficiency level", type: "text" },
   ];
   return (
     <RepeatableListEditor
@@ -914,6 +1000,8 @@ function QualificationsSkillsForm({ data, onChange, options, fieldConfig }: Card
 const ASSET_FIELDS: SubEntityFieldSpec[] = [
   { key: "assetType", label: "Asset type", type: "text", required: true },
   { key: "assetTag", label: "Asset tag", type: "text" },
+  { key: "description", label: "Description", type: "text" },
+  { key: "assignedDate", label: "Assigned on", type: "date" },
 ];
 
 function AssetsForm({ data, onChange, fieldConfig }: CardFormProps) {

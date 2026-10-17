@@ -145,8 +145,15 @@ export class CardFieldConfigService {
    * default.
    */
   async ensureDefaultFieldDefinitions(client: PoolClient, companyId: string): Promise<void> {
-    const existing = await client.query("SELECT 1 FROM core_employee_card_field_definitions WHERE company_id = $1 LIMIT 1", [companyId]);
-    if ((existing.rowCount ?? 0) > 0) return;
+    // Seeds a brand-new company in full, and tops up an existing one when the catalog has grown since (new built-in fields):
+    // only the rows that are missing are added (ON CONFLICT DO NOTHING), so nothing an admin configured is touched.
+    const missing = await client.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM unnest($2::text[], $3::text[]) AS c(card_key, field_key)
+        WHERE NOT EXISTS (SELECT 1 FROM core_employee_card_field_definitions d
+                           WHERE d.company_id = $1 AND d.card_key = c.card_key AND d.field_key = c.field_key)`,
+      [companyId, CARD_FIELD_CATALOG.map((f) => f.cardKey), CARD_FIELD_CATALOG.map((f) => f.fieldKey)]
+    );
+    if (Number(missing.rows[0]?.n ?? 0) === 0) return;
     for (const field of CARD_FIELD_CATALOG) {
       await client.query(
         `INSERT INTO core_employee_card_field_definitions (company_id, card_key, field_key, is_required, sort_order)

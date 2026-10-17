@@ -45,6 +45,15 @@ export const CARD_FIELD_CATALOG: readonly CardFieldSeed[] = [
   { cardKey: "personal_identity", fieldKey: "dateOfBirth", label: "Date of birth", sortOrder: 3, defaultRequired: false },
   { cardKey: "personal_identity", fieldKey: "gender", label: "Gender", sortOrder: 4, defaultRequired: false },
   { cardKey: "personal_identity", fieldKey: "maritalStatus", label: "Marital status", sortOrder: 5, defaultRequired: false },
+  { cardKey: "personal_identity", fieldKey: "middleName", label: "Middle name", sortOrder: 6, defaultRequired: false },
+  { cardKey: "personal_identity", fieldKey: "preferredName", label: "Preferred name", sortOrder: 7, defaultRequired: false },
+  { cardKey: "personal_identity", fieldKey: "title", label: "Title", sortOrder: 8, defaultRequired: false },
+  { cardKey: "personal_identity", fieldKey: "placeOfBirth", label: "Place of birth", sortOrder: 9, defaultRequired: false },
+  { cardKey: "personal_identity", fieldKey: "nationality", label: "Nationality", sortOrder: 10, defaultRequired: false },
+  { cardKey: "personal_identity", fieldKey: "language", label: "Language", sortOrder: 11, defaultRequired: false },
+  { cardKey: "personal_identity", fieldKey: "passportNumber", label: "Passport number", sortOrder: 12, defaultRequired: false },
+  { cardKey: "personal_identity", fieldKey: "passportExpiry", label: "Passport expiry", sortOrder: 13, defaultRequired: false },
+  { cardKey: "personal_identity", fieldKey: "ntn", label: "NTN", sortOrder: 14, defaultRequired: false },
 
   // employment — fields render inside Organization Assignment's own form
   // (presentation-only merge, see this file's header comment) but are
@@ -72,6 +81,9 @@ export const CARD_FIELD_CATALOG: readonly CardFieldSeed[] = [
   { cardKey: "addresses", fieldKey: "line1", label: "Address line 1", sortOrder: 1, defaultRequired: true },
   { cardKey: "addresses", fieldKey: "city", label: "City", sortOrder: 2, defaultRequired: false },
   { cardKey: "addresses", fieldKey: "country", label: "Country", sortOrder: 3, defaultRequired: false },
+  { cardKey: "addresses", fieldKey: "line2", label: "Address line 2", sortOrder: 4, defaultRequired: false },
+  { cardKey: "addresses", fieldKey: "stateProvince", label: "State / Province", sortOrder: 5, defaultRequired: false },
+  { cardKey: "addresses", fieldKey: "postalCode", label: "Postal code", sortOrder: 6, defaultRequired: false },
 
   // working_time — WorkingTimeForm
   { cardKey: "working_time", fieldKey: "shiftId", label: "Shift", sortOrder: 0, defaultRequired: false },
@@ -87,6 +99,7 @@ export const CARD_FIELD_CATALOG: readonly CardFieldSeed[] = [
   { cardKey: "payment_bank", fieldKey: "accountTitle", label: "Account title", sortOrder: 2, defaultRequired: false },
   { cardKey: "payment_bank", fieldKey: "accountNumber", label: "Account number", sortOrder: 3, defaultRequired: false },
   { cardKey: "payment_bank", fieldKey: "iban", label: "IBAN", sortOrder: 4, defaultRequired: false },
+  { cardKey: "payment_bank", fieldKey: "branchCode", label: "Branch code", sortOrder: 5, defaultRequired: false },
 
   // important_dates — ImportantDatesForm (RepeatableListEditor over IMPORTANT_DATE_FIELDS)
   { cardKey: "important_dates", fieldKey: "dateType", label: "Type", sortOrder: 0, defaultRequired: true },
@@ -104,20 +117,29 @@ export const CARD_FIELD_CATALOG: readonly CardFieldSeed[] = [
   { cardKey: "family_dependents", fieldKey: "dateOfBirth", label: "Date of birth", sortOrder: 2, defaultRequired: false },
   { cardKey: "family_dependents", fieldKey: "isDependent", label: "Dependent", sortOrder: 3, defaultRequired: false },
   { cardKey: "family_dependents", fieldKey: "isBeneficiary", label: "Beneficiary", sortOrder: 4, defaultRequired: false },
+  { cardKey: "family_dependents", fieldKey: "cnic", label: "CNIC", sortOrder: 5, defaultRequired: false },
 
   // education — EducationForm
   { cardKey: "education", fieldKey: "degreeTitle", label: "Degree / Title", sortOrder: 0, defaultRequired: true },
   { cardKey: "education", fieldKey: "institution", label: "Institution", sortOrder: 1, defaultRequired: false },
   { cardKey: "education", fieldKey: "fieldOfStudy", label: "Field of study", sortOrder: 2, defaultRequired: false },
+  { cardKey: "education", fieldKey: "startDate", label: "Start date", sortOrder: 3, defaultRequired: false },
+  { cardKey: "education", fieldKey: "endDate", label: "End date", sortOrder: 4, defaultRequired: false },
+  { cardKey: "education", fieldKey: "grade", label: "Grade / CGPA", sortOrder: 5, defaultRequired: false },
 
   // qualifications_skills — QualificationsSkillsForm
   { cardKey: "qualifications_skills", fieldKey: "qualificationType", label: "Type", sortOrder: 0, defaultRequired: true },
   { cardKey: "qualifications_skills", fieldKey: "title", label: "Title", sortOrder: 1, defaultRequired: true },
   { cardKey: "qualifications_skills", fieldKey: "issuingAuthority", label: "Issuing authority", sortOrder: 2, defaultRequired: false },
+  { cardKey: "qualifications_skills", fieldKey: "issueDate", label: "Issue date", sortOrder: 3, defaultRequired: false },
+  { cardKey: "qualifications_skills", fieldKey: "expiryDate", label: "Expiry date", sortOrder: 4, defaultRequired: false },
+  { cardKey: "qualifications_skills", fieldKey: "proficiencyLevel", label: "Proficiency level", sortOrder: 5, defaultRequired: false },
 
   // assets — AssetsForm
   { cardKey: "assets", fieldKey: "assetType", label: "Asset type", sortOrder: 0, defaultRequired: true },
   { cardKey: "assets", fieldKey: "assetTag", label: "Asset tag", sortOrder: 1, defaultRequired: false },
+  { cardKey: "assets", fieldKey: "description", label: "Description", sortOrder: 2, defaultRequired: false },
+  { cardKey: "assets", fieldKey: "assignedDate", label: "Assigned on", sortOrder: 3, defaultRequired: false },
 
   // documents / time_leave_setup / benefits / emergency_safety —
   // GenericNotesForm; each has exactly one built-in field, the shared

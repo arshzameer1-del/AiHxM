@@ -131,7 +131,7 @@ describe("HiringProcessService", () => {
     expect(requiredCards).toEqual(["personal_identity", "employment", "organization_assignment", "review_completion"]);
 
     const cardPayloads: Record<string, Record<string, unknown>> = {
-      personal_identity: { firstName: "Bilal", lastName: "Ahmed", cnic: `${Date.now()}` },
+      personal_identity: { firstName: "Bilal", lastName: "Ahmed", cnic: `${Date.now()}`, middleName: "Raza", preferredName: "Billy", title: "Mr", placeOfBirth: "Multan", language: "Urdu", passportExpiry: "2032-01-31" },
       employment: { employmentType: "permanent", dateOfJoining: "2026-01-01" },
       organization_assignment: { note: "HQ" },
       review_completion: { reviewed: true },
@@ -155,6 +155,15 @@ describe("HiringProcessService", () => {
     const completed = await hiring.complete(hrAdminClaims, process.id);
     expect(completed.status).toBe("hired");
     expect(completed.employeeId).not.toBeNull();
+
+    // UIFIELDS: the extra Personal Identity answers reached the person record.
+    const person = await db.withClaims(hrAdminClaims, (c) =>
+      c.query("SELECT p.middle_name, p.preferred_name, p.title, p.place_of_birth, p.language, p.passport_expiry FROM persons p JOIN employees e ON e.person_id = p.id WHERE e.id = $1", [
+        completed.employeeId,
+      ])
+    );
+    expect(person.rows[0]).toMatchObject({ middle_name: "Raza", preferred_name: "Billy", title: "Mr", place_of_birth: "Multan", language: "Urdu" });
+    expect(String(person.rows[0].passport_expiry)).toContain("2032");
 
     const employeeIdAfterFirstComplete = completed.employeeId;
     const completedAgain = await hiring.complete(hrAdminClaims, process.id);
