@@ -1,5 +1,5 @@
 import { LoadingNote } from "../shared/PageChrome";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type { EmployeeView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
@@ -29,6 +29,18 @@ export function EmployeeListPage() {
   }, []);
 
   const canCreate = identity?.roleKeys.includes("hr_admin") ?? false;
+
+  // A company can have hundreds of people: find them by name, number, department or job title, and by status.
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState("all");
+  const shown = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return (employees ?? []).filter((e) => {
+      if (status !== "all" && e.employmentStatus !== status) return false;
+      if (!q) return true;
+      return [e.employeeNumber, `${e.firstName} ${e.lastName}`, e.department, e.designation].some((v) => (v ?? "").toLowerCase().includes(q));
+    });
+  }, [employees, search, status]);
 
   return (
     <div>
@@ -62,6 +74,51 @@ export function EmployeeListPage() {
       )}
 
       {employees && employees.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 mb-3">
+          <label className="sr-only" htmlFor="emp-search">
+            Search employees
+          </label>
+          <input
+            id="emp-search"
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search name, number, department, job title…"
+            className="w-80 max-w-full rounded-lg border border-black/10 bg-card px-3 py-2 text-sm"
+            data-testid="emp-search"
+          />
+          <label className="sr-only" htmlFor="emp-status">
+            Status
+          </label>
+          <select id="emp-status" value={status} onChange={(e) => setStatus(e.target.value)} className="rounded-lg border border-black/10 bg-card px-3 py-2 text-sm" data-testid="emp-status">
+            <option value="all">All statuses</option>
+            <option value="active">Active</option>
+            <option value="on_leave">On leave</option>
+            <option value="terminated">Terminated</option>
+          </select>
+          <span className="text-xs text-label-tertiary" data-testid="emp-count" aria-live="polite">
+            {shown.length === employees.length ? `${employees.length} employees` : `${shown.length} of ${employees.length} employees`}
+          </span>
+        </div>
+      )}
+
+      {employees && employees.length > 0 && shown.length === 0 && (
+        <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-tertiary" data-testid="emp-none">
+          No one matches this search.{" "}
+          <button
+            type="button"
+            className="text-accent hover:underline font-medium"
+            onClick={() => {
+              setSearch("");
+              setStatus("all");
+            }}
+          >
+            Clear filters
+          </button>
+        </div>
+      )}
+
+      {employees && shown.length > 0 && (
         <div className="bg-card rounded-card shadow-sm overflow-hidden">
           <table className="w-full text-sm">
             <thead>
@@ -74,7 +131,7 @@ export function EmployeeListPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-black/5">
-              {employees.map((e) => (
+              {shown.map((e) => (
                 <tr key={e.id} className="hover:bg-black/[0.02]">
                   <td className="px-4 py-3">
                     <Link to={`/app/employees/${e.id}`} className="font-mono text-xs text-accent hover:underline">

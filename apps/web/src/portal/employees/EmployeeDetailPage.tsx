@@ -1,6 +1,6 @@
 import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, ReactNode, useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import type {
   CostCenterView,
   EmployeeView,
@@ -130,7 +130,7 @@ export function EmployeeDetailPage() {
   const qualificationTypeOptions = qualificationTypes.map((t) => ({ value: t.code, label: t.label }));
 
   return (
-    <div className="max-w-2xl">
+    <div className="max-w-4xl">
       <div className="flex items-start justify-between mb-1">
         <h1 className="text-2xl font-bold tracking-tight">
           {employee.firstName} {employee.lastName}
@@ -171,6 +171,7 @@ export function EmployeeDetailPage() {
           ) : (
             <section className="bg-card rounded-card p-5 shadow-sm mb-6">
               <EmployeeFields employee={employee} />
+              <ReportsTo employee={employee} canManage={canManage} onChangeManager={() => setTab("Lifecycle Actions")} />
             </section>
           )}
 
@@ -282,6 +283,50 @@ export function EmployeeDetailPage() {
   );
 }
 
+/** Who the employee reports to. Changing it is a dated lifecycle action ("Change manager"), so it is shown here, not edited here. */
+function ReportsTo({ employee, canManage, onChangeManager }: { employee: EmployeeView; canManage: boolean; onChangeManager: () => void }) {
+  const managerId = employee.managerId;
+  const [manager, setManager] = useState<EmployeeView | null | undefined>(managerId ? undefined : null);
+  useEffect(() => {
+    if (!managerId) {
+      setManager(null);
+      return;
+    }
+    let live = true;
+    setManager(undefined);
+    api
+      .getEmployee(managerId)
+      .then((m) => live && setManager(m))
+      .catch(() => live && setManager(null));
+    return () => {
+      live = false;
+    };
+  }, [managerId]);
+
+  return (
+    <div className="mt-4 pt-4 border-t border-black/5 text-sm" data-testid="reports-to">
+      <div className="text-xs font-semibold uppercase tracking-wide text-label-tertiary mb-0.5">Reports to</div>
+      {manager === undefined ? (
+        <span className="text-label-tertiary">Loading…</span>
+      ) : manager ? (
+        <Link to={`/app/employees/${manager.id}`} className="text-accent hover:underline">
+          {manager.firstName} {manager.lastName} <span className="font-mono text-xs text-label-tertiary">{manager.employeeNumber}</span>
+        </Link>
+      ) : (
+        <span className="text-label-tertiary">{managerId ? "A manager is set but you cannot view their record." : "No manager set."}</span>
+      )}
+      {canManage && (
+        <>
+          {" · "}
+          <button type="button" onClick={onChangeManager} className="text-xs font-medium text-accent hover:underline">
+            Change under Lifecycle Actions
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
 function EditForm({
   employee,
   onSaved,
@@ -304,8 +349,22 @@ function EditForm({
   const [salaryBand, setSalaryBand] = useState(employee.salaryBand ?? "");
   const [bankAccountNumber, setBankAccountNumber] = useState(employee.bankAccountNumber ?? "");
   const [terminationReason, setTerminationReason] = useState(employee.terminationReason ?? "");
+  const [gender, setGender] = useState(employee.gender ?? "");
+  const [maritalStatus, setMaritalStatus] = useState(employee.maritalStatus ?? "");
+  const [dateOfBirth, setDateOfBirth] = useState(employee.dateOfBirth ?? "");
+  const [dateOfJoining, setDateOfJoining] = useState(employee.dateOfJoining ?? "");
+  const [maritalOptions, setMaritalOptions] = useState<HrReferenceCatalogItemView[]>([]);
+  const [typeOptions, setTypeOptions] = useState<HrReferenceCatalogItemView[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // Date of birth is hidden by field rules from some callers: when the API did not send it, it is not offered either.
+  const canEditBirth = "dateOfBirth" in employee;
+
+  useEffect(() => {
+    // Same company lists the hiring wizard uses, so what is picked here matches what a hire could pick.
+    api.listHrCatalogItems("marital_status").then(setMaritalOptions).catch(() => setMaritalOptions([]));
+    api.listHrCatalogItems("employment_type").then(setTypeOptions).catch(() => setTypeOptions([]));
+  }, []);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -326,6 +385,11 @@ function EditForm({
         salaryBand: salaryBand || undefined,
         bankAccountNumber: bankAccountNumber || undefined,
         terminationReason: employmentStatus === "terminated" ? terminationReason || undefined : undefined,
+        // Sent only when changed, so saving an unrelated field never re-validates an old stored value.
+        ...(gender && gender !== (employee.gender ?? "") ? { gender } : {}),
+        ...(maritalStatus && maritalStatus !== (employee.maritalStatus ?? "") ? { maritalStatus } : {}),
+        ...(canEditBirth && dateOfBirth && dateOfBirth !== (employee.dateOfBirth ?? "") ? { dateOfBirth } : {}),
+        ...(dateOfJoining && dateOfJoining !== (employee.dateOfJoining ?? "") ? { dateOfJoining } : {}),
       });
       onSaved(updated);
     } catch (err) {
@@ -396,11 +460,21 @@ function EditForm({
             onChange={(e) => setEmploymentType(e.target.value as EmploymentType)}
             className="w-full rounded-lg border border-black/10 px-3 py-2 capitalize focus:outline-none focus:ring-2 focus:ring-accent"
           >
-            {EMPLOYMENT_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
+            {typeOptions.length > 0
+              ? [
+                  // The saved type stays selectable even if the company has since renamed or switched it off.
+                  ...(typeOptions.some((t) => t.code === employmentType) ? [] : [{ code: employmentType, label: employmentType, id: "current" }]),
+                  ...typeOptions,
+                ].map((t) => (
+                  <option key={t.id} value={t.code}>
+                    {t.label}
+                  </option>
+                ))
+              : EMPLOYMENT_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
           </select>
         </Field>
         <Field label="Status">
@@ -425,6 +499,38 @@ function EditForm({
             />
           </Field>
         )}
+        <Field label="Gender">
+          <select value={gender} onChange={(e) => setGender(e.target.value)} className="w-full rounded-lg border border-black/10 px-3 py-2 capitalize focus:outline-none focus:ring-2 focus:ring-accent">
+            <option value="">—</option>
+            {["male", "female", "other"].map((g) => (
+              <option key={g} value={g}>
+                {g}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Marital status">
+          <select value={maritalStatus} onChange={(e) => setMaritalStatus(e.target.value)} className="w-full rounded-lg border border-black/10 px-3 py-2 capitalize focus:outline-none focus:ring-2 focus:ring-accent">
+            <option value="">—</option>
+            {(maritalOptions.length > 0
+              ? maritalOptions.map((m) => ({ value: m.code, label: m.label }))
+              : ["single", "married", "divorced", "widowed"].map((m) => ({ value: m, label: m }))
+            ).map((m) => (
+              <option key={m.value} value={m.value}>
+                {m.label}
+              </option>
+            ))}
+            {maritalStatus && maritalOptions.length > 0 && !maritalOptions.some((m) => m.code === maritalStatus) && <option value={maritalStatus}>{maritalStatus}</option>}
+          </select>
+        </Field>
+        {canEditBirth && (
+          <Field label="Date of birth">
+            <input type="date" value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent" />
+          </Field>
+        )}
+        <Field label="Date of joining">
+          <input type="date" value={dateOfJoining} onChange={(e) => setDateOfJoining(e.target.value)} className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent" />
+        </Field>
         <Field label="CNIC">
           <input
             value={cnic}

@@ -155,3 +155,67 @@ test.describe("Employee maintenance", () => {
     await expect(page.getByTestId("pd-placeOfBirth")).toHaveText("—");
   });
 });
+
+test.describe("Employee maintenance - lists, details and sub-sections", () => {
+  test("the directory can be searched and filtered by status", async ({ page }) => {
+    await loginAsHrAdmin(page);
+    const last = `Findable${Date.now()}`;
+    await quickHire(page, last);
+    await page.goto("/app/employees");
+    await expect(page.getByTestId("emp-count")).toContainText(/employee/);
+    await page.getByTestId("emp-search").fill(last);
+    await expect(page.locator("tbody tr")).toHaveCount(1);
+    await expect(page.getByTestId("emp-count")).toContainText("1 of");
+    await page.getByTestId("emp-status").selectOption("terminated");
+    await expect(page.getByTestId("emp-none")).toBeVisible();
+    await page.getByRole("button", { name: "Clear filters" }).click();
+    await page.getByTestId("emp-search").fill("zzz-nobody-has-this-name");
+    await expect(page.getByTestId("emp-none")).toBeVisible();
+  });
+
+  test("Contact & Address lists load (no error) and a new contact shows up", async ({ page }) => {
+    await loginAsHrAdmin(page);
+    await quickHire(page, `Contacts${Date.now()}`);
+    await page.getByRole("button", { name: "Contact & Address" }).click();
+    await expect(page.getByText(/could not load/i)).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /add contact/i })).toBeVisible();
+    await page.getByRole("button", { name: /add contact/i }).click();
+    await page.getByLabel("Type", { exact: true }).selectOption({ index: 1 });
+    await page.getByLabel("Value", { exact: true }).fill("+92 300 1112223");
+    await page.getByRole("button", { name: /^(save|add)/i }).first().click();
+    await expect(page.getByText("+92 300 1112223")).toBeVisible();
+  });
+
+  test("every other sub-section tab loads without an error", async ({ page }) => {
+    await loginAsHrAdmin(page);
+    await quickHire(page, `Tabs${Date.now()}`);
+    for (const tab of ["Family & Education", "Compensation & Assets"]) {
+      await page.getByRole("button", { name: tab }).click();
+      await page.waitForTimeout(1200);
+      await expect(page.getByText(/could not load/i)).toHaveCount(0);
+    }
+  });
+
+  test("the edit form covers gender, marital status, date of birth and date of joining", async ({ page }) => {
+    await loginAsHrAdmin(page);
+    await quickHire(page, `Details${Date.now()}`);
+    await page.getByRole("button", { name: "Edit" }).click();
+    await page.getByLabel("Gender").selectOption("female");
+    await page.getByLabel("Marital status").selectOption({ index: 1 });
+    await page.getByLabel("Date of birth").fill("1992-05-17");
+    await page.getByLabel("Date of joining").fill("2026-01-05");
+    await page.getByRole("button", { name: /save/i }).click();
+    const fields = page.locator("dl");
+    await expect(fields).toContainText(/female/i);
+    await expect(fields).toContainText("17 May 1992");
+    await expect(fields).toContainText("5 Jan 2026");
+  });
+
+  test("the Overview shows who the employee reports to", async ({ page }) => {
+    await loginAsHrAdmin(page);
+    await quickHire(page, `Reports${Date.now()}`);
+    await expect(page.getByTestId("reports-to")).toContainText("Reports to");
+    await expect(page.getByTestId("reports-to")).toContainText(/no manager set/i);
+  });
+});
+

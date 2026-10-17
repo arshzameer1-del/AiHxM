@@ -1,3 +1,4 @@
+import { EMPLOYEE_ID } from "./employee-id-route";
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post, UseGuards } from "@nestjs/common";
 import { SessionGuard } from "../auth/session.guard";
 import { CurrentClaims } from "../auth/current-claims.decorator";
@@ -25,59 +26,59 @@ import { CancelLifecycleEventDto, CorrectLifecycleEventDto } from "./dto/correct
 export class EmployeeLifecycleController {
   constructor(private readonly lifecycle: EmployeeLifecycleService) {}
 
-  @Post(":id/transfer")
+  @Post(`${EMPLOYEE_ID}/transfer`)
   transfer(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: TransferEmployeeDto) {
     return this.lifecycle.transfer(claims, id, dto);
   }
 
-  @Post(":id/promote")
+  @Post(`${EMPLOYEE_ID}/promote`)
   promote(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: PromoteEmployeeDto) {
     return this.lifecycle.promote(claims, id, dto);
   }
 
-  @Post(":id/demote")
+  @Post(`${EMPLOYEE_ID}/demote`)
   demote(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: DemoteEmployeeDto) {
     return this.lifecycle.demote(claims, id, dto);
   }
 
-  @Post(":id/second")
+  @Post(`${EMPLOYEE_ID}/second`)
   second(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: SecondEmployeeDto) {
     return this.lifecycle.second(claims, id, dto);
   }
 
-  @Post(":id/act")
+  @Post(`${EMPLOYEE_ID}/act`)
   act(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: AssignActingRoleDto) {
     return this.lifecycle.assignActingRole(claims, id, dto);
   }
 
-  @Post(":id/change-manager")
+  @Post(`${EMPLOYEE_ID}/change-manager`)
   changeManager(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: ChangeEmployeeManagerDto) {
     return this.lifecycle.changeManager(claims, id, dto);
   }
 
-  @Post(":id/change-location")
+  @Post(`${EMPLOYEE_ID}/change-location`)
   changeLocation(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: ChangeEmployeeLocationDto) {
     return this.lifecycle.changeLocation(claims, id, dto);
   }
 
-  @Post(":id/terminate")
+  @Post(`${EMPLOYEE_ID}/terminate`)
   terminate(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: TerminateEmployeeLifecycleDto) {
     return this.lifecycle.terminate(claims, id, dto);
   }
 
-  @Post(":id/reactivate")
+  @Post(`${EMPLOYEE_ID}/reactivate`)
   reactivate(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: ReactivateEmployeeDto) {
     return this.lifecycle.reactivate(claims, id, dto);
   }
 
   // Step 4 (LIF-01/03/04): the event stream, cancelling a scheduled action,
   // and corrections (a new event referencing the original).
-  @Get(":id/lifecycle-events")
+  @Get(`${EMPLOYEE_ID}/lifecycle-events`)
   events(@CurrentClaims() claims: RequestClaims, @Param("id", ParseUUIDPipe) id: string) {
     return this.lifecycle.listEvents(claims, id);
   }
 
-  @Post(":id/lifecycle-events/:eventId/cancel")
+  @Post(`${EMPLOYEE_ID}/lifecycle-events/:eventId/cancel`)
   cancelEvent(
     @CurrentClaims() claims: RequestClaims,
     @Param("id", ParseUUIDPipe) id: string,
@@ -87,7 +88,7 @@ export class EmployeeLifecycleController {
     return this.lifecycle.cancelScheduled(claims, id, eventId, dto.reason);
   }
 
-  @Post(":id/lifecycle-events/:eventId/correct")
+  @Post(`${EMPLOYEE_ID}/lifecycle-events/:eventId/correct`)
   correctEvent(
     @CurrentClaims() claims: RequestClaims,
     @Param("id", ParseUUIDPipe) id: string,

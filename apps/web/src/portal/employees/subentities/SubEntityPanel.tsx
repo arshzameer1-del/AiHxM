@@ -1,5 +1,5 @@
 import { LoadingNote } from "../../shared/PageChrome";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useId, useState } from "react";
 import { ApiError } from "../../../api/client";
 
 /**
@@ -114,6 +114,8 @@ export function FieldInput({
 }) {
   const inputClass =
     "w-full rounded-lg border border-black/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent";
+  // Each label is tied to its control, so screen readers, click-the-label and tests can reach the field by name.
+  const id = useId();
 
   if (field.type === "checkbox") {
     return (
@@ -132,8 +134,9 @@ export function FieldInput({
   if (field.type === "select") {
     return (
       <div>
-        <label className="block text-xs font-medium mb-1">{field.label}</label>
+        <label htmlFor={id} className="block text-xs font-medium mb-1">{field.label}</label>
         <select
+          id={id}
           required={field.required}
           value={toFormValue(values[field.key])}
           onChange={(e) => onChange(field.key, e.target.value)}
@@ -153,8 +156,9 @@ export function FieldInput({
   if (field.type === "textarea") {
     return (
       <div>
-        <label className="block text-xs font-medium mb-1">{field.label}</label>
+        <label htmlFor={id} className="block text-xs font-medium mb-1">{field.label}</label>
         <textarea
+          id={id}
           required={field.required}
           value={toFormValue(values[field.key])}
           onChange={(e) => onChange(field.key, e.target.value)}
@@ -168,8 +172,9 @@ export function FieldInput({
 
   return (
     <div>
-      <label className="block text-xs font-medium mb-1">{field.label}</label>
+      <label htmlFor={id} className="block text-xs font-medium mb-1">{field.label}</label>
       <input
+        id={id}
         type={field.type === "date" ? "date" : field.type === "number" ? "number" : "text"}
         required={field.required}
         value={toFormValue(values[field.key])}
@@ -284,7 +289,6 @@ export function SubEntityPanel<TView extends SubEntityRow>({
         )}
       </div>
 
-      {loadError && <div className="text-danger text-xs mb-2">{loadError}</div>}
       {rowError && <div className="text-danger text-xs mb-2">{rowError}</div>}
 
       {adding && (
@@ -302,7 +306,22 @@ export function SubEntityPanel<TView extends SubEntityRow>({
         </div>
       )}
 
-      {items === null && <LoadingNote />}
+      {items === null && !loadError && <LoadingNote />}
+      {items === null && loadError && (
+        <div className="text-sm text-danger flex items-center gap-3" role="alert">
+          <span>{loadError}</span>
+          <button
+            type="button"
+            className="text-accent font-medium hover:underline"
+            onClick={() => {
+              setLoadError(null);
+              load();
+            }}
+          >
+            Try again
+          </button>
+        </div>
+      )}
       {items && items.length === 0 && !adding && <div className="text-sm text-label-tertiary">{config.emptyLabel}</div>}
 
       {items && items.length > 0 && (

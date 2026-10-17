@@ -1,3 +1,4 @@
+import { EMPLOYEE_ID } from "./employee-id-route";
 import {
   Body,
   Controller,
@@ -85,23 +86,23 @@ export class EmployeesController {
     return this.employees.getFieldSensitivityClassification(claims);
   }
 
-  @Get(":id")
+  @Get(`${EMPLOYEE_ID}`)
   get(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
     return this.employees.get(claims, id);
   }
 
-  @Patch(":id")
+  @Patch(`${EMPLOYEE_ID}`)
   update(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: UpdateEmployeeDto) {
     return this.employees.update(claims, id, dto);
   }
 
   /** Decision #12 — see EmployeesService.createLogin()'s doc comment. */
-  @Post(":id/account")
+  @Post(`${EMPLOYEE_ID}/account`)
   createLogin(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: CreateEmployeeLoginDto) {
     return this.employees.createLogin(claims, id, dto);
   }
 
-  @Post(":id/documents")
+  @Post(`${EMPLOYEE_ID}/documents`)
   @UseInterceptors(FileInterceptor("file", { limits: { fileSize: 10 * 1024 * 1024 } }))
   uploadDocument(
     @CurrentClaims() claims: RequestClaims,
@@ -112,12 +113,12 @@ export class EmployeesController {
     return this.employees.addDocument(claims, id, dto.documentType, file);
   }
 
-  @Get(":id/documents")
+  @Get(`${EMPLOYEE_ID}/documents`)
   listDocuments(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
     return this.employees.listDocuments(claims, id);
   }
 
-  @Get(":id/documents/:documentId")
+  @Get(`${EMPLOYEE_ID}/documents/:documentId`)
   async downloadDocument(
     @CurrentClaims() claims: RequestClaims,
     @Param("id") id: string,
@@ -130,12 +131,12 @@ export class EmployeesController {
     res.send(buffer);
   }
 
-  @Post(":id/job-history")
+  @Post(`${EMPLOYEE_ID}/job-history`)
   addJobHistory(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: RecordJobHistoryDto) {
     return this.employees.addJobHistory(claims, id, dto);
   }
 
-  @Get(":id/job-history")
+  @Get(`${EMPLOYEE_ID}/job-history`)
   listJobHistory(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
     return this.employees.listJobHistory(claims, id);
   }
