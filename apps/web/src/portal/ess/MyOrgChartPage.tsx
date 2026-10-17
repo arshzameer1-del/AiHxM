@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import type { MyOrgChart, MyOrgChartNode, MyOrgChartPerson } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { BackLink, PageHeader } from "../shared/PageChrome";
@@ -13,54 +13,75 @@ function countAll(nodes: MyOrgChartNode[]): number {
   return nodes.reduce((n, x) => n + 1 + countAll(x.directReports), 0);
 }
 
-function PersonCard({ person, highlight, testId, extra }: { person: MyOrgChartPerson; highlight?: boolean; testId?: string; extra?: string }) {
+/** One box of the chart: the person plus the people drawn below them. */
+type ChartNode = { person: MyOrgChartPerson; kind: "manager" | "me" | "peer" | "report"; children: ChartNode[]; teamSize: number; level: number };
+
+function fromDownline(n: MyOrgChartNode, level: number): ChartNode {
+  return { person: n, kind: "report", level, children: n.directReports.map((c) => fromDownline(c, level + 1)), teamSize: countAll(n.directReports) };
+}
+
+/**
+ * Builds the tree the chart draws: the manager chain runs down the middle (top person first), the signed-in person sits
+ * in one row with the colleagues who share their manager (in the middle of that row), and their own team hangs below.
+ */
+function buildTree(chart: MyOrgChart): ChartNode[] {
+  const me: ChartNode = { person: chart.me, kind: "me", children: chart.downline.map((n) => fromDownline(n, 0)), teamSize: countAll(chart.downline), level: 0 };
+  const peers: ChartNode[] = chart.peers.map((p) => ({ person: p, kind: "peer", children: [], teamSize: 0, level: 0 }));
+  const mid = Math.floor(peers.length / 2);
+  let level: ChartNode[] = [...peers.slice(0, mid), me, ...peers.slice(mid)];
+  for (let i = chart.managerChain.length - 1; i >= 0; i--) {
+    level = [{ person: chart.managerChain[i], kind: "manager", children: level, teamSize: 0, level: 0 }];
+  }
+  return level;
+}
+
+const TEST_ID: Record<ChartNode["kind"], string> = { manager: "org-manager", me: "org-me", peer: "org-peer", report: "org-report" };
+
+function OrgBox({ node, open, onToggle }: { node: ChartNode; open: boolean; onToggle?: () => void }) {
+  const isMe = node.kind === "me";
   return (
-    <div
-      data-testid={testId}
-      className={`flex items-center gap-3 rounded-md p-3 min-w-0 ${highlight ? "bg-accent/10 ring-1 ring-accent" : "bg-white shadow-sm"}`}
-    >
-      <div className="h-10 w-10 shrink-0 rounded-full bg-accent/15 text-accent grid place-items-center text-sm font-semibold" aria-hidden="true">
-        {initials(person.fullName)}
-      </div>
-      <div className="min-w-0">
-        <p className="text-sm font-semibold truncate">
-          {person.fullName}
-          {highlight && <span className="ml-2 text-xs font-medium text-accent">You</span>}
+    <div className="relative">
+      <div data-testid={TEST_ID[node.kind]} className={`orgnode rounded-lg p-3 text-center ${isMe ? "orgnode-me" : ""}`}>
+        <div
+          className={`mx-auto h-10 w-10 rounded-full grid place-items-center text-sm font-semibold ${isMe ? "bg-accent text-white" : "bg-accent/15 text-accent"}`}
+          aria-hidden="true"
+        >
+          {initials(node.person.fullName)}
+        </div>
+        <p className="mt-2 text-sm font-semibold leading-tight break-words">
+          {node.person.fullName}
+          {isMe && <span className="ml-1.5 text-xs font-medium text-accent">(You)</span>}
         </p>
-        <p className="text-xs text-label-secondary truncate">{person.designation ?? "—"}</p>
-        <p className="text-xs text-label-tertiary truncate">{[person.department, extra].filter(Boolean).join(" · ") || "—"}</p>
+        <p className="text-xs text-label-secondary leading-tight mt-0.5 break-words">{node.person.designation ?? "—"}</p>
+        {node.person.department && <p className="text-xs text-label-tertiary leading-tight mt-0.5 break-words">{node.person.department}</p>}
       </div>
+      {onToggle && (
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={open}
+          aria-label={`${open ? "Hide" : "Show"} ${node.person.fullName}'s team`}
+          className="relative z-10 mt-1.5 mx-auto flex items-center gap-0.5 rounded-full bg-card px-2 py-0.5 text-xs font-medium text-accent shadow-sm ring-1 ring-accent/40 hover:ring-accent"
+        >
+          {node.teamSize}
+          {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+        </button>
+      )}
     </div>
   );
 }
 
-function TeamNode({ node, depth }: { node: MyOrgChartNode; depth: number }) {
-  const [open, setOpen] = useState(depth < 1);
-  const has = node.directReports.length > 0;
+function ChartBranch({ node }: { node: ChartNode }) {
+  // Keep the first two levels of a team open so the chart is useful at a glance; deeper teams open on demand.
+  const [open, setOpen] = useState(node.kind !== "report" || node.level < 2);
+  const has = node.children.length > 0;
   return (
     <li>
-      <div className="flex items-start gap-1">
-        {has ? (
-          <button
-            type="button"
-            onClick={() => setOpen((v) => !v)}
-            aria-expanded={open}
-            aria-label={`${open ? "Collapse" : "Expand"} ${node.fullName}'s team`}
-            className="mt-3 h-6 w-6 shrink-0 grid place-items-center rounded text-label-secondary hover:bg-black/5"
-          >
-            {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-          </button>
-        ) : (
-          <span className="h-6 w-6 shrink-0" aria-hidden="true" />
-        )}
-        <div className="flex-1 min-w-0 max-w-md">
-          <PersonCard person={node} extra={has ? `${countAll(node.directReports)} in team` : undefined} testId="org-report" />
-        </div>
-      </div>
+      <OrgBox node={node} open={open} onToggle={has && node.kind === "report" ? () => setOpen((v) => !v) : undefined} />
       {has && open && (
-        <ul className="ml-4 pl-4 border-l border-black/10 mt-2 space-y-2">
-          {node.directReports.map((c) => (
-            <TeamNode key={c.id} node={c} depth={depth + 1} />
+        <ul>
+          {node.children.map((c) => (
+            <ChartBranch key={c.person.id} node={c} />
           ))}
         </ul>
       )}
@@ -69,9 +90,10 @@ function TeamNode({ node, depth }: { node: MyOrgChartNode; depth: number }) {
 }
 
 /**
- * "My Org Chart" (Employee Self Service): where the signed-in person sits. Their manager chain, their colleagues under
- * the same manager and everyone below them — across departments, so a manager sees all of their own teams. Only public
- * fields (name, job title, department) are shown, and a person can only look at their own position.
+ * "My Org Chart" (Employee Self Service): where the signed-in person sits, drawn as a top-down chart. Their manager chain
+ * on top, they and their colleagues under the same manager in one row, and everyone below them — across departments, so a
+ * manager sees all of their own teams. Only public fields (name, job title, department) are shown, and a person can only
+ * look at their own position.
  */
 export function MyOrgChartPage() {
   const [chart, setChart] = useState<MyOrgChart | null>(null);
@@ -88,6 +110,18 @@ export function MyOrgChartPage() {
     };
   }, []);
 
+  const tree = useMemo(() => (chart ? buildTree(chart) : []), [chart]);
+  const treeRef = useRef<HTMLDivElement>(null);
+
+  // A wide chart scrolls sideways: start with the signed-in person in the middle of the view, not at the far left.
+  useEffect(() => {
+    const box = treeRef.current;
+    const me = box?.querySelector<HTMLElement>('[data-testid="org-me"]');
+    if (!box || !me) return;
+    const b = box.getBoundingClientRect();
+    const m = me.getBoundingClientRect();
+    box.scrollLeft += m.left - b.left - (b.width - m.width) / 2;
+  }, [tree]);
   const total = chart ? countAll(chart.downline) : 0;
 
   return (
@@ -97,9 +131,9 @@ export function MyOrgChartPage() {
       {error && <p className="text-sm text-label-secondary">{error}</p>}
       {!error && !chart && <p className="text-sm text-label-secondary">Loading…</p>}
       {chart && (
-        <div className="space-y-6">
-          <section aria-label="Departments">
-            <h2 className="text-sm font-semibold text-label-secondary mb-2">{chart.departments.length > 1 ? "Departments I work with" : "My department"}</h2>
+        <div className="space-y-4">
+          <section aria-label="Departments" className="flex flex-wrap items-center gap-2">
+            <h2 className="text-sm font-semibold text-label-secondary mr-1">{chart.departments.length > 1 ? "Departments I work with" : "My department"}</h2>
             {chart.departments.length === 0 ? (
               <p className="text-sm text-label-secondary">No department is recorded on your profile.</p>
             ) : (
@@ -113,49 +147,20 @@ export function MyOrgChartPage() {
             )}
           </section>
 
-          <section aria-label="Reporting line">
-            <h2 className="text-sm font-semibold text-label-secondary mb-2">Reporting line</h2>
-            <ol className="space-y-2 max-w-md" data-testid="org-chain">
-              {chart.managerChain.map((m, i) => (
-                <li key={m.id} style={{ marginLeft: `${i * 12}px` }}>
-                  <PersonCard person={m} testId="org-manager" />
-                </li>
+          <p className="text-xs text-label-tertiary" data-testid="org-summary">
+            {chart.managerChain.length === 0 ? "You are at the top of your reporting line. " : ""}
+            {chart.peers.length} colleague{chart.peers.length === 1 ? "" : "s"} under the same manager · {chart.downline.length} direct report{chart.downline.length === 1 ? "" : "s"}
+            {total > chart.downline.length ? ` (${total} in total)` : ""}
+          </p>
+
+          <div className="orgtree" ref={treeRef} data-testid="org-chart-tree" role="group" aria-label="Organization chart">
+            <ul>
+              {tree.map((n) => (
+                <ChartBranch key={n.person.id} node={n} />
               ))}
-              <li style={{ marginLeft: `${chart.managerChain.length * 12}px` }}>
-                <PersonCard person={chart.me} highlight testId="org-me" />
-              </li>
-            </ol>
-            {chart.managerChain.length === 0 && <p className="text-xs text-label-tertiary mt-2">You are at the top of your reporting line.</p>}
-          </section>
-
-          <section aria-label="Colleagues">
-            <h2 className="text-sm font-semibold text-label-secondary mb-2">My colleagues ({chart.peers.length})</h2>
-            {chart.peers.length === 0 ? (
-              <p className="text-sm text-label-secondary">No one else reports to the same manager.</p>
-            ) : (
-              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3" data-testid="org-peers">
-                {chart.peers.map((p) => (
-                  <PersonCard key={p.id} person={p} testId="org-peer" />
-                ))}
-              </div>
-            )}
-          </section>
-
-          <section aria-label="My team">
-            <h2 className="text-sm font-semibold text-label-secondary mb-2">
-              My team ({chart.downline.length} direct{total > chart.downline.length ? `, ${total} in total` : ""})
-            </h2>
-            {chart.downline.length === 0 ? (
-              <p className="text-sm text-label-secondary">No one reports to you.</p>
-            ) : (
-              <ul className="space-y-2" data-testid="org-team">
-                {chart.downline.map((n) => (
-                  <TeamNode key={n.id} node={n} depth={0} />
-                ))}
-              </ul>
-            )}
-            {chart.truncated && <p className="text-xs text-label-tertiary mt-2">Your team is very large, so only the first part is shown.</p>}
-          </section>
+            </ul>
+          </div>
+          {chart.truncated && <p className="text-xs text-label-tertiary">Your team is very large, so only the first part is shown.</p>}
         </div>
       )}
     </div>

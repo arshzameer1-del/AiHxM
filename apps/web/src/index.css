@@ -197,3 +197,100 @@ button.ui-card:focus-visible {
   border-color: rgb(var(--c-accent) / 0.85);
   box-shadow: 0 0 0 1px rgb(var(--c-accent) / 0.25);
 }
+
+/* My Org Chart (ESS): a real top-down chart. Each <li> is one person; its <ul> holds the people who report to them. The
+   lines are drawn with borders: a stub down from the parent, a bar across the children, and a stub into every child. */
+.orgtree {
+  --org-line: rgb(var(--c-accent) / 0.45);
+  overflow-x: auto;
+  padding: 8px 4px 16px;
+}
+.orgtree ul {
+  display: flex;
+  justify-content: center;
+  list-style: none;
+  margin: 0;
+  padding: 24px 0 0;
+  position: relative;
+  width: max-content;
+  min-width: 100%;
+}
+.orgtree ul ul {
+  min-width: 0;
+}
+.orgtree > ul {
+  padding-top: 0;
+}
+.orgtree li {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px 8px 0;
+}
+.orgtree li::before,
+.orgtree li::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 50%;
+  width: 50%;
+  height: 24px;
+  border-top: 1px solid var(--org-line);
+}
+.orgtree li::after {
+  right: auto;
+  left: 50%;
+  border-left: 1px solid var(--org-line);
+}
+.orgtree li:only-child::before,
+.orgtree li:only-child::after {
+  display: none;
+}
+.orgtree li:only-child {
+  padding-top: 0;
+}
+.orgtree li:first-child::before,
+.orgtree li:last-child::after {
+  border-top-color: transparent;
+}
+.orgtree li:last-child::before {
+  border-right: 1px solid var(--org-line);
+  border-radius: 0 8px 0 0;
+}
+.orgtree li:first-child::after {
+  border-radius: 8px 0 0 0;
+}
+.orgtree ul ul::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  height: 24px;
+  border-left: 1px solid var(--org-line);
+}
+.orgtree > ul > li {
+  padding-top: 0;
+}
+.orgtree > ul > li::before,
+.orgtree > ul > li::after {
+  display: none;
+}
+.orgnode {
+  width: 208px;
+  background: rgb(var(--c-card));
+  box-shadow: 0 0 0 1px rgb(var(--c-accent) / 0.28), 0 1px 3px 0 rgb(0 0 0 / 0.08);
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+.orgnode:hover {
+  box-shadow: 0 0 0 1px rgb(var(--c-accent) / 0.85), 0 8px 20px -10px rgb(var(--c-accent) / 0.5);
+}
+.orgnode-me {
+  background: rgb(var(--c-accent) / 0.1);
+  box-shadow: 0 0 0 2px rgb(var(--c-accent)), 0 8px 20px -10px rgb(var(--c-accent) / 0.55);
+}
+@media (prefers-reduced-motion: reduce) {
+  .orgnode {
+    transition: none;
+  }
+}
