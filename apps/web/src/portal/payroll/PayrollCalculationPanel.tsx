@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { PayrollCalculationProgressView, PayrollExceptionView, PayrollRunView } from "@aihxm/shared-types";
-import { api, ApiError } from "../../api/client";
+import { api, ApiError, withoutCache } from "../../api/client";
 
 const CLASS_LABELS: Record<PayrollExceptionView["exceptionClass"], string> = {
   calculation: "Could not calculate",
@@ -54,10 +54,10 @@ export function PayrollCalculationPanel({
 
   const load = useCallback(async () => {
     try {
-      const [p, ex] = await Promise.all([api.getPayrollCalculationProgress(run.id), api.listPayrollExceptions(run.id, "open")]);
+      const [p, ex] = await Promise.all([withoutCache(() => api.getPayrollCalculationProgress(run.id)), withoutCache(() => api.listPayrollExceptions(run.id, "open"))]);
       setProgress(p);
       setExceptions(ex);
-      if (calculating && p.status !== "calculating") onRunChanged(await api.getPayrollRun(run.id));
+      if (calculating && p.status !== "calculating") onRunChanged(await withoutCache(() => api.getPayrollRun(run.id)));
     } catch (err) {
       setError(describe(err, "Could not load the calculation status."));
     }
@@ -80,7 +80,7 @@ export function PayrollCalculationPanel({
     try {
       const res = await api.retryPayrollException(run.id, ex.id);
       setNotice(res.resolved ? `${ex.employeeNumber ?? "Employee"} calculated.` : `Still failing: ${res.message}`);
-      onRunChanged(await api.getPayrollRun(run.id));
+      onRunChanged(await withoutCache(() => api.getPayrollRun(run.id)));
       await load();
     } catch (err) {
       setError(describe(err, "Could not retry this employee."));
@@ -97,7 +97,7 @@ export function PayrollCalculationPanel({
       await api.waivePayrollException(run.id, ex.id, note.trim());
       setWaiveFor(null);
       setNote("");
-      onRunChanged(await api.getPayrollRun(run.id));
+      onRunChanged(await withoutCache(() => api.getPayrollRun(run.id)));
       await load();
     } catch (err) {
       setError(describe(err, "Could not leave this employee out."));

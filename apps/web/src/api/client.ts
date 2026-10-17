@@ -1,3 +1,5 @@
+import { createResponseCache, isCacheablePath } from "./responseCache";
+import { WARM_READS_BY_ROLE } from "./warmReads";
 import type {
   MyOrgChart,
   MyRequisitionView,
@@ -538,16 +540,150 @@ import type {
 
 const TOKEN_KEY = "aihxm.platformAdminToken";
 
+function safeSessionStorage(): Storage | null {
+  try {
+    return typeof sessionStorage === "undefined" ? null : sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+const swr = createResponseCache({
+  now: () => Date.now(),
+  storage: safeSessionStorage(),
+});
+
+/** A cached answer belongs to whoever holds this session token; a different token starts with an empty cache. */
+function cacheOwnerOf(token: string | null): string {
+  return token ? token.slice(-24) : "";
+}
+
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
 
 export function setToken(token: string): void {
   localStorage.setItem(TOKEN_KEY, token);
+  swr.setOwner(cacheOwnerOf(token));
 }
 
 export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
+  swr.setOwner("");
+}
+
+/** Forget every cached answer (after a save made outside `request()`, such as a file upload). */
+export function invalidateResponseCache(): void {
+  swr.invalidateAll();
+}
+
+let bypassNextRead = false;
+/**
+ * Runs one API call that must always ask the server (polling a status that changes every few seconds).
+ * The flag is read synchronously by `request()`, so only the call made directly inside `fn` is affected.
+ */
+export function withoutCache<T>(fn: () => Promise<T>): Promise<T> {
+  bypassNextRead = true;
+  try {
+    return fn();
+  } finally {
+    bypassNextRead = false;
+  }
+}
+
+// What each screen asked for last time, so hovering a menu entry (or opening the app) can load it ahead of the click.
+const ROUTE_READS_KEY = "aihxm.routeReads.v1";
+const MAX_READS_PER_ROUTE = 12;
+
+function readRouteMap(): Record<string, string[]> {
+  try {
+    return JSON.parse(localStorage.getItem(ROUTE_READS_KEY) ?? "{}") as Record<string, string[]>;
+  } catch {
+    return {};
+  }
+}
+
+function noteRouteRead(path: string): void {
+  if (typeof window === "undefined" || path === "/auth/me") return;
+  const route = window.location.pathname;
+  if (!route.startsWith("/app")) return;
+  try {
+    const map = readRouteMap();
+    const list = map[route] ?? [];
+    if (list.includes(path) || list.length >= MAX_READS_PER_ROUTE) return;
+    map[route] = [...list, path];
+    localStorage.setItem(ROUTE_READS_KEY, JSON.stringify(map));
+  } catch {
+    /* learning is a convenience only */
+  }
+}
+
+/** Loads (in the background) the data a screen needed last time. Safe to call often; recent answers are not re-fetched. */
+export function prefetchRoute(route: string): void {
+  const paths = readRouteMap()[route];
+  if (!paths) return;
+  for (const path of paths) {
+    if (!isCacheablePath(path)) continue;
+    void swr.prefetch(path, () => fetchText(path, {}));
+  }
+}
+
+let keepWarmStarted = false;
+let lastActivityAt = Date.now();
+/**
+ * While the tab is visible and the person is active, re-reads the screens they have been using once a minute,
+ * so the next click still finds data younger than the cache's freshness limit. Stops by itself when idle.
+ */
+export function startKeepWarm(): void {
+  if (keepWarmStarted || typeof window === "undefined") return;
+  keepWarmStarted = true;
+  const mark = () => {
+    lastActivityAt = Date.now();
+  };
+  for (const ev of ["pointerdown", "keydown", "scroll", "touchstart"]) window.addEventListener(ev, mark, { passive: true });
+  let running = false;
+  window.setInterval(async () => {
+    if (running || document.visibilityState !== "visible" || Date.now() - lastActivityAt > 10 * 60_000 || !getToken()) return;
+    running = true;
+    try {
+      const work = swr.inUse(200);
+      async function lane() {
+        for (;;) {
+          const next = work.shift();
+          if (!next) return;
+          await swr.refresh(next, () => fetchText(next, {}), 45_000);
+        }
+      }
+      await Promise.all([lane(), lane()]);
+    } finally {
+      running = false;
+    }
+  }, 60_000);
+}
+
+/**
+ * Right after sign-in: loads, one after another with at most three requests in flight, the data of every module
+ * this login can open (the recorded list for its roles, plus whatever this browser learned) so a click finds it ready.
+ */
+export async function warmForRoles(roleKeys: string[], max = 120): Promise<void> {
+  const queue: string[] = [];
+  const add = (p: string) => {
+    if (!queue.includes(p) && isCacheablePath(p)) queue.push(p);
+  };
+  const roles = roleKeys.length > 0 ? roleKeys : ["employee_self_service"];
+  for (const role of roles) for (const p of WARM_READS_BY_ROLE[role] ?? WARM_READS_BY_ROLE.employee_self_service ?? []) add(p);
+  for (const paths of Object.values(readRouteMap())) for (const p of paths) add(p);
+  const year = new Date().getFullYear();
+  if (roles.some((r) => r !== "system_admin")) add(`/holidays?year=${year}`);
+  const work = queue.slice(0, max);
+  async function lane() {
+    for (;;) {
+      const next = work.shift();
+      if (!next) return;
+      await swr.prefetch(next, () => fetchText(next, {}));
+    }
+  }
+  await Promise.all([lane(), lane(), lane()]);
 }
 
 // Which tenant's own /:companySlug/login this session's identity last
@@ -705,7 +841,7 @@ export function ssoLoginUrl(companySlug: string): string {
   return `/api/auth/sso/${companySlug}/login`;
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+async function fetchText(path: string, options: RequestInit = {}): Promise<string> {
   const token = getToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -760,9 +896,26 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   // and only parsing it as JSON when it's non-empty is correct for every
   // status code, not just 204, so this protects any future void endpoint
   // too, not only today's three.
-  const text = await res.text();
-  if (!text) return undefined as T;
-  return JSON.parse(text) as T;
+  return res.text();
+}
+
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const bypass = bypassNextRead;
+  bypassNextRead = false;
+  const method = (options.method ?? "GET").toUpperCase();
+  swr.setOwner(cacheOwnerOf(getToken()));
+  if (method === "GET" && isCacheablePath(path)) {
+    noteRouteRead(path);
+    const cached = await swr.get(path, () => fetchText(path, options), { bypass });
+    return cached ? (JSON.parse(cached) as T) : (undefined as T);
+  }
+  try {
+    const text = await fetchText(path, options);
+    return text ? (JSON.parse(text) as T) : (undefined as T);
+  } finally {
+    // A save (or anything that is not a plain read) may have changed what other screens show.
+    if (method !== "GET") swr.invalidateAll();
+  }
 }
 
 export const api = {
@@ -881,6 +1034,7 @@ export const api = {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: formData,
     });
+    invalidateResponseCache();
     if (!res.ok) {
       let message = `Request failed (${res.status})`;
       try {
@@ -1290,6 +1444,7 @@ export const api = {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: formData,
     });
+    invalidateResponseCache();
     if (!res.ok) {
       let message = `Request failed (${res.status})`;
       try {
@@ -2483,6 +2638,7 @@ export const api = {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: formData,
     });
+    invalidateResponseCache();
     if (!res.ok) {
       let message = `Request failed (${res.status})`;
       try {
@@ -2643,6 +2799,7 @@ export const api = {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: formData,
     });
+    invalidateResponseCache();
     if (!res.ok) {
       let message = `Request failed (${res.status})`;
       try {
@@ -3171,6 +3328,7 @@ export const api = {
       `/api/payroll/runs/${runId}/disbursement?${new URLSearchParams({ ...(confirmRegenerate ? { confirmRegenerate: "true" } : {}), ...(formatId ? { formatId } : {}) }).toString()}`,
       { headers: token ? { Authorization: `Bearer ${token}` } : {} }
     );
+    invalidateResponseCache(); // generating a bank file records a batch other screens show
     if (!res.ok) {
       let message = `Request failed (${res.status})`;
       try {

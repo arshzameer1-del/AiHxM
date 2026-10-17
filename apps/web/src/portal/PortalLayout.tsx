@@ -21,7 +21,7 @@ import {
   LayoutGrid,
 } from "lucide-react";
 import type { ModuleKey, PublicTenantBranding, TenantRoleKey } from "@aihxm/shared-types";
-import { api, publicTenantBrandingAssetUrl } from "../api/client";
+import { api, prefetchRoute, publicTenantBrandingAssetUrl, startKeepWarm, warmForRoles } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Topbar, type QuickJumpItem } from "../components/shell/Topbar";
 import {
@@ -308,7 +308,7 @@ function NavGroup({ item }: { item: NavItem & { children: NavItem[] } }) {
   return (
     <div>
       <div className="flex items-center gap-1">
-        <NavLink to={item.to} end={item.end} className={navLinkClass} style={{ flex: 1 }}>
+        <NavLink to={item.to} end={item.end} className={navLinkClass} style={{ flex: 1 }} onMouseEnter={() => prefetchRoute(item.to)} onFocus={() => prefetchRoute(item.to)}>
           {Icon && <Icon size={18} strokeWidth={1.75} className="shrink-0" />}
           {item.label}
         </NavLink>
@@ -325,7 +325,7 @@ function NavGroup({ item }: { item: NavItem & { children: NavItem[] } }) {
       {expanded && (
         <div className={SIDEBAR_GROUP_DIVIDER_CLASS}>
           {item.children.map((child) => (
-            <NavLink key={child.to} to={child.to} end={child.end} className={navLinkClass}>
+            <NavLink key={child.to} to={child.to} end={child.end} className={navLinkClass} onMouseEnter={() => prefetchRoute(child.to)} onFocus={() => prefetchRoute(child.to)}>
               {child.label}
             </NavLink>
           ))}
@@ -421,6 +421,17 @@ export function PortalLayout() {
   const navItems = buildNavItems(roleKeys, enabledModules);
   const roleLabel = roleKeys.length > 0 ? roleKeys.map((k) => ROLE_LABELS[k] ?? k).join(" · ") : "Member";
 
+  // Right after sign-in, load the main screens' data in the background (and keep it fresh), so a click finds it ready.
+  const navKey = navItems.map((n) => n.to).join("|");
+  useEffect(() => {
+    if (!identity) return;
+    startKeepWarm();
+    const timer = window.setTimeout(() => {
+      void warmForRoles(roleKeys);
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [identity?.email, navKey, roleKeys.join(",")]);
+
   return (
     <div className="min-h-screen flex flex-col">
       {impersonation && <ImpersonationBanner impersonation={impersonation} endImpersonation={endImpersonation} />}
@@ -439,7 +450,7 @@ export function PortalLayout() {
               }
               const Icon = item.icon;
               return (
-                <NavLink key={item.to} to={item.to} end={item.end} className={navLinkClass}>
+                <NavLink key={item.to} to={item.to} end={item.end} className={navLinkClass} onMouseEnter={() => prefetchRoute(item.to)} onFocus={() => prefetchRoute(item.to)}>
                   {Icon && <Icon size={18} strokeWidth={1.75} className="shrink-0" />}
                   {item.label}
                 </NavLink>

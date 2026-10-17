@@ -2,7 +2,7 @@ import { LoadingNote } from "../shared/PageChrome";
 import { formatDay, formatPeriod } from "../shared/dates";
 import { useEffect, useRef, useState } from "react";
 import type { PayrollDashboardRunView, PayrollDashboardView, PayrollEventCatalogEntry, PayrollInputBatchView, PayrollInputImportType, PayrollInputRowView, PayrollInputTemplateView } from "@aihxm/shared-types";
-import { api } from "../../api/client";
+import { api, withoutCache } from "../../api/client";
 import { Field, Notice, Pill, buttonClass, errorMessage, inputClass, quietButtonClass } from "./PayrollPanelKit";
 import { RUN_STATUS_LABELS, pkr } from "./payrollLabels";
 
@@ -45,7 +45,7 @@ export function PayrollDashboardPanel() {
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
-    const pull = () => api.getPayrollDashboard().then((v) => alive && setD(v)).catch((e) => alive && setError(errorMessage(e, "Could not load the dashboard.")));
+    const pull = () => withoutCache(() => api.getPayrollDashboard()).then((v) => alive && setD(v)).catch((e) => alive && setError(errorMessage(e, "Could not load the dashboard.")));
     void pull();
     const t = setInterval(pull, 15000);
     return () => {
@@ -128,7 +128,7 @@ export function PayrollInputImportPanel() {
     if (!current || !["queued", "running"].includes(current.status)) return;
     const t = setInterval(async () => {
       try {
-        const b = await api.getPayrollInputImport(current.id);
+        const b = await withoutCache(() => api.getPayrollInputImport(current.id));
         setCurrent(b);
         if (!["queued", "running"].includes(b.status)) {
           void loadBatches();

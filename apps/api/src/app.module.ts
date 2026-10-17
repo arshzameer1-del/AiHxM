@@ -3,6 +3,7 @@ import { RequestContextMiddleware } from "./common/request-context";
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
 import { DatabaseInputErrorFilter } from "./common/database-input-error.filter";
 import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
+import { SIGNED_IN_LIMIT_PER_MINUTE, sessionSubject } from "./common/session-throttle";
 import { ScheduleModule } from "@nestjs/schedule";
 import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
@@ -57,7 +58,7 @@ import { HrAdministrationModule } from "./hr-administration/hr-administration.mo
  * (starting with Employee Core, Phase 7) is built against.
  *
  * ThrottlerModule is registered globally (default: 100 req/min per IP) as
- * a generic abuse guard — auth.controller.ts's public, unauthenticated
+ * a generic abuse guard (100 per minute per address; a signed-in person is counted by themselves with a higher limit, see common/session-throttle.ts) — auth.controller.ts's public, unauthenticated
  * endpoints layer a much stricter per-route limit on top via `@Throttle`,
  * since account lockout alone (AuthService) only protects a KNOWN
  * account's password, not a brute-force sweep across many harvested
@@ -65,7 +66,17 @@ import { HrAdministrationModule } from "./hr-administration/hr-administration.mo
  */
 @Module({
   imports: [
-    ThrottlerModule.forRoot([{ name: "default", ttl: 60_000, limit: 100 }]),
+    ThrottlerModule.forRoot([
+      {
+        name: "default",
+        ttl: 60_000,
+        limit: (ctx) => (sessionSubject(ctx.switchToHttp().getRequest()) ? SIGNED_IN_LIMIT_PER_MINUTE : 100),
+        getTracker: (req) => {
+          const who = sessionSubject(req);
+          return who ? `user:${who}` : String(req.ip);
+        },
+      },
+    ]),
     ScheduleModule.forRoot(),
     DatabaseModule,
     CacheModule,

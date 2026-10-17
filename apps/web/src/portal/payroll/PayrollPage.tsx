@@ -11,7 +11,7 @@ import type {
   TaxSlabSetView,
   TaxSlabView,
 } from "@aihxm/shared-types";
-import { api, ApiError } from "../../api/client";
+import { api, ApiError, withoutCache } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { CreateRunForm, OFF_CYCLE_REASON_LABELS, OffCyclePaymentsPanel, PayrollSettingsForm, TaxSlabsForm } from "./PayrollAdminForms";
 import { CostCenterBreakdownPanel, DisbursementPanel, DisbursementSettingsForm } from "./PayrollDisbursementPanels";
@@ -217,7 +217,7 @@ function RunCard({
   /** Watches the run until the server has finished calculating it, then shows the real result. */
   async function followCalculation() {
     setCalcSummary("This run is large, so the browser stopped waiting, but the calculation is still going on the server. Checking every few seconds…");
-    const settled = await waitForRunToSettle(() => api.getPayrollRun(run.id), run.status, { onTick: (r) => onRunChanged(r) });
+    const settled = await waitForRunToSettle(() => withoutCache(() => api.getPayrollRun(run.id)), run.status, { onTick: (r) => onRunChanged(r) });
     if (settled) {
       setCalcSummary(`The calculation has finished (status: ${RUN_STATUS_LABELS[settled.status]}).`);
       if (expanded) setPayslips(await api.listPayslips({ payrollRunId: run.id }));
