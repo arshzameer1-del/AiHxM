@@ -57,7 +57,7 @@ function TileBody({ spec }: { spec: TileSpec }) {
 }
 
 export function Tile({ spec }: { spec: TileSpec }) {
-  const box = "group relative flex flex-col justify-between min-h-[168px] rounded-md border border-black/10 p-4";
+  const box = "group relative flex flex-col justify-between min-h-[168px] rounded-md p-4 ui-card";
   if (spec.comingSoon || !spec.to) {
     return (
       <div role="group" aria-disabled="true" aria-label={`${spec.title} (coming soon)`} data-testid={spec.testId} className={`${box} bg-black/[0.03]`}>
@@ -70,7 +70,7 @@ export function Tile({ spec }: { spec: TileSpec }) {
       to={spec.to}
       data-testid={spec.testId}
       aria-label={spec.title}
-      className={`${box} bg-white shadow-sm hover:border-accent hover:shadow transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent`}
+      className={`${box} bg-white shadow-sm`}
     >
       <TileBody spec={spec} />
     </Link>

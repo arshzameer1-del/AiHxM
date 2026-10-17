@@ -111,7 +111,7 @@ function HomeCardTile({ card }: { card: HomeCard }) {
   return (
     <Link
       to={card.to}
-      className="flex flex-col gap-3 bg-card rounded-card p-4 shadow-sm border border-black/5 hover:border-accent/30 hover:shadow transition-all"
+      className="flex flex-col gap-3 bg-card rounded-card p-4 shadow-sm ui-card"
     >
       <div className="w-10 h-10 rounded-lg bg-accent/10 text-accent flex items-center justify-center">
         <Icon size={20} strokeWidth={1.75} />
@@ -232,7 +232,7 @@ function MyDayKpiRow({
             key={card.label}
             to={card.to}
             data-testid={card.testId}
-            className="bg-card rounded-card p-4 shadow-sm border border-black/5 hover:border-accent/30 flex items-center gap-3 transition-colors"
+            className="bg-card rounded-card p-4 shadow-sm ui-card flex items-center gap-3"
           >
             <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${toneClasses[card.tone]}`}>
               <Icon size={20} strokeWidth={1.75} />
@@ -276,7 +276,7 @@ function QuickActionsRow({ enabledModules, roleKeys }: { enabledModules: ModuleK
           <Link
             key={action.to + action.label}
             to={action.to}
-            className="flex items-center gap-2 bg-card rounded-lg px-3.5 py-2.5 shadow-sm border border-black/5 hover:border-accent/30 text-sm font-medium transition-colors"
+            className="flex items-center gap-2 bg-card rounded-lg px-3.5 py-2.5 shadow-sm ui-card text-sm font-medium"
           >
             <Icon size={16} strokeWidth={1.75} className="text-accent" />
             {action.label}

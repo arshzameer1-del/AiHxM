@@ -106,3 +106,73 @@ body {
   outline: 2px solid rgb(var(--c-accent) / 0.55);
   outline-offset: 2px;
 }
+
+/* ---- UI outline and hover focus (all themes) ----------------------------------------------------------------------
+ * Tabs, cards/tiles and form fields share one look: a thin, light-blue outline at rest. Under the cursor, the item
+ * under it turns a clear blue with a soft glow (cards also lift a little) and its neighbours step back, so the one you
+ * are pointing at is easy to tell from the rest. The outline is an inset shadow, so nothing changes size or moves.
+ * Colour comes from --c-accent, so it follows the theme.
+ */
+
+/* Tabs (role="tab" and the underline-style tab buttons) */
+:is([role="tab"], button.border-b-2) {
+  border-radius: 8px;
+  margin-right: 2px;
+  box-shadow: inset 0 0 0 1px rgb(var(--c-accent) / 0.28);
+  transition: box-shadow 0.15s ease, background-color 0.15s ease, opacity 0.15s ease, color 0.15s ease;
+}
+:is([role="tab"], button.border-b-2)[aria-selected="true"],
+button.border-b-2.border-accent {
+  box-shadow: inset 0 0 0 1px rgb(var(--c-accent) / 0.55);
+  background-color: rgb(var(--c-accent) / 0.07);
+}
+:is([role="tab"], button.border-b-2):hover,
+:is([role="tab"], button.border-b-2):focus-visible {
+  box-shadow: inset 0 0 0 1.5px rgb(var(--c-accent) / 0.95), 0 3px 10px -4px rgb(var(--c-accent) / 0.55);
+  background-color: rgb(var(--c-accent) / 0.1);
+  color: rgb(var(--c-accent));
+  outline: none;
+}
+:is([role="tablist"], :has(> button.border-b-2)):has(> :is([role="tab"], button.border-b-2):hover)
+  > :is([role="tab"], button.border-b-2):not(:hover):not([aria-selected="true"]):not(.border-accent) {
+  opacity: 0.6;
+}
+
+/* Cards and tiles: add class "ui-card" (launchpad tiles, home cards, KPI cards, quick links) */
+.ui-card {
+  border: 1px solid rgb(var(--c-accent) / 0.28);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
+}
+a.ui-card:hover,
+a.ui-card:focus-visible,
+button.ui-card:hover,
+button.ui-card:focus-visible {
+  border-color: rgb(var(--c-accent));
+  box-shadow: 0 0 0 1px rgb(var(--c-accent) / 0.45), 0 8px 20px -8px rgb(var(--c-accent) / 0.45);
+  transform: translateY(-2px);
+  outline: none;
+}
+:has(> a.ui-card:hover) > a.ui-card:not(:hover),
+:has(> button.ui-card:hover) > button.ui-card:not(:hover) {
+  opacity: 0.7;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ui-card, :is([role="tab"], button.border-b-2) { transition: none; }
+  a.ui-card:hover, a.ui-card:focus-visible, button.ui-card:hover, button.ui-card:focus-visible { transform: none; }
+}
+
+/* Form fields: text, number, date, select and text areas (checkboxes, radios, ranges and files keep their own look;
+   an invalid field keeps its red border) */
+:is(input, select, textarea):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]):not([type="hidden"]):not([aria-invalid="true"]):not(.border-danger) {
+  border-color: rgb(var(--c-accent) / 0.3);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+:is(input, select, textarea):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]):not([type="hidden"]):not([aria-invalid="true"]):not(.border-danger):not(:disabled):hover {
+  border-color: rgb(var(--c-accent) / 0.85);
+  box-shadow: 0 0 0 3px rgb(var(--c-accent) / 0.12);
+}
+:is(input, select, textarea):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]):not([type="hidden"]):not([aria-invalid="true"]):not(.border-danger):focus {
+  border-color: rgb(var(--c-accent));
+  box-shadow: 0 0 0 3px rgb(var(--c-accent) / 0.22);
+  outline: none;
+}
