@@ -1,6 +1,7 @@
 import { assertValidCnic, assertValidIban } from "../../crypto/identifier-validation";
 import { decryptDraftData, encryptDraftData, scrubHireProcessDrafts } from "./draft-sensitive-data";
 import { applyPersonExtras } from "./hire-person-extras";
+import { resolveUnitHead, type UnitHead } from "../../organization/org-unit-head";
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { DatabaseService } from "../../database/database.service";
@@ -495,6 +496,28 @@ export class HiringProcessService {
     });
   }
 
+  /**
+   * The default direct manager for this hire: the head of the department chosen on the Organization Assignment card (the parent
+   * unit's head when the unit has none, or when the hire is taking the head seat itself). Null when no department is chosen yet or
+   * nobody holds a head position. The Reporting card prefills with it; HR can pick someone else there.
+   */
+  async suggestManager(claims: RequestClaims, hireProcessId: string): Promise<UnitHead | null> {
+    await this.requireAccess(claims);
+    return this.db.withClaims(claims, async (client) => {
+      await this.loadProcessOrThrow(client, hireProcessId);
+      const card = await client.query("SELECT data FROM hire_process_card_data WHERE hire_process_id = $1 AND card_key = 'organization_assignment'", [hireProcessId]);
+      const data = (card.rows[0]?.data ?? {}) as Record<string, unknown>;
+      let orgUnitId = typeof data.orgUnitId === "string" && data.orgUnitId ? data.orgUnitId : undefined;
+      const positionId = typeof data.positionId === "string" && data.positionId ? data.positionId : undefined;
+      if (!orgUnitId && positionId) {
+        const pos = await client.query<{ org_unit_id: string }>("SELECT org_unit_id FROM positions WHERE id = $1 AND company_id = $2", [positionId, claims.company_id]);
+        orgUnitId = pos.rows[0]?.org_unit_id;
+      }
+      if (!orgUnitId) return null;
+      return resolveUnitHead(client, claims.company_id!, orgUnitId, { excludePositionId: positionId ?? null });
+    });
+  }
+
   async getCardData(claims: RequestClaims, hireProcessId: string, cardKey: string): Promise<HireProcessCardDataView | null> {
     await this.requireAccess(claims);
     return this.db.withClaims(claims, async (client) => {
@@ -887,6 +910,14 @@ export class HiringProcessService {
         cardOrgUnitId = pos.rows[0].org_unit_id;
       }
 
+      // The head of the chosen department is the default direct manager. An explicit answer on the Reporting card always wins,
+      // including "None"; the head is used only when that card was never filled in.
+      let managerIdForHire = typeof reporting.directManagerEmployeeId === "string" && reporting.directManagerEmployeeId ? reporting.directManagerEmployeeId : undefined;
+      if (!dataByCard.has("reporting_relationships") && cardOrgUnitId) {
+        const head = await resolveUnitHead(client, processRow.company_id, cardOrgUnitId, { excludePositionId: cardPositionId ?? null });
+        if (head) managerIdForHire = head.employeeId;
+      }
+
       const employee = await this.employees.createWithinTransaction(client, claims, {
         firstName: String(personal.firstName ?? ""),
         lastName: String(personal.lastName ?? ""),
@@ -900,7 +931,7 @@ export class HiringProcessService {
         designation: employment.designation as string | undefined,
         orgUnitId: cardOrgUnitId,
         locationId: orgAssignment.locationId as string | undefined,
-        managerId: reporting.directManagerEmployeeId as string | undefined,
+        managerId: managerIdForHire,
       });
 
       // UIFIELDS — the extra Personal Identity answers (name parts, title, nationality, language, place of birth, passport, NTN)

@@ -8084,6 +8084,16 @@ export type RuleEvaluationResult = {
 
 export type PersonNationalIdType = "cnic" | "nicop" | "passport" | "b_form" | "other";
 
+/** The default direct manager for a hire: the head of the department chosen on the Organization Assignment card. */
+export type HireManagerSuggestion = {
+  employeeId: string;
+  name: string;
+  /** The unit whose head this is (the parent unit when the chosen unit has no head of its own). */
+  orgUnitId: string;
+  orgUnitName: string;
+  inherited: boolean;
+};
+
 export type PersonView = {
   id: string;
   companyId: string;

@@ -1,6 +1,7 @@
 import { createResponseCache, isCacheablePath } from "./responseCache";
 import { WARM_READS_BY_ROLE } from "./warmReads";
 import type {
+  HireManagerSuggestion,
   MyOrgChart,
   MyRequisitionView,
   TeamAttendanceView,
@@ -2098,6 +2099,7 @@ export const api = {
 
   getHireProcess: (id: string) => request<HireProcessView>(`/employees/hiring/${id}`),
 
+  getHireSuggestedManager: (id: string) => request<HireManagerSuggestion | null>(`/employees/hiring/${id}/suggested-manager`),
   getHireProcessCardData: (id: string, cardKey: string) =>
     request<HireProcessCardDataView | null>(`/employees/hiring/${id}/cards/${cardKey}`),
 

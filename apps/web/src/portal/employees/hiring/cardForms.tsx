@@ -84,6 +84,8 @@ export type CardFormProps = {
   onChange: (data: Record<string, unknown>) => void;
   options: HiringPickerOptions;
   fieldConfig?: CardFieldRuntimeConfig;
+  /** Reporting Relationships only: the head of the chosen department, the default direct manager. */
+  managerHint?: { employeeId: string; name: string; text: string } | null;
 };
 
 function fieldEnabled(fieldConfig: CardFieldRuntimeConfig | undefined, key: string): boolean {
@@ -662,7 +664,9 @@ function OrganizationAssignmentForm({ data, onChange, options, fieldConfig }: Ca
   );
 }
 
-function ReportingRelationshipsForm({ data, onChange, options, fieldConfig }: CardFormProps) {
+function ReportingRelationshipsForm({ data, onChange, options, fieldConfig, managerHint }: CardFormProps) {
+  const chosen = str(data, "directManagerEmployeeId");
+  const known = options.colleagues.some((c) => c.id === chosen);
   return (
     <FieldGate fieldConfig={fieldConfig} fieldKey="directManagerEmployeeId">
       <Labeled label="Direct manager">
@@ -673,12 +677,23 @@ function ReportingRelationshipsForm({ data, onChange, options, fieldConfig }: Ca
           className={inputClass()}
         >
           <option value="">None</option>
+          {!known && managerHint && chosen === managerHint.employeeId && <option value={managerHint.employeeId}>{managerHint.name}</option>}
           {options.colleagues.map((c) => (
             <option key={c.id} value={c.id}>
               {c.firstName} {c.lastName}
             </option>
           ))}
         </select>
+        {managerHint && (
+          <p className="mt-1 text-xs text-label-tertiary" data-testid="manager-hint">
+            {managerHint.text}{" "}
+            {chosen !== managerHint.employeeId && (
+              <button type="button" className="underline text-accent" onClick={() => set(data, onChange, "directManagerEmployeeId", managerHint.employeeId)}>
+                Use {managerHint.name}
+              </button>
+            )}
+          </p>
+        )}
       </Labeled>
     </FieldGate>
   );

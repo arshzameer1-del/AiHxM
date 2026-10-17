@@ -872,4 +872,84 @@ describe("HiringProcessService", () => {
       expect(String((await rawCardData(fresh.id, "personal_identity")).cnic)).toMatch(/^enc:v1:/);
     });
   });
+
+  describe("the head of the department is the default direct manager", () => {
+    const tag = () => `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const unit = (name: string, parentId: string | null = null) =>
+      db.withClaims(FIXTURE_CLAIMS, async (c) =>
+        (await c.query("INSERT INTO org_units (company_id, unit_type, name, parent_id) VALUES ($1,'department',$2,$3) RETURNING id", [companyId, `${name} ${tag()}`, parentId])).rows[0].id as string
+      );
+    const seat = (orgUnitId: string) =>
+      db.withClaims(FIXTURE_CLAIMS, async (c) =>
+        (await c.query("INSERT INTO positions (company_id, org_unit_id, position_title, status) VALUES ($1,$2,$3,'filled') RETURNING id", [companyId, orgUnitId, `Head ${tag()}`])).rows[0].id as string
+      );
+    /** An employee who holds `positionId`, and that position becomes the unit's head seat. */
+    const makeHead = (orgUnitId: string, positionId: string, first: string) =>
+      db.withClaims(FIXTURE_CLAIMS, async (c) => {
+        const e = await c.query("INSERT INTO employees (company_id, employee_number, first_name, last_name) VALUES ($1,$2,$3,'Head') RETURNING id", [companyId, `HD-${tag()}`, first]);
+        await c.query(
+          "INSERT INTO employee_org_assignments (company_id, employee_id, assignment_type, org_unit_id, position_id) VALUES ($1,$2,'primary',$3,$4)",
+          [companyId, e.rows[0].id, orgUnitId, positionId]
+        );
+        await c.query("UPDATE org_units SET head_position_id = $2 WHERE id = $1", [orgUnitId, positionId]);
+        return e.rows[0].id as string;
+      });
+
+    it("suggests the unit head, the parent unit's head when the unit has none, and moves up when the hire takes the head seat", async () => {
+      const parent = await unit("Division");
+      const child = await unit("Team", parent);
+      const parentHead = await makeHead(parent, await seat(parent), "Parent");
+      const process = await hiring.start(hrAdminClaims);
+
+      expect(await hiring.suggestManager(hrAdminClaims, process.id)).toBeNull(); // no department chosen yet
+
+      await hiring.saveCard(hrAdminClaims, process.id, "organization_assignment", { data: { orgUnitId: child } });
+      const inherited = await hiring.suggestManager(hrAdminClaims, process.id);
+      expect(inherited).toMatchObject({ employeeId: parentHead, orgUnitId: parent, inherited: true });
+
+      const childSeat = await seat(child);
+      const childHead = await makeHead(child, childSeat, "Child");
+      const own = await hiring.suggestManager(hrAdminClaims, process.id);
+      expect(own).toMatchObject({ employeeId: childHead, orgUnitId: child, inherited: false });
+
+      // a unit whose head seat is vacant, and the new hire is taking that very seat: their manager is the head one level up
+      const team2 = await unit("Team2", parent);
+      const vacantSeat = await db.withClaims(FIXTURE_CLAIMS, async (c) => {
+        const id = (await c.query("INSERT INTO positions (company_id, org_unit_id, position_title, status) VALUES ($1,$2,$3,'vacant') RETURNING id", [companyId, team2, `Head ${tag()}`])).rows[0].id as string;
+        await c.query("UPDATE org_units SET head_position_id = $2 WHERE id = $1", [team2, id]);
+        return id;
+      });
+      await hiring.saveCard(hrAdminClaims, process.id, "organization_assignment", { data: { orgUnitId: team2, positionId: vacantSeat } });
+      expect(await hiring.suggestManager(hrAdminClaims, process.id)).toMatchObject({ employeeId: parentHead, orgUnitId: parent, inherited: true });
+    });
+
+    it("at completion the head becomes the manager when the Reporting card was never filled in, but an explicit choice (even none) wins", async () => {
+      const dept = await unit("Dept");
+      const head = await makeHead(dept, await seat(dept), "Dept");
+
+      async function hireWith(reporting?: Record<string, unknown>) {
+        let process = await hiring.start(hrAdminClaims);
+        const payloads: Record<string, Record<string, unknown>> = {
+          personal_identity: { firstName: "New", lastName: `Hire${tag()}` },
+          employment: { employmentType: "permanent", dateOfJoining: "2026-01-01" },
+          organization_assignment: { orgUnitId: dept },
+          review_completion: { reviewed: true },
+        };
+        if (reporting) payloads.reporting_relationships = reporting;
+        for (let i = 0; i < process.cards.length; i++) {
+          const card = process.cards[i];
+          if (payloads[card.cardKey]) await hiring.saveCard(hrAdminClaims, process.id, card.cardKey, { data: payloads[card.cardKey] });
+          process = await hiring.get(hrAdminClaims, process.id);
+          if (i < process.cards.length - 1) process = await hiring.next(hrAdminClaims, process.id, process.revision);
+        }
+        process = await hiring.next(hrAdminClaims, process.id, process.revision);
+        const done = await hiring.complete(hrAdminClaims, process.id);
+        const row = await db.withClaims(FIXTURE_CLAIMS, (c) => c.query("SELECT manager_id FROM employees WHERE id = $1", [done.employeeId]));
+        return row.rows[0].manager_id as string | null;
+      }
+
+      expect(await hireWith()).toBe(head);
+      expect(await hireWith({ directManagerEmployeeId: "" })).toBeNull();
+    });
+  });
 });

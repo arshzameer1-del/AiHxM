@@ -146,6 +146,7 @@ export function HiringWizardPage() {
   const [cardData, setCardData] = useState<Record<string, unknown>>({});
   const [cardRevisions, setCardRevisions] = useState<Record<string, number | undefined>>({});
   const [fieldConfig, setFieldConfig] = useState<CardFieldRuntimeConfig | undefined>(undefined);
+  const [managerHint, setManagerHint] = useState<{ employeeId: string; name: string; text: string } | null>(null);
   const [cardLoading, setCardLoading] = useState(false);
   const [cardError, setCardError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -268,6 +269,7 @@ export function HiringWizardPage() {
       setCardLoading(true);
       setCardError(null);
       setFieldConfig(undefined);
+      setManagerHint(null);
       if (cardKey === MERGE_TARGET_CARD_KEY) {
         Promise.all([
           api.getHireProcessCardData(id, MERGE_TARGET_CARD_KEY),
@@ -314,9 +316,21 @@ export function HiringWizardPage() {
           .catch(() => setCardError("Could not load this card's saved data."))
           .finally(() => setCardLoading(false));
       } else {
-        Promise.all([api.getHireProcessCardData(id, cardKey), api.listCardFields(cardKey).catch(() => null)])
-          .then(([data, fields]) => {
-            setCardData(data?.data ?? {});
+        Promise.all([
+          api.getHireProcessCardData(id, cardKey),
+          api.listCardFields(cardKey).catch(() => null),
+          // The head of the chosen department is the default direct manager; HR can pick anyone else.
+          cardKey === "reporting_relationships" ? api.getHireSuggestedManager(id).catch(() => null) : Promise.resolve(null),
+        ])
+          .then(([data, fields, suggestion]) => {
+            let loaded = data?.data ?? {};
+            if (suggestion) {
+              const where = suggestion.inherited ? `${suggestion.orgUnitName} (the department above, which has no head of its own)` : suggestion.orgUnitName;
+              setManagerHint({ employeeId: suggestion.employeeId, name: suggestion.name, text: `${suggestion.name} is head of ${where}, so the default direct manager.` });
+              // Prefill only while this card has never been saved; a saved answer (even "None") is HR's decision.
+              if (!data) loaded = { ...loaded, directManagerEmployeeId: suggestion.employeeId };
+            }
+            setCardData(loaded);
             setCardRevisions((prev) => ({ ...prev, [cardKey]: data?.revision }));
             if (fields) setFieldConfig(toRuntimeConfig([fields]));
           })
@@ -584,7 +598,7 @@ export function HiringWizardPage() {
               (() => {
                 const Form = CARD_FORM_REGISTRY[activeCard.cardKey];
                 if (!Form) return <div className="text-sm text-label-tertiary">No editor is available for this card yet.</div>;
-                return <Form data={cardData} onChange={setCardData} options={options} fieldConfig={fieldConfig} />;
+                return <Form data={cardData} onChange={setCardData} options={options} fieldConfig={fieldConfig} managerHint={managerHint} />;
               })()
             )}
 

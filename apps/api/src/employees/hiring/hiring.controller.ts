@@ -49,6 +49,11 @@ export class HiringController {
     return (await this.hiring.get(claims, id)).cards;
   }
 
+  @Get(":id/suggested-manager")
+  suggestedManager(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.hiring.suggestManager(claims, id);
+  }
+
   @Get(":id/cards/:cardKey")
   getCardData(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Param("cardKey") cardKey: string) {
     return this.hiring.getCardData(claims, id, cardKey);
