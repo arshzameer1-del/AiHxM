@@ -488,6 +488,7 @@ import type {
   CardFieldDefinitionView,
   UpdateCardFieldConfigRequest,
   AddCardCustomFieldRequest,
+  MyPersonalDataView,
   CustomFieldDefinition,
 } from "@aihxm/shared-types";
 import type {
@@ -1574,6 +1575,9 @@ export const api = {
   listEmployees: () => request<EmployeeView[]>("/employees"),
 
   getEmployee: (id: string) => request<EmployeeView>(`/employees/${id}`),
+
+  /** The signed-in person's own person record and its dated history ("My Personal Data"). */
+  getMyPersonalData: () => request<MyPersonalDataView>("/employees/me/personal-data"),
 
   /** The signed-in person's own place in the organization (Employee Self Service "My Org Chart"). */
   getMyOrgChart: () => request<MyOrgChart>("/employees/me/org-chart"),

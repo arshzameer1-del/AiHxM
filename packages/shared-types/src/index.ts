@@ -8133,6 +8133,18 @@ export type UpdatePersonRequest = {
   reason?: string;
 };
 
+/**
+ * "My Personal Data" (Employee Self Service): the caller's own person record plus its dated history.
+ * CNIC and date of birth are deliberately not part of it - those stay on the field-rule-filtered employee record.
+ */
+export type MyPersonalDataView = {
+  employeeId: string;
+  /** Null when the employee row is not linked to a person record yet. */
+  person: PersonView | null;
+  /** Oldest first; the last slice is the current one. */
+  history: PersonVersionView[];
+};
+
 export type PersonVersionView = {
   id: string;
   personId: string;

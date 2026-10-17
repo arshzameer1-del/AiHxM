@@ -14,6 +14,7 @@ import { FileInterceptor } from "@nestjs/platform-express";
 import type { Response } from "express";
 import { SessionGuard } from "../auth/session.guard";
 import { MyOrgChartService } from "./my-org-chart.service";
+import { MyPersonalDataService } from "./my-personal-data.service";
 import { CurrentClaims } from "../auth/current-claims.decorator";
 import type { RequestClaims } from "../database/tenant-context";
 import { EmployeesService } from "./employees.service";
@@ -36,7 +37,11 @@ import { BulkImportEmployeesDto } from "./dto/bulk-import-employees.dto";
 @Controller("employees")
 @UseGuards(SessionGuard)
 export class EmployeesController {
-  constructor(private readonly employees: EmployeesService, private readonly myOrgChartService: MyOrgChartService) {}
+  constructor(
+    private readonly employees: EmployeesService,
+    private readonly myOrgChartService: MyOrgChartService,
+    private readonly myPersonalData: MyPersonalDataService
+  ) {}
 
   @Post()
   create(@CurrentClaims() claims: RequestClaims, @Body() dto: CreateEmployeeDto) {
@@ -52,6 +57,12 @@ export class EmployeesController {
   @Get("me/org-chart")
   myOrgChart(@CurrentClaims() claims: RequestClaims) {
     return this.myOrgChartService.get(claims);
+  }
+
+  // "My Personal Data" (Employee Self Service): the caller's own person record and its dated history. Declared before `:id`.
+  @Get("me/personal-data")
+  myPersonalDataView(@CurrentClaims() claims: RequestClaims) {
+    return this.myPersonalData.get(claims);
   }
 
   @Get("org-chart")

@@ -4,6 +4,7 @@ import { EmployeesController } from "./employees.controller";
 import { EmployeesService } from "./employees.service";
 import { PersonsService } from "./persons.service";
 import { MyOrgChartService } from "./my-org-chart.service";
+import { MyPersonalDataService } from "./my-personal-data.service";
 import { PersonDirectoryService } from "./person-directory.service";
 import { PersonsController } from "./persons.controller";
 import { EmployeeNumberingController } from "./employee-numbering.controller";
@@ -148,6 +149,7 @@ import { OrgOccupancyModule } from "../organization/occupancy/org-occupancy.modu
   providers: [
     EmployeesService,
     MyOrgChartService,
+    MyPersonalDataService,
     PersonsService,
     PersonDirectoryService,
     EmployeeNumberingService,

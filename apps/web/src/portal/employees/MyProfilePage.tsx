@@ -1,11 +1,12 @@
 import { LoadingNote } from "../shared/PageChrome";
 import { useSearchParams } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { FileText, Download } from "lucide-react";
-import type { EmployeeDocumentView, EmployeeView, JobHistoryEntryView } from "@aihxm/shared-types";
+import { FileText, Download, Mail, Phone, ChevronDown } from "lucide-react";
+import type { EmployeeDocumentView, EmployeeView, JobHistoryEntryView, MyPersonalDataView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { EmployeeFields } from "./EmployeeFields";
+import { PersonalDataCard } from "./PersonalDataCard";
 import { PROFILE_TABS, profileTabFromParam, type ProfileTab } from "./profileTabs";
 import { OnboardingOffboardingSection } from "../onboarding-offboarding/OnboardingOffboardingSection";
 import { formatDay, localDayKey } from "../shared/dates";
@@ -103,6 +104,10 @@ export function MyProfilePage() {
   const { identity } = useAuth();
   const [employee, setEmployee] = useState<EmployeeView | null>(null);
   const [jobHistory, setJobHistory] = useState<JobHistoryEntryView[] | null>(null);
+  // Person record + dated history. Stays null if it cannot be read: the card then shows the employee record alone.
+  const [personal, setPersonal] = useState<MyPersonalDataView | null>(null);
+  const [personalSettled, setPersonalSettled] = useState(false);
+  const [headerOpen, setHeaderOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<Tab>(() => profileTabFromParam(searchParams.get("tab")));
@@ -114,6 +119,11 @@ export function MyProfilePage() {
       .then(setEmployee)
       .catch((err) => setError(err instanceof ApiError ? err.message : "Could not load your profile."));
     api.listJobHistory(identity.employeeId).then(setJobHistory).catch(() => setJobHistory([]));
+    api
+      .getMyPersonalData()
+      .then(setPersonal)
+      .catch(() => setPersonal(null))
+      .finally(() => setPersonalSettled(true));
   }, [identity?.employeeId]);
 
   if (!identity?.employeeId) {
@@ -128,13 +138,13 @@ export function MyProfilePage() {
   if (!employee) return <LoadingNote />;
 
   return (
-    <div className="max-w-2xl">
+    <div className="max-w-4xl">
       <section className="bg-card rounded-card p-5 shadow-sm mb-6">
         <div className="flex items-start gap-4">
           <div className="w-14 h-14 rounded-full bg-accent/10 text-accent font-semibold text-lg flex items-center justify-center shrink-0">
             {(employee.firstName[0] ?? "") + (employee.lastName[0] ?? "")}
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <h1 className="text-xl font-bold tracking-tight truncate">
               {employee.firstName} {employee.lastName}
             </h1>
@@ -144,8 +154,53 @@ export function MyProfilePage() {
               {employee.department ? ` · ${employee.department}` : ""}
               {employee.location ? ` · ${employee.location}` : ""}
             </p>
+            {(employee.email || employee.phone) && (
+              <div className="flex flex-wrap gap-x-5 gap-y-1 mt-2 text-sm">
+                {employee.phone && (
+                  <a href={`tel:${employee.phone}`} className="flex items-center gap-1.5 text-accent hover:text-accent-dark" data-testid="profile-phone">
+                    <Phone size={14} strokeWidth={1.75} aria-hidden="true" />
+                    {employee.phone}
+                  </a>
+                )}
+                {employee.email && (
+                  <a href={`mailto:${employee.email}`} className="flex items-center gap-1.5 text-accent hover:text-accent-dark min-w-0" data-testid="profile-email">
+                    <Mail size={14} strokeWidth={1.75} aria-hidden="true" />
+                    <span className="truncate">{employee.email}</span>
+                  </a>
+                )}
+              </div>
+            )}
           </div>
+          <button
+            type="button"
+            onClick={() => setHeaderOpen((v) => !v)}
+            aria-expanded={headerOpen}
+            aria-controls="profile-header-more"
+            className="text-xs font-medium text-label-secondary hover:text-label-primary flex items-center gap-1 shrink-0"
+            data-testid="profile-header-toggle"
+          >
+            {headerOpen ? "Hide details" : "More details"}
+            <ChevronDown size={14} strokeWidth={1.75} className={headerOpen ? "rotate-180 transition-transform" : "transition-transform"} aria-hidden="true" />
+          </button>
         </div>
+        {headerOpen && (
+          <dl id="profile-header-more" className="mt-4 pt-4 border-t border-black/10 grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-3" data-testid="profile-header-more">
+            {[
+              ["Employee #", employee.employeeNumber],
+              ["Status", employee.employmentStatus.replace(/_/g, " ")],
+              ["Employment type", employee.employmentType],
+              ["Date of joining", formatDay(employee.dateOfJoining)],
+              ["Department", employee.department],
+              ["Designation", employee.designation],
+              ["Location", employee.location],
+            ].map(([label, value]) => (
+              <div key={label}>
+                <dt className="text-xs text-label-tertiary mb-0.5">{label}</dt>
+                <dd className="text-sm">{value || "—"}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
       </section>
 
       <div className="flex gap-1 border-b border-black/10 mb-5 overflow-x-auto">
@@ -167,7 +222,7 @@ export function MyProfilePage() {
 
       {activeTab === "Personal Information" && (
         <section className="bg-card rounded-card p-5 shadow-sm">
-          <EmployeeFields employee={employee} sections={["personal"]} />
+          {personalSettled ? <PersonalDataCard employee={employee} data={personal} /> : <LoadingNote />}
         </section>
       )}
 
