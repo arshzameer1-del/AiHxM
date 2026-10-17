@@ -94,8 +94,8 @@ export function EmployeeCreatePage() {
           </h2>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium mb-1">First name</label>
-              <input
+              <label htmlFor="qa-first-name" className="block text-sm font-medium mb-1">First name</label>
+              <input id="qa-first-name"
                 required
                 value={firstName}
                 onChange={(e) => setFirstName(e.target.value)}
@@ -103,8 +103,8 @@ export function EmployeeCreatePage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Last name</label>
-              <input
+              <label htmlFor="qa-last-name" className="block text-sm font-medium mb-1">Last name</label>
+              <input id="qa-last-name"
                 required
                 value={lastName}
                 onChange={(e) => setLastName(e.target.value)}
@@ -112,8 +112,8 @@ export function EmployeeCreatePage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Email</label>
-              <input
+              <label htmlFor="qa-email" className="block text-sm font-medium mb-1">Email</label>
+              <input id="qa-email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -122,8 +122,8 @@ export function EmployeeCreatePage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Phone</label>
-              <input
+              <label htmlFor="qa-phone" className="block text-sm font-medium mb-1">Phone</label>
+              <input id="qa-phone"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
@@ -138,32 +138,32 @@ export function EmployeeCreatePage() {
           </h2>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium mb-1">Department</label>
-              <input
+              <label htmlFor="qa-department" className="block text-sm font-medium mb-1">Department</label>
+              <input id="qa-department"
                 value={department}
                 onChange={(e) => setDepartment(e.target.value)}
                 className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Designation</label>
-              <input
+              <label htmlFor="qa-designation" className="block text-sm font-medium mb-1">Designation</label>
+              <input id="qa-designation"
                 value={designation}
                 onChange={(e) => setDesignation(e.target.value)}
                 className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Location</label>
-              <input
+              <label htmlFor="qa-location" className="block text-sm font-medium mb-1">Location</label>
+              <input id="qa-location"
                 value={location}
                 onChange={(e) => setLocation(e.target.value)}
                 className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Employment type</label>
-              <select
+              <label htmlFor="qa-employment-type" className="block text-sm font-medium mb-1">Employment type</label>
+              <select id="qa-employment-type"
                 value={employmentType}
                 onChange={(e) => setEmploymentType(e.target.value as EmploymentType)}
                 className="w-full rounded-lg border border-black/10 px-3 py-2 capitalize focus:outline-none focus:ring-2 focus:ring-accent"
@@ -182,8 +182,8 @@ export function EmployeeCreatePage() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Manager</label>
-              <select
+              <label htmlFor="qa-manager" className="block text-sm font-medium mb-1">Manager</label>
+              <select id="qa-manager"
                 value={managerId}
                 onChange={(e) => setManagerId(e.target.value)}
                 className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
@@ -197,8 +197,8 @@ export function EmployeeCreatePage() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Date of joining</label>
-              <input
+              <label htmlFor="qa-date-of-joining" className="block text-sm font-medium mb-1">Date of joining</label>
+              <input id="qa-date-of-joining"
                 type="date"
                 value={dateOfJoining}
                 onChange={(e) => setDateOfJoining(e.target.value)}

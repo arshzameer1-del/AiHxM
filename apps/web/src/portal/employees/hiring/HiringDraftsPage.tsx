@@ -7,7 +7,7 @@ import { formatDay, localDayKey } from "../../shared/dates";
 
 /**
  * Core Employee Enterprise Phase 2's Hiring Wizard entry point
- * (2026-09-27) — `/app/employees/hire`. Lists in-progress drafts
+ * (2026-09-27) — `/app/hire`. Lists in-progress drafts
  * (`listHiringDrafts`, which the backend already scopes to non-terminal
  * `HireProcessView`s) and lets HR start a brand-new one
  * (`startHireProcess`), then navigates into `HiringWizardPage` by the
@@ -35,7 +35,7 @@ export function HiringDraftsPage() {
     setError(null);
     try {
       const process = await api.startHireProcess();
-      navigate(`/app/employees/hire/${process.id}`);
+      navigate(`/app/hire/${process.id}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not start a new hire.");
     } finally {
@@ -75,7 +75,7 @@ export function HiringDraftsPage() {
               return (
                 <button
                   key={d.id}
-                  onClick={() => navigate(`/app/employees/hire/${d.id}`)}
+                  onClick={() => navigate(`/app/hire/${d.id}`)}
                   className="w-full flex items-center justify-between py-3 text-left hover:bg-black/5 rounded-lg px-2 -mx-2"
                 >
                   <div>

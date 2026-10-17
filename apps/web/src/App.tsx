@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useParams } from "react-router-dom";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import {
   ProtectedRoute,
@@ -324,6 +324,12 @@ function RootRedirect() {
  * RequireTenant (ProtectedRoute.tsx) keep a session out of the portal it
  * doesn't belong to.
  */
+/** Old `/app/employees/hire/:id` bookmarks land on the hiring section's own address. */
+function RedirectHireDraft() {
+  const { id } = useParams<{ id: string }>();
+  return <Navigate to={`/app/hire/${id ?? ""}`} replace />;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -387,10 +393,6 @@ export default function App() {
                   <Route path="my-hiring" element={<MyHiringPage />} />
                   <Route path="employees" element={<EmployeeListPage />} />
                   <Route
-                    path="employees/new"
-                    element={<EmployeeCreatePage />}
-                  />
-                  <Route
                     path="employees/:id"
                     element={<EmployeeDetailPage />}
                   />
@@ -399,9 +401,16 @@ export default function App() {
                     and Bulk Hiring. Same courtesy-nav gate (hr_admin) as
                     every other route here; the real gates are enforced
                     server-side by HiringController/EmployeesController. */}
-                  <Route path="employees/hire" element={<HiringDraftsPage />} />
-                  <Route path="employees/hire/:id" element={<HiringWizardPage />} />
-                  <Route path="employees/bulk-import" element={<EmployeeBulkImportPage />} />
+                  {/* Hiring lives in its own section (/app/hire), apart from Employees (maintenance of people already hired).
+                      The old /app/employees/... addresses keep working by redirecting here. */}
+                  <Route path="hire" element={<HiringDraftsPage />} />
+                  <Route path="hire/quick" element={<EmployeeCreatePage />} />
+                  <Route path="hire/bulk" element={<EmployeeBulkImportPage />} />
+                  <Route path="hire/:id" element={<HiringWizardPage />} />
+                  <Route path="employees/hire" element={<Navigate to="/app/hire" replace />} />
+                  <Route path="employees/hire/:id" element={<RedirectHireDraft />} />
+                  <Route path="employees/new" element={<Navigate to="/app/hire/quick" replace />} />
+                  <Route path="employees/bulk-import" element={<Navigate to="/app/hire/bulk" replace />} />
                   <Route path="employees/analytics" element={<WorkforceAnalyticsPage />} />
                   {/* Organization Management Phase 1 — the Hierarchy
                     Explorer. org_unit.view.all/org_unit.manage.all (both

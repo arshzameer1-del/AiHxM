@@ -6,6 +6,9 @@ import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 
 /**
+ * Employees = maintenance of the people already hired (directory, records, profiles, lifecycle). Hiring itself (guided
+ * wizard, quick add, bulk) is its own section under /app/hire and is deliberately not offered from here.
+ *
  * One list, every role. `GET /employees` already returns exactly the
  * rows RbacService's view-scope grants the caller (`.all` for hr_admin,
  * `.team` — direct reports only — for line_manager) — this page renders
@@ -38,27 +41,6 @@ export function EmployeeListPage() {
               : "Your direct reports"}
           </p>
         </div>
-        {canCreate && (
-          <div className="flex items-center gap-3">
-            {/* Core Employee Enterprise Phase 2's frontend catch-up
-              (2026-09-27) — the guided, multi-card Hiring Wizard sits
-              alongside this page's original one-shot quick-create form
-              rather than replacing it; either flow lands on the same
-              employee record. */}
-            <Link
-              to="/app/employees/hire"
-              className="bg-black/5 text-label-primary rounded-lg px-4 py-2 text-sm font-semibold"
-            >
-              Guided Hire
-            </Link>
-            <Link
-              to="/app/employees/new"
-              className="bg-accent text-white rounded-lg px-4 py-2 text-sm font-semibold"
-            >
-              New Employee
-            </Link>
-          </div>
-        )}
       </div>
 
       {error && <div className="text-danger text-sm mb-4">{error}</div>}
@@ -68,6 +50,14 @@ export function EmployeeListPage() {
       {employees && employees.length === 0 && (
         <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-tertiary">
           No employees to show yet.
+          {canCreate && (
+            <>
+              {" "}
+              <Link to="/app/hire" className="text-accent hover:underline font-medium">
+                Hire the first employee
+              </Link>
+            </>
+          )}
         </div>
       )}
 

@@ -13,6 +13,7 @@ import type {
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { EmployeeFields } from "./EmployeeFields";
+import { PersonDetailsPanel } from "./PersonDetailsPanel";
 import { OnboardingOffboardingSection } from "../onboarding-offboarding/OnboardingOffboardingSection";
 import { LifecycleActionsPanel } from "./LifecycleActionsPanel";
 import { EmployeeCustomFieldsPanel } from "./EmployeeCustomFieldsPanel";
@@ -45,7 +46,7 @@ import { formatDay } from "../shared/dates";
  * app (plain local `tab` state, `{tab === "X" && (...)}` blocks — no
  * router or tab library) rather than inventing a second convention.
  */
-const TABS = ["Overview", "Contact & Address", "Family & Education", "Compensation & Assets", "Lifecycle Actions"] as const;
+const TABS = ["Overview", "Personal Details", "Contact & Address", "Family & Education", "Compensation & Assets", "Lifecycle Actions"] as const;
 type Tab = (typeof TABS)[number];
 
 const EMPLOYMENT_TYPES: EmploymentType[] = ["permanent", "contract", "probation", "intern"];
@@ -226,6 +227,9 @@ export function EmployeeDetailPage() {
           </section>
         </>
       )}
+
+      {/* Employee maintenance: the person record behind the employee (what the hiring wizard's Personal Identity card collected). */}
+      {tab === "Personal Details" && <PersonDetailsPanel employee={employee} canManage={canManage} />}
 
       {/* Core Employee Enterprise Phase 6 — Contact and Address cards' own CRUD surface, outside the hiring flow. */}
       {tab === "Contact & Address" && (
@@ -469,8 +473,11 @@ function EditForm({
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>
-      <label className="block text-sm font-medium mb-1">{label}</label>
-      {children}
+      {/* The control sits inside its label, so the pairing is real (screen readers, click-the-label, tests). */}
+      <label className="block">
+        <span className="block text-sm font-medium mb-1">{label}</span>
+        {children}
+      </label>
     </div>
   );
 }

@@ -510,7 +510,7 @@ export function HiringWizardPage() {
     if (!window.confirm("Cancel this hire process? Everything entered so far will be kept but the hire will not proceed.")) return;
     try {
       await api.cancelHireProcess(id, process.revision);
-      navigate("/app/employees/hire");
+      navigate("/app/hire");
     } catch (err) {
       setLoadError(err instanceof ApiError ? err.message : "Could not cancel this hire process.");
     }
@@ -521,7 +521,7 @@ export function HiringWizardPage() {
     setDraftSaving(true);
     try {
       await api.saveHiringDraft(id);
-      navigate("/app/employees/hire");
+      navigate("/app/hire");
     } catch (err) {
       setLoadError(err instanceof ApiError ? err.message : "Could not save this as a draft.");
       setDraftSaving(false);

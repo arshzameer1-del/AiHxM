@@ -8,6 +8,7 @@ import {
   type LucideIcon,
   User,
   Users,
+  UserPlus,
   Network,
   Settings2,
   ShieldCheck,
@@ -63,6 +64,7 @@ function buildHomeCards(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]):
 
   if ((hasRole("hr_admin", "line_manager") || hasAnyRoleKey(roleKeys, "regional_hr")) && hasModule("employee")) {
     cards.push({ to: "/app/employees", label: "Employees", description: "Directory, records & profiles", icon: Users });
+    if (hasRole("hr_admin")) cards.push({ to: "/app/hire", label: "Hire", description: "Guided hire, quick add & bulk hiring", icon: UserPlus });
   } else if (roleKeys.length > 0 && hasModule("employee")) {
     cards.push({ to: "/app/profile", label: "My Profile", description: "Your own employee record", icon: User });
   }

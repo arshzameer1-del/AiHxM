@@ -19,6 +19,7 @@ import {
   Receipt,
   GraduationCap,
   LayoutGrid,
+  UserPlus,
 } from "lucide-react";
 import type { ModuleKey, PublicTenantBranding, TenantRoleKey } from "@aihxm/shared-types";
 import { api, prefetchRoute, publicTenantBrandingAssetUrl, startKeepWarm, warmForRoles } from "../api/client";
@@ -97,8 +98,7 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): 
       ...(hasRole("hr_admin")
         ? {
             children: [
-              { to: "/app/employees/hire", label: "Hire" },
-              { to: "/app/employees/bulk-import", label: "Bulk Import" },
+              { to: "/app/employees", label: "Directory", end: true },
               { to: "/app/employees/analytics", label: "Workforce Analytics" },
             ],
           }
@@ -106,6 +106,22 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): 
     });
   } else if (roleKeys.length > 0 && hasModule("employee")) {
     items.push({ to: "/app/profile", label: "My Profile", icon: User });
+  }
+
+  // Hiring is its own section, apart from Employees (maintenance of the people already hired): the guided wizard,
+  // the quick one-form add and bulk hiring from a CSV. All are hr_admin only (employee.manage.all).
+  if (hasRole("hr_admin") && hasModule("employee")) {
+    items.push({
+      to: "/app/hire",
+      label: "Hire",
+      end: true,
+      icon: UserPlus,
+      children: [
+        { to: "/app/hire", label: "Guided Hire", end: true },
+        { to: "/app/hire/quick", label: "Quick Add" },
+        { to: "/app/hire/bulk", label: "Bulk Hiring" },
+      ],
+    });
   }
 
   // Organization Management Phase 1 — org_unit.view.all is seeded broadly

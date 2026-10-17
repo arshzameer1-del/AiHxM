@@ -2,6 +2,9 @@ import { createResponseCache, isCacheablePath } from "./responseCache";
 import { WARM_READS_BY_ROLE } from "./warmReads";
 import type {
   HireManagerSuggestion,
+  PersonVersionView,
+  PersonView,
+  UpdatePersonRequest,
   MyOrgChart,
   MyRequisitionView,
   TeamAttendanceView,
@@ -2222,6 +2225,12 @@ export const api = {
   // `hr-reference-catalog.service.ts`'s own class doc comment on the API
   // side for why the two stay separate.
   listHrCatalogTypes: () => request<HrReferenceCatalogTypeSummary[]>("/hr-administration/reference-catalog/types"),
+
+  // Employee maintenance: the person record behind an employee (names, nationality, passport, NTN) and its dated history.
+  getPerson: (personId: string) => request<PersonView>(`/persons/${personId}`),
+  getPersonHistory: (personId: string) => request<PersonVersionView[]>(`/persons/${personId}/history`),
+  updatePerson: (personId: string, input: UpdatePersonRequest) =>
+    request<PersonView>(`/persons/${personId}`, { method: "PATCH", body: JSON.stringify(input) }),
 
   listHrCatalogItems: (catalogType: string, includeInactive = false) =>
     request<HrReferenceCatalogItemView[]>(

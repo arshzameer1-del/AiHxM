@@ -64,7 +64,7 @@ test.describe("Employee Core Portal (Task #48)", () => {
   test("HR Admin can create a new employee", async ({ page }) => {
     await loginAsHrAdmin(page);
     // Navigate to employee create page
-    await page.goto("/app/employees/new");
+    await page.goto("/app/hire/quick");
 
     // Fill in employee form
     const timestamp = Date.now();
@@ -96,7 +96,7 @@ test.describe("Employee Core Portal (Task #48)", () => {
     await loginAsHrAdmin(page);
     // Create a real employee via the UI first so there's always at least
     // one row to click — a freshly signed-up company starts with none.
-    await page.goto("/app/employees/new");
+    await page.goto("/app/hire/quick");
     const timestamp = Date.now();
     await page.locator('label:has-text("First name") + input').fill("Detail");
     await page.locator('label:has-text("Last name") + input').fill(`Test${timestamp}`);
@@ -255,29 +255,13 @@ test.describe("Employee Core Accessibility", () => {
 
   test("Form labels are properly associated with inputs", async ({ page }) => {
     await loginAsHrAdmin(page);
-    await page.goto("/app/employees/new");
+    await page.goto("/app/hire/quick");
 
-    // Real finding (2026-10-01, surfaced now that login actually works):
-    // EmployeeCreatePage.tsx's "First name" field is a bare
-    // `<label>First name</label>` followed by a sibling `<input>` with no
-    // `htmlFor`/`id` pairing and no `name` or `aria-label` attribute —
-    // there's nothing to select by `input[name="firstName"]` at all
-    // (that locator hangs forever rather than reporting absence, which is
-    // its own trap). This test is intentionally left asserting the real
-    // requirement rather than loosened to pass: it should fail until the
-    // product code pairs the label, which is a genuine accessibility gap
-    // this file is now actually able to catch.
-    const firstNameInput = page.locator('label:has-text("First name") + input');
-    const firstNameLabel = page.locator('label[for="firstName"]');
-
-    // Check that input has associated label or ARIA attributes
-    const hasAriaLabel = await firstNameInput.evaluate((el) =>
-      el.hasAttribute("aria-label")
-    );
-    const hasLabel =
-      (await firstNameLabel.count()) > 0 ||
-      hasAriaLabel ||
-      (await firstNameInput.evaluate((el) => el.closest("label"))) !== null;
+    // The quick-add form's "First name" input must be reachable through its label (htmlFor/id), so screen readers and
+    // click-the-label both work. The browser's own `labels` list is the source of truth for that pairing.
+    const firstNameInput = page.getByLabel("First name", { exact: true });
+    await expect(firstNameInput).toHaveCount(1);
+    const hasLabel = await firstNameInput.evaluate((el) => ((el as HTMLInputElement).labels?.length ?? 0) > 0);
 
     expect(hasLabel).toBe(true);
   });

@@ -36,7 +36,8 @@ function Value({ row }: { row: PersonalRow }) {
   );
 }
 
-export function PersonalDataCard({ employee, data }: { employee: EmployeeView; data: MyPersonalDataView | null }) {
+/** `hrView`: HR maintaining someone else's record, so the "ask HR" hint reads differently. */
+export function PersonalDataCard({ employee, data, hrView }: { employee: EmployeeView; data: MyPersonalDataView | null; hrView?: boolean }) {
   const slices = useMemo(() => buildSlices(data, employee), [data, employee]);
   const [selected, setSelected] = useState<string | null>(null);
   const slice = slices.find((s) => s.key === selected) ?? slices.find((s) => s.current) ?? slices[0];
@@ -53,7 +54,7 @@ export function PersonalDataCard({ employee, data }: { employee: EmployeeView; d
           {slice.current && (
             <p className="text-xs text-label-tertiary mt-0.5" data-testid="pd-completeness">
               {filled} of {total} details filled in
-              {filled < total ? " — ask HR to add the rest." : "."}
+              {filled < total ? (hrView ? " — use Edit to add the rest." : " — ask HR to add the rest.") : "."}
             </p>
           )}
           {slice.upcoming && (
