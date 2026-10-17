@@ -539,6 +539,14 @@ import type {
   UpsertRecruitmentEventRequest,
 } from "@aihxm/shared-types";
 
+/**
+ * Where API calls go. Empty (the default) means the same origin under `/api`, which the Vite dev server proxies and a
+ * host with a rewrite rule can forward. A host that cannot proxy (Cloudflare Pages) sets VITE_API_BASE_URL at build time
+ * to the API's own address and the browser calls it directly (the API's CORS_ORIGIN must then allow the web origin).
+ */
+const API_BASE = String((import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "").trim().replace(/\/+$/, "");
+export const API_PREFIX = API_BASE || "/api";
+
 const TOKEN_KEY = "aihxm.platformAdminToken";
 
 function safeSessionStorage(): Storage | null {
@@ -813,7 +821,7 @@ export function publicTenantBrandingAssetUrl(
   companySlug: string,
   slot: "logo" | "login-background"
 ): string {
-  return `/api/public/tenants/${companySlug}/branding/${slot}/asset`;
+  return `${API_PREFIX}/public/tenants/${companySlug}/branding/${slot}/asset`;
 }
 
 /**
@@ -828,7 +836,7 @@ export function publicTenantBrandingAssetUrl(
  */
 export function platformBrandingAssetUrl(updatedAt?: string): string {
   const version = updatedAt ? encodeURIComponent(updatedAt) : "";
-  return `/api/public/platform-branding/logo/asset${version ? `?v=${version}` : ""}`;
+  return `${API_PREFIX}/public/platform-branding/logo/asset${version ? `?v=${version}` : ""}`;
 }
 
 /**
@@ -839,7 +847,7 @@ export function platformBrandingAssetUrl(updatedAt?: string): string {
  * client to parse.
  */
 export function ssoLoginUrl(companySlug: string): string {
-  return `/api/auth/sso/${companySlug}/login`;
+  return `${API_PREFIX}/auth/sso/${companySlug}/login`;
 }
 
 async function fetchText(path: string, options: RequestInit = {}): Promise<string> {
@@ -852,7 +860,7 @@ async function fetchText(path: string, options: RequestInit = {}): Promise<strin
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const res = await fetch(`/api${path}`, { ...options, headers });
+  const res = await fetch(`${API_PREFIX}${path}`, { ...options, headers });
 
   if (res.status === 401) {
     clearToken();
@@ -1030,7 +1038,7 @@ export const api = {
     const token = getToken();
     const formData = new FormData();
     formData.append("file", file);
-    const res = await fetch("/api/platform/branding/logo", {
+    const res = await fetch(`${API_PREFIX}/platform/branding/logo`, {
       method: "POST",
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: formData,
@@ -1277,7 +1285,7 @@ export const api = {
   // Streams the backup's JSON file — same pattern as downloadDisbursementFile below.
   async downloadBackup(companyId: string, backupId: string): Promise<void> {
     const token = getToken();
-    const res = await fetch(`/api/platform/companies/${companyId}/backups/${backupId}/download`, {
+    const res = await fetch(`${API_PREFIX}/platform/companies/${companyId}/backups/${backupId}/download`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
     if (!res.ok) {
@@ -1317,7 +1325,7 @@ export const api = {
   async downloadDataExport(companyId: string, exportId: string, fileName: string, password?: string): Promise<void> {
     const token = getToken();
     const query = password ? `?password=${encodeURIComponent(password)}` : "";
-    const res = await fetch(`/api/platform/companies/${companyId}/exports/${exportId}/download${query}`, {
+    const res = await fetch(`${API_PREFIX}/platform/companies/${companyId}/exports/${exportId}/download${query}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
     if (!res.ok) {
@@ -1440,7 +1448,7 @@ export const api = {
     const token = getToken();
     const formData = new FormData();
     formData.append("file", file);
-    const res = await fetch(`/api/platform/companies/${companyId}/branding/${slot}`, {
+    const res = await fetch(`${API_PREFIX}/platform/companies/${companyId}/branding/${slot}`, {
       method: "POST",
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: formData,
@@ -1465,7 +1473,7 @@ export const api = {
   // an authenticated fetch, same pattern as downloadBackup/downloadDataExport.
   async brandingAssetPreviewUrl(companyId: string, slot: BrandingAssetSlot): Promise<string | null> {
     const token = getToken();
-    const res = await fetch(`/api/platform/companies/${companyId}/branding/${slot}`, {
+    const res = await fetch(`${API_PREFIX}/platform/companies/${companyId}/branding/${slot}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
     if (!res.ok) return null;
@@ -1612,7 +1620,7 @@ export const api = {
 
   async downloadEmployeeDocument(employeeId: string, documentId: string, fileName: string): Promise<void> {
     const token = getToken();
-    const res = await fetch(`/api/employees/${employeeId}/documents/${documentId}`, {
+    const res = await fetch(`${API_PREFIX}/employees/${employeeId}/documents/${documentId}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
     if (!res.ok) {
@@ -2638,7 +2646,7 @@ export const api = {
     const token = getToken();
     const formData = new FormData();
     formData.append("file", file);
-    const res = await fetch(`/api/expense-claims/${claimId}/receipts`, {
+    const res = await fetch(`${API_PREFIX}/expense-claims/${claimId}/receipts`, {
       method: "POST",
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: formData,
@@ -2664,7 +2672,7 @@ export const api = {
   // Same authenticated-blob pattern as downloadEmployeeDocument above.
   async downloadExpenseReceipt(claimId: string, receiptId: string, fileName: string): Promise<void> {
     const token = getToken();
-    const res = await fetch(`/api/expense-claims/${claimId}/receipts/${receiptId}`, {
+    const res = await fetch(`${API_PREFIX}/expense-claims/${claimId}/receipts/${receiptId}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
     if (!res.ok) {
@@ -2799,7 +2807,7 @@ export const api = {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("docType", docType);
-    const res = await fetch(`/api/candidates/${candidateId}/documents`, {
+    const res = await fetch(`${API_PREFIX}/candidates/${candidateId}/documents`, {
       method: "POST",
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: formData,
@@ -2819,7 +2827,7 @@ export const api = {
   },
   async downloadCandidateDocument(candidateId: string, documentId: string, fileName: string): Promise<void> {
     const token = getToken();
-    const res = await fetch(`/api/candidates/${candidateId}/documents/${documentId}`, {
+    const res = await fetch(`${API_PREFIX}/candidates/${candidateId}/documents/${documentId}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
     if (!res.ok) throw new ApiError(res.status, `Request failed (${res.status})`);
@@ -3330,7 +3338,7 @@ export const api = {
   async downloadDisbursementFile(runId: string, confirmRegenerate = false, formatId?: string, fileExtension = "csv"): Promise<{ batchReference: string; excludedCount: number }> {
     const token = getToken();
     const res = await fetch(
-      `/api/payroll/runs/${runId}/disbursement?${new URLSearchParams({ ...(confirmRegenerate ? { confirmRegenerate: "true" } : {}), ...(formatId ? { formatId } : {}) }).toString()}`,
+      `${API_PREFIX}/payroll/runs/${runId}/disbursement?${new URLSearchParams({ ...(confirmRegenerate ? { confirmRegenerate: "true" } : {}), ...(formatId ? { formatId } : {}) }).toString()}`,
       { headers: token ? { Authorization: `Bearer ${token}` } : {} }
     );
     invalidateResponseCache(); // generating a bank file records a batch other screens show
@@ -3447,7 +3455,7 @@ export const api = {
   /** Saves a text/CSV response (journal export, error report) as a file; the endpoint answers with text, not JSON. */
   async downloadPayrollText(path: string, fileName: string): Promise<void> {
     const token = getToken();
-    const res = await fetch(`/api${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    const res = await fetch(`${API_PREFIX}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
     if (!res.ok) {
       let message = `Request failed (${res.status})`;
       try {

@@ -59,6 +59,10 @@ async function bootstrap() {
       if (!origin || corsOrigins.includes(origin)) return callback(null, true);
       callback(new Error(`Origin "${origin}" is not allowed`), false);
     },
+    // The browser may call this API directly (a static host that cannot proxy /api, such as Cloudflare Pages): let it
+    // read the headers screens use for downloads, and remember the permission check so repeat calls skip it.
+    exposedHeaders: ["Content-Disposition", "X-Correlation-Id", "X-Payroll-Batch-Reference", "X-Payroll-Excluded-Count"],
+    maxAge: 7200,
   });
 
   // Strip unknown fields and reject bad ones at the edge, before any

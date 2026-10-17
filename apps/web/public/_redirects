@@ -1,0 +1,2 @@
+# Cloudflare Pages: any path that is not a real file opens the app, so a refresh on /app/payroll or /leadhcm/login works.
+/*  /index.html  200
