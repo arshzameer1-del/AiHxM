@@ -552,6 +552,9 @@ function arg(name: string): string | undefined {
 }
 
 async function main() {
+  // Dates are handled in UTC, as on the live server: on a PC in a time zone ahead of UTC (Pakistan) the database driver's
+  // date values shift by a day and the effective-dating checks fail ("position_versions_check").
+  process.env.TZ = "UTC";
   loadEnvFile(join(__dirname, "../../.env"));
   const slug = arg("slug");
   if (!slug) throw new Error("Give the company with --slug <company-slug>");

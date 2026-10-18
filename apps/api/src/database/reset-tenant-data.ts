@@ -135,6 +135,7 @@ function arg(name: string): string | undefined {
 const flag = (name: string) => process.argv.includes(`--${name}`);
 
 async function main() {
+  process.env.TZ = "UTC"; // same as the live server (see seed-tenant-demo.ts)
   loadEnvFile(join(__dirname, "../../.env"));
   const slug = arg("slug");
   if (!slug) throw new Error("Give the company with --slug <company-slug> (for example --slug qatar-solutions)");
