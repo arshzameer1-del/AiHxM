@@ -70,6 +70,27 @@ async function findAdminUser(app: INestApplicationContext, companyId: string): P
   return r.rows[0] as { id: string; email: string };
 }
 
+/**
+ * The people's CNIC, phone and bank details are stored encrypted with the company's own key, which is itself locked with the
+ * master key FIELD_ENCRYPTION_KEY. If this machine's .env does not hold the SAME master key as the live API (Render), nothing
+ * sensitive can be written. That is checked first, before anything is created (and, in the PowerShell script, before anything is deleted).
+ */
+export async function checkFieldKeys(app: INestApplicationContext, companyId: string, claims: RequestClaims): Promise<void> {
+  const { DatabaseService } = await import("./database.service");
+  const { fieldCrypto } = await import("../crypto/field-crypto");
+  const db = app.get(DatabaseService, { strict: false });
+  try {
+    await db.withClaims(claims, async (client) => {
+      await fieldCrypto.warm(client, companyId);
+    });
+  } catch (err) {
+    throw new Error(
+      `Encryption key problem: ${(err as Error).message}. FIELD_ENCRYPTION_KEY in apps\\api\\.env must be exactly the same value as FIELD_ENCRYPTION_KEY on Render (api service > Environment). Copy it from there into .env, then run again.`
+    );
+  }
+  if (!fieldCrypto.isWarm(companyId)) throw new Error("Encryption key problem: this company's keys could not be loaded. Check FIELD_ENCRYPTION_KEY in apps\\api\\.env (it must match Render).");
+}
+
 export async function seedDemoTenant(app: INestApplicationContext, companyId: string, log: SeedLog = console.log): Promise<SeedResult> {
   const { DatabaseService } = await import("./database.service");
   const { OrgUnitsService } = await import("../organization/org-units.service");
@@ -105,6 +126,7 @@ export async function seedDemoTenant(app: INestApplicationContext, companyId: st
   const admin = await findAdminUser(app, companyId);
   const claims: RequestClaims = { is_platform_admin: false, company_id: companyId, sub: admin.id };
   log(`Acting as ${admin.email}`);
+  await checkFieldKeys(app, companyId, claims);
 
   // ---- sites ------------------------------------------------------------
   const locationId: Record<string, string> = {};
@@ -541,6 +563,12 @@ async function main() {
     const db = app.get(DatabaseService, { strict: false });
     const company = await db.withClaims(SERVICE_CLAIMS, (c) => c.query("SELECT id, name FROM companies WHERE slug = $1", [slug]));
     if (company.rowCount === 0) throw new Error(`No company with slug "${slug}"`);
+    if (process.argv.includes("--check")) {
+      const admin = await findAdminUser(app, company.rows[0].id);
+      await checkFieldKeys(app, company.rows[0].id, { is_platform_admin: false, company_id: company.rows[0].id, sub: admin.id });
+      console.log(`CHECK OK: ${company.rows[0].name} - encryption key matches, the seed can write people's details.`);
+      return;
+    }
     console.log(`Seeding ${company.rows[0].name} (${slug})`);
     const result = await seedDemoTenant(app, company.rows[0].id);
     console.log("DONE", JSON.stringify(result.counts));
