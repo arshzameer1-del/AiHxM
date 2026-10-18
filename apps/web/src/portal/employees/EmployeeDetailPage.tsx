@@ -57,7 +57,7 @@ const EDITABLE_STATUSES: EmploymentStatus[] = ["active", "on_leave"];
 const ROLE_LABELS: Record<TenantRoleKey, string> = {
   hr_admin: "HR Admin",
   line_manager: "Line Manager",
-  employee_self_service: "Employee (self-service)",
+  employee_self_service: "Employee",
   ess_portal: "Employee Self Service",
   system_admin: "System Admin",
   payroll_approver: "Payroll Approver",

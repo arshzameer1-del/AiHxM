@@ -6,7 +6,7 @@ import { api, ApiError } from "../../api/client";
 const ROLE_LABELS: Record<TenantRoleKey, string> = {
   hr_admin: "HR Admin",
   line_manager: "Line Manager",
-  employee_self_service: "Employee (Self-Service)",
+  employee_self_service: "Employee",
   ess_portal: "Employee Self Service",
   system_admin: "System Admin",
   payroll_approver: "Payroll Approver",
@@ -95,7 +95,10 @@ function AssignRoleControl({
 }) {
   const grantable = roles.filter((r) => !user.roleKeys.includes(r.key as TenantRoleKey));
   const [assigning, setAssigning] = useState(false);
-  const [selected, setSelected] = useState(grantable[0]?.key ?? "");
+  const [picked, setPicked] = useState("");
+  // The list shrinks after a grant: a remembered choice that is no longer offered falls back to the first one shown,
+  // so what the dropdown displays is always what "Grant" sends (before, a stale choice produced "already holds this role").
+  const selected = grantable.some((r) => r.key === picked) ? picked : (grantable[0]?.key ?? "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -120,7 +123,7 @@ function AssignRoleControl({
     <div className="flex items-center gap-2 flex-wrap mt-1">
       <select
         value={selected}
-        onChange={(e) => setSelected(e.target.value)}
+        onChange={(e) => setPicked(e.target.value)}
         className="rounded-lg border border-black/10 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-accent"
       >
         {grantable.map((r) => (
