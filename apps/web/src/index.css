@@ -151,6 +151,119 @@
   outline-offset: 2px;
 }
 
+/* ---- One exD: My Workspace header and coloured KPI tiles ---------------------------------------------------------- */
+.ws-hero {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  padding: 26px 28px;
+  border-radius: 22px;
+  color: #fff;
+  background:
+    radial-gradient(70% 140% at 100% 0%, rgb(99 102 241 / 0.38), transparent 62%),
+    radial-gradient(60% 120% at 0% 100%, rgb(236 72 153 / 0.24), transparent 65%),
+    linear-gradient(118deg, #614059 0%, #2a2b65 100%);
+  box-shadow: 0 24px 48px -30px #4547a9, inset 0 1px 0 rgb(255 255 255 / 0.14);
+}
+.ws-hero-avatar {
+  flex: none;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: 700;
+  background: rgb(255 255 255 / 0.14);
+  box-shadow: 0 0 0 4px rgb(255 255 255 / 0.18);
+}
+.ws-hero-body { min-width: 0; flex: 1; }
+.ws-hero-greet { font-size: 13px; color: rgb(255 255 255 / 0.85); }
+.ws-hero-name { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.ws-hero-name h1 { font-size: 24px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.25; }
+.ws-hero-empno { padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: rgb(255 255 255 / 0.14); }
+.ws-hero-job { margin-top: 2px; font-size: 13px; color: rgb(255 255 255 / 0.82); }
+.ws-hero-facts { margin-top: 18px; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.ws-hero-fact {
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: rgb(255 255 255 / 0.07);
+  border: 1px solid rgb(255 255 255 / 0.18);
+  min-width: 0;
+}
+.ws-hero-fact dt { font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: rgb(255 255 255 / 0.7); }
+.ws-hero-fact dd { margin-top: 2px; font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 640px) {
+  .ws-hero { flex-direction: column; padding: 20px; }
+}
+
+:root[data-theme="onexd"] .kpi-tile {
+  color: #fff;
+  border: 0;
+  border-radius: 18px;
+  --c-label-primary: 255 255 255;
+  --c-label-secondary: 255 255 255;
+  --c-label-tertiary: 235 235 245;
+}
+:root[data-theme="onexd"] .kpi-tile-indigo {
+  background: radial-gradient(120% 120% at 100% 0%, rgb(99 102 241 / 0.42), transparent 58%), linear-gradient(145deg, #393b8c 0%, #26275c 100%);
+  box-shadow: 0 18px 34px -24px #4547a9, inset 0 1px 0 rgb(255 255 255 / 0.14);
+}
+:root[data-theme="onexd"] .kpi-tile-green {
+  background: radial-gradient(120% 120% at 100% 0%, rgb(20 184 166 / 0.42), transparent 58%), linear-gradient(145deg, #0c6b60 0%, #08463f 100%);
+  box-shadow: 0 18px 34px -24px #0c6b60, inset 0 1px 0 rgb(255 255 255 / 0.14);
+}
+:root[data-theme="onexd"] .kpi-tile-plum {
+  background: radial-gradient(120% 120% at 100% 0%, rgb(113 75 103 / 0.42), transparent 58%), linear-gradient(145deg, #422b3c 0%, #2b1d27 100%);
+  box-shadow: 0 18px 34px -24px #5a3c52, inset 0 1px 0 rgb(255 255 255 / 0.14);
+}
+:root[data-theme="onexd"] .kpi-tile .kpi-tile-icon {
+  background: rgb(255 255 255 / 0.14);
+  color: #fff;
+  border: 1px solid rgb(255 255 255 / 0.22);
+}
+
+/* Cards: soft border and a hairline shadow, 16px corners. */
+:root[data-theme="onexd"] .rounded-card:not(.kpi-tile) {
+  border-radius: 16px;
+  border: 1px solid #e2dadb;
+  box-shadow: 0 1px 2px 0 rgb(37 24 26 / 0.07);
+}
+
+/* Motion (One exD): header and tiles ease in, tiles and cards lift under the cursor. Off for reduced-motion. */
+@keyframes ws-rise {
+  from { opacity: 0; transform: translateY(14px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes ws-sheen {
+  0% { background-position: 0% 0%; }
+  50% { background-position: 100% 100%; }
+  100% { background-position: 0% 0%; }
+}
+@keyframes ws-pop {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ws-hero { background-size: 100% 100%, 100% 100%, 160% 160%; animation: ws-rise 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) both, ws-sheen 18s ease-in-out 0.6s infinite; }
+  .ws-hero-avatar { animation: ws-pop 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.3) 0.15s both; }
+  .ws-hero-fact { animation: ws-rise 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+  .ws-hero-fact:nth-child(1) { animation-delay: 0.18s; }
+  .ws-hero-fact:nth-child(2) { animation-delay: 0.26s; }
+  .ws-hero-fact:nth-child(3) { animation-delay: 0.34s; }
+  .ws-hero-fact:nth-child(4) { animation-delay: 0.42s; }
+  :root[data-theme="onexd"] .kpi-tile { animation: ws-rise 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both; transition: transform 0.2s ease, box-shadow 0.2s ease; }
+  :root[data-theme="onexd"] .kpi-tile-indigo { animation-delay: 0.2s; }
+  :root[data-theme="onexd"] .kpi-tile-green { animation-delay: 0.3s; }
+  :root[data-theme="onexd"] .kpi-tile-plum { animation-delay: 0.4s; }
+  :root[data-theme="onexd"] .kpi-tile:hover { transform: translateY(-4px); }
+  :root[data-theme="onexd"] .kpi-tile:hover .kpi-tile-icon { transform: scale(1.08) rotate(-4deg); }
+  :root[data-theme="onexd"] .kpi-tile-icon { transition: transform 0.2s ease; }
+  :root[data-theme="onexd"] .rounded-card:not(.kpi-tile) { transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease; }
+  :root[data-theme="onexd"] a.rounded-card:not(.kpi-tile):hover { transform: translateY(-3px); box-shadow: 0 14px 28px -16px rgb(113 99 158 / 0.45); }
+}
+
 body {
   @apply bg-surface text-label-primary font-sans;
   -webkit-font-smoothing: antialiased;
@@ -372,3 +485,15 @@ button.ui-card:focus-visible {
 /* Side menu: scrolls without a visible scrollbar. */
 .no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
+
+/* One exD: use the full width of the screen, and render text and pictures crisply. */
+:root[data-theme="onexd"] .app-main {
+  max-width: none;
+}
+:root[data-theme="onexd"] body {
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "kern", "liga", "calt";
+}
+:root[data-theme="onexd"] img {
+  image-rendering: -webkit-optimize-contrast;
+}

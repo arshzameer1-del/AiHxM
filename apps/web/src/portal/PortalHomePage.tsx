@@ -29,6 +29,8 @@ import type {
   TenantRoleKey,
 } from "@aihxm/shared-types";
 import { useAuth } from "../auth/AuthContext";
+import { useTheme } from "../theme/useTheme";
+import { WorkspaceHero } from "./WorkspaceHero";
 import { api } from "../api/client";
 import { leaveTypeLabel, STATUS_LABELS, STATUS_STYLES } from "./leave/leaveLabels";
 import { MyAttendanceCard, MyTimesheetCard } from "./attendance/AttendanceCards";
@@ -225,18 +227,20 @@ function MyDayKpiRow({
     warning: "bg-warning/10 text-warning",
   };
 
+  const tileClasses = ["kpi-tile-indigo", "kpi-tile-green", "kpi-tile-plum"];
+
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
-      {cards.map((card) => {
+      {cards.map((card, index) => {
         const Icon = card.icon;
         return (
           <Link
             key={card.label}
             to={card.to}
             data-testid={card.testId}
-            className="bg-card rounded-card p-4 shadow-sm ui-card flex items-center gap-3"
+            className={`kpi-tile ${tileClasses[index % tileClasses.length]} bg-card rounded-card p-4 shadow-sm ui-card flex items-center gap-3`}
           >
-            <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${toneClasses[card.tone]}`}>
+            <div className={`kpi-tile-icon w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${toneClasses[card.tone]}`}>
               <Icon size={20} strokeWidth={1.75} />
             </div>
             <div className="min-w-0">
@@ -377,6 +381,7 @@ const REORG_STATUS_LABELS: Record<string, string> = {
 
 export function PortalHomePage() {
   const { identity } = useAuth();
+  const theme = useTheme();
   const [commandCenter, setCommandCenter] = useState<OrganizationCommandCenterSummary | null>(null);
 
   // Organization Management Phase 6 — the scoped Command Center panel.
@@ -405,8 +410,16 @@ export function PortalHomePage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold tracking-tight mb-1">Good to see you, {fullName}</h1>
-      <p className="text-sm text-label-tertiary mb-6">{companyName}</p>
+      {theme === "onexd" ? (
+        <div className="mb-6">
+          <WorkspaceHero fullName={fullName} companyName={companyName} email={identity.email} employeeId={identity.employeeId} />
+        </div>
+      ) : (
+        <>
+          <h1 className="text-2xl font-bold tracking-tight mb-1">Good to see you, {fullName}</h1>
+          <p className="text-sm text-label-tertiary mb-6">{companyName}</p>
+        </>
+      )}
 
       {roleKeys.includes("hr_admin") && <StarterSetupNudge />}
 

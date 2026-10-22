@@ -90,3 +90,17 @@ test("One exD theme: purple top bar, warm page, light sidebar, readable account 
   expect(await menu.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgb(255, 255, 255)");
   await page.screenshot({ path: SHOTS ? `${SHOTS}/menu-onexd.png` : undefined });
 });
+
+test("One exD home: workspace header and coloured tiles", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await loginToApp(page, token);
+  await page.evaluate(() => localStorage.setItem("aihxm.theme", "onexd"));
+  await page.goto("/app");
+  const hero = page.getByRole("region", { name: "My workspace" });
+  await expect(hero).toBeVisible();
+  await expect(hero.getByText("Today")).toBeVisible();
+  await expect(hero.getByText("Work email")).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Good to see you/ })).toHaveCount(0);
+  await page.waitForTimeout(1200);
+  await page.screenshot({ path: SHOTS ? `${SHOTS}/home-onexd-full.png` : undefined });
+});
