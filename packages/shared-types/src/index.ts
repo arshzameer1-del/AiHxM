@@ -6075,6 +6075,44 @@ export type PayrollValidationFinding = {
   employeeNumber?: string;
 };
 
+export type PayrollVarianceFlag = "new_in_run" | "missing_from_run" | "net_change" | "tax_change";
+
+export type PayrollVarianceRowView = {
+  employeeId: string;
+  employeeNumber: string;
+  employeeName: string;
+  grossPay: number | null;
+  previousGrossPay: number | null;
+  incomeTax: number | null;
+  previousIncomeTax: number | null;
+  netPay: number | null;
+  previousNetPay: number | null;
+  /** net pay now minus net pay in the previous finalised run (a new or missing person counts from/to 0). */
+  netChange: number;
+  /** null when there is no previous amount to compare with. */
+  netChangePercent: number | null;
+  flags: PayrollVarianceFlag[];
+};
+
+/** A run compared with the previous finalised regular run of the same payroll area, person by person. */
+export type PayrollRunVarianceView = {
+  payrollRunId: string;
+  previousRun: { id: string; periodStart: string; periodEnd: string } | null;
+  netPayThresholdPercent: number;
+  taxThresholdPercent: number;
+  totals: {
+    netPay: number;
+    previousNetPay: number | null;
+    netChangePercent: number | null;
+    headcount: number;
+    previousHeadcount: number | null;
+    newCount: number;
+    missingCount: number;
+    flaggedCount: number;
+  };
+  rows: PayrollVarianceRowView[];
+};
+
 export type PayrollRunValidationView = {
   run: PayrollRunView;
   stage: "pre_validation" | "validation";

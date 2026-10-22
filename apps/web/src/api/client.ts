@@ -137,6 +137,7 @@ import type {
   CreatePayrollRunRequest,
   ReversePayrollRunRequest,
   PayrollRunValidationView,
+  PayrollRunVarianceView,
   PayrollCalendarView,
   PayslipDetailView,
   PayrollYtdView,
@@ -3271,6 +3272,7 @@ export const api = {
     request<PayrollRunValidationView>(`/payroll/runs/${id}/pre-validate`, { method: "POST" }),
   validatePayrollRun: (id: string) =>
     request<PayrollRunValidationView>(`/payroll/runs/${id}/validate`, { method: "POST" }),
+  getPayrollRunVariance: (id: string) => request<PayrollRunVarianceView>(`/payroll/runs/${id}/variance`),
   closePayrollRun: (id: string, input: ClosePayrollRunRequest = {}) =>
     request<PayrollRunView>(`/payroll/runs/${id}/close`, { method: "POST", body: JSON.stringify(input) }),
   reopenPayrollRun: (id: string, input: ReopenPayrollRunRequest) =>

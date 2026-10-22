@@ -23,12 +23,21 @@ import type {
   PayrollRunReopenView,
   PayrollRunStatus,
   PayrollRunValidationView,
+  PayrollRunVarianceView,
+  PayrollVarianceFlag,
+  PayrollVarianceRowView,
   PayrollRunPopulationView,
   PayrollValidationFinding,
   SetPayrollOverrideRequest,
 } from "@aihxm/shared-types";
 
 const MODULE_KEY = "payroll" as const;
+/** A person is flagged for review when their pay or tax moved by more than this against the previous finalised run. */
+export const VARIANCE_NET_PERCENT = 20;
+export const VARIANCE_TAX_PERCENT = 50;
+/** ...and by at least this many rupees, so a small base does not raise noise. */
+const VARIANCE_MIN_AMOUNT = 1000;
+
 const CALCULATE_BASE = "payroll.calculate";
 const FINALIZE_BASE = "payroll.finalize";
 const DISBURSE_BASE = "payroll.disburse";
@@ -729,6 +738,38 @@ export class PayrollRunControlService {
       findings.push({ severity: "error", code: "OVERTIME_UNPRICED", message: `Approved overtime on ${iso(r.work_date)!.slice(0, 10)} has no snapshotted amount`, employeeId: r.employee_id, employeeNumber: byId.get(r.employee_id)?.employee_number });
     }
 
+    if (run.run_type === "regular" && !run.is_simulation) {
+      const month = Number(periodStart.slice(5, 7));
+      const taxYearStart = `${Number(periodStart.slice(0, 4)) - (month >= 7 ? 0 : 1)}-07-01`;
+      // An earlier month of this tax year still open: its pay is not in the year-to-date yet, so this month's tax would be worked out on too little.
+      const open = await client.query(
+        `SELECT period_start, period_end, status FROM payroll_runs
+          WHERE company_id = $1 AND id <> $2 AND run_type = 'regular' AND is_simulation = false
+            AND status NOT IN ('finalized','accounting','payment_released','reconciled','closed','reopened','reversed','cancelled')
+            AND COALESCE(payroll_area_id, '00000000-0000-0000-0000-000000000000'::uuid) = COALESCE($3::uuid, '00000000-0000-0000-0000-000000000000'::uuid)
+            AND period_end < $4::date AND period_end >= $5::date
+          ORDER BY period_end`,
+        [run.company_id, run.id, run.payroll_area_id ?? null, periodStart, taxYearStart]
+      );
+      for (const o of open.rows) {
+        findings.push({ severity: "warning", code: "EARLIER_RUN_NOT_FINAL", message: `The run for ${iso(o.period_start)!.slice(0, 10)} to ${iso(o.period_end)!.slice(0, 10)} is still ${o.status}; finalise or cancel it first so this month's tax uses the year-to-date correctly` });
+      }
+      // Tax year runs July to June. After July, with no finalised month in the tax year, tax is estimated from this month alone.
+      if (periodStart > taxYearStart) {
+        const history = await client.query(
+          `SELECT 1 FROM payroll_runs
+            WHERE company_id = $1 AND id <> $2 AND run_type = 'regular' AND is_simulation = false
+              AND status IN ('finalized','accounting','payment_released','reconciled','closed','reopened')
+              AND COALESCE(payroll_area_id, '00000000-0000-0000-0000-000000000000'::uuid) = COALESCE($3::uuid, '00000000-0000-0000-0000-000000000000'::uuid)
+              AND period_end >= $4::date AND period_end < $5::date LIMIT 1`,
+          [run.company_id, run.id, run.payroll_area_id ?? null, taxYearStart, periodStart]
+        );
+        if (history.rowCount === 0) {
+          findings.push({ severity: "warning", code: "NO_TAX_YEAR_HISTORY", message: `No finalised payroll exists for the earlier months of this tax year (from ${taxYearStart}). Tax is estimated from this month alone unless each employee's earlier income and tax are entered in their tax profile` });
+        }
+      }
+    }
+
     findings.push({ severity: "info", code: "POPULATION", message: `${people.length} employee(s) fall into this run` });
     return findings;
   }
@@ -761,22 +802,129 @@ export class PayrollRunControlService {
     if (overrides.rows[0].n > 0) {
       findings.push({ severity: "warning", code: "OVERRIDES_APPLIED", message: `${overrides.rows[0].n} value(s) were overridden manually; the approver sees them listed` });
     }
-    // Variance against the previous finalised regular run of the same area (information only - no threshold is imposed).
+    // Variance against the previous finalised regular run of the same area: the total, then each person who moved a lot.
+    const prev = await this.previousFinalRun(client, run);
+    const net = slips.rows.reduce((a, s) => a + Number(s.net_pay), 0);
+    if (prev) {
+      const v = await this.buildVariance(client, run, prev);
+      if (v.totals.previousNetPay && v.totals.previousNetPay > 0 && v.totals.netChangePercent !== null) {
+        const delta = v.totals.netChangePercent;
+        findings.push({ severity: "info", code: "NET_VARIANCE", message: `Total net pay is ${delta >= 0 ? "+" : ""}${delta.toFixed(1)}% against the previous finalised run` });
+      }
+      for (const r of v.rows) {
+        const who = { employeeId: r.employeeId, employeeNumber: r.employeeNumber };
+        if (r.flags.includes("missing_from_run")) {
+          findings.push({ severity: "warning", code: "MISSING_FROM_RUN", message: `${r.employeeName} was paid ${money(r.previousNetPay)} in the previous run but has no payslip in this one (left, on hold, or left out by mistake?)`, ...who });
+        }
+        if (r.flags.includes("net_change")) {
+          findings.push({ severity: "warning", code: "NET_PAY_CHANGE", message: `${r.employeeName}: net pay ${signedPercent(r.netChangePercent)} (${money(r.previousNetPay)} to ${money(r.netPay)})${reasonText(r)}`, ...who });
+        }
+        if (r.flags.includes("tax_change")) {
+          findings.push({ severity: "warning", code: "TAX_CHANGE", message: `${r.employeeName}: income tax moved from ${money(r.previousIncomeTax)} to ${money(r.incomeTax)}`, ...who });
+        }
+      }
+      if (v.totals.newCount > 0) {
+        findings.push({ severity: "info", code: "NEW_IN_RUN", message: `${v.totals.newCount} employee(s) are paid for the first time in this run` });
+      }
+    } else if (net > 0) {
+      findings.push({ severity: "info", code: "NO_PREVIOUS_RUN", message: "There is no earlier finalised run to compare with" });
+    }
+    return findings;
+  }
+
+  /** The latest finalised regular run of the same payroll area that ended before this one began. */
+  private async previousFinalRun(client: PoolClient, run: Record<string, any>): Promise<{ id: string; period_start: unknown; period_end: unknown } | null> { // eslint-disable-line @typescript-eslint/no-explicit-any
     const prev = await client.query(
-      `SELECT total_net FROM payroll_runs
-        WHERE company_id = $1 AND id <> $2 AND run_type = 'regular' AND is_simulation = false AND total_net IS NOT NULL
+      `SELECT id, period_start, period_end FROM payroll_runs
+        WHERE company_id = $1 AND id <> $2 AND run_type = 'regular' AND is_simulation = false
           AND status IN ('finalized','accounting','payment_released','reconciled','closed','reopened')
           AND COALESCE(payroll_area_id, '00000000-0000-0000-0000-000000000000'::uuid) = COALESCE($3::uuid, '00000000-0000-0000-0000-000000000000'::uuid)
           AND period_end < $4::date
         ORDER BY period_end DESC LIMIT 1`,
       [run.company_id, run.id, run.payroll_area_id ?? null, iso(run.period_start)!.slice(0, 10)]
     );
-    const net = slips.rows.reduce((a, s) => a + Number(s.net_pay), 0);
-    if (prev.rowCount && Number(prev.rows[0].total_net) > 0) {
-      const delta = ((net - Number(prev.rows[0].total_net)) / Number(prev.rows[0].total_net)) * 100;
-      findings.push({ severity: "info", code: "NET_VARIANCE", message: `Total net pay is ${delta >= 0 ? "+" : ""}${delta.toFixed(1)}% against the previous finalised run` });
-    }
-    return findings;
+    return prev.rows[0] ?? null;
+  }
+
+  private async buildVariance(client: PoolClient, run: Record<string, any>, prev: { id: string; period_start: unknown; period_end: unknown } | null): Promise<PayrollRunVarianceView> { // eslint-disable-line @typescript-eslint/no-explicit-any
+    const r = await client.query(
+      `SELECT COALESCE(c.employee_id, p.employee_id) AS employee_id,
+              COALESCE(c.employee_number, p.employee_number) AS employee_number,
+              concat_ws(' ', e.first_name, e.last_name) AS employee_name,
+              c.gross_pay AS gross, p.gross_pay AS prev_gross,
+              c.income_tax_monthly AS tax, p.income_tax_monthly AS prev_tax,
+              c.net_pay AS net, p.net_pay AS prev_net
+         FROM (SELECT * FROM payslips WHERE payroll_run_id = $1) c
+         FULL OUTER JOIN (SELECT * FROM payslips WHERE payroll_run_id = $2::uuid) p ON p.employee_id = c.employee_id
+         JOIN employees e ON e.id = COALESCE(c.employee_id, p.employee_id)`,
+      [run.id, prev?.id ?? null]
+    );
+    const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+    const rows: PayrollVarianceRowView[] = r.rows.map((x) => {
+      const netPay = num(x.net);
+      const previousNetPay = num(x.prev_net);
+      const incomeTax = num(x.tax);
+      const previousIncomeTax = num(x.prev_tax);
+      const netChange = Math.round(((netPay ?? 0) - (previousNetPay ?? 0)) * 100) / 100;
+      const netChangePercent = previousNetPay !== null && previousNetPay > 0 && netPay !== null ? Math.round((netChange / previousNetPay) * 1000) / 10 : null;
+      const flags: PayrollVarianceFlag[] = [];
+      if (prev) {
+        if (netPay === null) flags.push("missing_from_run");
+        else if (previousNetPay === null) flags.push("new_in_run");
+        else {
+          if (netChangePercent !== null && Math.abs(netChangePercent) > VARIANCE_NET_PERCENT && Math.abs(netChange) >= VARIANCE_MIN_AMOUNT) flags.push("net_change");
+          const taxChange = (incomeTax ?? 0) - (previousIncomeTax ?? 0);
+          const taxBase = Math.max(previousIncomeTax ?? 0, 1);
+          if (Math.abs(taxChange) >= VARIANCE_MIN_AMOUNT && (Math.abs(taxChange) / taxBase) * 100 > VARIANCE_TAX_PERCENT) flags.push("tax_change");
+        }
+      }
+      return {
+        employeeId: x.employee_id,
+        employeeNumber: x.employee_number,
+        employeeName: String(x.employee_name ?? "").trim(),
+        grossPay: num(x.gross),
+        previousGrossPay: num(x.prev_gross),
+        incomeTax,
+        previousIncomeTax,
+        netPay,
+        previousNetPay,
+        netChange,
+        netChangePercent,
+        flags,
+      };
+    });
+    // the biggest movers first; people with no change last
+    rows.sort((a, b) => Math.abs(b.netChange) - Math.abs(a.netChange) || a.employeeNumber.localeCompare(b.employeeNumber));
+    const currentRows = rows.filter((x) => x.netPay !== null);
+    const previousRows = rows.filter((x) => x.previousNetPay !== null);
+    const netPay = currentRows.reduce((a, x) => a + (x.netPay ?? 0), 0);
+    const previousNetPay = prev ? previousRows.reduce((a, x) => a + (x.previousNetPay ?? 0), 0) : null;
+    return {
+      payrollRunId: run.id,
+      previousRun: prev ? { id: prev.id, periodStart: iso(prev.period_start)!.slice(0, 10), periodEnd: iso(prev.period_end)!.slice(0, 10) } : null,
+      netPayThresholdPercent: VARIANCE_NET_PERCENT,
+      taxThresholdPercent: VARIANCE_TAX_PERCENT,
+      totals: {
+        netPay: Math.round(netPay * 100) / 100,
+        previousNetPay: previousNetPay === null ? null : Math.round(previousNetPay * 100) / 100,
+        netChangePercent: previousNetPay && previousNetPay > 0 ? Math.round(((netPay - previousNetPay) / previousNetPay) * 1000) / 10 : null,
+        headcount: currentRows.length,
+        previousHeadcount: prev ? previousRows.length : null,
+        newCount: rows.filter((x) => x.flags.includes("new_in_run")).length,
+        missingCount: rows.filter((x) => x.flags.includes("missing_from_run")).length,
+        flaggedCount: rows.filter((x) => x.flags.length > 0).length,
+      },
+      rows,
+    };
+  }
+
+  /** The run compared with the previous finalised run, person by person (read only). */
+  async getVariance(claims: RequestClaims, runId: string): Promise<PayrollRunVarianceView> {
+    await this.requireView(claims, runId);
+    return this.db.withClaims(claims, async (client) => {
+      const run = await this.loadRun(client, runId);
+      return this.buildVariance(client, run, await this.previousFinalRun(client, run));
+    });
   }
 
   // ------------------------------------------------------------------ close / reopen / cancel
@@ -1144,3 +1292,22 @@ export class PayrollRunControlService {
   }
 }
 
+
+function money(v: number | null): string {
+  return v === null ? "-" : `Rs ${Math.round(v).toLocaleString("en-US")}`;
+}
+
+function signedPercent(v: number | null): string {
+  return v === null ? "changed" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
+}
+
+/** Says whether the move came from gross pay, tax, or the other deductions. */
+function reasonText(r: PayrollVarianceRowView): string {
+  if (r.grossPay === null || r.previousGrossPay === null) return "";
+  const gross = r.grossPay - r.previousGrossPay;
+  const tax = (r.incomeTax ?? 0) - (r.previousIncomeTax ?? 0);
+  const parts: string[] = [];
+  if (Math.abs(gross) >= 1) parts.push(`gross ${gross >= 0 ? "+" : "-"}${money(Math.abs(gross))}`);
+  if (Math.abs(tax) >= 1) parts.push(`tax ${tax >= 0 ? "+" : "-"}${money(Math.abs(tax))}`);
+  return parts.length ? `; ${parts.join(", ")}` : "";
+}

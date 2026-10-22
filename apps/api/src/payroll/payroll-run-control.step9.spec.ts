@@ -228,6 +228,66 @@ describe("Payroll run control (Step 9A)", () => {
     });
   });
 
+  describe("variance against the previous run and readiness warnings", () => {
+    it("names the people whose pay moved, who is new, and who dropped out; the variance view lists them biggest first", async () => {
+      const changer = await f.createEmployee({ monthlySalary: 100000 });
+      const leaver = await f.createEmployee({ monthlySalary: 80000, terminationDate: "2061-05-31" });
+      await f.finalizedRun("2061-05-01", "2061-05-31");
+      await f.compensation.setCompensation(f.hr, { employeeId: changer.id, monthlySalary: 200000, effectiveFrom: "2061-06-01" });
+      const newcomer = await f.createEmployee({ monthlySalary: 60000, dateOfJoining: "2061-06-01" });
+      const run = await f.payroll.createRun(f.hr, { periodStart: "2061-06-01", periodEnd: "2061-06-30" });
+      await f.payroll.calculateRun(f.hr, run.id);
+      const res = await f.control.validate(f.hr, run.id);
+      const codes = res.findings.map((x) => `${x.code}:${x.employeeId ?? ""}`);
+      expect(codes).toContain(`NET_PAY_CHANGE:${changer.id}`);
+      expect(codes).toContain(`MISSING_FROM_RUN:${leaver.id}`);
+      expect(res.findings.find((x) => x.code === "NEW_IN_RUN")?.message).toMatch(/1 employee/);
+      expect(res.findings.find((x) => x.code === "NET_VARIANCE")).toBeDefined();
+      expect(res.findings.find((x) => x.code === "NET_PAY_CHANGE" && x.employeeId === changer.id)?.message).toMatch(/gross \+Rs/);
+
+      const v = await f.control.getVariance(f.hr, run.id);
+      expect(v.previousRun).toMatchObject({ periodStart: "2061-05-01", periodEnd: "2061-05-31" });
+      const by = new Map(v.rows.map((r) => [r.employeeId, r]));
+      expect(by.get(changer.id)!.flags).toContain("net_change");
+      expect(by.get(changer.id)!.netChangePercent).toBeGreaterThan(50);
+      expect(by.get(leaver.id)!.flags).toEqual(["missing_from_run"]);
+      expect(by.get(leaver.id)!.netPay).toBeNull();
+      expect(by.get(newcomer.id)!.flags).toEqual(["new_in_run"]);
+      expect(v.totals.newCount).toBeGreaterThanOrEqual(1);
+      expect(v.totals.missingCount).toBeGreaterThanOrEqual(1);
+      const moves = v.rows.map((r) => Math.abs(r.netChange));
+      expect(moves).toEqual([...moves].sort((a, b) => b - a));
+      await expect(f.control.getVariance(f.staff, run.id)).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it("says so when there is nothing to compare with", async () => {
+      const run = await f.payroll.createRun(f.hr, { periodStart: "1998-01-01", periodEnd: "1998-01-31" });
+      const v = await f.control.getVariance(f.hr, run.id);
+      expect(v.previousRun).toBeNull();
+      expect(v.rows.every((r) => r.flags.length === 0)).toBe(true);
+    });
+
+    it("pre-validation warns about an earlier month still open and about a tax year with no finalised history", async () => {
+      await f.createEmployee({ monthlySalary: 70000 });
+      const earlier = await f.payroll.createRun(f.hr, { periodStart: "2062-08-01", periodEnd: "2062-08-31" });
+      const run = await f.payroll.createRun(f.hr, { periodStart: "2062-09-01", periodEnd: "2062-09-30" });
+      const res = await f.control.preValidate(f.hr, run.id);
+      const open = res.findings.find((x) => x.code === "EARLIER_RUN_NOT_FINAL");
+      expect(open?.severity).toBe("warning");
+      expect(open?.message).toContain("2062-08-01");
+      expect(res.findings.find((x) => x.code === "NO_TAX_YEAR_HISTORY")?.message).toContain("2062-07-01");
+      expect(res.passed).toBe(true); // warnings do not block
+      void earlier;
+    });
+
+    it("does not warn about tax history in the first month of the tax year", async () => {
+      await f.createEmployee({ monthlySalary: 70000 });
+      const run = await f.payroll.createRun(f.hr, { periodStart: "2063-07-01", periodEnd: "2063-07-31" });
+      const res = await f.control.preValidate(f.hr, run.id);
+      expect(res.findings.map((x) => x.code)).not.toContain("NO_TAX_YEAR_HISTORY");
+    });
+  });
+
   // ======================================================================= PAY-19
   describe("PAY-19 reversal", () => {
     it("records the reversal with its impact, voids the bank file and opens a corrective run", async () => {

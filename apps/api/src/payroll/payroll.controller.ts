@@ -101,6 +101,11 @@ export class PayrollController {
     return this.control.getCalculationProgress(claims, id);
   }
 
+  @Get("payroll/runs/:id/variance")
+  getRunVariance(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.control.getVariance(claims, id);
+  }
+
   @Get("payroll/runs/:id/exceptions")
   listExceptions(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Query("status") status?: string) {
     return this.control.listExceptions(claims, id, status);

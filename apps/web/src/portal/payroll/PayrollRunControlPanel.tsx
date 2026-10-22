@@ -11,6 +11,7 @@ import type {
 import { api, ApiError } from "../../api/client";
 import { RUN_STATUS_LABELS, isPostFinalRunStatus, pkr } from "./payrollLabels";
 import { formatDateTime } from "../shared/dates";
+import { PayrollVariancePanel } from "./PayrollVariancePanel";
 
 const OVERRIDE_FIELD_LABELS: Record<PayrollOverridableField, string> = {
   incomeTaxMonthly: "Income tax (monthly)",
@@ -263,6 +264,10 @@ export function PayrollRunControlPanel({
             </div>
           ))}
         </div>
+      )}
+
+      {open && run.status !== "draft" && run.status !== "pre_validated" && run.status !== "cancelled" && (
+        <PayrollVariancePanel runId={run.id} calculationSequence={run.calculationSequence} />
       )}
 
       {open && (
