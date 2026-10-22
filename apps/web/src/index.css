@@ -78,6 +78,79 @@
   --radius-button: 999px;
 }
 
+/* One exD: the look of the One exD workspace (purple top bar, warm light page, soft light sidebar). */
+:root[data-theme="onexd"] {
+  --c-surface: 246 243 244;
+  --c-card: 255 255 255;
+  --c-border: 230 223 227;
+  --c-accent: 113 99 158;
+  --c-accent-dark: 93 80 133;
+  --c-brand-secondary: 113 75 103;
+  --c-brand-dark: 43 29 39;
+  --c-success: 22 128 96;
+  --c-danger: 190 40 70;
+  --c-warning: 176 98 16;
+  --c-info: 40 120 150;
+  --c-ai: 99 102 241;
+  --c-label-primary: 44 32 33;
+  --c-label-secondary: 98 86 90;
+  --c-label-tertiary: 140 128 133;
+
+  --c-sidebar: 253 252 253;
+  --c-sidebar-fg: 44 32 33;
+  --c-sidebar-fg-hover: 44 32 33;
+  --c-sidebar-muted: 98 86 90;
+  --c-sidebar-strong: 44 32 33;
+  --c-sidebar-active: 113 99 158;
+  --c-sidebar-active-fg: 93 80 133;
+  --c-sidebar-hover: 113 75 103;
+  --c-sidebar-line: 0 0 0;
+  --c-sidebar-edge: 236 230 233;
+
+  --radius-control: 12px;
+  --radius-button: 12px;
+}
+
+/* Top bar: the purple bar of One exD, with white text. Its drop-down keeps the light tokens. */
+:root[data-theme="onexd"] .app-topbar {
+  --c-card: 113 99 158;
+  --c-surface: 134 121 176;
+  --c-border: 150 138 188;
+  --c-accent: 255 255 255;
+  --c-label-primary: 255 255 255;
+  --c-label-secondary: 234 230 244;
+  --c-label-tertiary: 234 230 244;
+  border-color: transparent;
+}
+:root[data-theme="onexd"] .app-topbar .app-topbar-menu {
+  --c-card: 255 255 255;
+  --c-surface: 246 243 244;
+  --c-border: 230 223 227;
+  --c-accent: 113 99 158;
+  --c-label-primary: 44 32 33;
+  --c-label-secondary: 98 86 90;
+  --c-label-tertiary: 140 128 133;
+}
+
+/* Softer, rounder shapes. */
+:root[data-theme="onexd"] :is(button, a, label).bg-accent.text-white,
+:root[data-theme="onexd"] :is(button, a, label).border-accent.text-accent {
+  border-radius: var(--radius-button);
+}
+:root[data-theme="onexd"] :is(input, select, textarea):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not(.rounded-full) {
+  border-radius: var(--radius-control);
+}
+:root[data-theme="onexd"] [role="tablist"] [role="tab"] {
+  border-radius: 10px;
+}
+:root[data-theme="onexd"] :is(.rounded-xl, .rounded-2xl) {
+  border-radius: 18px;
+}
+:root[data-theme="onexd"] :is(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid rgb(var(--c-accent) / 0.55);
+  outline-offset: 2px;
+}
+
 body {
   @apply bg-surface text-label-primary font-sans;
   -webkit-font-smoothing: antialiased;

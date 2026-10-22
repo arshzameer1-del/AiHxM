@@ -5,12 +5,14 @@
  *
  *  - "enterprise": the AiHxM Enterprise Master Design System (dark sidebar, #2563EB). Default.
  *  - "boostfactor": the iOS-style look of the BoostFactor prototype (white sidebar, #007AFF, pill buttons).
+ *  - "onexd": the One exD workspace look (purple top bar #71639e, warm light page, soft light sidebar, rounded cards).
  */
-export type ThemeKey = "enterprise" | "boostfactor";
+export type ThemeKey = "enterprise" | "boostfactor" | "onexd";
 
 export const THEMES: ReadonlyArray<{ key: ThemeKey; label: string; hint: string }> = [
   { key: "enterprise", label: "AiHxM Enterprise", hint: "Dark sidebar, blue accent" },
   { key: "boostfactor", label: "BoostFactor", hint: "Light, iOS style, pill buttons" },
+  { key: "onexd", label: "One exD", hint: "Purple top bar, warm light, rounded" },
 ];
 
 export const DEFAULT_THEME: ThemeKey = "enterprise";

@@ -73,3 +73,20 @@ test("an unknown saved theme falls back to enterprise", async ({ page }) => {
   await page.goto("/app");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "enterprise");
 });
+
+test("One exD theme: purple top bar, warm page, light sidebar, readable account menu", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await loginToApp(page, token);
+  await page.goto("/app");
+  await chooseTheme(page, "One exD");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "onexd");
+  expect(await bg(page, "header")).toBe("rgb(113, 99, 158)");
+  expect(await bg(page, "body")).toBe("rgb(246, 243, 244)");
+  await expect.poll(() => bg(page, "aside")).toBe("rgb(253, 252, 253)");
+  await page.screenshot({ path: SHOTS ? `${SHOTS}/home-onexd.png` : undefined });
+  await page.getByRole("button", { name: "Account menu" }).click();
+  const menu = page.locator(".app-topbar-menu");
+  await expect(menu).toBeVisible();
+  expect(await menu.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgb(255, 255, 255)");
+  await page.screenshot({ path: SHOTS ? `${SHOTS}/menu-onexd.png` : undefined });
+});

@@ -109,7 +109,7 @@ export function Topbar({
 
   return (
     <>
-      <header className="h-16 shrink-0 bg-card border-b border-border flex items-center justify-between gap-4 px-6">
+      <header className="app-topbar h-16 shrink-0 bg-card border-b border-border flex items-center justify-between gap-4 px-6">
         <button
           type="button"
           onClick={() => setPaletteOpen(true)}
@@ -145,7 +145,7 @@ export function Topbar({
           </button>
 
           {profileOpen && (
-            <div className="absolute right-0 mt-2 w-64 bg-card border border-border rounded-xl shadow-lg py-1.5 z-30">
+            <div className="app-topbar-menu absolute right-0 mt-2 w-64 bg-card border border-border rounded-xl shadow-lg py-1.5 z-30">
               <div className="px-3.5 py-2 border-b border-border">
                 <div className="text-sm font-medium text-label-primary truncate">{userName}</div>
                 <div className="text-xs text-label-secondary truncate">{userEmail}</div>
