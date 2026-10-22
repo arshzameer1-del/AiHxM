@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { Check, ChevronDown, LogOut, Search } from "lucide-react";
+import { StatusPill } from "./StatusPill";
 import { applyTheme, currentTheme, THEMES, type ThemeKey } from "../../theme/theme";
 
 export type QuickJumpItem = { to: string; label: string; group?: string };
@@ -122,9 +123,10 @@ export function Topbar({
           </kbd>
         </button>
 
-        {contextLabel && (
-          <div className="hidden md:block text-sm text-label-secondary truncate">{contextLabel}</div>
-        )}
+        <div className="flex items-center gap-3 min-w-0">
+          <StatusPill />
+          {contextLabel && <div className="hidden md:block text-sm text-label-secondary truncate">{contextLabel}</div>}
+        </div>
 
         <div className="relative shrink-0" ref={profileRef}>
           <button

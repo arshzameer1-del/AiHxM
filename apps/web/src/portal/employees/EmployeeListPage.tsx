@@ -6,7 +6,7 @@ import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { compareEmployeeNumbers } from "./employeeNumberOrder";
 import { StatTile } from "../../components/StatTile";
-import { Building2, CalendarPlus, UserCheck, Users } from "lucide-react";
+import { Building2, CalendarPlus, LayoutGrid, List, UserCheck, Users } from "lucide-react";
 
 /**
  * Employees = maintenance of the people already hired (directory, records, profiles, lifecycle). Hiring itself (guided
@@ -36,14 +36,22 @@ export function EmployeeListPage() {
   // A company can have hundreds of people: find them by name, number, department or job title, and by status.
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
+  const [department, setDepartment] = useState("all");
+  const [view, setView] = useState<"list" | "cards">("list");
+  const departments = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const e of employees ?? []) if (e.department) counts.set(e.department, (counts.get(e.department) ?? 0) + 1);
+    return [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [employees]);
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase();
     return [...(employees ?? [])].sort((a, b) => compareEmployeeNumbers(a.employeeNumber, b.employeeNumber)).filter((e) => {
       if (status !== "all" && e.employmentStatus !== status) return false;
+      if (department !== "all" && e.department !== department) return false;
       if (!q) return true;
       return [e.employeeNumber, `${e.firstName} ${e.lastName}`, e.department, e.designation].some((v) => (v ?? "").toLowerCase().includes(q));
     });
-  }, [employees, search, status]);
+  }, [employees, search, status, department]);
 
   const total = employees?.length ?? 0;
   const activeCount = (employees ?? []).filter((e) => e.employmentStatus === "active").length;
@@ -113,9 +121,30 @@ export function EmployeeListPage() {
             <option value="on_leave">On leave</option>
             <option value="terminated">Terminated</option>
           </select>
+          <div className="view-switch ml-auto" role="group" aria-label="View">
+            <button type="button" aria-pressed={view === "list"} onClick={() => setView("list")} title="List">
+              <List size={16} aria-hidden /> <span>List</span>
+            </button>
+            <button type="button" aria-pressed={view === "cards"} onClick={() => setView("cards")} title="Cards">
+              <LayoutGrid size={16} aria-hidden /> <span>Cards</span>
+            </button>
+          </div>
           <span className="text-xs text-label-tertiary" data-testid="emp-count" aria-live="polite">
             {shown.length === employees.length ? `${employees.length} employees` : `${shown.length} of ${employees.length} employees`}
           </span>
+        </div>
+      )}
+
+      {employees && departments.length > 1 && (
+        <div className="dept-pills mb-3" role="group" aria-label="Department">
+          <button type="button" aria-pressed={department === "all"} onClick={() => setDepartment("all")}>
+            All departments <span>{employees.length}</span>
+          </button>
+          {departments.map(([name, count]) => (
+            <button key={name} type="button" aria-pressed={department === name} onClick={() => setDepartment(name)}>
+              {name} <span>{count}</span>
+            </button>
+          ))}
         </div>
       )}
 
@@ -135,7 +164,32 @@ export function EmployeeListPage() {
         </div>
       )}
 
-      {employees && shown.length > 0 && (
+      {employees && shown.length > 0 && view === "cards" && (
+        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4" data-testid="emp-cards">
+          {shown.map((e) => (
+            <Link key={e.id} to={`/app/employees/${e.id}`} className="emp-card ui-card">
+              <div className="emp-card-banner">
+                {e.department && <span className="emp-card-tag">{e.department}</span>}
+              </div>
+              <div className="emp-card-avatar" aria-hidden="true">
+                {`${e.firstName[0] ?? ""}${e.lastName[0] ?? ""}`.toUpperCase()}
+              </div>
+              <div className="emp-card-body">
+                <div className="emp-card-name">
+                  {e.firstName} {e.lastName}
+                </div>
+                <div className="emp-card-job">{e.designation ?? "—"}</div>
+                <div className="emp-card-meta">
+                  <span className="font-mono">{e.employeeNumber}</span>
+                  <span className={`emp-card-status is-${e.employmentStatus}`}>{e.employmentStatus.replace("_", " ")}</span>
+                </div>
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
+
+      {employees && shown.length > 0 && view === "list" && (
         <div className="bg-card rounded-card shadow-sm overflow-hidden">
           <table className="w-full text-sm">
             <thead>

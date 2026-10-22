@@ -1,3 +1,4 @@
+import { ApprovalStepper } from "../../components/ApprovalStepper";
 import { LoadingNote } from "../shared/PageChrome";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -152,6 +153,12 @@ export function RequestDetail({
           <dd className={`font-semibold ${STATUS_TEXT[request.status]}`}>{STATUS_LABELS[request.status]}</dd>
         </dl>
       </header>
+
+      <ApprovalStepper
+        steps={["Submitted", "Approver", request.status === "approved" ? "Approved" : request.status === "rejected" ? "Rejected" : request.status === "cancelled" ? "Cancelled" : "Decision"]}
+        current={request.status === "pending" ? 1 : 2}
+        failed={request.status === "rejected" || request.status === "cancelled"}
+      />
 
       <dl className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 text-xs">
         {request.employeeName && (

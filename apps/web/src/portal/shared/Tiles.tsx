@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { LucideIcon } from "lucide-react";
+import { hueOf } from "../../components/shell/hue";
 
 /**
  * Launchpad tiles: each tile is one task and opens its own page. Same size, same layout, and the
@@ -30,7 +31,7 @@ function TileBody({ spec }: { spec: TileSpec }) {
   return (
     <>
       <div className="flex items-start justify-between gap-3">
-        <span className={`inline-flex p-2 rounded-md ${dim ? "bg-black/5 text-label-tertiary" : "bg-accent/10 text-accent"}`}>
+        <span className={`hue-chip tile-ic inline-flex p-2 rounded-md ${dim ? "bg-black/5 text-label-tertiary is-dim" : "bg-accent/10 text-accent"}`} data-hue={hueOf(spec.title)}>
           <Icon size={22} strokeWidth={1.75} aria-hidden />
         </span>
         {spec.comingSoon ? (
@@ -57,7 +58,7 @@ function TileBody({ spec }: { spec: TileSpec }) {
 }
 
 export function Tile({ spec }: { spec: TileSpec }) {
-  const box = "group relative flex flex-col justify-between min-h-[168px] rounded-md p-4 ui-card";
+  const box = "launch-tile group relative flex flex-col justify-between min-h-[168px] rounded-md p-4 ui-card";
   if (spec.comingSoon || !spec.to) {
     return (
       <div role="group" aria-disabled="true" aria-label={`${spec.title} (coming soon)`} data-testid={spec.testId} className={`${box} bg-black/[0.03]`}>
