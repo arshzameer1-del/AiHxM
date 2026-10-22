@@ -20,6 +20,7 @@ import { FinalSettlementsSection, SchemesAndSettlementSettingsPanel } from "./Pa
 import { GlMappingsPanel, RunAccountingPanel } from "./PayrollAccountingPanels";
 import { MyPayrollDocumentsCard, PayrollDocumentsPanel } from "./PayrollDocumentsPanels";
 import { BenefitsPanel } from "./PayrollBenefitsPanel";
+import { PayrollMonthCard } from "./PayrollMonthCard";
 import { PayrollDashboardPanel, PayrollEventCatalogPanel, PayrollInputImportPanel } from "./PayrollOperationsPanels";
 import { PayrollAreasSection } from "./PayrollAreasSection";
 import { PayrollCalendarsSection } from "./PayrollCalendarsSection";
@@ -606,7 +607,7 @@ function RunsSection({
   if (error) return <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-secondary">{error}</div>;
 
   return (
-    <section>
+    <section id="payroll-runs">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold">Payroll Runs</h2>
         {canPrepare && !showForm && (
@@ -948,6 +949,7 @@ export function PayrollPage() {
             <p className="text-label-tertiary text-sm -mt-2">{activeTab.hint}</p>
             {activeTab.key === "run" && (
               <>
+                <PayrollMonthCard refreshKey={refreshKey} />
                 <CollapsibleSection title="Payroll Dashboard" defaultOpen forceOpen={focusSection === "payroll-dashboard"} sectionId="payroll-dashboard">
                   <PayrollDashboardPanel />
                 </CollapsibleSection>
