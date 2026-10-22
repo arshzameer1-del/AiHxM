@@ -58,6 +58,11 @@ export class RolesService {
     });
   }
 
+  /** The permissions the caller holds themselves: only these can be put into a custom role by them. */
+  async listHeldPermissions(claims: RequestClaims): Promise<string[]> {
+    return this.rbac.listHeldPermissionKeys(claims);
+  }
+
   async getPermissionKeys(claims: RequestClaims, roleId: string): Promise<string[]> {
     return this.db.withClaims(claims, async (client) => {
       await this.mustVisibleRole(client, roleId);

@@ -8,6 +8,7 @@ import { AuditService } from "../audit/audit.service";
 import { WorkflowService } from "../workflow/workflow.service";
 import { EmployeesService } from "../employees/employees.service";
 import { LocalFileStorageService } from "../file-storage/local-file-storage.service";
+import { RolesService } from "../rbac/roles.service";
 import { SystemAdminService } from "./system-admin.service";
 
 const FIXTURE_CLAIMS: RequestClaims = { is_platform_admin: true, company_id: null, sub: "system-admin-spec-fixtures" };
@@ -270,6 +271,41 @@ describe("SystemAdminService", () => {
           steps: [{ stepOrder: 1, name: "x", approvers: [{ approverType: "manager_of_submitter" }] }],
         })
       ).rejects.toThrow(ForbiddenException);
+    });
+  });
+  describe("custom roles (Roles & Permissions)", () => {
+    it("lists the permissions the caller holds, and a System Admin can only put those into a custom role", async () => {
+      const roles = new RolesService(db);
+      const held = await roles.listHeldPermissions(bilalClaims);
+      expect(held).toContain("role.manage.all");
+      expect(held).not.toContain("employee.view.all");
+
+      await expect(roles.createCustom(bilalClaims, { key: "spec_escalation", name: "Escalation", permissionKeys: ["employee.view.all"] })).rejects.toThrow(
+        ForbiddenException
+      );
+    });
+
+    it("assigns this company's own active custom role to an employee, lists it, and refuses it once deactivated or from another company", async () => {
+      const roles = new RolesService(db);
+      const custom = await roles.createCustom(bilalClaims, { key: `spec_flow_${Date.now() % 100000}`, name: "Workflow Helper", permissionKeys: ["workflow_template.manage.all"] });
+
+      const assignable = await systemAdmin.listAssignableRoles(bilalClaims);
+      expect(assignable.map((r) => r.key)).toContain(custom.key);
+
+      const assignment = await systemAdmin.assignRole(bilalClaims, { employeeId: ayeshaId, roleKey: custom.key });
+      expect(assignment.roleName).toBe("Workflow Helper");
+      await systemAdmin.revokeRole(bilalClaims, assignment.id);
+
+      await roles.setActive(bilalClaims, custom.id, false);
+      await expect(systemAdmin.assignRole(bilalClaims, { employeeId: ayeshaId, roleKey: custom.key })).rejects.toThrow(BadRequestException);
+      expect((await systemAdmin.listAssignableRoles(bilalClaims)).map((r) => r.key)).not.toContain(custom.key);
+
+      // A role that belongs to another company is never assignable here.
+      const foreignKey = `cffffffff_spec_${Date.now() % 100000}`;
+      await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        await client.query("INSERT INTO roles (key, name, company_id) VALUES ($1, 'Foreign', $2)", [foreignKey, otherCompanyId]);
+      });
+      await expect(systemAdmin.assignRole(bilalClaims, { employeeId: ayeshaId, roleKey: foreignKey })).rejects.toThrow(BadRequestException);
     });
   });
 });

@@ -2,13 +2,15 @@ import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { WorkflowTemplatesPanel } from "./WorkflowTemplatesPanel";
 import { RolesAccessPanel } from "./RolesAccessPanel";
+import { RolesPermissionsPanel } from "./RolesPermissionsPanel";
 import { AllConfigurationPanel } from "./AllConfigurationPanel";
 
-type Tab = "workflows" | "access" | "configuration";
+type Tab = "workflows" | "access" | "permissions" | "configuration";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "workflows", label: "Workflow Templates" },
   { key: "access", label: "Roles & Access" },
+  { key: "permissions", label: "Roles & Permissions" },
   // kumail's own instruction (2026-09-27): "all the configuration please
   // add in system admin with there specific tile" — see
   // AllConfigurationPanel.tsx's own doc comment for why this is a
@@ -18,7 +20,7 @@ const TABS: { key: Tab; label: string }[] = [
 ];
 
 // Configuration Center links here with ?tab=workflows (0032_configuration_center.sql).
-const VALID_TABS: Tab[] = ["workflows", "access", "configuration"];
+const VALID_TABS: Tab[] = ["workflows", "access", "permissions", "configuration"];
 function initialTabFrom(searchParams: URLSearchParams): Tab {
   const requested = searchParams.get("tab");
   return (VALID_TABS as string[]).includes(requested ?? "") ? (requested as Tab) : "workflows";
@@ -59,6 +61,7 @@ export function SystemAdminPage() {
 
       {tab === "workflows" && <WorkflowTemplatesPanel />}
       {tab === "access" && <RolesAccessPanel />}
+      {tab === "permissions" && <RolesPermissionsPanel />}
       {tab === "configuration" && <AllConfigurationPanel />}
     </div>
   );

@@ -500,6 +500,25 @@ export class RbacService {
     return this.hasPermission(claims, permissionKey);
   }
 
+  /** Every permission key the caller holds through their active roles (what they may put into a custom role). */
+  async listHeldPermissionKeys(claims: RequestClaims): Promise<string[]> {
+    if (!claims.company_id) return [];
+    const result = await this.db.queryWithClaims(
+      claims,
+      `SELECT DISTINCT p.key
+         FROM user_role_assignments ura
+         JOIN roles r ON r.id = ura.role_id AND r.is_active
+         JOIN role_permissions rp ON rp.role_id = ura.role_id
+         JOIN permissions p ON p.id = rp.permission_id
+         WHERE ura.user_account_id = $1
+           AND ura.company_id = $2
+           AND ${ASSIGNMENT_ACTIVE}
+         ORDER BY p.key`,
+      [claims.sub, claims.company_id]
+    );
+    return result.rows.map((row) => String(row.key));
+  }
+
   private hasPermission(claims: RequestClaims, permissionKey: string): Promise<boolean> {
     // Asked once per http request for the same user and permission (see memoizeForRequest); the next request asks again.
     return memoizeForRequest(`p|${claims.sub}|${claims.company_id ?? ""}|${permissionKey}`, () => this.lookupPermission(claims, permissionKey));

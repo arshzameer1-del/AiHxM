@@ -33,6 +33,11 @@ export class TenantRolesController {
     return this.roles.listPermissions(claims);
   }
 
+  @Get("held-permissions")
+  held(@CurrentClaims() claims: RequestClaims) {
+    return this.roles.listHeldPermissions(claims);
+  }
+
   @Get(":id/permissions")
   rolePermissions(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
     return this.roles.getPermissionKeys(claims, id);

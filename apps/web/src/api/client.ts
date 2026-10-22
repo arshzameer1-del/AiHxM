@@ -329,6 +329,8 @@ import type {
   ResolvedWorkScheduleView,
   ReviewCycleView,
   Role,
+  PermissionView,
+  CreateCustomRoleRequest,
   SessionResult,
   SetCompensationRequest,
   SetEmployeeCompensationComponentsRequest,
@@ -2923,6 +2925,17 @@ export const api = {
   // "role" approver step — see SystemAdminService.listAssignableRoles()'s
   // own comment on why this can't just be a hardcoded list client-side.
   listAssignableRoles: () => request<Role[]>("/system-admin/roles"),
+
+  // Roles & Permissions (System Admin): the role catalog, the permission list, and a company's own custom roles.
+  listRbacRoles: () => request<Role[]>("/rbac/roles"),
+  listRbacPermissions: () => request<PermissionView[]>("/rbac/roles/permissions"),
+  listHeldPermissions: () => request<string[]>("/rbac/roles/held-permissions"),
+  getRbacRolePermissions: (roleId: string) => request<string[]>(`/rbac/roles/${encodeURIComponent(roleId)}/permissions`),
+  createCustomRole: (input: CreateCustomRoleRequest) => request<Role>("/rbac/roles", { method: "POST", body: JSON.stringify(input) }),
+  setCustomRolePermissions: (roleId: string, permissionKeys: string[]) =>
+    request<string[]>(`/rbac/roles/${encodeURIComponent(roleId)}/permissions`, { method: "PUT", body: JSON.stringify({ permissionKeys }) }),
+  setCustomRoleActive: (roleId: string, isActive: boolean) =>
+    request<Role>(`/rbac/roles/${encodeURIComponent(roleId)}/${isActive ? "activate" : "deactivate"}`, { method: "POST" }),
 
   listAssignableUsers: () => request<AssignableUserView[]>("/system-admin/assignable-users"),
 

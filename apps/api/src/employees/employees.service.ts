@@ -76,6 +76,8 @@ const SENSITIVE_FIELDS: readonly string[] = Array.from(
 // defeats the segregation of duties the role exists for) without a
 // separate Platform-Admin step.
 const TENANT_ROLE_KEYS = ["hr_admin", "line_manager", "employee_self_service", "ess_portal", "system_admin", "payroll_approver"] as const;
+// Roles only a System Admin hands out at login creation (the first System Admin of a company is the one exception).
+const PRIVILEGED_LOGIN_ROLE_KEYS = ["system_admin", "payroll_approver"] as const;
 const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024; // 10MB — see addDocument()'s doc comment.
 
 // Tenant Management gap-fill Phase 1 item #10 — Storage quota enforcement.
@@ -1351,7 +1353,26 @@ export class EmployeesService {
       sub: "employees-service",
     };
 
+    // System Admin and Payroll Approver are given by a System Admin (the holder of user_account.manage.all), not by HR Admin.
+    // One exception keeps a new company from being stuck: while the company has no System Admin at all, the first one can be
+    // created here. Payroll Approver has no such exception.
+    const privilegedKeys = uniqueRoleKeys.filter((key) => (PRIVILEGED_LOGIN_ROLE_KEYS as readonly string[]).includes(key));
+    const callerIsSystemAdmin = privilegedKeys.length === 0 ? true : await this.rbac.can(claims, ACCOUNT_PERMISSION);
+
     return this.db.withClaims(elevatedClaims, async (client) => {
+      if (!callerIsSystemAdmin) {
+        const onlyFirstSystemAdmin = privilegedKeys.every((key) => key === "system_admin");
+        const existing = onlyFirstSystemAdmin
+          ? await client.query(
+              `SELECT 1 FROM user_role_assignments ura JOIN roles r ON r.id = ura.role_id
+                WHERE ura.company_id = $1 AND r.key = 'system_admin' LIMIT 1`,
+              [claims.company_id]
+            )
+          : null;
+        if (!onlyFirstSystemAdmin || (existing?.rowCount ?? 0) > 0) {
+          throw new ForbiddenException("Only a System Admin can give the System Admin or Payroll Approver role");
+        }
+      }
       const employeeResult = await client.query("SELECT * FROM employees WHERE id = $1 AND company_id = $2", [
         employeeId,
         claims.company_id,

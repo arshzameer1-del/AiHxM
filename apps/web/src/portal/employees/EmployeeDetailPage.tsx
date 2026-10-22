@@ -630,6 +630,10 @@ function LoginSection({
   employee: EmployeeView;
   onChanged: (employee: EmployeeView) => void;
 }) {
+  const { identity } = useAuth();
+  // System Admin and Payroll Approver are given by a System Admin (Roles & Access), not from the HR Admin's login form.
+  const isSystemAdmin = identity?.roleKeys.includes("system_admin") ?? false;
+  const offeredRoles = (Object.keys(ROLE_LABELS) as TenantRoleKey[]).filter((key) => isSystemAdmin || (key !== "system_admin" && key !== "payroll_approver"));
   const [creating, setCreating] = useState(false);
   const [initialPassword, setInitialPassword] = useState("");
   const [roleKeys, setRoleKeys] = useState<Set<TenantRoleKey>>(new Set(["employee_self_service"]));
@@ -695,7 +699,7 @@ function LoginSection({
           <div>
             <label className="block text-xs font-medium mb-1">Roles to grant</label>
             <div className="flex flex-col gap-1">
-              {(Object.keys(ROLE_LABELS) as TenantRoleKey[]).map((key) => (
+              {offeredRoles.map((key) => (
                 <label key={key} className="flex items-center gap-2 text-sm">
                   <input
                     type="checkbox"
@@ -707,6 +711,7 @@ function LoginSection({
                 </label>
               ))}
             </div>
+            {!isSystemAdmin && <p className="text-xs text-label-tertiary mt-1">System Admin and Payroll Approver are given by a System Admin.</p>}
           </div>
           {error && <div className="text-danger text-xs">{error}</div>}
           <div className="flex gap-3">

@@ -91,9 +91,10 @@ export class SystemAdminService {
   async listAssignableRoles(claims: RequestClaims): Promise<Role[]> {
     await this.requirePermission(claims);
     return this.db.withClaims(claims, async (client) => {
+      // The built-in tenant roles plus this company's own active custom roles (made in Roles & Permissions).
       const result = await client.query(
-        "SELECT * FROM roles WHERE key = ANY($1::text[]) ORDER BY key ASC",
-        [ASSIGNABLE_ROLE_KEYS]
+        "SELECT * FROM roles WHERE key = ANY($1::text[]) OR (company_id = $2 AND is_system = false AND is_active) ORDER BY is_system DESC, key ASC",
+        [ASSIGNABLE_ROLE_KEYS, claims.company_id]
       );
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return result.rows.map((row: any) => ({ id: row.id, key: row.key, name: row.name, description: row.description ?? null }));
@@ -161,12 +162,10 @@ export class SystemAdminService {
 
   async assignRole(
     claims: RequestClaims,
-    input: { employeeId: string; roleKey: TenantRoleKey }
+    input: { employeeId: string; roleKey: TenantRoleKey | string }
   ): Promise<SystemAdminRoleAssignmentView> {
     await this.requirePermission(claims);
-    if (!ASSIGNABLE_ROLE_KEYS.includes(input.roleKey)) {
-      throw new BadRequestException(`Cannot assign role "${input.roleKey}"`);
-    }
+    const isBuiltIn = (ASSIGNABLE_ROLE_KEYS as string[]).includes(input.roleKey);
 
     const elevatedClaims: RequestClaims = {
       is_platform_admin: false,
@@ -186,8 +185,14 @@ export class SystemAdminService {
         throw new BadRequestException("This employee has no login yet — create one first");
       }
 
-      const role = await client.query("SELECT id, name FROM roles WHERE key = $1", [input.roleKey]);
+      const role = await client.query(
+        "SELECT id, name, company_id, is_system, is_active FROM roles WHERE key = $1",
+        [input.roleKey]
+      );
       if (role.rowCount === 0) throw new NotFoundException(`No role with key "${input.roleKey}"`);
+      // Besides the built-in tenant roles, only this company's own active custom roles can be assigned.
+      const isOwnCustom = role.rows[0].company_id === claims.company_id && role.rows[0].is_system === false && role.rows[0].is_active === true;
+      if (!isBuiltIn && !isOwnCustom) throw new BadRequestException(`Cannot assign role "${input.roleKey}"`);
 
       const existing = await client.query(
         "SELECT 1 FROM user_role_assignments WHERE user_account_id = $1 AND company_id = $2 AND role_id = $3",

@@ -46,7 +46,7 @@ test.describe("System Admin Portal (Task #52)", () => {
     // SystemAdminPage.tsx's own tabs are plain <button>s with no
     // role="tab" — the original `[role='tab']` locator this file used
     // elsewhere never matched any of them.
-    for (const label of ["Workflow Templates", "Roles & Access", "Configuration"]) {
+    for (const label of ["Workflow Templates", "Roles & Access", "Roles & Permissions", "Configuration"]) {
       await expect(page.locator("button", { hasText: label })).toBeVisible();
     }
 
