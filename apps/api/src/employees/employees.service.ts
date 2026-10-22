@@ -1392,21 +1392,63 @@ export class EmployeesService {
       // /login, and user_accounts.email is compared byte-for-byte — see
       // auth/email.util.ts.
       const passwordHash = await hashPassword(input.initialPassword);
+      const loginEmail = normalizeEmail(employee.email);
       let userAccountId: string;
-      try {
-        const account = await client.query(
-          "INSERT INTO user_accounts (email, password_hash) VALUES ($1, $2) RETURNING id",
-          [normalizeEmail(employee.email), passwordHash]
+      let adoptedRolesRemoved: string[] | null = null;
+
+      // user_accounts.email is globally UNIQUE (Section 5). An account with this email can be left behind with no person: a reset of the
+      // company's demo data deletes the employees but keeps their logins, so the same email at the next hire used to answer "A login
+      // already exists". Such a leftover (no employee, no admin account, nothing in any other company, an ordinary password login) is
+      // taken over for this employee: its old roles are removed, the password and authenticator are replaced, its sessions end.
+      // Anything else that already uses the email is refused with a message that says so.
+      const existingAccount = await client.query(
+        "SELECT id, auth_provider FROM user_accounts WHERE email = $1",
+        [loginEmail]
+      );
+      if ((existingAccount.rowCount ?? 0) > 0) {
+        const existingId = existingAccount.rows[0].id as string;
+        const stillUsed = await client.query(
+          `SELECT
+             EXISTS (SELECT 1 FROM employees WHERE user_account_id = $1) AS has_employee,
+             EXISTS (SELECT 1 FROM company_admins WHERE user_account_id = $1) AS is_company_admin,
+             EXISTS (SELECT 1 FROM platform_admins WHERE user_account_id = $1) AS is_platform_admin,
+             EXISTS (SELECT 1 FROM user_role_assignments WHERE user_account_id = $1 AND company_id <> $2) AS in_other_company`,
+          [existingId, claims.company_id]
         );
-        userAccountId = account.rows[0].id;
-      } catch (err) {
-        // user_accounts.email is globally UNIQUE (Section 5) — a friendly
-        // 409 instead of a raw constraint-violation 500, matching the
-        // clarity every other module's duplicate-key path already has.
-        if ((err as { code?: string }).code === "23505") {
-          throw new ConflictException(`A login already exists for ${employee.email}`);
+        const used = stillUsed.rows[0] as { has_employee: boolean; is_company_admin: boolean; is_platform_admin: boolean; in_other_company: boolean };
+        const adoptable = existingAccount.rows[0].auth_provider === "local" && !used.has_employee && !used.is_company_admin && !used.is_platform_admin && !used.in_other_company;
+        if (!adoptable) {
+          throw new ConflictException(
+            used.has_employee || used.in_other_company
+              ? `The email ${employee.email} is already used by a login that belongs to another person or company`
+              : `The email ${employee.email} is already used by another kind of account (admin or single sign-on)`
+          );
         }
-        throw err;
+        const stale = await client.query(
+          "DELETE FROM user_role_assignments WHERE user_account_id = $1 AND company_id = $2 RETURNING role_id",
+          [existingId, claims.company_id]
+        );
+        adoptedRolesRemoved = stale.rows.map((row) => String(row.role_id));
+        await client.query(
+          `UPDATE user_accounts SET password_hash = $2, failed_login_attempts = 0, locked_until = NULL, mfa_enabled = false,
+                  mfa_secret_encrypted = NULL, last_login_at = NULL, credential_issued_at = now(), status = 'active', updated_at = now()
+            WHERE id = $1`,
+          [existingId, passwordHash]
+        );
+        await client.query("DELETE FROM mfa_recovery_codes WHERE user_account_id = $1", [existingId]);
+        await client.query("UPDATE user_sessions SET revoked_at = now(), revoked_by = 'login-recreated' WHERE user_account_id = $1 AND revoked_at IS NULL", [existingId]);
+        userAccountId = existingId;
+      } else {
+        try {
+          const account = await client.query("INSERT INTO user_accounts (email, password_hash) VALUES ($1, $2) RETURNING id", [loginEmail, passwordHash]);
+          userAccountId = account.rows[0].id;
+        } catch (err) {
+          // Two logins created at the same moment for the same email: the second one loses the race.
+          if ((err as { code?: string }).code === "23505") {
+            throw new ConflictException(`A login already exists for ${employee.email}`);
+          }
+          throw err;
+        }
       }
 
       await client.query("UPDATE employees SET user_account_id = $1, updated_at = now() WHERE id = $2", [
@@ -1427,7 +1469,7 @@ export class EmployeesService {
         companyId: claims.company_id ?? null,
         action: "employee.login_created",
         target: employeeId,
-        metadata: { roleKeys: uniqueRoleKeys },
+        metadata: { roleKeys: uniqueRoleKeys, ...(adoptedRolesRemoved ? { tookOverLeftoverAccount: true, staleRoleAssignmentsRemoved: adoptedRolesRemoved.length } : {}) },
       });
 
       const updated = await client.query("SELECT * FROM employees WHERE id = $1", [employeeId]);

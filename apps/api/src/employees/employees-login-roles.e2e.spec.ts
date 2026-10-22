@@ -49,8 +49,9 @@ describe("Creating a login: privileged roles (e2e)", () => {
         designation: "Analyst",
         employmentType: "permanent",
         dateOfJoining: new Date().toISOString().split("T")[0],
+        confirmNotDuplicate: true,
       });
-    expect(res.status).toBe(201);
+    if (res.status !== 201) throw new Error(JSON.stringify(res.body));
     return res.body.id as string;
   }
 
@@ -113,5 +114,67 @@ describe("Creating a login: privileged roles (e2e)", () => {
     const id = await newEmployee(hrToken, "bysys");
     const res = await makeLogin(sysToken, id, ["employee_self_service", "payroll_approver", "system_admin"]);
     expect(res.status).toBe(201);
+  });
+  describe("a login left behind with no employee", () => {
+    async function removeEmployee(id: string) {
+      // Employees can only be deleted by the owner role (the reset script runs as it), not by the app's role.
+      const owner = new Pool({ connectionString: process.env.DATABASE_URL });
+      try {
+        const gone = await owner.query("DELETE FROM employees WHERE id = $1", [id]);
+        expect(gone.rowCount).toBe(1);
+      } finally {
+        await owner.end();
+      }
+    }
+
+    async function accountState(email: string) {
+      return db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const account = await client.query("SELECT id FROM user_accounts WHERE email = $1", [email]);
+        if (account.rowCount === 0) return null;
+        const roles = await client.query(
+          "SELECT r.key FROM user_role_assignments ura JOIN roles r ON r.id = ura.role_id WHERE ura.user_account_id = $1 AND ura.company_id = $2 ORDER BY r.key",
+          [account.rows[0].id, companyId]
+        );
+        return { id: account.rows[0].id as string, roles: roles.rows.map((r) => r.key as string) };
+      });
+    }
+
+    it("is taken over by the next employee with that email: old roles removed, only the chosen roles granted", async () => {
+      const label = `ghost${Date.now() % 1000000}`;
+      const email = `${label}-${stamp}@example.com`;
+      const first = await newEmployee(hrToken, label);
+      expect((await makeLogin(hrToken, first, ["hr_admin", "line_manager"])).status).toBe(201);
+      const before = await accountState(email);
+      expect(before?.roles).toEqual(["hr_admin", "line_manager"]);
+
+      // What a reset of the company's data does: the employee goes, the login stays.
+      await removeEmployee(first);
+      expect((await accountState(email))?.roles).toEqual(["hr_admin", "line_manager"]);
+
+      const second = await newEmployee(hrToken, label);
+      const res = await makeLogin(hrToken, second, ["employee_self_service"]);
+      if (res.status !== 201) throw new Error(JSON.stringify(res.body));
+      const after = await accountState(email);
+      expect(after?.id).toBe(before?.id);
+      expect(after?.roles).toEqual(["employee_self_service"]);
+    });
+
+    it("is refused when the email's login also holds roles in another company", async () => {
+      const label = `shared${Date.now() % 1000000}`;
+      const email = `${label}-${stamp}@example.com`;
+      const first = await newEmployee(hrToken, label);
+      expect((await makeLogin(hrToken, first, ["employee_self_service"])).status).toBe(201);
+      await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const other = await client.query("INSERT INTO companies (name, slug, status) VALUES ($1,$2,'active') RETURNING id", [`Other ${label}`, `other-${label}`]);
+        const acct = await client.query("SELECT id FROM user_accounts WHERE email = $1", [email]);
+        const role = await client.query("SELECT id FROM roles WHERE key = 'employee_self_service'");
+        await client.query("INSERT INTO user_role_assignments (user_account_id, company_id, role_id) VALUES ($1,$2,$3)", [acct.rows[0].id, other.rows[0].id, role.rows[0].id]);
+      });
+      await removeEmployee(first);
+      const second = await newEmployee(hrToken, label);
+      const res = await makeLogin(hrToken, second, ["employee_self_service"]);
+      expect(res.status).toBe(409);
+      expect(JSON.stringify(res.body)).toMatch(/another person or company/);
+    });
   });
 });
