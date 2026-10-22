@@ -3164,7 +3164,13 @@ export class PayrollService {
     // must not get annualized into every remaining period's estimate.
     const recurringTaxableThisPeriod = Math.max(0, taxableGrossThisPeriod - overtimePay - additionalEarningsTaxable - arrearsTaxable);
     const dailyTaxableRate = daysInPeriod > 0 ? recurringTaxableThisPeriod / daysInPeriod : 0;
-    const projectedRemainingIncome = dailyTaxableRate * daysRemaining;
+    // A full calendar month worked is projected as whole remaining months (October of a July-June year leaves 8 months), not
+    // as this month's daily rate times the remaining days: with 31 days in October that gave 7.8 months of pay instead of 8,
+    // and the answer changed with the length of the month the run happened to be for. Part-month periods keep the daily rate.
+    const isFullCalendarMonth = !offCycleOptions && periodStart.slice(8, 10) === "01" && employmentWindowDays === daysInPeriod &&
+      toIsoDate(new Date(Date.UTC(Number(periodEnd.slice(0, 4)), Number(periodEnd.slice(5, 7)), 0))) === periodEnd;
+    const remainingWholeMonths = Math.max(0, (Number(taxYearEnd.slice(0, 4)) * 12 + Number(taxYearEnd.slice(5, 7))) - (Number(periodEnd.slice(0, 4)) * 12 + Number(periodEnd.slice(5, 7))));
+    const projectedRemainingIncome = isFullCalendarMonth && daysRemaining > 0 ? recurringTaxableThisPeriod * remainingWholeMonths : dailyTaxableRate * daysRemaining;
     const estimatedAnnualTaxableIncome = priorYtdTaxable + taxableGrossThisPeriod + projectedRemainingIncome;
     breakdown.push({
       label: offCycleOptions?.isFinalSettlement
@@ -3178,7 +3184,14 @@ export class PayrollService {
     const incomeForSlabs = profileTax ? profileTax.taxableForSlabs : estimatedAnnualTaxableIncome;
     const totalAnnualTaxEstimate = profileTax ? profileTax.annualTax : taxFromSlabs(estimatedAnnualTaxableIncome, taxSlabs);
     const fractionElapsed = offCycleOptions?.isFinalSettlement ? 1 : totalDaysInTaxYear > 0 ? daysElapsedInclusive / totalDaysInTaxYear : 1;
-    const totalTaxDueToDate = totalAnnualTaxEstimate * fractionElapsed;
+    // Tax due so far follows the income earned so far, not the calendar (the "average rate" method: the tax on the estimated
+    // year, spread in proportion to the pay). The calendar fraction collected a whole elapsed part of the year at once whenever
+    // an employee had no earlier runs in this system (first run, or a go-live part-way through the year: 123/365 of the year's
+    // tax in a single October payslip) and made the monthly tax depend on how many days each month has.
+    const incomeShareToDate = offCycleOptions?.isFinalSettlement
+      ? 1
+      : estimatedAnnualTaxableIncome > 0 ? Math.min(1, (priorYtdTaxable + taxableGrossThisPeriod) / estimatedAnnualTaxableIncome) : fractionElapsed;
+    const totalTaxDueToDate = totalAnnualTaxEstimate * incomeShareToDate;
     const bracket =
       slabsInUse.find(
         (s) => incomeForSlabs >= s.minAnnualIncome && (s.maxAnnualIncome === null || incomeForSlabs <= s.maxAnnualIncome)
@@ -3194,7 +3207,7 @@ export class PayrollService {
       value: Number(totalAnnualTaxEstimate.toFixed(2)),
     });
     breakdown.push({
-      label: `Tax due to date (${daysElapsedInclusive}/${totalDaysInTaxYear} days elapsed this tax year)`,
+      label: `Tax due to date (${(incomeShareToDate * 100).toFixed(2)}% of the estimated year's taxable income earned so far)`,
       value: Number(totalTaxDueToDate.toFixed(2)),
     });
     breakdown.push({ label: "Already withheld this tax year (finalized runs only)", value: Number(priorYtdTaxWithheld.toFixed(2)) });
@@ -3242,6 +3255,8 @@ export class PayrollService {
         priorYtdTaxWithheld,
         slabAnnualTax: totalAnnualTaxEstimate,
         taxDueToDate: totalTaxDueToDate,
+        taxableGrossThisPeriod,
+        incomeShareToDate,
         bracket: { min: bracket.minAnnualIncome, max: bracket.maxAnnualIncome, ratePercent: bracket.ratePercent, baseTax: bracket.baseTax },
         taxYearDaysElapsed: daysElapsedInclusive,
         taxYearTotalDays: totalDaysInTaxYear,

@@ -72,7 +72,7 @@ describe("demo tenant: reset, seed and a walk through the product", () => {
     expect(seeded.warnings).toEqual([]);
     expect(seeded.counts).toMatchObject({
       onboardingItems: 7, offboardingItems: 6, leavePolicies: 2, employeeGroups: 2, shifts: 2, shiftAssignments: 40,
-      courses: 5, competencies: 5, reviewCycles: 1, developmentPlans: 5, requisitions: 3, candidates: 10, applications: 10, expenseClaims: 4, payrollRuns: 1,
+      courses: 5, competencies: 5, reviewCycles: 1, developmentPlans: 5, requisitions: 3, candidates: 10, applications: 10, expenseClaims: 4, payrollRuns: 3,
     });
     expect(seeded.counts.courseEnrollments).toBeGreaterThan(80);
     expect(seeded.counts.goals).toBeGreaterThan(100);
@@ -165,6 +165,19 @@ describe("demo tenant: reset, seed and a walk through the product", () => {
     const run = await get(`/payroll/runs/${created.body.id}`);
     expect(run.body.payslipCount).toBe(40);
     expect(run.body.totalNetPay).toBeGreaterThan(0);
+    // July-September are finalized history, so October tax is about a twelfth-ish of the year, not a time-based lump
+    const list = (await db.withClaims(SERVICE, (c) => c.query(
+      "SELECT p.id, p.net_pay FROM payslips p WHERE p.payroll_run_id = $1 ORDER BY p.gross_pay DESC LIMIT 1", [created.body.id]))).rows;
+    const detail = await get(`/payslips/${list[0].id}/detail`);
+    const tax = (detail.body.components as Array<{ key: string; amount: number; trace: Record<string, number> }>).find((c) => c.key === "income_tax")!;
+    // eslint-disable-next-line no-console
+    console.log("top earner October tax:", -tax.amount, JSON.stringify(tax.trace).slice(0, 400));
+    expect(tax.trace.priorYtdTaxable).toBeGreaterThan(0);
+    expect(tax.trace.priorYtdTaxWithheld).toBeGreaterThan(0);
+    const monthly = -tax.amount;
+    const yearTax = tax.trace.slabAnnualTax;
+    expect(monthly).toBeGreaterThan((yearTax / 12) * 0.8);
+    expect(monthly).toBeLessThan((yearTax / 12) * 1.2);
   }, 60000);
 
   it("reset removes the people and structure again and the seed can run once more", async () => {

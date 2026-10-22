@@ -81,11 +81,16 @@ function expectedIncomeTax(opts: {
   const remaining = Math.max(0, totalDays - elapsed);
   const recurring = opts.taxableGrossThisPeriod - (opts.oneOffTaxableThisPeriod ?? 0);
   const dailyRate = opts.daysInPeriod > 0 ? recurring / opts.daysInPeriod : 0;
-  const projected = dailyRate * remaining;
+  // A full calendar month is projected as whole remaining months; anything else keeps the daily rate.
+  const endDay = Number(opts.periodEnd.slice(8, 10));
+  const isFullCalendarMonth = opts.daysInPeriod === endDay && new Date(Date.UTC(Number(opts.periodEnd.slice(0, 4)), Number(opts.periodEnd.slice(5, 7)), 0)).getUTCDate() === endDay;
+  const remainingMonths = Math.max(0, Number(end.slice(0, 4)) * 12 + Number(end.slice(5, 7)) - (Number(opts.periodEnd.slice(0, 4)) * 12 + Number(opts.periodEnd.slice(5, 7))));
+  const projected = isFullCalendarMonth && remaining > 0 ? recurring * remainingMonths : dailyRate * remaining;
   const estimatedAnnual = priorYtdTaxable + opts.taxableGrossThisPeriod + projected;
   const totalAnnualTax = taxFromSlabsForTests(estimatedAnnual, opts.slabs);
-  const fraction = totalDays > 0 ? elapsed / totalDays : 1;
-  const dueToDate = totalAnnualTax * fraction;
+  // tax due so far follows the share of the estimated year's income earned so far (average-rate method)
+  const share = estimatedAnnual > 0 ? Math.min(1, (priorYtdTaxable + opts.taxableGrossThisPeriod) / estimatedAnnual) : totalDays > 0 ? elapsed / totalDays : 1;
+  const dueToDate = totalAnnualTax * share;
   return Math.max(0, dueToDate - priorYtdWithheld);
 }
 

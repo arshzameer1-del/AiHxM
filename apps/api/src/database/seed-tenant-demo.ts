@@ -528,16 +528,40 @@ export async function seedDemoTenant(app: INestApplicationContext, companyId: st
   });
   log(`expense claims: ${counts.expenseClaims ?? 0}`);
 
-  // ---- payroll: last month's run, calculated and left for review ----------------------------------------------------------
-  await optional("payroll run", async () => {
+  // ---- payroll: every finished month of the current tax year (July onwards) is calculated and finalized, so the running
+  // month's tax is worked out the way it is in real life (income and tax already paid are known). The history is booked
+  // directly as approved - there is no second login in a demo company to approve it. If the tax year has just started
+  // (July) there is no finished month yet, so last month's run is only calculated and left for review.
+  await optional("payroll history", async () => {
     const { PayrollService } = await import("../payroll/payroll.service");
+    const { PayrollRunControlService } = await import("../payroll/payroll-run-control.service");
     const payroll = get(PayrollService);
-    const prev = new Date(Date.UTC(year, Number(today.slice(5, 7)) - 2, 1));
-    const start = prev.toISOString().slice(0, 10);
-    const end = new Date(Date.UTC(prev.getUTCFullYear(), prev.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
-    const run = await payroll.createRun(claims, { periodStart: start, periodEnd: end });
-    await payroll.calculateRun(claims, run.id);
-    bump("payrollRuns");
+    const control = get(PayrollRunControlService);
+    const thisMonth = Number(today.slice(5, 7));
+    const taxYearStartYear = thisMonth >= 7 ? year : year - 1;
+    const months: Array<{ y: number; m: number }> = [];
+    for (let y = taxYearStartYear, m = 7; y < year || (y === year && m < thisMonth); m === 12 ? ((m = 1), y++) : m++) months.push({ y, m });
+    const range = (y: number, m: number) => ({
+      periodStart: new Date(Date.UTC(y, m - 1, 1)).toISOString().slice(0, 10),
+      periodEnd: new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10),
+    });
+    if (months.length === 0) {
+      const prev = new Date(Date.UTC(year, thisMonth - 2, 1));
+      const run = await payroll.createRun(claims, range(prev.getUTCFullYear(), prev.getUTCMonth() + 1));
+      await payroll.calculateRun(claims, run.id);
+      bump("payrollRuns");
+      return;
+    }
+    for (const { y, m } of months) {
+      const run = await payroll.createRun(claims, range(y, m));
+      await payroll.calculateRun(claims, run.id);
+      await db.withClaims(claims, async (c) => {
+        await control.transition(c, claims, run.id, "pending_approval", { action: "submit", reason: "Demo history" });
+        await control.transition(c, claims, run.id, "approved", { action: "approve", reason: "Demo history" });
+      });
+      await payroll.finalizeRun(claims, run.id);
+      bump("payrollRuns");
+    }
   });
   log(`payroll runs: ${counts.payrollRuns ?? 0}`);
 

@@ -32,7 +32,7 @@ const INCOME_TAX_VARIABLES = {
   priorYtdTaxableIncome: "Taxable income on this employee's FINALIZED payslips earlier in the same tax year (1 Jul - 30 Jun).",
   priorYtdTaxWithheld: "Income tax already withheld on this employee's FINALIZED payslips earlier in the same tax year.",
   slabAnnualTax: "Tax on taxableAnnualIncome per the tax-slab set in force at the run's periodEnd.",
-  taxDueToDate: "slabAnnualTax x taxYearFractionElapsed — total tax that should have been withheld by the end of this period.",
+  taxDueToDate: "slabAnnualTax x the share of the estimated year's taxable income earned so far (priorYtdTaxableIncome + taxableGrossThisPeriod) / taxableAnnualIncome — total tax that should have been withheld by the end of this period.",
   bracketMinAnnualIncome: "Lower bound of the tax slab taxableAnnualIncome falls in.",
   bracketBaseTax: "Fixed base tax of that slab.",
   bracketRatePercent: "Marginal rate (%) of that slab, applied to income above bracketMinAnnualIncome.",

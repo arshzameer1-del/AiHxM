@@ -23,7 +23,8 @@ describe("Tax years, tax profiles and employee tax profiles (Step 9F)", () => {
   ];
   // the period the payroll tests run in: 2041-08 belongs to the tax year labelled 2042 (July 2041 - June 2042)
   const PERIOD = { periodStart: "2041-08-01", periodEnd: "2041-08-31" };
-  const ELAPSED = 62 / 365; // 1 July - 31 August of a 365-day tax year
+  // tax due to date = annual tax x (income earned so far / estimated year's income)
+  const shareOf = (trace: Record<string, any>) => Math.min(1, ((trace.priorYtdTaxable as number) + (trace.taxableGrossThisPeriod as number)) / (trace.estimatedAnnualTaxableIncome as number)); // eslint-disable-line @typescript-eslint/no-explicit-any
 
   beforeAll(async () => {
     f = await buildPayrollFixture("tax");
@@ -193,7 +194,7 @@ describe("Tax years, tax profiles and employee tax profiles (Step 9F)", () => {
       const { amount, trace } = await incomeTax(people.base);
       const estimate = trace.estimatedAnnualTaxableIncome as number;
       expect(trace.taxProfile.profile).toMatchObject({ code: "base", taxYear: "FY-T1" });
-      expect(amount).toBeCloseTo(Math.max(0, (estimate - 100000) * 0.1) * ELAPSED, 1);
+      expect(amount).toBeCloseTo(Math.max(0, (estimate - 100000) * 0.1) * shareOf(trace), 1);
       expect(trace.bracket).toMatchObject({ min: 100000, ratePercent: 10 });
     });
 
@@ -206,7 +207,7 @@ describe("Tax years, tax profiles and employee tax profiles (Step 9F)", () => {
       const annual = Math.round((afterCredit * 1.1) / 100) * 100; // surcharge above the threshold, then round to the nearest 100
       expect(trace.taxProfile.creditsApplied).toEqual([{ code: "donation", amount: 2000 }]);
       expect(trace.slabAnnualTax).toBe(annual);
-      expect(amount).toBeCloseTo(annual * ELAPSED, 1);
+      expect(amount).toBeCloseTo(annual * shareOf(trace), 1);
     });
 
     it("adds the previous employer's income and tax of the same tax year, and ignores another year's", async () => {
@@ -215,7 +216,7 @@ describe("Tax years, tax profiles and employee tax profiles (Step 9F)", () => {
       expect(prev.trace.priorYtdTaxWithheld).toBe(5000);
       const estimate = prev.trace.estimatedAnnualTaxableIncome as number;
       expect(estimate).toBeGreaterThan(100000);
-      expect(prev.amount).toBeCloseTo(Math.max(0, ((estimate - 100000) * 0.1) * ELAPSED - 5000), 1);
+      expect(prev.amount).toBeCloseTo(Math.max(0, ((estimate - 100000) * 0.1) * shareOf(prev.trace) - 5000), 1);
 
       const stale = await incomeTax(people.staleYear);
       expect(stale.trace.priorYtdTaxable).toBe(0);
