@@ -25,12 +25,9 @@ import type { ModuleKey, PublicTenantBranding, TenantRoleKey } from "@aihxm/shar
 import { api, prefetchRoute, publicTenantBrandingAssetUrl, startKeepWarm, warmForRoles } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Topbar, type QuickJumpItem } from "../components/shell/Topbar";
-import {
-  SIDEBAR_CONTAINER_CLASS,
-  SIDEBAR_GROUP_DIVIDER_CLASS,
-  SIDEBAR_GROUP_TOGGLE_CLASS,
-  sidebarNavLinkClass as navLinkClass,
-} from "../components/shell/sidebarTheme";
+import { RAIL_CONTAINER_CLASS, RAIL_GROUP_CHILDREN_CLASS, railChildClass, railLinkClass } from "../components/shell/sidebarTheme";
+import { SidebarToggle } from "../components/shell/SidebarToggle";
+import { useSidebar } from "../components/shell/useSidebar";
 
 const ROLE_LABELS: Record<TenantRoleKey, string> = {
   hr_admin: "HR Admin",
@@ -317,31 +314,31 @@ function PortalMark({ companySlug, companyName }: { companySlug: string | null; 
  * renders a group; every flat `NavItem` still renders as a single
  * `NavLink`, unchanged from before this phase.
  */
-function NavGroup({ item }: { item: NavItem & { children: NavItem[] } }) {
+function NavGroup({ item, onNavigate }: { item: NavItem & { children: NavItem[] }; onNavigate: () => void }) {
   const [expanded, setExpanded] = useState(true);
   const Icon = item.icon;
 
   return (
     <div>
-      <div className="flex items-center gap-1">
-        <NavLink to={item.to} end={item.end} className={navLinkClass} style={{ flex: 1 }} onMouseEnter={() => prefetchRoute(item.to)} onFocus={() => prefetchRoute(item.to)}>
-          {Icon && <Icon size={18} strokeWidth={1.75} className="shrink-0" />}
-          {item.label}
+      <div className="relative">
+        <NavLink to={item.to} end={item.end} className={railLinkClass} title={item.label} onClick={onNavigate} onMouseEnter={() => prefetchRoute(item.to)} onFocus={() => prefetchRoute(item.to)}>
+          {Icon && <Icon size={20} strokeWidth={1.75} className="shrink-0" />}
+          <span>{item.label}</span>
         </NavLink>
         <button
           type="button"
           onClick={() => setExpanded((current) => !current)}
           aria-expanded={expanded}
           aria-label={expanded ? `Collapse ${item.label}` : `Expand ${item.label}`}
-          className={SIDEBAR_GROUP_TOGGLE_CLASS}
+          className="absolute top-0.5 right-0.5 w-4 h-4 text-[9px] leading-none text-sidebar-muted hover:text-sidebar-fg-hover"
         >
           <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>
         </button>
       </div>
       {expanded && (
-        <div className={SIDEBAR_GROUP_DIVIDER_CLASS}>
+        <div className={RAIL_GROUP_CHILDREN_CLASS}>
           {item.children.map((child) => (
-            <NavLink key={child.to} to={child.to} end={child.end} className={navLinkClass} onMouseEnter={() => prefetchRoute(child.to)} onFocus={() => prefetchRoute(child.to)}>
+            <NavLink key={child.to} to={child.to} end={child.end} className={railChildClass} onClick={onNavigate} onMouseEnter={() => prefetchRoute(child.to)} onFocus={() => prefetchRoute(child.to)}>
               {child.label}
             </NavLink>
           ))}
@@ -448,34 +445,51 @@ export function PortalLayout() {
     return () => window.clearTimeout(timer);
   }, [identity?.email, navKey, roleKeys.join(",")]);
 
+  const sidebar = useSidebar();
+  // Escape closes a floating menu.
+  const { floating: menuFloating, closeFloating } = sidebar;
+  useEffect(() => {
+    if (!menuFloating) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeFloating();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menuFloating, closeFloating]);
+
+  const menu = (
+    <aside id="app-sidebar" className={`${RAIL_CONTAINER_CLASS} ${sidebar.floating ? "shadow-xl" : ""}`}>
+      <div className="sticky top-0 max-h-screen overflow-y-auto px-1.5 py-4">
+        <div className="px-1 mb-4 text-center">
+          <PortalMark companySlug={identity?.companySlug ?? null} companyName={identity?.companyName ?? null} />
+          <div className="text-[10px] text-sidebar-muted truncate mt-1" title={identity?.companyName ?? undefined}>{identity?.companyName ?? "Your company"}</div>
+        </div>
+
+        <nav className="flex flex-col gap-1" aria-label="Main">
+          {navItems.map((item) => {
+            if (item.children) {
+              return <NavGroup key={item.to} item={item as NavItem & { children: NavItem[] }} onNavigate={sidebar.closeFloating} />;
+            }
+            const Icon = item.icon;
+            return (
+              <NavLink key={item.to} to={item.to} end={item.end} className={railLinkClass} title={item.label} onClick={sidebar.closeFloating} onMouseEnter={() => prefetchRoute(item.to)} onFocus={() => prefetchRoute(item.to)}>
+                {Icon && <Icon size={20} strokeWidth={1.75} className="shrink-0" />}
+                <span>{item.label}</span>
+              </NavLink>
+            );
+          })}
+        </nav>
+      </div>
+    </aside>
+  );
+
   return (
     <div className="min-h-screen flex flex-col">
       {impersonation && <ImpersonationBanner impersonation={impersonation} endImpersonation={endImpersonation} />}
 
-      <div className="flex flex-1 min-h-0">
-        <aside className={SIDEBAR_CONTAINER_CLASS}>
-          <div className="px-3 mb-8">
-            <PortalMark companySlug={identity?.companySlug ?? null} companyName={identity?.companyName ?? null} />
-            <div className="text-xs text-sidebar-muted truncate mt-1.5">{identity?.companyName ?? "Your company"}</div>
-          </div>
-
-          <nav className="flex flex-col gap-1">
-            {navItems.map((item) => {
-              if (item.children) {
-                return <NavGroup key={item.to} item={item as NavItem & { children: NavItem[] }} />;
-              }
-              const Icon = item.icon;
-              return (
-                <NavLink key={item.to} to={item.to} end={item.end} className={navLinkClass} onMouseEnter={() => prefetchRoute(item.to)} onFocus={() => prefetchRoute(item.to)}>
-                  {Icon && <Icon size={18} strokeWidth={1.75} className="shrink-0" />}
-                  {item.label}
-                </NavLink>
-              );
-            })}
-          </nav>
-        </aside>
-
-        <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex shrink-0">
+        <SidebarToggle visible={sidebar.visible} pinned={sidebar.pinned} onToggle={sidebar.toggle} onTogglePin={sidebar.togglePin} />
+        <div className="flex-1 min-w-0">
           <Topbar
             items={flattenNavItems(navItems)}
             userName={identity?.fullName ?? "Account"}
@@ -483,10 +497,20 @@ export function PortalLayout() {
             roleLabel={roleLabel}
             onLogout={logout}
           />
-          <main className="flex-1 px-8 py-8 max-w-5xl overflow-y-auto">
-            <Outlet />
-          </main>
         </div>
+      </div>
+
+      <div className="relative flex flex-1 min-h-0">
+        {sidebar.docked && menu}
+        {sidebar.floating && (
+          <>
+            <div className="fixed inset-0 z-30 bg-black/25" onClick={sidebar.closeFloating} aria-hidden="true" />
+            <div className="absolute inset-y-0 left-0 z-40 flex">{menu}</div>
+          </>
+        )}
+        <main className="flex-1 min-w-0 px-8 py-8 max-w-5xl overflow-y-auto">
+          <Outlet />
+        </main>
       </div>
     </div>
   );

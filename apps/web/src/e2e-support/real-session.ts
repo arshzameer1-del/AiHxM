@@ -226,11 +226,15 @@ export function getSharedSession(roleKey: TenantRoleKey): string {
  * ordering bug `PortalHomePage.e2e.spec.ts`'s `loginAsRole` documents; the
  * key this writes (`aihxm.platformAdminToken`) is `api/client.ts`'s real
  * `TOKEN_KEY`, not the "authToken" placeholder every spec used before. */
-export async function loginToApp(page: Page, token: string): Promise<void> {
+export async function loginToApp(page: Page, token: string, opts: { menuPinned?: boolean } = {}): Promise<void> {
   await page.goto("/login");
-  await page.evaluate((t) => {
+  // The side menu is closed by default; most specs click links in it, so pin it open unless asked otherwise.
+  const pinned = opts.menuPinned ?? true;
+  await page.evaluate(([t, pin]) => {
     localStorage.setItem("aihxm.platformAdminToken", t);
-  }, token);
+    if (pin) localStorage.setItem("aihxm.sidebarPinned", "1");
+    else localStorage.removeItem("aihxm.sidebarPinned");
+  }, [token, pinned ? "1" : ""] as [string, string]);
   await page.goto("/app");
-  await page.waitForSelector("nav", { timeout: 10000 });
+  await page.waitForSelector(pinned ? "nav" : 'button[aria-label="Open menu"]', { timeout: 10000 });
 }

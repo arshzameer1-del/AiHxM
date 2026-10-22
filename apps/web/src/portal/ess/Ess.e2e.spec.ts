@@ -132,7 +132,7 @@ test("My Org Chart tile opens a page showing the person's own position, and the 
   await expect(me).toContainText("E2E");
   await expect(me).toContainText("You");
   await expect(page.getByText("You are at the top of your reporting line.")).toBeVisible();
-  await expect(page.getByText("No one reports to you.")).toBeVisible();
+  await expect(page.getByText(/0 direct reports/)).toBeVisible();
   await page.screenshot({ path: SHOTS ? `${SHOTS}/ess-org-chart.png` : undefined, fullPage: true });
   await page.getByRole("link", { name: /Back to Employee Self Service/ }).click();
   await expect(page).toHaveURL(/\/app\/ess$/);

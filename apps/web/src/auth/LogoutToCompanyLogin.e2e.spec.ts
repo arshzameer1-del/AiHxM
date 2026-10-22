@@ -8,7 +8,7 @@ import { createHrAdminSession } from "../e2e-support/real-session";
 test("logout lands on the company login page, also while requests are still pending", async ({ page }) => {
   const s = await createHrAdminSession();
   await page.goto("/login");
-  await page.evaluate((t) => localStorage.setItem("aihxm.platformAdminToken", t), s.token);
+  await page.evaluate((t) => { localStorage.setItem("aihxm.platformAdminToken", t); localStorage.setItem("aihxm.sidebarPinned", "1"); }, s.token);
 
   // Once armed, requests are held until the person has logged out and then refused (401): exactly what a request that
   // was still in flight at the moment of logout looks like.
