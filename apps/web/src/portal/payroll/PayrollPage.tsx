@@ -826,6 +826,26 @@ function SettingsAndSlabsSection() {
   );
 }
 
+type PayrollTab = { key: string; label: string; hint: string; visible?: boolean };
+
+/** Which tab holds each deep-linkable section (?section=...). */
+const SECTION_TAB: Record<string, string> = {
+  "payroll-dashboard": "run",
+  "payroll-documents": "run",
+  "input-imports": "inputs",
+  benefits: "inputs",
+  "final-settlements": "settlements",
+  schemes: "settlements",
+  accounting: "payments",
+  "gl-mappings": "payments",
+  "disbursement-settings": "payments",
+  "bank-file-formats": "payments",
+  "payroll-areas": "setup",
+  "payroll-periods": "setup",
+  "tax-slabs": "setup",
+  "event-catalog": "setup",
+};
+
 /**
  * Task — Compensation & Payroll (Phase 12, Decision #14; run approval
  * added Phase P2). hr_admin still gets the whole object graph
@@ -843,7 +863,7 @@ export function PayrollPage() {
   const { identity } = useAuth();
   const [refreshKey, setRefreshKey] = useState(0);
   const bump = () => setRefreshKey((k) => k + 1);
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   // System Admin's Configuration tile for "Tax Slabs & Statutory Rates"
   // links here with ?section=tax-slabs; Compensation is included for the
   // same reason, in case something ever deep-links to it too.
@@ -855,6 +875,27 @@ export function PayrollPage() {
   // Regional Payroll prepares, finalizes and disburses runs of its own payroll areas only; the server enforces the scope.
   const isRegionalPayroll = hasAnyRoleKey(roleKeys, "regional_payroll") && !isHrAdmin;
   const isSelfService = isSelfServiceRole(roleKeys);
+
+  // The page is split by the kind of work, so the month's routine is not buried among one-time setup.
+  const tabs: PayrollTab[] = [
+    { key: "run", label: "Run payroll", hint: "The month's work: check the dashboard, run and approve payroll, then issue payslips." },
+    { key: "inputs", label: "Pay inputs", hint: "Things that change what people are paid: bulk uploads of pay inputs and benefit plans." },
+    { key: "settlements", label: "Settlements", hint: "Final settlements for people who are leaving, and the rules they follow.", visible: isHrAdmin || isPayrollApprover },
+    { key: "payments", label: "Payments & accounting", hint: "Paying people and posting to the books: journals, costing, bank files and their layouts." },
+    { key: "setup", label: "Setup", hint: "Set up once and review rarely: payroll areas, calendars, tax slabs and statutory settings." },
+  ];
+  const visibleTabs = tabs.filter((t) => t.visible !== false);
+  // A deep link (?section=tax-slabs) opens the tab that holds that section; otherwise ?tab= or the first tab.
+  const requestedTab = searchParams.get("tab") ?? SECTION_TAB[focusSection ?? ""] ?? "run";
+  const activeTab = visibleTabs.find((t) => t.key === requestedTab) ?? visibleTabs[0];
+  const selectTab = (key: string) => setSearchParams(key === "run" ? {} : { tab: key });
+  const onTabKey = (e: React.KeyboardEvent) => {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    const i = visibleTabs.findIndex((t) => t.key === activeTab.key);
+    const next = visibleTabs[(i + (e.key === "ArrowRight" ? 1 : visibleTabs.length - 1)) % visibleTabs.length];
+    selectTab(next.key);
+    requestAnimationFrame(() => document.getElementById(`payroll-tab-${next.key}`)?.focus());
+  };
 
   return (
     <div>
@@ -873,15 +914,9 @@ export function PayrollPage() {
       {isSelfService && <MyPayrollDocumentsCard />}
 
       {(isHrAdmin || isPayrollApprover || isRegionalPayroll) && (
-        <div className="space-y-6">
-          <CollapsibleSection title="Payroll Dashboard" defaultOpen forceOpen={focusSection === "payroll-dashboard"} sectionId="payroll-dashboard">
-            <PayrollDashboardPanel />
-          </CollapsibleSection>
-
-          <RunsSection refreshKey={refreshKey} canPrepare={isHrAdmin || isRegionalPayroll} canApprove={isPayrollApprover} onChanged={bump} />
-
+        <>
           {isHrAdmin && focusSection === "compensation" && (
-            <div className="bg-card rounded-card p-5 shadow-sm text-sm text-label-tertiary">
+            <div className="bg-card rounded-card p-5 shadow-sm text-sm text-label-tertiary mb-6">
               Compensation now lives on each employee's own profile — open an
               employee and use the "Compensation & Assets" tab. This keeps
               recurring pay as employee master data (the same way SAP's
@@ -890,93 +925,118 @@ export function PayrollPage() {
             </div>
           )}
 
-          {/* Payroll Areas (0101_payroll_areas.sql). hr_admin is the only
-              role seeded with `payroll_area.manage.all`, so it's the
-              management gate; a Payroll Approver can read the list (any
-              payroll-staff permission can — PayrollAreasService.list())
-              to see which employees a run they're deciding on covers.
-              Deep-linkable with ?section=payroll-areas, same as tax slabs. */}
-          <CollapsibleSection
-            title="Payroll Areas"
-            forceOpen={focusSection === "payroll-areas"}
-            sectionId="payroll-areas"
-          >
-            <PayrollAreasSection canManage={isHrAdmin} onChanged={bump} />
-          </CollapsibleSection>
+          <div role="tablist" aria-label="Payroll areas of work" className="flex gap-1 overflow-x-auto border-b border-black/10 mb-6" onKeyDown={onTabKey}>
+            {visibleTabs.map((tab) => (
+              <button
+                key={tab.key}
+                role="tab"
+                id={`payroll-tab-${tab.key}`}
+                aria-selected={tab.key === activeTab.key}
+                aria-controls={`payroll-panel-${tab.key}`}
+                tabIndex={tab.key === activeTab.key ? 0 : -1}
+                onClick={() => selectTab(tab.key)}
+                className={`px-4 py-2.5 text-sm font-semibold whitespace-nowrap border-b-2 -mb-px ${
+                  tab.key === activeTab.key ? "border-accent text-accent" : "border-transparent text-label-tertiary hover:text-label-primary"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
 
-          {/* PAY-03 - calendars and periods. Any payroll staff can read them; hr_admin holds payroll_calendar.manage.all. */}
-          <CollapsibleSection title="Calendars & Periods" forceOpen={focusSection === "payroll-periods"} sectionId="payroll-periods">
-            <PayrollCalendarsSection canManage={isHrAdmin} />
-          </CollapsibleSection>
+          <div role="tabpanel" id={`payroll-panel-${activeTab.key}`} aria-labelledby={`payroll-tab-${activeTab.key}`} className="space-y-6">
+            <p className="text-label-tertiary text-sm -mt-2">{activeTab.hint}</p>
+            {activeTab.key === "run" && (
+              <>
+                <CollapsibleSection title="Payroll Dashboard" defaultOpen forceOpen={focusSection === "payroll-dashboard"} sectionId="payroll-dashboard">
+                  <PayrollDashboardPanel />
+                </CollapsibleSection>
 
-          {isHrAdmin && (
-            <CollapsibleSection title="Settings & Tax Slabs" forceOpen={focusSection === "tax-slabs"} sectionId="tax-slabs">
-              <SettingsAndSlabsSection />
-            </CollapsibleSection>
-          )}
+                <RunsSection refreshKey={refreshKey} canPrepare={isHrAdmin || isRegionalPayroll} canApprove={isPayrollApprover} onChanged={bump} />
 
-          {/* Phase P5 — which bank-file columns get written and in what
-              order; tenant-editable so every bank's import template fits
-              without a per-bank code path. Deep-linkable the same way as
-              the sections above, for a future System Admin tile. */}
-          {isHrAdmin && (
-            <CollapsibleSection
-              title="Disbursement Settings"
-              forceOpen={focusSection === "disbursement-settings"}
-              sectionId="disbursement-settings"
-            >
-              <DisbursementSettingsForm />
-            </CollapsibleSection>
-          )}
+                <CollapsibleSection title="Payslips & Certificates" forceOpen={focusSection === "payroll-documents"} sectionId="payroll-documents">
+                  <PayrollDocumentsPanel canIssue={isHrAdmin} />
+                </CollapsibleSection>
+              </>
+            )}
 
-          {(isHrAdmin || isPayrollApprover) && (
-            <CollapsibleSection title="Final Settlements" forceOpen={focusSection === "final-settlements"} sectionId="final-settlements">
-              <FinalSettlementsSection canPrepare={isHrAdmin} canApprove={isPayrollApprover} />
-            </CollapsibleSection>
-          )}
+            {activeTab.key === "inputs" && (
+              <>
+                {isHrAdmin && (
+                  <CollapsibleSection title="Bulk Pay Inputs" defaultOpen forceOpen={focusSection === "input-imports"} sectionId="input-imports">
+                    <PayrollInputImportPanel />
+                  </CollapsibleSection>
+                )}
+                <CollapsibleSection title="Benefits" defaultOpen={!isHrAdmin} forceOpen={focusSection === "benefits"} sectionId="benefits">
+                  <BenefitsPanel canManage={isHrAdmin} />
+                </CollapsibleSection>
+              </>
+            )}
 
-          {isHrAdmin && (
-            <CollapsibleSection title="Schemes & Settlement Settings" forceOpen={focusSection === "schemes"} sectionId="schemes">
-              <SchemesAndSettlementSettingsPanel />
-            </CollapsibleSection>
-          )}
+            {activeTab.key === "settlements" && (
+              <>
+                <CollapsibleSection title="Final Settlements" defaultOpen forceOpen={focusSection === "final-settlements"} sectionId="final-settlements">
+                  <FinalSettlementsSection canPrepare={isHrAdmin} canApprove={isPayrollApprover} />
+                </CollapsibleSection>
+                {isHrAdmin && (
+                  <CollapsibleSection title="Schemes & Settlement Settings" forceOpen={focusSection === "schemes"} sectionId="schemes">
+                    <SchemesAndSettlementSettingsPanel />
+                  </CollapsibleSection>
+                )}
+              </>
+            )}
 
-          <CollapsibleSection title="Accounting & Costing" forceOpen={focusSection === "accounting"} sectionId="accounting">
-            <RunAccountingPanel canPost={isHrAdmin} />
-          </CollapsibleSection>
+            {activeTab.key === "payments" && (
+              <>
+                <CollapsibleSection title="Accounting & Costing" defaultOpen forceOpen={focusSection === "accounting"} sectionId="accounting">
+                  <RunAccountingPanel canPost={isHrAdmin} />
+                </CollapsibleSection>
+                {isHrAdmin && (
+                  <CollapsibleSection title="GL Account Mapping" forceOpen={focusSection === "gl-mappings"} sectionId="gl-mappings">
+                    <GlMappingsPanel canManage={isHrAdmin} />
+                  </CollapsibleSection>
+                )}
+                {/* Phase P5 - which bank-file columns get written and in what order; tenant-editable so every bank's import template fits without a per-bank code path. */}
+                {isHrAdmin && (
+                  <CollapsibleSection title="Disbursement Settings" forceOpen={focusSection === "disbursement-settings"} sectionId="disbursement-settings">
+                    <DisbursementSettingsForm />
+                  </CollapsibleSection>
+                )}
+                {isHrAdmin && (
+                  <CollapsibleSection title="Payment File Layouts" forceOpen={focusSection === "bank-file-formats"} sectionId="bank-file-formats">
+                    <BankFileFormatsPanel />
+                  </CollapsibleSection>
+                )}
+              </>
+            )}
 
-          {isHrAdmin && (
-            <CollapsibleSection title="GL Account Mapping" forceOpen={focusSection === "gl-mappings"} sectionId="gl-mappings">
-              <GlMappingsPanel canManage={isHrAdmin} />
-            </CollapsibleSection>
-          )}
+            {activeTab.key === "setup" && (
+              <>
+                {/* Payroll Areas (0101_payroll_areas.sql). hr_admin holds `payroll_area.manage.all`; any payroll staff can read the list. */}
+                <CollapsibleSection title="Payroll Areas" defaultOpen forceOpen={focusSection === "payroll-areas"} sectionId="payroll-areas">
+                  <PayrollAreasSection canManage={isHrAdmin} onChanged={bump} />
+                </CollapsibleSection>
 
-          <CollapsibleSection title="Payslips & Certificates" forceOpen={focusSection === "payroll-documents"} sectionId="payroll-documents">
-            <PayrollDocumentsPanel canIssue={isHrAdmin} />
-          </CollapsibleSection>
+                {/* PAY-03 - calendars and periods. Any payroll staff can read them; hr_admin holds payroll_calendar.manage.all. */}
+                <CollapsibleSection title="Calendars & Periods" forceOpen={focusSection === "payroll-periods"} sectionId="payroll-periods">
+                  <PayrollCalendarsSection canManage={isHrAdmin} />
+                </CollapsibleSection>
 
-          <CollapsibleSection title="Benefits" forceOpen={focusSection === "benefits"} sectionId="benefits">
-            <BenefitsPanel canManage={isHrAdmin} />
-          </CollapsibleSection>
+                {isHrAdmin && (
+                  <CollapsibleSection title="Settings & Tax Slabs" forceOpen={focusSection === "tax-slabs"} sectionId="tax-slabs">
+                    <SettingsAndSlabsSection />
+                  </CollapsibleSection>
+                )}
 
-          {isHrAdmin && (
-            <CollapsibleSection title="Bulk Pay Inputs" forceOpen={focusSection === "input-imports"} sectionId="input-imports">
-              <PayrollInputImportPanel />
-            </CollapsibleSection>
-          )}
-
-          {isHrAdmin && (
-            <CollapsibleSection title="Payroll Events" forceOpen={focusSection === "event-catalog"} sectionId="event-catalog">
-              <PayrollEventCatalogPanel />
-            </CollapsibleSection>
-          )}
-
-          {isHrAdmin && (
-            <CollapsibleSection title="Payment File Layouts" forceOpen={focusSection === "bank-file-formats"} sectionId="bank-file-formats">
-              <BankFileFormatsPanel />
-            </CollapsibleSection>
-          )}
-        </div>
+                {isHrAdmin && (
+                  <CollapsibleSection title="Payroll Events" forceOpen={focusSection === "event-catalog"} sectionId="event-catalog">
+                    <PayrollEventCatalogPanel />
+                  </CollapsibleSection>
+                )}
+              </>
+            )}
+          </div>
+        </>
       )}
 
       {!isHrAdmin && !isPayrollApprover && !isRegionalPayroll && !isSelfService && (
