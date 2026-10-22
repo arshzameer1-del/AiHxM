@@ -1,3 +1,4 @@
+import { AttendanceAutoCloseService } from "./attendance-auto-close.service";
 import { Pool } from "pg";
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import { DatabaseService } from "../database/database.service";
@@ -71,7 +72,7 @@ describe("LeaveRequestsService + AttendanceService", () => {
     shiftsService = new ShiftsService(db, rbac, entitlements, audit, new EffectiveDatingEngine(), new RulesEngine());
     const workSchedule = new WorkScheduleResolutionService(db, shiftsService, holidays);
     leaveRequests = new LeaveRequestsService(db, rbac, entitlements, audit, groups, workflow, workSchedule);
-    attendance = new AttendanceService(db, rbac, entitlements, audit, workSchedule);
+    attendance = new AttendanceService(db, rbac, entitlements, audit, workSchedule, new AttendanceAutoCloseService(db, audit, workSchedule));
 
     const stamp = Date.now();
 
@@ -497,7 +498,7 @@ describe("LeaveRequestsService + AttendanceService", () => {
   });
 
   describe("AttendanceService", () => {
-    it("clocks in and out by employee_number, and refuses a second clock-in while already clocked in", async () => {
+    it("clocks in and out by employee_number, and refuses a second clock-in while clocked in and again after clocking out the same day", async () => {
       const employeeNumber = (await employees.get(hrAdminClaims, staffEmployeeId)).employeeNumber;
 
       const clockedIn = await attendance.clockIn(staffClaims, { employeeNumber, source: "manual" });
@@ -509,10 +510,8 @@ describe("LeaveRequestsService + AttendanceService", () => {
       expect(clockedOut.id).toBe(clockedIn.id);
       expect(clockedOut.clockOutAt).not.toBeNull();
 
-      // Now clocking in again is fine — the previous record is closed.
-      const secondClockIn = await attendance.clockIn(staffClaims, { employeeNumber, source: "gps", gpsLat: 24.8607, gpsLng: 67.0011 });
-      expect(secondClockIn.gpsLat).toBeCloseTo(24.8607, 4);
-      await attendance.clockOut(staffClaims, { employeeNumber });
+      // One clock-in and one clock-out per day: a second clock-in after clocking out the same day is refused.
+      await expect(attendance.clockIn(staffClaims, { employeeNumber, source: "gps", gpsLat: 24.8607, gpsLng: 67.0011 })).rejects.toThrow(/one clock-in and one clock-out is allowed per day/i);
     });
 
     it("LIVE-13: a clock-in forgotten two days ago does not stop today's clock-in and keeps its hours uninvented", async () => {

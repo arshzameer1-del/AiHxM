@@ -6,6 +6,7 @@ import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
 import { WorkScheduleResolutionService } from "../shifts/work-schedule-resolution.service";
+import { AttendanceAutoCloseService, AUTO_CLOSED_STATUS } from "./attendance-auto-close.service";
 import { localParts } from "./attendance-evaluation.service";
 import type { AttendanceRecordView, ClockInRequest, ClockOutRequest, ResolvedWorkScheduleView } from "@aihxm/shared-types";
 
@@ -63,6 +64,7 @@ async function rowToRecord(
     gpsLng: row.gps_lng === null ? null : Number(row.gps_lng),
     status,
     shiftName,
+    autoClosed: row.derived_status === AUTO_CLOSED_STATUS,
   };
 }
 
@@ -83,7 +85,8 @@ export class AttendanceService {
     private readonly rbac: RbacService,
     private readonly entitlements: EntitlementsService,
     private readonly audit: AuditService,
-    private readonly workSchedule: WorkScheduleResolutionService
+    private readonly workSchedule: WorkScheduleResolutionService,
+    private readonly autoClose: AttendanceAutoCloseService
   ) {}
 
   async clockIn(claims: RequestClaims, input: ClockInRequest): Promise<AttendanceRecordView> {
@@ -104,6 +107,25 @@ export class AttendanceService {
       const canAll = await this.rbac.can(claims, "attendance.record.all");
       if (!canSelf && !canAll) {
         throw new ForbiddenException("Not permitted to record attendance for this employee");
+      }
+
+      // A clock-in with no clock-out from an earlier day is closed at that day's shift end time first.
+      await this.autoClose.closeForgottenForEmployee(client, claims, employee.id);
+
+      // One clock-in and one clock-out per day: once today has a record (open or finished), no second one is started.
+      const todayDate = localParts(new Date(), DEFAULT_SCHEDULE_TIMEZONE).date;
+      const sameDay = await client.query<{ open: boolean }>(
+        `SELECT (clock_out_at IS NULL) AS open FROM attendance_records
+          WHERE employee_id = $1 AND COALESCE(work_date, (clock_in_at AT TIME ZONE 'Asia/Karachi')::date) = $2::date
+          ORDER BY clock_in_at DESC LIMIT 1`,
+        [employee.id, todayDate]
+      );
+      if ((sameDay.rowCount ?? 0) > 0) {
+        throw new ConflictException(
+          sameDay.rows[0].open
+            ? "This employee is already clocked in — clock out first"
+            : "Already clocked in and out for today. Only one clock-in and one clock-out is allowed per day; if a time is wrong, ask for an attendance correction."
+        );
       }
 
       // LIVE-13: a clock-in left open for a day or more is a forgotten clock-out, not a live shift. It must not
@@ -160,6 +182,8 @@ export class AttendanceService {
         throw new ForbiddenException("Not permitted to record attendance for this employee");
       }
 
+      await this.autoClose.closeForgottenForEmployee(client, claims, employee.id);
+
       const open = await client.query(
         `SELECT id FROM attendance_records WHERE employee_id = $1 AND clock_out_at IS NULL
             AND clock_in_at > now() - make_interval(hours => $2::int)
@@ -212,6 +236,9 @@ export class AttendanceService {
       if (!canSelf && !canAll) {
         throw new ForbiddenException("Not permitted to view attendance for this employee");
       }
+
+      // Best effort: the viewer may not be allowed to write; the hourly sweep then does it.
+      await this.autoClose.closeForgottenForEmployee(client, claims, employeeId).catch(() => 0);
 
       const result = await client.query(
         `SELECT * FROM attendance_records WHERE employee_id = $1 ORDER BY clock_in_at DESC LIMIT $2`,

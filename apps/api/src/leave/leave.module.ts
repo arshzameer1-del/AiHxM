@@ -10,6 +10,8 @@ import { TimesheetsService } from "./timesheets.service";
 import { AttendanceOpsController, DeviceIngestController } from "./attendance-ops.controller";
 import { DeviceKeyGuard } from "./device-key.guard";
 import { AttendanceService } from "./attendance.service";
+import { AttendanceAutoCloseService } from "./attendance-auto-close.service";
+import { AttendanceAutoCloseScheduler } from "./attendance-auto-close.scheduler";
 import { AttendanceCorrectionsService } from "./attendance-corrections.service";
 import { OvertimeService } from "./overtime.service";
 import { WorkProfileService } from "./work-profile.service";
@@ -44,7 +46,7 @@ import { EffectiveDatingModule } from "../effective-dating/effective-dating.modu
     EffectiveDatingModule,
   ],
   controllers: [LeaveController, AttendanceOpsController, DeviceIngestController],
-  providers: [LeaveRequestsService, LeaveTypesService, LeaveLedgerService, LeaveAccrualService, AttendanceEvaluationService, AttendanceDevicesService, TimesheetsService, DeviceKeyGuard, AttendanceService, AttendanceCorrectionsService, OvertimeService, WorkProfileService, OnDutyService],
-  exports: [LeaveRequestsService, LeaveTypesService, LeaveLedgerService, LeaveAccrualService, AttendanceEvaluationService, AttendanceDevicesService, TimesheetsService, AttendanceService, AttendanceCorrectionsService, OvertimeService, WorkProfileService, OnDutyService],
+  providers: [LeaveRequestsService, LeaveTypesService, LeaveLedgerService, LeaveAccrualService, AttendanceEvaluationService, AttendanceDevicesService, TimesheetsService, DeviceKeyGuard, AttendanceService, AttendanceAutoCloseService, AttendanceAutoCloseScheduler, AttendanceCorrectionsService, OvertimeService, WorkProfileService, OnDutyService],
+  exports: [LeaveRequestsService, LeaveTypesService, LeaveLedgerService, LeaveAccrualService, AttendanceEvaluationService, AttendanceDevicesService, TimesheetsService, AttendanceService, AttendanceAutoCloseService, AttendanceCorrectionsService, OvertimeService, WorkProfileService, OnDutyService],
 })
 export class LeaveModule {}

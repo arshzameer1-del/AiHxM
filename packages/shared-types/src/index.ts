@@ -4073,6 +4073,8 @@ export type AttendanceRecordView = {
   gpsLng: number | null;
   status: AttendanceStatus;
   shiftName: string | null;
+  /** True when nobody clocked out and the system set the clock-out to the shift end time at the end of the day. */
+  autoClosed?: boolean;
 };
 
 export type ClockInRequest = {

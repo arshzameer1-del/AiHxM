@@ -1,3 +1,4 @@
+import { AttendanceAutoCloseService } from "./attendance-auto-close.service";
 import { Pool } from "pg";
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import { DatabaseService } from "../database/database.service";
@@ -75,7 +76,7 @@ describe("LeaveRequestsService LV-UP: edit, approvals, team calendar", () => {
     shiftsService = new ShiftsService(db, rbac, entitlements, audit, new EffectiveDatingEngine(), new RulesEngine());
     const workSchedule = new WorkScheduleResolutionService(db, shiftsService, holidays);
     leaveRequests = new LeaveRequestsService(db, rbac, entitlements, audit, groups, workflow, workSchedule);
-    attendance = new AttendanceService(db, rbac, entitlements, audit, workSchedule);
+    attendance = new AttendanceService(db, rbac, entitlements, audit, workSchedule, new AttendanceAutoCloseService(db, audit, workSchedule));
 
     const stamp = Date.now();
 

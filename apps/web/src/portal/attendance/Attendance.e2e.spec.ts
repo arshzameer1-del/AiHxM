@@ -30,7 +30,7 @@ test.describe("Time & Attendance Portal", () => {
     // The Clock in/out button is the stable signal that the clock page rendered.
     const clockButton = page
       .locator("button")
-      .filter({ hasText: /clock in|clock out/i });
+      .filter({ hasText: /clock in|clock out|done for today/i });
     await expect(clockButton).toBeVisible();
   });
 

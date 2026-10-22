@@ -319,6 +319,12 @@ export class AttendanceDevicesService {
       if (open) return finish("duplicate", "Already clocked in", emp.employee_id, open.id);
       const device = (await client.query("SELECT timezone FROM attendance_devices WHERE id = $1", [punch.device_id])).rows[0];
       const workDate = localParts(at, device?.timezone ?? "Asia/Karachi").date;
+      // One clock-in and one clock-out per day: a second "in" on a day that already has a record is not a new shift.
+      const sameDay = await client.query(
+        `SELECT id FROM attendance_records WHERE employee_id = $1 AND COALESCE(work_date, (clock_in_at AT TIME ZONE 'Asia/Karachi')::date) = $2::date LIMIT 1`,
+        [emp.employee_id, workDate]
+      );
+      if ((sameDay.rowCount ?? 0) > 0) return finish("duplicate", "Already has a clock-in and clock-out for this day (one per day)", emp.employee_id, sameDay.rows[0].id);
       const rec = await client.query(
         `INSERT INTO attendance_records (company_id, employee_id, employee_number, source, clock_in_at, device_id, work_date)
          VALUES ($1,$2,$3,'biometric',$4,$5,$6) RETURNING id`,

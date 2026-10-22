@@ -1,3 +1,4 @@
+import { AttendanceAutoCloseService } from "./attendance-auto-close.service";
 import { Pool } from "pg";
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import { DatabaseService } from "../database/database.service";
@@ -74,7 +75,7 @@ describe("Attendance daily results, devices and timesheets (Step 8B)", () => {
     const shifts = new ShiftsService(db, rbac, ent, audit, eff, new RulesEngine());
     const schedule = new WorkScheduleResolutionService(db, shifts, holidays);
     leave = new LeaveRequestsService(db, rbac, ent, audit, groups, workflow, schedule);
-    attendance = new AttendanceService(db, rbac, ent, audit, schedule);
+    attendance = new AttendanceService(db, rbac, ent, audit, schedule, new AttendanceAutoCloseService(db, audit, schedule));
     evaluation = new AttendanceEvaluationService(db, rbac, ent, audit, schedule);
     devices = new AttendanceDevicesService(db, rbac, ent, audit);
     timesheets = new TimesheetsService(db, rbac, ent, audit, workflow);

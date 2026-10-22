@@ -68,6 +68,9 @@ export function ClockPanel({ employeeId, refreshKey, onChanged }: { employeeId: 
   const clockedIn = Boolean(latest && latest.clockOutAt === null);
   const now = useNow(clockedIn);
   const todayRow = data.days.get(data.today);
+  // One clock-in and one clock-out per day: once today has a finished punch pair, the button is switched off.
+  const doneForToday = !clockedIn && Boolean(todayRow?.lastOut);
+  const autoClosedIns = new Set(data.records.filter((r) => r.autoClosed).map((r) => new Date(r.clockInAt).getTime()));
   const shift = summariseShift(data.schedule);
   const staleHours = clockedIn && latest ? staleClockInHours(latest.clockInAt) : null;
 
@@ -110,10 +113,11 @@ export function ClockPanel({ employeeId, refreshKey, onChanged }: { employeeId: 
             <button
               type="button"
               onClick={handleClock}
-              disabled={busy || !employee || data.loading}
+              disabled={busy || !employee || data.loading || doneForToday}
+              data-testid="clock-button"
               className={`text-sm font-semibold rounded-lg px-6 py-2.5 disabled:opacity-50 ${clockedIn ? "bg-danger/10 text-danger" : "bg-accent text-white"}`}
             >
-              {busy ? "…" : clockedIn ? "Clock out" : "Clock in"}
+              {busy ? "…" : clockedIn ? "Clock out" : doneForToday ? "Done for today" : "Clock in"}
             </button>
             <div className="min-w-0">
               {data.loading ? (
@@ -129,7 +133,9 @@ export function ClockPanel({ employeeId, refreshKey, onChanged }: { employeeId: 
                   </p>
                 </>
               ) : todayRow?.lastOut ? (
-                <p className="text-xs text-label-secondary">You are not clocked in. Last clock-out today at {formatTime(todayRow.lastOut)}.</p>
+                <p className="text-xs text-label-secondary" data-testid="done-for-today">
+                  You clocked in and out for today (one per day). Clock-out at {formatTime(todayRow.lastOut)}.
+                </p>
               ) : (
                 <p className="text-xs text-label-secondary">You are not clocked in.</p>
               )}
@@ -163,6 +169,11 @@ export function ClockPanel({ employeeId, refreshKey, onChanged }: { employeeId: 
                     <span>
                       <span className="text-label-tertiary mr-2">{i + 1}.</span>
                       {formatTime(s.inAt)} – {s.outAt ? formatTime(s.outAt) : "now"}
+                      {autoClosedIns.has(new Date(s.inAt).getTime()) && (
+                        <span className="ml-2 inline-block px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-warning/10 text-warning" title="No clock-out was recorded, so the system set it to the shift end time" data-testid="auto-clock-out">
+                          Auto clock-out
+                        </span>
+                      )}
                     </span>
                     <span className="text-label-secondary">{s.outAt ? minutesText(Math.round((new Date(s.outAt).getTime() - new Date(s.inAt).getTime()) / 60000)) : "running"}</span>
                   </li>

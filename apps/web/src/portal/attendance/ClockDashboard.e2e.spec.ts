@@ -42,7 +42,10 @@ test("Clock in shows running time and the punch; clock out fills check-out and w
   await expect(page.getByTestId("today-summary")).toContainText("Working…");
 
   await page.getByRole("button", { name: "Clock out", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Clock in", exact: true })).toBeVisible();
+  // One clock-in and one clock-out per day: the button now says so and cannot start a second shift.
+  await expect(page.getByTestId("clock-button")).toHaveText("Done for today");
+  await expect(page.getByTestId("clock-button")).toBeDisabled();
+  await expect(page.getByTestId("done-for-today")).toContainText("one per day");
   await expect(page.getByTestId("running-time")).toHaveCount(0);
   await expect(page.getByTestId("today-summary")).not.toContainText("Working…");
   await expect(page.getByTestId("today-summary")).toContainText(/\d{1,2}:\d{2} (AM|PM)/);
