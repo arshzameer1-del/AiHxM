@@ -6113,6 +6113,32 @@ export type PayrollRunVarianceView = {
   rows: PayrollVarianceRowView[];
 };
 
+export type PayrollStatutoryReportKind = "income_tax" | "eobi" | "social_security";
+
+export type PayrollStatutoryReportRowView = {
+  employeeNumber: string;
+  employeeName: string;
+  cnic: string | null;
+  /** the person's figures for the run, one per column the report lists (see `columns`) */
+  values: number[];
+};
+
+/** A report of what a finalised run withheld or owes for one statutory purpose, from the payslips as finalised. */
+export type PayrollStatutoryReportView = {
+  kind: PayrollStatutoryReportKind;
+  title: string;
+  payrollRunId: string;
+  periodStart: string;
+  periodEnd: string;
+  columns: Array<{ key: string; label: string }>;
+  rows: PayrollStatutoryReportRowView[];
+  totals: number[];
+  /** people on the run who are left out because they have nothing to report (for example no EOBI) */
+  omittedCount: number;
+  /** people on the run with no CNIC on file; the regulator's statements need it */
+  missingCnicCount: number;
+};
+
 export type PayrollRunValidationView = {
   run: PayrollRunView;
   stage: "pre_validation" | "validation";

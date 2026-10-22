@@ -21,6 +21,7 @@ import { GlMappingsPanel, RunAccountingPanel } from "./PayrollAccountingPanels";
 import { MyPayrollDocumentsCard, PayrollDocumentsPanel } from "./PayrollDocumentsPanels";
 import { BenefitsPanel } from "./PayrollBenefitsPanel";
 import { PayrollMonthCard } from "./PayrollMonthCard";
+import { PayrollStatutoryReportsPanel } from "./PayrollStatutoryReportsPanel";
 import { PayrollDashboardPanel, PayrollEventCatalogPanel, PayrollInputImportPanel } from "./PayrollOperationsPanels";
 import { PayrollAreasSection } from "./PayrollAreasSection";
 import { PayrollCalendarsSection } from "./PayrollCalendarsSection";
@@ -839,6 +840,7 @@ const SECTION_TAB: Record<string, string> = {
   schemes: "settlements",
   accounting: "payments",
   "gl-mappings": "payments",
+  "statutory-reports": "payments",
   "disbursement-settings": "payments",
   "bank-file-formats": "payments",
   "payroll-areas": "setup",
@@ -993,6 +995,11 @@ export function PayrollPage() {
                 <CollapsibleSection title="Accounting & Costing" defaultOpen forceOpen={focusSection === "accounting"} sectionId="accounting">
                   <RunAccountingPanel canPost={isHrAdmin} />
                 </CollapsibleSection>
+                {(isHrAdmin || isRegionalPayroll) && (
+                  <CollapsibleSection title="Statutory Reports" forceOpen={focusSection === "statutory-reports"} sectionId="statutory-reports">
+                    <PayrollStatutoryReportsPanel />
+                  </CollapsibleSection>
+                )}
                 {isHrAdmin && (
                   <CollapsibleSection title="GL Account Mapping" forceOpen={focusSection === "gl-mappings"} sectionId="gl-mappings">
                     <GlMappingsPanel canManage={isHrAdmin} />

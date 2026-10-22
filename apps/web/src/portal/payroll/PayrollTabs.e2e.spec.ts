@@ -26,6 +26,7 @@ test("opens on Run payroll and each tab shows only its own sections", async ({ p
   await tabs.getByRole("tab", { name: "Payments & accounting" }).click();
   await expect(page.getByRole("heading", { name: "Accounting & Costing" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Payment File Layouts" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Statutory Reports" })).toBeVisible();
 
   // keyboard: arrow keys move between tabs
   await tabs.getByRole("tab", { name: "Payments & accounting" }).focus();
