@@ -124,8 +124,8 @@ function CreateRoleForm({
 /**
  * System Admin: which permissions each role carries. Built-in roles are fixed and shown read-only; a company's own custom roles
  * can be created, ticked permission by permission, switched off, and then given to people under Roles & Access.
- * A custom role can only carry permissions the person editing it holds themselves (the server enforces it; the boxes for the
- * others are disabled and say so).
+ * The role editor (System Admin) can put any permission into a custom role; every change is audited with the permission list.
+ * If the server ever lists fewer grantable permissions than exist, the boxes for the others are disabled and say so.
  */
 export function RolesPermissionsPanel() {
   const [roles, setRoles] = useState<Role[] | null>(null);
@@ -256,7 +256,7 @@ export function RolesPermissionsPanel() {
         </p>
         {notHeldCount > 0 && (
           <p className="text-xs text-label-tertiary">
-            You can put only the {held.size} permission(s) you hold yourself into a custom role; the other {notHeldCount} show as disabled. This stops a role editor from creating more power than they have.
+            You can give {held.size} of the {permissions.length} permissions to a custom role; the other {notHeldCount} show as disabled.
           </p>
         )}
       </div>

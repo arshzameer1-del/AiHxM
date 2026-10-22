@@ -31,8 +31,9 @@ function rowToRole(row: any): Role {
  * revealing each other's roles, and so a custom role can never shadow a
  * system role key.
  *
- * Privilege-escalation rule: a role editor can only put into a custom role
- * permissions the editor holds themselves. System roles are never edited.
+ * Who may edit: the holder of `role.manage.all` (the System Admin) can put any permission into a company's own custom role (decision
+ * 2026-10-22: the System Admin manages permissions in full detail). Every create and every permission change is audited with the
+ * full list of permission keys. System roles are never edited.
  */
 @Injectable()
 export class RolesService {
@@ -58,9 +59,13 @@ export class RolesService {
     });
   }
 
-  /** The permissions the caller holds themselves: only these can be put into a custom role by them. */
+  /** The permissions the caller may put into a custom role: all of them for a role editor, none otherwise. */
   async listHeldPermissions(claims: RequestClaims): Promise<string[]> {
-    return this.rbac.listHeldPermissionKeys(claims);
+    if (!claims.company_id || !(await this.rbac.can(claims, MANAGE_PERMISSION))) return [];
+    return this.db.withClaims(claims, async (client) => {
+      const r = await client.query("SELECT key FROM permissions ORDER BY key");
+      return r.rows.map((p) => p.key as string);
+    });
   }
 
   async getPermissionKeys(claims: RequestClaims, roleId: string): Promise<string[]> {
@@ -92,7 +97,7 @@ export class RolesService {
         companyId: claims.company_id ?? null,
         action: "rbac.custom_role_created",
         target: role.id,
-        metadata: { key: storedKey, permissionCount: input.permissionKeys?.length ?? 0 },
+        metadata: { key: storedKey, permissionCount: input.permissionKeys?.length ?? 0, permissionKeys: [...new Set(input.permissionKeys ?? [])] },
       });
       return rowToRole(role);
     });
@@ -135,11 +140,6 @@ export class RolesService {
     const known = new Set(found.rows.map((p) => p.key));
     const unknown = unique.filter((k) => !known.has(k));
     if (unknown.length) throw new BadRequestException(`Unknown permission(s): ${unknown.join(", ")}`);
-    for (const key of unique) {
-      if (!(await this.rbac.holdsPermission(claims, key))) {
-        throw new ForbiddenException(`You cannot grant "${key}" because you do not hold it yourself`);
-      }
-    }
     await client.query("DELETE FROM role_permissions WHERE role_id = $1", [roleId]);
     for (const p of found.rows) {
       await client.query("INSERT INTO role_permissions (role_id, permission_id) VALUES ($1,$2)", [roleId, p.id]);

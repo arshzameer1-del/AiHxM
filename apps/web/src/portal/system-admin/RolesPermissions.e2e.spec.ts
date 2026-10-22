@@ -24,7 +24,7 @@ test.describe("Roles & Permissions", () => {
     await expect(table.getByText("payroll.approve.all")).toBeVisible();
   });
 
-  test("a System Admin creates a custom role with a permission they hold, and cannot tick one they do not hold", async ({ page }) => {
+  test("a System Admin creates a custom role and can tick any permission, built-in roles stay read only", async ({ page }) => {
     await loginToApp(page, getSharedSession("system_admin"));
     await page.goto("/app/system-admin?tab=permissions");
 
@@ -34,8 +34,8 @@ test.describe("Roles & Permissions", () => {
     await page.getByRole("button", { name: "Create role" }).click();
     await expect(page.getByText("Custom role", { exact: true })).toBeVisible();
 
-    // A System Admin does not hold employee.view.all, so its box is disabled.
-    await expect(page.getByRole("checkbox", { name: "employee.view.all" })).toBeDisabled();
+    // A System Admin manages permissions in full detail: boxes are enabled even for permissions they do not use themselves.
+    await expect(page.getByRole("checkbox", { name: "employee.view.all" })).toBeEnabled();
     const mine = page.getByRole("checkbox", { name: "workflow_template.manage.all" });
     await expect(mine).toBeEnabled();
     await mine.check();

@@ -274,15 +274,24 @@ describe("SystemAdminService", () => {
     });
   });
   describe("custom roles (Roles & Permissions)", () => {
-    it("lists the permissions the caller holds, and a System Admin can only put those into a custom role", async () => {
+    it("a System Admin can put any permission into a custom role, and the change is audited with the permission list", async () => {
       const roles = new RolesService(db);
-      const held = await roles.listHeldPermissions(bilalClaims);
-      expect(held).toContain("role.manage.all");
-      expect(held).not.toContain("employee.view.all");
+      const grantable = await roles.listHeldPermissions(bilalClaims);
+      expect(grantable).toContain("employee.view.all");
+      expect(grantable.length).toBeGreaterThan(100);
 
-      await expect(roles.createCustom(bilalClaims, { key: "spec_escalation", name: "Escalation", permissionKeys: ["employee.view.all"] })).rejects.toThrow(
-        ForbiddenException
-      );
+      const custom = await roles.createCustom(bilalClaims, { key: `spec_any_${Date.now() % 100000}`, name: "Any", permissionKeys: ["employee.view.all"] });
+      await roles.setPermissions(bilalClaims, custom.id, ["employee.view.all", "leave_request.view.all"]);
+      const audit = await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const r = await client.query("SELECT metadata FROM audit_log WHERE target = $1 AND action = 'rbac.custom_role_permissions_set'", [custom.id]);
+        return r.rows;
+      });
+      expect(audit[0].metadata.permissionKeys).toEqual(["employee.view.all", "leave_request.view.all"]);
+
+      // Someone without role.manage.all gets nothing to grant and cannot create a role.
+      const none = await roles.listHeldPermissions(ayeshaClaims);
+      expect(none).toEqual([]);
+      await expect(roles.createCustom(ayeshaClaims, { key: "spec_nope", name: "Nope" })).rejects.toThrow(ForbiddenException);
     });
 
     it("assigns this company's own active custom role to an employee, lists it, and refuses it once deactivated or from another company", async () => {

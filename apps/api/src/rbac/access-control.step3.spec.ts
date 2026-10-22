@@ -97,8 +97,10 @@ describe("Access control backbone (ACC-01..04)", () => {
       await expect(roles.setPermissions(otherAdmin, roleId, [])).rejects.toThrow(); // not visible / not theirs
     });
 
-    it("cannot grant a permission the editor does not hold, or edit system roles", async () => {
-      await expect(roles.setPermissions(admin, roleId, ["hr_reference_catalog.manage.all"])).rejects.toThrow(ForbiddenException);
+    it("a role editor can grant any real permission (2026-10-22 decision), but not unknown ones, and cannot edit system roles", async () => {
+      const before = await roles.getPermissionKeys(admin, roleId);
+      await expect(roles.setPermissions(admin, roleId, ["hr_reference_catalog.manage.all"])).resolves.toEqual(["hr_reference_catalog.manage.all"]);
+      await roles.setPermissions(admin, roleId, before);
       await expect(roles.setPermissions(admin, roleId, ["no.such.permission"])).rejects.toThrow(BadRequestException);
       const sys = (await roles.list(admin)).find((r) => r.key === "hr_admin")!;
       await expect(roles.setPermissions(admin, sys.id, [])).rejects.toThrow(ForbiddenException);
