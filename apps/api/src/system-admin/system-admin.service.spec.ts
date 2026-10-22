@@ -9,6 +9,7 @@ import { WorkflowService } from "../workflow/workflow.service";
 import { EmployeesService } from "../employees/employees.service";
 import { LocalFileStorageService } from "../file-storage/local-file-storage.service";
 import { RolesService } from "../rbac/roles.service";
+import { verifyPassword } from "../auth/password";
 import { SystemAdminService } from "./system-admin.service";
 
 const FIXTURE_CLAIMS: RequestClaims = { is_platform_admin: true, company_id: null, sub: "system-admin-spec-fixtures" };
@@ -315,6 +316,47 @@ describe("SystemAdminService", () => {
         await client.query("INSERT INTO roles (key, name, company_id) VALUES ($1, 'Foreign', $2)", [foreignKey, otherCompanyId]);
       });
       await expect(systemAdmin.assignRole(bilalClaims, { employeeId: ayeshaId, roleKey: foreignKey })).rejects.toThrow(BadRequestException);
+    });
+  });
+  describe("resetPassword", () => {
+    async function passwordFor(employeeId: string): Promise<{ hash: string; id: string }> {
+      return db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const r = await client.query("SELECT ua.id, ua.password_hash FROM employees e JOIN user_accounts ua ON ua.id = e.user_account_id WHERE e.id = $1", [employeeId]);
+        return { hash: r.rows[0].password_hash as string, id: r.rows[0].id as string };
+      });
+    }
+
+    it("a System Admin sets a new password, clears the lockout and signs the person out", async () => {
+      const before = await passwordFor(ayeshaId);
+      await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        await client.query("UPDATE user_accounts SET failed_login_attempts = 5, locked_until = now() + interval '10 minutes' WHERE id = $1", [before.id]);
+        await client.query("INSERT INTO user_sessions (user_account_id, company_id, expires_at) VALUES ($1,$2, now() + interval '1 day')", [before.id, companyId]);
+      });
+
+      await systemAdmin.resetPassword(bilalClaims, ayeshaId, "Brand-new-pass-1");
+
+      const after = await passwordFor(ayeshaId);
+      expect(after.hash).not.toBe(before.hash);
+      expect(await verifyPassword("Brand-new-pass-1", after.hash)).toBe(true);
+      const state = await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const a = await client.query("SELECT failed_login_attempts, locked_until FROM user_accounts WHERE id = $1", [before.id]);
+        const open = await client.query("SELECT count(*)::int AS n FROM user_sessions WHERE user_account_id = $1 AND revoked_at IS NULL", [before.id]);
+        return { attempts: a.rows[0].failed_login_attempts, lockedUntil: a.rows[0].locked_until, openSessions: open.rows[0].n };
+      });
+      expect(state).toEqual({ attempts: 0, lockedUntil: null, openSessions: 0 });
+    });
+
+    it("an HR Admin cannot reset the password of a System Admin, but can for an ordinary login", async () => {
+      await expect(systemAdmin.resetPassword(ayeshaClaims, bilalId, "Another-pass-123")).rejects.toThrow(ForbiddenException);
+
+      const { rolesGranted } = await employees.createLogin(ayeshaClaims, sanaId, { initialPassword: "Password123!", roleKeys: ["employee_self_service"] });
+      expect(rolesGranted).toEqual(["employee_self_service"]);
+      await expect(systemAdmin.resetPassword(ayeshaClaims, sanaId, "Another-pass-123")).resolves.toBeUndefined();
+    });
+
+    it("refuses an employee with no login, another company's employee, and a caller with no rights", async () => {
+      await expect(systemAdmin.resetPassword(bilalClaims, otherCoEmployeeId, "Another-pass-123")).rejects.toThrow(NotFoundException);
+      await expect(systemAdmin.resetPassword(sanaSelfServiceClaims, ayeshaId, "Another-pass-123")).rejects.toThrow(ForbiddenException);
     });
   });
 });

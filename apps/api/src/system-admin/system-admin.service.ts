@@ -3,6 +3,7 @@ import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
 import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
+import { hashPassword } from "../auth/password";
 import type { AssignableUserView, Role, SystemAdminRoleAssignmentView, TenantRoleKey } from "@aihxm/shared-types";
 
 const ROLE_ASSIGNMENT_PERMISSION = "role_assignment.manage.all";
@@ -223,6 +224,55 @@ export class SystemAdminService {
         first_name: employee.first_name,
         last_name: employee.last_name,
         email: employee.email,
+      });
+    });
+  }
+
+  /**
+   * Sets a new password for an employee's login: the person who forgot theirs gets a temporary one handed to them directly (the
+   * same hand-off as creating the login). Allowed for a System Admin (`user_account.manage.all`) and, for ordinary logins only, an
+   * HR Admin (`employee.manage.all`): an HR Admin cannot reset the password of an HR Admin, System Admin or Payroll Approver,
+   * which would otherwise be a way to take over a more powerful account. Clears the lockout and signs the person out everywhere.
+   * The old password is never read back; the new one is never logged.
+   */
+  async resetPassword(claims: RequestClaims, employeeId: string, newPassword: string): Promise<void> {
+    if (!claims.company_id) throw new ForbiddenException();
+    const [canAccounts, canEmployees] = await Promise.all([
+      this.rbac.can(claims, "user_account.manage.all"),
+      this.rbac.can(claims, "employee.manage.all"),
+    ]);
+    if (!canAccounts && !canEmployees) throw new ForbiddenException("Not permitted to reset passwords");
+
+    const elevatedClaims: RequestClaims = { is_platform_admin: false, is_service: true, company_id: claims.company_id, sub: "system-admin-service" };
+    await this.db.withClaims(elevatedClaims, async (client) => {
+      const employee = await client.query("SELECT id, user_account_id, email FROM employees WHERE id = $1 AND company_id = $2", [employeeId, claims.company_id]);
+      if (employee.rowCount === 0) throw new NotFoundException("Employee not found");
+      const userAccountId = employee.rows[0].user_account_id as string | null;
+      if (!userAccountId) throw new BadRequestException("This employee has no login yet - create one first");
+
+      if (!canAccounts) {
+        const privileged = await client.query(
+          `SELECT 1 FROM user_role_assignments ura JOIN roles r ON r.id = ura.role_id
+            WHERE ura.user_account_id = $1 AND ura.company_id = $2 AND r.key = ANY($3::text[]) LIMIT 1`,
+          [userAccountId, claims.company_id, ["hr_admin", "system_admin", "payroll_approver"]]
+        );
+        if ((privileged.rowCount ?? 0) > 0) {
+          throw new ForbiddenException("Only a System Admin can reset the password of an HR Admin, System Admin or Payroll Approver");
+        }
+      }
+
+      const passwordHash = await hashPassword(newPassword);
+      await client.query(
+        `UPDATE user_accounts SET password_hash = $2, failed_login_attempts = 0, locked_until = NULL, credential_issued_at = now(), updated_at = now()
+          WHERE id = $1`,
+        [userAccountId, passwordHash]
+      );
+      await client.query("UPDATE user_sessions SET revoked_at = now(), revoked_by = $2 WHERE user_account_id = $1 AND revoked_at IS NULL", [userAccountId, "password_reset"]);
+      await this.audit.record(client, claims, {
+        companyId: claims.company_id ?? null,
+        action: "system_admin.password_reset",
+        target: userAccountId,
+        metadata: { employeeId },
       });
     });
   }

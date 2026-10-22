@@ -4,6 +4,7 @@ import { CurrentClaims } from "../auth/current-claims.decorator";
 import type { RequestClaims } from "../database/tenant-context";
 import { SystemAdminService } from "./system-admin.service";
 import { AssignSystemAdminRoleDto } from "./dto/assign-system-admin-role.dto";
+import { ResetEmployeePasswordDto } from "./dto/reset-employee-password.dto";
 
 /**
  * Any real session can call these — same posture as every other module
@@ -34,6 +35,13 @@ export class SystemAdminController {
   @Post("role-assignments")
   assignRole(@CurrentClaims() claims: RequestClaims, @Body() dto: AssignSystemAdminRoleDto) {
     return this.systemAdmin.assignRole(claims, dto);
+  }
+
+  /** Sets a new temporary password for an employee's login (and signs them out everywhere). */
+  @Post("users/:employeeId/reset-password")
+  async resetPassword(@CurrentClaims() claims: RequestClaims, @Param("employeeId") employeeId: string, @Body() dto: ResetEmployeePasswordDto) {
+    await this.systemAdmin.resetPassword(claims, employeeId, dto.newPassword);
+    return { message: "Password changed." };
   }
 
   @Delete("role-assignments/:id")

@@ -12,6 +12,7 @@ import type {
 } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
+import { ResetPasswordControl } from "../shared/ResetPasswordControl";
 import { EmployeeFields } from "./EmployeeFields";
 import { PersonDetailsPanel } from "./PersonDetailsPanel";
 import { emptiedFields } from "./employeeEditDiff";
@@ -678,7 +679,10 @@ function LoginSection({
           <code className="block bg-white rounded px-2 py-1">{createdCredential.password}</code>
         </div>
       ) : employee.userAccountId ? (
-        <p className="text-sm text-label-secondary">This employee already has a login.</p>
+        <div>
+          <p className="text-sm text-label-secondary">This employee already has a login.</p>
+          <ResetPasswordControl employeeId={employee.id} employeeName={`${employee.firstName} ${employee.lastName}`} />
+        </div>
       ) : creating ? (
         <form onSubmit={handleCreate} className="space-y-3 bg-black/5 rounded-lg p-3">
           {!employee.email && (

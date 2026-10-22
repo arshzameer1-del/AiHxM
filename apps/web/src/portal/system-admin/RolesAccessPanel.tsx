@@ -2,6 +2,7 @@ import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import type { AssignableUserView, Role, SystemAdminRoleAssignmentView, TenantRoleKey } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
+import { ResetPasswordControl } from "../shared/ResetPasswordControl";
 
 const ROLE_LABELS: Record<TenantRoleKey, string> = {
   hr_admin: "HR Admin",
@@ -232,6 +233,7 @@ function UserRow({
       )}
 
       {user.hasLogin && <AssignRoleControl user={user} roles={roles} onChanged={onChanged} />}
+      {user.hasLogin && <ResetPasswordControl employeeId={user.employeeId} employeeName={user.fullName} />}
     </div>
   );
 }

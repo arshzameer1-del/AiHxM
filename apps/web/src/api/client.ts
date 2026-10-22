@@ -2937,6 +2937,9 @@ export const api = {
   setCustomRoleActive: (roleId: string, isActive: boolean) =>
     request<Role>(`/rbac/roles/${encodeURIComponent(roleId)}/${isActive ? "activate" : "deactivate"}`, { method: "POST" }),
 
+  resetEmployeePassword: (employeeId: string, newPassword: string) =>
+    request<{ message: string }>(`/system-admin/users/${encodeURIComponent(employeeId)}/reset-password`, { method: "POST", body: JSON.stringify({ newPassword }) }),
+
   listAssignableUsers: () => request<AssignableUserView[]>("/system-admin/assignable-users"),
 
   listSystemAdminRoleAssignments: () => request<SystemAdminRoleAssignmentView[]>("/system-admin/role-assignments"),

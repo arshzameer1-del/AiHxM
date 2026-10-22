@@ -1,5 +1,5 @@
 import { test, expect, Page } from "@playwright/test";
-import { getSharedSession, loginToApp } from "../../e2e-support/real-session";
+import { API_BASE_URL, getSharedSession, loginToApp } from "../../e2e-support/real-session";
 
 /**
  * System Admin E2E Tests (Task #52, Decision #20)
@@ -142,6 +142,36 @@ test.describe("System Admin Portal (Task #52)", () => {
     const systemAdminRow = page.locator("main .bg-card", { hasText: "E2E system admin" });
     await expect(systemAdminRow).toBeVisible();
     await expect(systemAdminRow.locator("span", { hasText: "System Admin" })).toBeVisible();
+  });
+
+  test("a System Admin resets a colleague's password and sees the new password once", async ({ page }) => {
+    // A throwaway employee with a login, so no shared test session is signed out by the reset.
+    const hr = { Authorization: `Bearer ${getSharedSession("hr_admin")}`, "Content-Type": "application/json" };
+    const stamp = `${Date.now() % 1000000}`;
+    const created = await fetch(`${API_BASE_URL}/employees`, {
+      method: "POST",
+      headers: hr,
+      body: JSON.stringify({ firstName: `Resetme${stamp}`, lastName: "Target", email: `resetme${stamp}@example.com`, employmentType: "permanent", dateOfJoining: "2026-01-01" }),
+    });
+    expect(created.status).toBe(201);
+    const employee = (await created.json()) as { id: string };
+    const login = await fetch(`${API_BASE_URL}/employees/${employee.id}/account`, { method: "POST", headers: hr, body: JSON.stringify({ initialPassword: "Password@123456789", roleKeys: ["employee_self_service"] }) });
+    expect(login.status).toBe(201);
+
+    await loginAsSystemAdmin(page);
+    await page.goto("/app/system-admin");
+    await page.locator("button", { hasText: "Roles & Access" }).click();
+
+    const row = page.locator("main .bg-card", { hasText: `Resetme${stamp}` });
+    await row.getByRole("button", { name: "Reset password" }).click();
+    await row.getByRole("button", { name: "Generate" }).click();
+    const typed = await row.getByLabel(/New temporary password/).inputValue();
+    expect(typed.length).toBeGreaterThanOrEqual(8);
+    await row.getByRole("button", { name: "Set password" }).click();
+    await expect(row.getByRole("status")).toContainText("Password changed for");
+    await expect(row.getByRole("status")).toContainText(typed);
+    await row.getByRole("button", { name: "Done" }).click();
+    await expect(row.getByRole("status")).toHaveCount(0);
   });
 
   test("Portal navigation includes System Admin menu item", async ({ page }) => {
