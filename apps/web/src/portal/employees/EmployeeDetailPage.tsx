@@ -37,6 +37,8 @@ import {
   qualificationsConfig,
 } from "./subentities/subEntityConfigs";
 import { formatDay } from "../shared/dates";
+import { useTheme } from "../../theme/useTheme";
+import { ProfileHero } from "../shared/ProfileHero";
 
 /**
  * Core Employee Enterprise Phases 6-10's frontend catch-up (2026-09-27) —
@@ -48,6 +50,24 @@ import { formatDay } from "../shared/dates";
  * app (plain local `tab` state, `{tab === "X" && (...)}` blocks — no
  * router or tab library) rather than inventing a second convention.
  */
+function titleCase(value: string): string {
+  const text = value.replace(/_/g, " ");
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** "3 yrs 11 mos" from the joining date to today (or to the leaving date). */
+function serviceText(joined: string | null | undefined, left: string | null | undefined): string {
+  if (!joined) return "—";
+  const start = new Date(joined);
+  const end = left ? new Date(left) : new Date();
+  let months = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
+  if (end.getDate() < start.getDate()) months -= 1;
+  if (months < 1) return "Under a month";
+  const years = Math.floor(months / 12);
+  const rest = months % 12;
+  return [years ? `${years} yr${years === 1 ? "" : "s"}` : "", rest ? `${rest} mo${rest === 1 ? "" : "s"}` : ""].filter(Boolean).join(" ");
+}
+
 const TABS = ["Overview", "Personal Details", "Contact & Address", "Family & Education", "Compensation & Assets", "Lifecycle Actions"] as const;
 type Tab = (typeof TABS)[number];
 
@@ -67,6 +87,7 @@ const ROLE_LABELS: Record<TenantRoleKey, string> = {
 export function EmployeeDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { identity } = useAuth();
+  const theme = useTheme();
   const [employee, setEmployee] = useState<EmployeeView | null>(null);
   const [jobHistory, setJobHistory] = useState<JobHistoryEntryView[] | null>(null);
   const [costCenters, setCostCenters] = useState<CostCenterView[]>([]);
@@ -135,17 +156,43 @@ export function EmployeeDetailPage() {
 
   return (
     <div className="max-w-4xl">
-      <div className="flex items-start justify-between mb-1">
-        <h1 className="text-2xl font-bold tracking-tight">
-          {employee.firstName} {employee.lastName}
-        </h1>
-        {canManage && tab === "Overview" && !editing && (
-          <button onClick={() => setEditing(true)} className="text-sm font-semibold text-accent hover:underline">
-            Edit
-          </button>
-        )}
-      </div>
-      <p className="text-label-tertiary text-sm font-mono mb-4">{employee.employeeNumber}</p>
+      {theme === "onexd" ? (
+        <div className="mb-5">
+          <ProfileHero
+            name={`${employee.firstName} ${employee.lastName}`}
+            badge={employee.employeeNumber}
+            title={employee.designation}
+            line={[employee.department, employee.location].filter(Boolean).join(" / ")}
+            facts={[
+              { label: "Joined", value: formatDay(employee.dateOfJoining, "—") },
+              { label: "Service", value: serviceText(employee.dateOfJoining, employee.terminationDate) },
+              { label: "Type", value: titleCase(employee.employmentType) },
+              { label: "Status", value: titleCase(employee.employmentStatus), dot: employee.employmentStatus === "active" ? "on" : "off" },
+            ]}
+            actions={
+              canManage && tab === "Overview" && !editing ? (
+                <button onClick={() => setEditing(true)} className="ws-hero-button">
+                  Edit
+                </button>
+              ) : undefined
+            }
+          />
+        </div>
+      ) : (
+        <>
+          <div className="flex items-start justify-between mb-1">
+            <h1 className="text-2xl font-bold tracking-tight">
+              {employee.firstName} {employee.lastName}
+            </h1>
+            {canManage && tab === "Overview" && !editing && (
+              <button onClick={() => setEditing(true)} className="text-sm font-semibold text-accent hover:underline">
+                Edit
+              </button>
+            )}
+          </div>
+          <p className="text-label-tertiary text-sm font-mono mb-4">{employee.employeeNumber}</p>
+        </>
+      )}
 
       <div className="flex gap-1 border-b border-black/10 mb-4 overflow-x-auto">
         {TABS.map((t) => (

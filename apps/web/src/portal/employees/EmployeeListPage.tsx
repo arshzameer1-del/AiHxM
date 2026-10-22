@@ -5,6 +5,8 @@ import type { EmployeeView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { compareEmployeeNumbers } from "./employeeNumberOrder";
+import { StatTile } from "../../components/StatTile";
+import { Building2, CalendarPlus, UserCheck, Users } from "lucide-react";
 
 /**
  * Employees = maintenance of the people already hired (directory, records, profiles, lifecycle). Hiring itself (guided
@@ -43,6 +45,11 @@ export function EmployeeListPage() {
     });
   }, [employees, search, status]);
 
+  const total = employees?.length ?? 0;
+  const activeCount = (employees ?? []).filter((e) => e.employmentStatus === "active").length;
+  const departmentCount = new Set((employees ?? []).map((e) => e.department).filter(Boolean)).size;
+  const newlyHired = (employees ?? []).filter((e) => e.dateOfJoining && Date.now() - new Date(e.dateOfJoining).getTime() < 30 * 86400000).length;
+
   return (
     <div>
       <div className="flex items-start justify-between mb-6">
@@ -57,6 +64,15 @@ export function EmployeeListPage() {
       </div>
 
       {error && <div className="text-danger text-sm mb-4">{error}</div>}
+
+      {employees && employees.length > 0 && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5" data-testid="emp-tiles">
+          <StatTile icon={Users} value={total} label="All employees" active={status === "all"} onClick={() => setStatus("all")} />
+          <StatTile icon={UserCheck} value={activeCount} label="Active" active={status === "active"} onClick={() => setStatus("active")} />
+          <StatTile icon={CalendarPlus} value={newlyHired} label="Joined in 30 days" />
+          <StatTile icon={Building2} value={departmentCount} label="Departments" />
+        </div>
+      )}
 
       {!error && !employees && <LoadingNote />}
 
