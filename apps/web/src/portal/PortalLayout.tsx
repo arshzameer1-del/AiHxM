@@ -25,6 +25,7 @@ import type { ModuleKey, PublicTenantBranding, TenantRoleKey } from "@aihxm/shar
 import { api, prefetchRoute, publicTenantBrandingAssetUrl, startKeepWarm, warmForRoles } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Topbar, type QuickJumpItem } from "../components/shell/Topbar";
+import { hueOf } from "../components/shell/hue";
 import { RAIL_CONTAINER_CLASS, RAIL_GROUP_CHILDREN_CLASS, railChildClass, railLinkClass } from "../components/shell/sidebarTheme";
 import { SidebarToggle } from "../components/shell/SidebarToggle";
 import { useSidebar } from "../components/shell/useSidebar";
@@ -314,6 +315,16 @@ function PortalMark({ companySlug, companyName }: { companySlug: string | null; 
  * renders a group; every flat `NavItem` still renders as a single
  * `NavLink`, unchanged from before this phase.
  */
+/** The menu icon. A plain icon in the other themes; in One exD it sits in a small tinted chip (the active page's chip is solid). */
+function NavIcon({ icon: Icon, label }: { icon?: LucideIcon; label: string }) {
+  if (!Icon) return null;
+  return (
+    <span className="hue-chip rail-ic shrink-0" data-hue={hueOf(label)}>
+      <Icon size={20} strokeWidth={1.75} className="shrink-0" />
+    </span>
+  );
+}
+
 function NavGroup({ item, onNavigate }: { item: NavItem & { children: NavItem[] }; onNavigate: () => void }) {
   // A group opens by itself when you are on one of its pages; otherwise it stays folded so the menu stays short.
   const { pathname } = useLocation();
@@ -326,7 +337,7 @@ function NavGroup({ item, onNavigate }: { item: NavItem & { children: NavItem[] 
     <div>
       <div className="relative">
         <NavLink to={item.to} end={item.end} className={railLinkClass} title={item.label} onClick={onNavigate} onMouseEnter={() => prefetchRoute(item.to)} onFocus={() => prefetchRoute(item.to)}>
-          {Icon && <Icon size={20} strokeWidth={1.75} className="shrink-0" />}
+          <NavIcon icon={Icon} label={item.label} />
           <span>{item.label}</span>
         </NavLink>
         <button
@@ -477,7 +488,7 @@ export function PortalLayout() {
             const Icon = item.icon;
             return (
               <NavLink key={item.to} to={item.to} end={item.end} className={railLinkClass} title={item.label} onClick={sidebar.closeFloating} onMouseEnter={() => prefetchRoute(item.to)} onFocus={() => prefetchRoute(item.to)}>
-                {Icon && <Icon size={20} strokeWidth={1.75} className="shrink-0" />}
+                <NavIcon icon={Icon} label={item.label} />
                 <span>{item.label}</span>
               </NavLink>
             );

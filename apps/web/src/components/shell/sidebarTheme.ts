@@ -32,12 +32,12 @@ export const RAIL_WIDTH_CLASS = "w-[92px]";
 export const RAIL_CONTAINER_CLASS = `${RAIL_WIDTH_CLASS} shrink-0 bg-sidebar border-r border-sidebar-edge`;
 
 export const railLinkClass = ({ isActive }: { isActive: boolean }) =>
-  `flex flex-col items-center gap-1 px-1.5 py-2 rounded-lg text-[11px] leading-tight font-medium text-center break-words transition-colors ${
+  `rail-link relative flex flex-col items-center gap-1 px-1.5 py-2 rounded-lg text-[11px] leading-tight font-medium text-center break-words transition-colors ${
     isActive ? "bg-sidebar-active/10 text-sidebar-active-fg" : "text-sidebar-fg hover:bg-sidebar-hover/5 hover:text-sidebar-fg-hover"
   }`;
 
 export const railChildClass = ({ isActive }: { isActive: boolean }) =>
-  `block px-1 py-1 rounded-md text-[10.5px] leading-tight text-center break-words transition-colors ${
+  `rail-child block px-1 py-1 rounded-md text-[10.5px] leading-tight text-center break-words transition-colors ${
     isActive ? "bg-sidebar-active/10 text-sidebar-active-fg font-medium" : "text-sidebar-muted hover:bg-sidebar-hover/5 hover:text-sidebar-fg-hover"
   }`;
 

@@ -30,6 +30,7 @@ import type {
 } from "@aihxm/shared-types";
 import { useAuth } from "../auth/AuthContext";
 import { useTheme } from "../theme/useTheme";
+import { hueOf } from "../components/shell/hue";
 import { WorkspaceHero } from "./WorkspaceHero";
 import { api } from "../api/client";
 import { leaveTypeLabel, STATUS_LABELS, STATUS_STYLES } from "./leave/leaveLabels";
@@ -117,7 +118,7 @@ function HomeCardTile({ card }: { card: HomeCard }) {
       to={card.to}
       className="flex flex-col gap-3 bg-card rounded-card p-4 shadow-sm ui-card"
     >
-      <div className="w-10 h-10 rounded-lg bg-accent/10 text-accent flex items-center justify-center">
+      <div className="home-tile-icon hue-chip w-10 h-10 rounded-lg bg-accent/10 text-accent flex items-center justify-center" data-hue={hueOf(card.label)}>
         <Icon size={20} strokeWidth={1.75} />
       </div>
       <div>

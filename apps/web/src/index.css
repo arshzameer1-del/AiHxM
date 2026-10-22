@@ -497,3 +497,164 @@ button.ui-card:focus-visible {
 :root[data-theme="onexd"] img {
   image-rendering: -webkit-optimize-contrast;
 }
+
+/* ==== One exD: icons, menu, fields, headings, tabs, buttons and motion ============================================ */
+.hue-chip { display: inline-flex; align-items: center; justify-content: center; }
+:root[data-theme="onexd"] [data-hue="0"] { --hue: 142 43 92; --hue-ink: 142 43 92; }
+:root[data-theme="onexd"] [data-hue="1"] { --hue: 6 182 212; --hue-ink: 15 140 163; }
+:root[data-theme="onexd"] [data-hue="2"] { --hue: 236 72 153; --hue-ink: 190 62 124; }
+:root[data-theme="onexd"] [data-hue="3"] { --hue: 99 102 241; --hue-ink: 86 85 191; }
+:root[data-theme="onexd"] [data-hue="4"] { --hue: 20 184 166; --hue-ink: 24 143 129; }
+:root[data-theme="onexd"] [data-hue="5"] { --hue: 249 115 22; --hue-ink: 194 92 20; }
+
+/* Icon chips: a 30px rounded square tinted with the item's colour. */
+:root[data-theme="onexd"] .hue-chip.rail-ic {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: rgb(var(--hue) / 0.14);
+  color: rgb(var(--hue-ink));
+  transition: transform 0.2s cubic-bezier(0.22, 0.8, 0.24, 1), background-color 0.2s, color 0.2s;
+}
+:root[data-theme="onexd"] .hue-chip.home-tile-icon {
+  background: rgb(var(--hue) / 0.14);
+  color: rgb(var(--hue-ink));
+  transition: transform 0.2s cubic-bezier(0.22, 0.8, 0.24, 1);
+}
+
+/* Menu: the current page gets a soft pink row, a solid plum chip and a bar on the left edge. */
+:root[data-theme="onexd"] .rail-link {
+  border-radius: 12px;
+  transition: background-color 0.2s cubic-bezier(0.22, 0.8, 0.24, 1), color 0.2s;
+}
+:root[data-theme="onexd"] .rail-link:hover .rail-ic { transform: translateY(-1px) scale(1.06); }
+:root[data-theme="onexd"] .rail-link[aria-current="page"] {
+  background: linear-gradient(90deg, #fbdeec, #fdf4f8);
+  color: #2c2021;
+  font-weight: 600;
+}
+:root[data-theme="onexd"] .rail-link[aria-current="page"] .rail-ic {
+  background: linear-gradient(140deg, #8e2b5c, #631e40);
+  color: #fff;
+  box-shadow: 0 6px 12px -6px #631e40;
+}
+:root[data-theme="onexd"] .rail-link[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 3px;
+  background: #ec4899;
+  transform-origin: center;
+}
+:root[data-theme="onexd"] .rail-child[aria-current="page"] { color: #be3e7c; background: #fdf4f8; }
+
+/* Fields: soft border, warm fill, a clear purple glow on focus. */
+:root[data-theme="onexd"] :is(input, select, textarea):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]) {
+  border-color: #e2dadb;
+  background-color: #fffdfd;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+}
+:root[data-theme="onexd"] :is(input, select, textarea):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):hover {
+  border-color: rgb(113 99 158 / 0.55);
+}
+:root[data-theme="onexd"] :is(input, select, textarea):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):focus {
+  border-color: #71639e;
+  background-color: #fff;
+  box-shadow: 0 0 0 4px rgb(113 99 158 / 0.16);
+  outline: none;
+}
+:root[data-theme="onexd"] :is(input, select, textarea)[aria-invalid="true"] {
+  border-color: rgb(var(--c-danger));
+  box-shadow: 0 0 0 4px rgb(var(--c-danger) / 0.12);
+}
+:root[data-theme="onexd"] :is(input, select, textarea):disabled,
+:root[data-theme="onexd"] :is(input, select, textarea)[readonly] {
+  background-color: #f6f3f4;
+  color: rgb(var(--c-label-secondary));
+}
+:root[data-theme="onexd"] label { color: rgb(var(--c-label-secondary)); letter-spacing: 0.005em; }
+:root[data-theme="onexd"] input[type="checkbox"],
+:root[data-theme="onexd"] input[type="radio"] { accent-color: #71639e; }
+
+/* Headings inside cards: a pink bar before the title; small caps headings in rose. */
+:root[data-theme="onexd"] .app-main .rounded-card > h2:not(.uppercase)::before,
+:root[data-theme="onexd"] .app-main .rounded-card > div > h2:not(.uppercase)::before {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 1em;
+  margin-right: 10px;
+  border-radius: 2px;
+  background: #ec4899;
+  vertical-align: -0.12em;
+  transform-origin: top;
+}
+:root[data-theme="onexd"] .app-main h2.uppercase,
+:root[data-theme="onexd"] .app-main h3.uppercase { color: #be3e7c; font-weight: 700; }
+
+/* Tabs: rose text and an underline under the open one. */
+:root[data-theme="onexd"] [role="tablist"] [role="tab"] { transition: color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease; }
+:root[data-theme="onexd"] [role="tablist"] [role="tab"][aria-selected="true"] { color: #be3e7c; }
+:root[data-theme="onexd"] [role="tablist"] [role="tab"]:hover:not([aria-selected="true"]) { background-color: rgb(113 99 158 / 0.07); }
+
+/* Buttons: plum gradient, lift on hover, press on click. */
+:root[data-theme="onexd"] :is(button, a, label).bg-accent.text-white {
+  background-image: linear-gradient(135deg, #7d6eb0 0%, #5d5085 100%);
+  box-shadow: 0 8px 16px -10px #5d5085;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, filter 0.16s ease;
+}
+:root[data-theme="onexd"] :is(button, a, label).bg-accent.text-white:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+  box-shadow: 0 12px 20px -10px #5d5085;
+}
+:root[data-theme="onexd"] :is(button, a, label).bg-accent.text-white:active:not(:disabled) { transform: translateY(0) scale(0.98); }
+
+/* Tables: row hover tint and small-caps column heads. */
+:root[data-theme="onexd"] .app-main tbody tr { transition: background-color 0.15s ease; }
+:root[data-theme="onexd"] .app-main tbody tr:hover { background-color: rgb(113 99 158 / 0.05); }
+:root[data-theme="onexd"] .app-main thead th { font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; color: #be3e7c; }
+
+/* Header status dot with a ping. */
+.ws-dot { display: inline-block; width: 8px; height: 8px; margin-right: 7px; border-radius: 50%; position: relative; }
+.ws-dot-on { background: #4ade80; }
+.ws-dot-off { background: #fbbf24; }
+
+@keyframes ws-grow-y { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes ws-ping { 0% { transform: scale(1); opacity: 0.7; } 80%, 100% { transform: scale(2.6); opacity: 0; } }
+@keyframes ws-grow-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+@media (prefers-reduced-motion: no-preference) {
+  .ws-dot::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: inherit; animation: ws-ping 1.8s ease-out infinite; }
+  /* Page content eases in one block after another on every page. */
+  :root[data-theme="onexd"] .app-main > * { animation: ws-rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+  :root[data-theme="onexd"] .app-main > *:nth-child(2) { animation-delay: 0.05s; }
+  :root[data-theme="onexd"] .app-main > *:nth-child(3) { animation-delay: 0.1s; }
+  :root[data-theme="onexd"] .app-main > *:nth-child(4) { animation-delay: 0.15s; }
+  :root[data-theme="onexd"] .app-main > *:nth-child(5) { animation-delay: 0.2s; }
+  :root[data-theme="onexd"] .app-main > *:nth-child(n + 6) { animation-delay: 0.25s; }
+  /* Menu chips pop in; the active bar grows. */
+  :root[data-theme="onexd"] .rail-ic { animation: ws-pop 0.4s cubic-bezier(0.2, 0.9, 0.3, 1.3) both; }
+  :root[data-theme="onexd"] .rail-link[aria-current="page"]::before { animation: ws-grow-y 0.35s cubic-bezier(0.22, 0.8, 0.24, 1) both; }
+  /* Card titles: the pink bar grows down. */
+  :root[data-theme="onexd"] .app-main .rounded-card > h2:not(.uppercase)::before,
+  :root[data-theme="onexd"] .app-main .rounded-card > div > h2:not(.uppercase)::before { animation: ws-grow-y 0.5s cubic-bezier(0.22, 0.8, 0.24, 1) 0.2s both; }
+  /* Tabs: underline grows from the left. */
+  :root[data-theme="onexd"] [role="tablist"] [role="tab"][aria-selected="true"] { position: relative; }
+  :root[data-theme="onexd"] [role="tablist"] [role="tab"][aria-selected="true"]::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -1px;
+    height: 2px;
+    background: #ec4899;
+    transform-origin: left;
+    animation: ws-grow-x 0.3s ease-out both;
+  }
+  /* Tile icons turn a little on hover. */
+  :root[data-theme="onexd"] a:hover > .home-tile-icon { transform: scale(1.1) rotate(-5deg); }
+}

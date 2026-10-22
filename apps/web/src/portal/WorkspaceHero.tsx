@@ -81,9 +81,9 @@ export function WorkspaceHero({
   }, [employeeId]);
 
   const jobLine = [employee?.designation, employee?.department].filter(Boolean).join(" / ") || companyName || "";
-  const facts: { label: string; value: string }[] = [
+  const facts: { label: string; value: string; dot?: "on" | "off" }[] = [
     { label: "Today", value: todayText(now) },
-    ...(statusText ? [{ label: "Status", value: statusText }] : []),
+    ...(statusText ? [{ label: "Status", value: statusText, dot: (todayRow?.open ? "on" : "off") as "on" | "off" }] : []),
     ...(employeeId ? [{ label: "Manager", value: managerName ?? "—" }] : []),
     { label: "Work email", value: employee?.email ?? email },
   ];
@@ -104,7 +104,7 @@ export function WorkspaceHero({
           {facts.map((f) => (
             <div key={f.label} className="ws-hero-fact">
               <dt>{f.label}</dt>
-              <dd>{f.value}</dd>
+              <dd>{f.dot && <span className={`ws-dot ws-dot-${f.dot}`} aria-hidden="true" />}{f.value}</dd>
             </div>
           ))}
         </dl>
