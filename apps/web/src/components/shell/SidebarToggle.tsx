@@ -1,13 +1,14 @@
 import { Menu, Pin, PinOff } from "lucide-react";
 
 /** The two buttons in the top-left corner: show/hide the side menu, and pin it open. */
-export function SidebarToggle({ visible, pinned, onToggle, onTogglePin }: { visible: boolean; pinned: boolean; onToggle: () => void; onTogglePin: () => void }) {
-  const button = "w-9 h-9 rounded-lg flex items-center justify-center text-label-secondary hover:bg-surface hover:text-label-primary transition-colors";
+export function SidebarToggle({ visible, pinned, canPin, onToggle, onTogglePin }: { visible: boolean; pinned: boolean; canPin: boolean; onToggle: () => void; onTogglePin: () => void }) {
+  const button = "w-9 h-9 rounded-lg flex items-center justify-center text-label-secondary hover:bg-surface hover:text-label-primary transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/50";
   return (
     <div className="h-16 shrink-0 bg-card border-b border-border flex items-center gap-0.5 pl-3 pr-1">
       <button type="button" onClick={onToggle} aria-label={visible ? "Close menu" : "Open menu"} aria-expanded={visible} aria-controls="app-sidebar" className={button}>
         <Menu size={20} strokeWidth={1.75} />
       </button>
+      {canPin && (
       <button
         type="button"
         onClick={onTogglePin}
@@ -18,6 +19,7 @@ export function SidebarToggle({ visible, pinned, onToggle, onTogglePin }: { visi
       >
         {pinned ? <PinOff size={17} strokeWidth={1.75} /> : <Pin size={17} strokeWidth={1.75} />}
       </button>
+      )}
     </div>
   );
 }

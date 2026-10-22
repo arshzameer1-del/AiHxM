@@ -1,6 +1,6 @@
 import { hasAnyRoleKey } from "./shared/roles";
 import { useEffect, useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   type LucideIcon,
   Home,
@@ -315,7 +315,11 @@ function PortalMark({ companySlug, companyName }: { companySlug: string | null; 
  * `NavLink`, unchanged from before this phase.
  */
 function NavGroup({ item, onNavigate }: { item: NavItem & { children: NavItem[] }; onNavigate: () => void }) {
-  const [expanded, setExpanded] = useState(true);
+  // A group opens by itself when you are on one of its pages; otherwise it stays folded so the menu stays short.
+  const { pathname } = useLocation();
+  const inGroup = [item, ...item.children].some((entry) => (entry.end ? pathname === entry.to : pathname === entry.to || pathname.startsWith(`${entry.to}/`)));
+  const [manual, setManual] = useState<boolean | null>(null);
+  const expanded = manual ?? inGroup;
   const Icon = item.icon;
 
   return (
@@ -327,10 +331,10 @@ function NavGroup({ item, onNavigate }: { item: NavItem & { children: NavItem[] 
         </NavLink>
         <button
           type="button"
-          onClick={() => setExpanded((current) => !current)}
+          onClick={() => setManual(!expanded)}
           aria-expanded={expanded}
           aria-label={expanded ? `Collapse ${item.label}` : `Expand ${item.label}`}
-          className="absolute top-0.5 right-0.5 w-4 h-4 text-[9px] leading-none text-sidebar-muted hover:text-sidebar-fg-hover"
+          className="absolute top-0 right-0 w-6 h-6 flex items-center justify-center text-[10px] leading-none text-sidebar-muted hover:text-sidebar-fg-hover rounded-md"
         >
           <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>
         </button>
@@ -459,7 +463,7 @@ export function PortalLayout() {
 
   const menu = (
     <aside id="app-sidebar" className={`${RAIL_CONTAINER_CLASS} ${sidebar.floating ? "shadow-xl" : ""}`}>
-      <div className="sticky top-0 max-h-screen overflow-y-auto px-1.5 py-4">
+      <div className="sticky top-0 max-h-[calc(100dvh-4rem)] overflow-y-auto no-scrollbar px-1.5 py-3">
         <div className="px-1 mb-4 text-center">
           <PortalMark companySlug={identity?.companySlug ?? null} companyName={identity?.companyName ?? null} />
           <div className="text-[10px] text-sidebar-muted truncate mt-1" title={identity?.companyName ?? undefined}>{identity?.companyName ?? "Your company"}</div>
@@ -488,7 +492,7 @@ export function PortalLayout() {
       {impersonation && <ImpersonationBanner impersonation={impersonation} endImpersonation={endImpersonation} />}
 
       <div className="flex shrink-0">
-        <SidebarToggle visible={sidebar.visible} pinned={sidebar.pinned} onToggle={sidebar.toggle} onTogglePin={sidebar.togglePin} />
+        <SidebarToggle visible={sidebar.visible} pinned={sidebar.pinned} canPin={!sidebar.narrow} onToggle={sidebar.toggle} onTogglePin={sidebar.togglePin} />
         <div className="flex-1 min-w-0">
           <Topbar
             items={flattenNavItems(navItems)}

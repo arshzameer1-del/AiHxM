@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 const PINNED_KEY = "aihxm.sidebarPinned";
 
@@ -18,6 +18,16 @@ function writePinned(value: boolean): void {
   }
 }
 
+const NARROW_QUERY = "(max-width: 767px)";
+
+function readNarrow(): boolean {
+  try {
+    return window.matchMedia(NARROW_QUERY).matches;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The side menu is closed until someone opens it. Open and unpinned it floats over the page and closes again after a choice or a click
  * outside; pinned it is docked beside the page and stays open (and is remembered for the next visit).
@@ -25,6 +35,19 @@ function writePinned(value: boolean): void {
 export function useSidebar() {
   const [pinned, setPinned] = useState(readPinned);
   const [open, setOpen] = useState(false);
+  // On a phone-width screen a docked menu would take too much room, so there it is always a floating menu (no pin).
+  const [narrow, setNarrow] = useState(readNarrow);
+  useEffect(() => {
+    let query: MediaQueryList;
+    try {
+      query = window.matchMedia(NARROW_QUERY);
+    } catch {
+      return;
+    }
+    const onChange = () => setNarrow(query.matches);
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
+  }, []);
 
   /** The 3-line button: shows the menu when hidden, hides it (and unpins it) when shown. */
   const toggle = useCallback(() => {
@@ -53,5 +76,6 @@ export function useSidebar() {
   /** Closes the floating menu; a pinned menu stays. */
   const closeFloating = useCallback(() => setOpen(false), []);
 
-  return { pinned, docked: pinned, floating: !pinned && open, visible: pinned || open, toggle, togglePin, closeFloating };
+  const docked = pinned && !narrow;
+  return { pinned, narrow, docked, floating: !docked && open, visible: docked || open, toggle, togglePin, closeFloating };
 }

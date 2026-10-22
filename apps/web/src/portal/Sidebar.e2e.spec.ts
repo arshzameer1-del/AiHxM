@@ -66,4 +66,25 @@ test.describe("Side menu", () => {
     await page.reload();
     await expect(page.locator("#app-sidebar")).toHaveCount(0);
   });
+
+  test("groups stay folded until you are inside them or open them", async ({ page }) => {
+    await loginToApp(page, getSharedSession("hr_admin"));
+    const menu = page.locator("#app-sidebar");
+    // On Home the Employees group is folded: its sub-pages are not listed.
+    await expect(menu.getByRole("link", { name: "Directory" })).toHaveCount(0);
+    await menu.getByRole("button", { name: "Expand Employees" }).click();
+    await expect(menu.getByRole("link", { name: "Directory" })).toBeVisible();
+    await menu.getByRole("button", { name: "Collapse Employees" }).click();
+    await expect(menu.getByRole("link", { name: "Directory" })).toHaveCount(0);
+  });
+
+  test("on a phone-width screen the menu always floats and there is no pin", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 800 });
+    await loginToApp(page, getSharedSession("hr_admin"), { menuPinned: false });
+    await expect(page.locator("#app-sidebar")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Pin menu open|Unpin menu/ })).toHaveCount(0);
+    await page.getByRole("button", { name: "Open menu" }).click();
+    await expect(page.locator("#app-sidebar")).toBeVisible();
+    await page.screenshot({ path: "/tmp/sidebar-mobile.png" });
+  });
 });

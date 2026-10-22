@@ -236,5 +236,7 @@ export async function loginToApp(page: Page, token: string, opts: { menuPinned?:
     else localStorage.removeItem("aihxm.sidebarPinned");
   }, [token, pinned ? "1" : ""] as [string, string]);
   await page.goto("/app");
-  await page.waitForSelector(pinned ? "nav" : 'button[aria-label="Open menu"]', { timeout: 10000 });
+  // A pinned menu is docked (its <nav> is on the page) except on phone-width screens, where the menu always floats.
+  const docked = pinned && (page.viewportSize()?.width ?? 1280) >= 768;
+  await page.waitForSelector(docked ? "nav" : 'button[aria-label="Open menu"]', { timeout: 10000 });
 }

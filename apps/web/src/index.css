@@ -294,3 +294,8 @@ button.ui-card:focus-visible {
     transition: none;
   }
 }
+
+
+/* Side menu: scrolls without a visible scrollbar. */
+.no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }

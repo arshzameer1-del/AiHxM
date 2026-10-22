@@ -42,7 +42,8 @@ test.describe("Employees and Hire are separate", () => {
     // Employees group: directory and analytics only.
     await expect(nav.getByRole("link", { name: "Directory" })).toBeVisible();
     await expect(nav.getByRole("link", { name: "Workforce Analytics" })).toBeVisible();
-    // Hire group: the three ways of hiring.
+    // Hire group: the three ways of hiring (a group is folded until you are inside it or open it).
+    await nav.getByRole("button", { name: "Expand Hire" }).click();
     await expect(nav.getByRole("link", { name: "Guided Hire" })).toHaveAttribute("href", "/app/hire");
     await expect(nav.getByRole("link", { name: "Quick Add" })).toHaveAttribute("href", "/app/hire/quick");
     await expect(nav.getByRole("link", { name: "Bulk Hiring" })).toHaveAttribute("href", "/app/hire/bulk");
