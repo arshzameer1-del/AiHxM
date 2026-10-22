@@ -78,6 +78,7 @@ export function PayrollRunControlPanel({
   const [error, setError] = useState<string | null>(null);
   const [reasonFor, setReasonFor] = useState<"reopen" | "cancel" | null>(null);
   const [reason, setReason] = useState("");
+  const [noticeResult, setNoticeResult] = useState<string | null>(null);
   const [ovEmployee, setOvEmployee] = useState("");
   const [ovField, setOvField] = useState<PayrollOverridableField>("incomeTaxMonthly");
   const [ovValue, setOvValue] = useState("");
@@ -87,6 +88,7 @@ export function PayrollRunControlPanel({
   const canPreValidate = canPrepare && (run.status === "draft" || run.status === "pre_validated");
   const canValidate = canPrepare && (run.status === "calculated" || run.status === "validated");
   const canClose = canPrepare && run.status === "finalized";
+  const canNotify = canPrepare && !run.isSimulation && isPostFinalRunStatus(run.status);
   const canReopen = canPrepare && run.status === "closed";
   const canCancel = canPrepare && !isPostFinalRunStatus(run.status) && run.status !== "cancelled" && run.status !== "reversed" && run.status !== "calculating";
 
@@ -196,6 +198,26 @@ export function PayrollRunControlPanel({
             Validate
           </button>
         )}
+        {canNotify && (
+          <button
+            onClick={() =>
+              act(async () => {
+                if (!window.confirm("Email every employee on this run that their payslip is ready? The email has no pay details, and each person is told only once.")) return;
+                const r = await api.notifyPayrollPayslips(run.id);
+                const parts = [`${r.sent} emailed`];
+                if (r.alreadySent) parts.push(`${r.alreadySent} already told`);
+                if (r.notPublished) parts.push(`${r.notPublished} not published yet`);
+                if (r.noEmail.length) parts.push(`no email address: ${r.noEmail.join(", ")}`);
+                if (r.failed.length) parts.push(`could not be delivered: ${r.failed.join(", ")}`);
+                setNoticeResult(parts.join(" · "));
+              }, "Could not send the payslip emails.")
+            }
+            disabled={busy}
+            className="font-semibold text-accent hover:underline disabled:opacity-50"
+          >
+            Email payslip notices
+          </button>
+        )}
         {canClose && (
           <button
             onClick={() =>
@@ -246,6 +268,7 @@ export function PayrollRunControlPanel({
       )}
 
       {error && <p className="text-xs text-danger mt-2">{error}</p>}
+      {noticeResult && <p className="text-xs text-success mt-2" role="status">Payslip notices: {noticeResult}</p>}
 
       {findings && (
         <div className="mt-2 rounded-lg bg-black/5 p-3 text-xs space-y-1">

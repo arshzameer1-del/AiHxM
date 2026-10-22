@@ -30,6 +30,19 @@ const TEMPLATES: Record<string, TemplateRenderer> = {
       "This link expires shortly. If you didn't request this, you can safely ignore this email — your password hasn't been changed.",
     ].join("\n"),
   }),
+  // Never carries an amount: salary details stay behind the sign-in.
+  payslip_ready: (payload) => ({
+    subject: `Your payslip for ${payload.period ?? "this period"} is ready`,
+    text: [
+      `Hello ${payload.employeeName ?? ""},`.replace(" ,", ","),
+      "",
+      `Your payslip for ${payload.period ?? "this period"} is ready to view.`,
+      "",
+      `Sign in to see it: ${payload.loginUrl ?? ""}`,
+      "",
+      "For your privacy this email does not include any pay details.",
+    ].join("\n"),
+  }),
 };
 
 /** Every template not explicitly listed above still gets a real, legible email — never a throw, never a blank body. */

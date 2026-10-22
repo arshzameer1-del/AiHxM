@@ -7,6 +7,10 @@ import { PayrollPaymentsController } from "./payroll-payments.controller";
 import { PayrollPaymentsService } from "./payroll-payments.service";
 import { PayrollReconciliationService } from "./payroll-reconciliation.service";
 import { PayrollAccountingController } from "./payroll-accounting.controller";
+import { NotificationsModule } from "../notifications/notifications.module";
+import { MailerModule } from "../mailer/mailer.module";
+import { PayrollPayslipNoticesController } from "./payroll-payslip-notices.controller";
+import { PayrollPayslipNoticesService } from "./payroll-payslip-notices.service";
 import { PayrollStatutoryReportsController } from "./payroll-statutory-reports.controller";
 import { PayrollStatutoryReportsService } from "./payroll-statutory-reports.service";
 import { PayrollAccountingService } from "./payroll-accounting.service";
@@ -87,6 +91,8 @@ import { EmployeeGroupsModule } from "../employee-groups/employee-groups.module"
     EmployeesModule,
     HrAdministrationModule,
     EmployeeGroupsModule,
+    NotificationsModule,
+    MailerModule,
   ],
   // Payroll Areas (0101_payroll_areas.sql) — needs only RbacModule/
   // EntitlementsModule/AuditModule, all already imported above.
@@ -95,8 +101,8 @@ import { EmployeeGroupsModule } from "../employee-groups/employee-groups.module"
   // the boolean-only RulesEngine; see its header). PayrollFormulaService
   // resolves/evaluates overrides inside calculateRun(); the Overrides
   // service/controller manage them. All reuse modules already imported above.
-  controllers: [PayrollController, PayrollPaymentsController, PayrollSchemesController, PayrollAccountingController, PayrollStatutoryReportsController, PayrollDocumentsController, PayslipDesignController, PayrollBenefitsController, PayrollOperationsController, PayrollAreasController, PayrollPeriodsController, PayrollFormulaOverridesController, PayrollTaxController],
-  providers: [PayrollService, PayrollRunControlService, PayrollAreasService, PayrollPeriodsService, FormulaExpressionEngine, PayrollFormulaService, PayrollFormulaOverridesService, PayrollCalculationWorker, PayrollRetroService, PayrollTaxService, PayrollPaymentsService, PayrollReconciliationService, PayrollSchemesService, PayrollFinalSettlementService, PayrollAccountingService, PayrollStatutoryReportsService, PayrollDocumentsService, PayslipDesignService, PayrollBenefitsService, PayrollDashboardService, PayrollInputImportService, PayrollInputImportWorker],
+  controllers: [PayrollController, PayrollPaymentsController, PayrollSchemesController, PayrollAccountingController, PayrollStatutoryReportsController, PayrollPayslipNoticesController, PayrollDocumentsController, PayslipDesignController, PayrollBenefitsController, PayrollOperationsController, PayrollAreasController, PayrollPeriodsController, PayrollFormulaOverridesController, PayrollTaxController],
+  providers: [PayrollService, PayrollRunControlService, PayrollAreasService, PayrollPeriodsService, FormulaExpressionEngine, PayrollFormulaService, PayrollFormulaOverridesService, PayrollCalculationWorker, PayrollRetroService, PayrollTaxService, PayrollPaymentsService, PayrollReconciliationService, PayrollSchemesService, PayrollFinalSettlementService, PayrollAccountingService, PayrollStatutoryReportsService, PayrollPayslipNoticesService, PayrollDocumentsService, PayslipDesignService, PayrollBenefitsService, PayrollDashboardService, PayrollInputImportService, PayrollInputImportWorker],
   exports: [PayrollService, PayrollAccountingService, PayrollDocumentsService, PayslipDesignService, PayrollBenefitsService, PayrollDashboardService, PayrollInputImportService, PayrollSchemesService, PayrollFinalSettlementService, PayrollPaymentsService, PayrollReconciliationService, PayrollRetroService, PayrollTaxService, PayrollRunControlService, PayrollAreasService, PayrollPeriodsService],
 })
 export class PayrollModule {}

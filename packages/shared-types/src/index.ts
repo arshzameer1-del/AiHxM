@@ -6113,6 +6113,20 @@ export type PayrollRunVarianceView = {
   rows: PayrollVarianceRowView[];
 };
 
+/** What emailing a finalised run's payslip notices did. The emails never contain amounts. */
+export type PayrollPayslipNoticeResult = {
+  payrollRunId: string;
+  sent: number;
+  /** people who were already told about this run's payslip */
+  alreadySent: number;
+  /** people whose payslip is not published to them yet, so telling them would be premature */
+  notPublished: number;
+  /** employee numbers with no email address on file */
+  noEmail: string[];
+  /** employee numbers whose email could not be delivered */
+  failed: string[];
+};
+
 export type PayrollStatutoryReportKind = "income_tax" | "eobi" | "social_security";
 
 export type PayrollStatutoryReportRowView = {

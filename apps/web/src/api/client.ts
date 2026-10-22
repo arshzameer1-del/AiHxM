@@ -136,6 +136,7 @@ import type {
   CreatePayrollAreaRequest,
   CreatePayrollRunRequest,
   ReversePayrollRunRequest,
+  PayrollPayslipNoticeResult,
   PayrollRunValidationView,
   PayrollStatutoryReportKind,
   PayrollStatutoryReportView,
@@ -3474,6 +3475,7 @@ export const api = {
   reversePayrollJournal: (id: string, reason: string) => request<PayrollJournalView>(`/payroll/journals/${id}/reverse`, { method: "POST", body: JSON.stringify({ reason }) }),
   getRunCosting: (runId: string) => request<PayrollCostingSummaryView>(`/payroll/runs/${runId}/costing`),
   generateRunCosting: (runId: string) => request<PayrollCostingSummaryView>(`/payroll/runs/${runId}/costing/generate`, { method: "POST" }),
+  notifyPayrollPayslips: (runId: string) => request<PayrollPayslipNoticeResult>(`/payroll/runs/${runId}/notify-payslips`, { method: "POST" }),
   getPayrollStatutoryReport: (runId: string, kind: PayrollStatutoryReportKind) => request<PayrollStatutoryReportView>(`/payroll/runs/${runId}/statutory/${kind}`),
   /** Saves a text/CSV response (journal export, error report) as a file; the endpoint answers with text, not JSON. */
   async downloadPayrollText(path: string, fileName: string): Promise<void> {
