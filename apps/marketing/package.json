@@ -1,0 +1,12 @@
+{
+  "name": "@ai-hxm/marketing",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The public AiHxM marketing website (aihxm.com). A static site: no framework, no runtime dependencies.",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/build.mjs && node scripts/serve.mjs",
+    "check": "node scripts/check.mjs",
+    "test": "node scripts/build.mjs && node scripts/check.mjs"
+  }
+}

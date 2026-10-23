@@ -48,6 +48,9 @@ const CompanyDetailPage = lazy(() =>
 const AuditLogPage = lazy(() =>
   import("./platform-admin/AuditLogPage").then((m) => ({ default: m.AuditLogPage })),
 );
+const DemoRequestsPage = lazy(() =>
+  import("./platform-admin/DemoRequestsPage").then((m) => ({ default: m.DemoRequestsPage })),
+);
 const PlatformAdminsPage = lazy(() =>
   import("./platform-admin/PlatformAdminsPage").then((m) => ({
     default: m.PlatformAdminsPage,
@@ -373,6 +376,7 @@ export default function App() {
                     path="/companies/:id"
                     element={<CompanyDetailPage />}
                   />
+                  <Route path="/demo-requests" element={<DemoRequestsPage />} />
                   <Route path="/audit-log" element={<AuditLogPage />} />
                   <Route
                     path="/platform-admins"

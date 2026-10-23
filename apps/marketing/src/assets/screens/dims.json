@@ -1,0 +1,46 @@
+{
+ "recruitment": [
+  1290,
+  900
+ ],
+ "payroll": [
+  1100,
+  900
+ ],
+ "organization": [
+  1290,
+  900
+ ],
+ "performance": [
+  1100,
+  900
+ ],
+ "employees": [
+  1100,
+  900
+ ],
+ "leave": [
+  1290,
+  520
+ ],
+ "configuration": [
+  1100,
+  900
+ ],
+ "analytics": [
+  1100,
+  900
+ ],
+ "home": [
+  1100,
+  900
+ ],
+ "payroll-hero": [
+  2000,
+  912
+ ],
+ "payroll-dashboard": [
+  1960,
+  880
+ ]
+}

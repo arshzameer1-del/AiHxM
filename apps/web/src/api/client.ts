@@ -319,6 +319,8 @@ import type {
   PreviewDisbursementFileResponse,
   PerformanceReviewView,
   PlatformAdmin,
+  DemoRequest,
+  DemoRequestStatus,
   PlatformBranding,
   PlatformSavedView,
   PlatformSavedViewType,
@@ -1083,6 +1085,13 @@ export const api = {
   // `code` is "step_up_required".
   verifyStepUp: (input: StepUpVerifyRequest) =>
     request<StepUpVerifyResponse>("/auth/step-up", { method: "POST", body: JSON.stringify(input) }),
+
+  // --- Marketing website: demo requests (Platform Admin) ---------------------
+  listDemoRequests: (status?: DemoRequestStatus) =>
+    request<DemoRequest[]>(`/platform/demo-requests${status ? `?status=${status}` : ""}`),
+
+  updateDemoRequest: (id: string, input: { status?: DemoRequestStatus; internalNotes?: string | null }) =>
+    request<DemoRequest>(`/platform/demo-requests/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
 
   // --- Platform Admins ------------------------------------------------------
   listPlatformAdmins: () => request<PlatformAdmin[]>("/platform/admins"),

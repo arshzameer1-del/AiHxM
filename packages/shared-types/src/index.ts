@@ -9089,3 +9089,41 @@ export type EmployeeNumberLedgerView = {
 };
 export type UpdateEmployeeNumberPolicyRequest = Partial<Pick<EmployeeNumberPolicyView, "generationTiming" | "resetPolicy" | "allowManual" | "manualPattern">>;
 export * from "./payslip-design";
+
+
+// --- Marketing website: demo requests --------------------------------------
+export type DemoRequestStatus = "new" | "contacted" | "qualified" | "closed";
+export type DemoRequestEmployeeCount = "1-50" | "51-200" | "201-500" | "501-1000" | "1000+";
+
+/** What the public "Book a demo" form sends. `website` is a hidden honeypot field: real people leave it empty. */
+export type DemoRequestInput = {
+  fullName: string;
+  workEmail: string;
+  companyName: string;
+  phone?: string;
+  jobTitle?: string;
+  employeeCount?: DemoRequestEmployeeCount;
+  interests?: string[];
+  message?: string;
+  sourcePage?: string;
+  consentPrivacy: boolean;
+  website?: string;
+};
+
+export type DemoRequest = {
+  id: string;
+  fullName: string;
+  workEmail: string;
+  companyName: string;
+  phone: string | null;
+  jobTitle: string | null;
+  employeeCount: DemoRequestEmployeeCount | null;
+  interests: string[];
+  message: string | null;
+  sourcePage: string | null;
+  status: DemoRequestStatus;
+  internalNotes: string | null;
+  duplicateCount: number;
+  createdAt: string;
+  lastSubmittedAt: string;
+};

@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
-import { LayoutDashboard, ScrollText, ShieldCheck, Palette } from "lucide-react";
+import { LayoutDashboard, ScrollText, ShieldCheck, Palette, Inbox } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import { AihxmLogo } from "../components/AihxmLogo";
 import { Topbar, type QuickJumpItem } from "../components/shell/Topbar";
@@ -7,6 +7,7 @@ import { SIDEBAR_CONTAINER_CLASS, sidebarNavLinkClass as navLinkClass } from "..
 
 const QUICK_JUMP_ITEMS: QuickJumpItem[] = [
   { to: "/", label: "Dashboard" },
+  { to: "/demo-requests", label: "Demo requests" },
   { to: "/audit-log", label: "Audit Log" },
   { to: "/platform-admins", label: "Platform Admins" },
   { to: "/platform-branding", label: "Platform Branding" },
@@ -27,6 +28,10 @@ export function Layout() {
           <NavLink to="/" end className={navLinkClass}>
             <LayoutDashboard size={18} strokeWidth={1.75} className="shrink-0" />
             Dashboard
+          </NavLink>
+          <NavLink to="/demo-requests" className={navLinkClass}>
+            <Inbox size={18} strokeWidth={1.75} className="shrink-0" />
+            Demo requests
           </NavLink>
           <NavLink to="/audit-log" className={navLinkClass}>
             <ScrollText size={18} strokeWidth={1.75} className="shrink-0" />
