@@ -14,6 +14,7 @@ import {
   SESSION_EXPIRED_EVENT,
   type ImpersonationStash,
 } from "../api/client";
+import { hostTenantSlug } from "./tenantHost";
 
 /**
  * Phase 3: real password + mandatory-MFA login is a multi-step exchange
@@ -85,7 +86,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsAuthenticated(false);
     setIdentity(null);
     setIdentityLoading(false);
-    navigate(tenantSlug ? `/${tenantSlug}/login` : "/login", { replace: true });
+    // On a company's own address (acme.aihxm.com) the host already names the company, so plain /login is its sign-in page.
+    navigate(tenantSlug && !hostTenantSlug() ? `/${tenantSlug}/login` : "/login", { replace: true });
   }, [identity, navigate]);
 
   const fetchIdentity = useCallback(async (): Promise<MeResponse> => {

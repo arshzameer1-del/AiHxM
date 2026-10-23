@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import QRCode from "qrcode";
 import type { PublicTenantBranding } from "@aihxm/shared-types";
 import { useAuth } from "./AuthContext";
+import { hostTenantSlug } from "./tenantHost";
 import { api, ApiError, consumeSessionExpiredNotice, publicTenantBrandingAssetUrl, ssoLoginUrl } from "../api/client";
 import { AihxmLogo } from "../components/AihxmLogo";
 
@@ -92,8 +93,9 @@ export function LoginPage() {
   );
   const [loading, setLoading] = useState(false);
 
-  // undefined on the shared "/login" route, a real slug on "/:companySlug/login".
-  const tenantSlug = companySlug ?? null;
+  // undefined on the shared "/login" route, a real slug on "/:companySlug/login", and the first label of the address on a
+  // company's own host (acme.aihxm.com/login).
+  const tenantSlug = companySlug ?? hostTenantSlug() ?? null;
   const [tenantBranding, setTenantBranding] = useState<PublicTenantBranding | null>(null);
   // Real complaint from production: aihxm.com/<anything>/login rendered a
   // fully working-looking sign-in form for a slug that isn't any company at

@@ -240,6 +240,16 @@ const RESERVED_SLUGS = new Set([
   "public",
   "assets",
   "static",
+  // Host names the platform uses (qa.aihxm.com ...) or may use later; a company's own address is <slug>.aihxm.com.
+  "qa",
+  "staging",
+  "dev",
+  "sandbox",
+  "mail",
+  "status",
+  "docs",
+  "help",
+  "blog",
 ]);
 
 @Injectable()

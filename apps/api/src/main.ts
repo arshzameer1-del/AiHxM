@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { isOriginAllowed, parseCorsOrigins } from "./cors-origin";
 import { join } from "path";
 import { loadEnvFile } from "./load-env";
 
@@ -50,16 +51,13 @@ async function bootstrap() {
   // ruled subdomains out; see LoginPage.tsx's doc comment). So every
   // tenant's login page is served from the exact same origin as
   // everything else, and this plain static allowlist covers it.
-  const corsOrigins = (process.env.CORS_ORIGIN ?? "http://localhost:5173")
-    .split(",")
-    .map((origin) => origin.trim())
-    .filter(Boolean);
+  const corsOrigins = parseCorsOrigins(process.env.CORS_ORIGIN);
 
   app.enableCors({
     origin(origin, callback) {
       // No Origin header at all (server-to-server, curl, health checks) —
       // never a browser CORS concern in the first place.
-      if (!origin || corsOrigins.includes(origin)) return callback(null, true);
+      if (!origin || isOriginAllowed(origin, corsOrigins)) return callback(null, true);
       callback(new Error(`Origin "${origin}" is not allowed`), false);
     },
     // The browser may call this API directly (a static host that cannot proxy /api, such as Cloudflare Pages): let it
