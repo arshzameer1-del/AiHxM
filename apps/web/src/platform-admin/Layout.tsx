@@ -51,7 +51,7 @@ export function Layout() {
           roleLabel="Platform Admin"
           onLogout={logout}
         />
-        <main className="flex-1 px-8 py-8 max-w-5xl overflow-y-auto">
+        <main className="flex-1 min-w-0 px-4 py-5 sm:px-8 sm:py-8 max-w-5xl overflow-y-auto">
           <Outlet />
         </main>
       </div>

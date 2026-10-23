@@ -525,7 +525,7 @@ export function PortalLayout() {
             <div className="absolute inset-y-0 left-0 z-40 flex">{menu}</div>
           </>
         )}
-        <main className="flex-1 min-w-0 app-main px-8 py-8 max-w-5xl overflow-y-auto">
+        <main className="flex-1 min-w-0 app-main px-4 py-5 sm:px-8 sm:py-8 max-w-5xl overflow-y-auto">
           <Outlet />
         </main>
       </div>

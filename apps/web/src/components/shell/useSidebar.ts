@@ -49,16 +49,18 @@ export function useSidebar() {
     return () => query.removeEventListener("change", onChange);
   }, []);
 
-  /** The 3-line button: shows the menu when hidden, hides it (and unpins it) when shown. */
+  const docked = pinned && !narrow;
+
+  /** The 3-line button: shows the menu when hidden, hides it (and unpins it) when shown. A pin left over from a wide screen does not count on a phone. */
   const toggle = useCallback(() => {
-    if (pinned || open) {
+    if (docked || open) {
       setPinned(false);
       writePinned(false);
       setOpen(false);
     } else {
       setOpen(true);
     }
-  }, [pinned, open]);
+  }, [docked, open]);
 
   /** The pin button: pinning docks the menu; unpinning leaves it open as a floating menu. */
   const togglePin = useCallback(() => {
@@ -76,6 +78,5 @@ export function useSidebar() {
   /** Closes the floating menu; a pinned menu stays. */
   const closeFloating = useCallback(() => setOpen(false), []);
 
-  const docked = pinned && !narrow;
   return { pinned, narrow, docked, floating: !docked && open, visible: docked || open, toggle, togglePin, closeFloating };
 }

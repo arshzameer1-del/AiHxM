@@ -309,6 +309,32 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* ---- Phone and installed-app fit ---- */
+html {
+  -webkit-text-size-adjust: 100%;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+/* A phone with a notch or rounded corners (viewport-fit=cover): keep content out of the unsafe edges. */
+body {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+/* 100vh is taller than what is visible on a phone while the address bar shows; dvh follows the visible height. */
+@supports (min-height: 100dvh) {
+  .min-h-screen { min-height: 100dvh; }
+}
+/* iPhone zooms into any field under 16px; on touch screens keep fields at 16px so tapping one never zooms the page. */
+@media (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+.pwa-bottom { padding-bottom: calc(0.75rem + env(safe-area-inset-bottom)); }
+.pwa-sheet { margin-bottom: env(safe-area-inset-bottom); }
+
 /* ---- BoostFactor look: shape rules the colour tokens alone cannot express ---- */
 
 /* Primary and outlined buttons are pills. */
@@ -910,6 +936,8 @@ button.ui-card:focus-visible {
 .approval-kind-icon { flex: none; width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; background: rgb(var(--c-accent) / 0.1); color: rgb(var(--c-accent)); }
 .approvals-tab { background: rgb(var(--c-card)); border-color: rgb(var(--c-border)); color: rgb(var(--c-label-secondary)); transition: background-color 0.15s ease, color 0.15s ease; }
 .approvals-tab.is-active { background: rgb(var(--c-accent)); border-color: rgb(var(--c-accent)); color: #fff; }
+/* The generic role="tab" styling is more specific and would tint the chosen chip pale (white text on pale blue), so the chosen chip repeats its colours here. */
+button.approvals-tab.is-active[aria-selected="true"], button.approvals-tab.is-active[aria-selected="true"]:hover, button.approvals-tab.is-active[aria-selected="true"]:focus-visible { background-color: rgb(var(--c-accent)); color: #fff; }
 .approvals-count { display: inline-block; min-width: 1.25rem; padding: 0 0.3rem; margin-left: 0.2rem; border-radius: 999px; background: rgb(var(--c-label-tertiary) / 0.22); font-size: 0.7rem; text-align: center; }
 .approvals-tab.is-active .approvals-count { background: rgb(255 255 255 / 0.28); }
 :root[data-theme="onexd"] .approvals-tab.is-active { background: linear-gradient(135deg, #8e2b5c, #6d3a78); border-color: #8e2b5c; }

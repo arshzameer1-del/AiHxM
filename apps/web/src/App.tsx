@@ -1,5 +1,6 @@
 import { lazy, Suspense } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useParams } from "react-router-dom";
+import { PwaChrome } from "./pwa/PwaChrome";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import {
   ProtectedRoute,
@@ -554,6 +555,7 @@ export default function App() {
           </Routes>
         </Suspense>
       </AuthProvider>
+      <PwaChrome />
     </BrowserRouter>
   );
 }

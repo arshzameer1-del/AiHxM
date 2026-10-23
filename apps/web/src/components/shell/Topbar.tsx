@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { Check, ChevronDown, LogOut, Search } from "lucide-react";
+import { Check, ChevronDown, Download, LogOut, Search } from "lucide-react";
+import { IosInstallHelp, useInstallMode } from "../../pwa/PwaChrome";
+import { promptInstall } from "../../pwa/install";
 import { StatusPill } from "./StatusPill";
 import { TimerPill } from "./TimerPill";
 import { applyTheme, currentTheme, THEMES, type ThemeKey } from "../../theme/theme";
@@ -41,6 +43,8 @@ export function Topbar({
 }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [installHelp, setInstallHelp] = useState(false);
+  const installMode = useInstallMode();
   const [theme, setTheme] = useState<ThemeKey>(() => currentTheme());
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
@@ -111,20 +115,21 @@ export function Topbar({
 
   return (
     <>
-      <header className="app-topbar h-16 shrink-0 bg-card border-b border-border flex items-center justify-between gap-4 px-6">
+      <header className="app-topbar h-16 shrink-0 bg-card border-b border-border flex items-center justify-between gap-2 sm:gap-4 px-3 sm:px-6">
         <button
           type="button"
           onClick={() => setPaletteOpen(true)}
-          className="flex items-center gap-2.5 w-full max-w-sm px-3.5 py-2 rounded-lg border border-border bg-surface text-left text-sm text-label-secondary hover:border-accent/40 transition-colors"
+          aria-label="Search pages and actions"
+          className="flex items-center justify-center sm:justify-start gap-2.5 w-10 h-10 sm:h-auto sm:w-full sm:max-w-sm shrink-0 sm:shrink sm:px-3.5 sm:py-2 rounded-lg border border-border bg-surface text-left text-sm text-label-secondary hover:border-accent/40 transition-colors"
         >
           <Search size={16} strokeWidth={1.75} className="shrink-0" />
-          <span className="flex-1 truncate">Search pages, actions…</span>
-          <kbd className="text-[11px] font-semibold text-label-secondary bg-card border border-border rounded px-1.5 py-0.5">
+          <span className="hidden sm:block flex-1 truncate">Search pages, actions…</span>
+          <kbd className="hidden sm:block text-[11px] font-semibold text-label-secondary bg-card border border-border rounded px-1.5 py-0.5">
             ⌘K
           </kbd>
         </button>
 
-        <div className="flex items-center gap-3 min-w-0">
+        <div className="flex items-center gap-3 min-w-0 flex-1 justify-end sm:flex-none sm:justify-start">
           <StatusPill />
           <TimerPill />
           {contextLabel && <div className="hidden md:block text-sm text-label-secondary truncate">{contextLabel}</div>}
@@ -136,7 +141,7 @@ export function Topbar({
             onClick={() => setProfileOpen((v) => !v)}
             aria-expanded={profileOpen}
             aria-label="Account menu"
-            className="flex items-center gap-2.5 pl-1.5 pr-2.5 py-1.5 rounded-lg hover:bg-surface transition-colors"
+            className="flex items-center gap-2.5 pl-1.5 pr-1.5 sm:pr-2.5 py-1.5 rounded-lg hover:bg-surface transition-colors"
           >
             <span className="w-8 h-8 rounded-full bg-accent/10 text-accent font-semibold text-xs flex items-center justify-center shrink-0">
               {initials}
@@ -145,11 +150,11 @@ export function Topbar({
               <span className="text-sm font-medium text-label-primary truncate max-w-[140px]">{userName}</span>
               <span className="text-xs text-label-secondary truncate max-w-[140px]">{roleLabel}</span>
             </span>
-            <ChevronDown size={16} className="text-label-secondary shrink-0" />
+            <ChevronDown size={16} className="hidden sm:block text-label-secondary shrink-0" />
           </button>
 
           {profileOpen && (
-            <div className="app-topbar-menu absolute right-0 mt-2 w-64 bg-card border border-border rounded-xl shadow-lg py-1.5 z-30">
+            <div className="app-topbar-menu absolute right-0 mt-2 w-64 max-w-[calc(100vw-1.5rem)] bg-card border border-border rounded-xl shadow-lg py-1.5 z-30">
               <div className="px-3.5 py-2 border-b border-border">
                 <div className="text-sm font-medium text-label-primary truncate">{userName}</div>
                 <div className="text-xs text-label-secondary truncate">{userEmail}</div>
@@ -173,6 +178,21 @@ export function Topbar({
                   </button>
                 ))}
               </div>
+              {(installMode === "prompt" || installMode === "ios" || installMode === "ios-other-browser") && (
+                <button
+                  type="button"
+                  data-testid="menu-install"
+                  onClick={() => {
+                    setProfileOpen(false);
+                    if (installMode === "prompt") void promptInstall();
+                    else setInstallHelp(true);
+                  }}
+                  className="w-full flex items-center gap-2 px-3.5 py-2 text-sm text-label-primary hover:bg-surface transition-colors border-b border-border"
+                >
+                  <Download size={15} strokeWidth={1.75} />
+                  Install app
+                </button>
+              )}
               <button
                 type="button"
                 onClick={onLogout}
@@ -185,6 +205,8 @@ export function Topbar({
           )}
         </div>
       </header>
+
+      {installHelp && <IosInstallHelp mode={installMode} onClose={() => setInstallHelp(false)} />}
 
       {paletteOpen && (
         <div
