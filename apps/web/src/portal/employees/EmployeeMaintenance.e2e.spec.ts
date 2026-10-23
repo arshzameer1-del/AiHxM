@@ -80,8 +80,8 @@ test.describe("Employee maintenance", () => {
     await page.getByLabel("Designation").fill("Analyst");
     await page.getByLabel("Department").fill("Finance");
     await page.getByRole("button", { name: /save/i }).click();
-    await expect(page.getByText("Analyst")).toBeVisible();
-    await expect(page.getByText("Finance")).toBeVisible();
+    await expect(page.getByText("Analyst").first()).toBeVisible(); // the header and the details both show it
+    await expect(page.getByText("Finance").first()).toBeVisible();
   });
 
   test("HR maintains the personal details of a hired employee", async ({ page }) => {
@@ -206,7 +206,7 @@ test.describe("Employee maintenance - lists, details and sub-sections", () => {
     await page.getByLabel("Date of birth").fill("1992-05-17");
     await page.getByLabel("Date of joining").fill("2026-01-05");
     await page.getByRole("button", { name: /save/i }).click();
-    const fields = page.locator("dl");
+    const fields = page.locator("dl:not(.ws-hero-facts)"); // the header facts are a second list
     await expect(fields).toContainText(/female/i);
     await expect(fields).toContainText("17 May 1992");
     await expect(fields).toContainText("5 Jan 2026");
@@ -226,7 +226,7 @@ test.describe("Employee maintenance - lists, details and sub-sections", () => {
     await page.getByLabel("Designation").fill("Temporary title");
     await page.getByLabel("Phone").fill("0300-1234567");
     await page.getByRole("button", { name: /save/i }).click();
-    await expect(page.getByText("Temporary title")).toBeVisible();
+    await expect(page.getByText("Temporary title").first()).toBeVisible();
 
     await page.getByRole("button", { name: "Edit" }).click();
     // ending employment is a Lifecycle Action, not a status choice here

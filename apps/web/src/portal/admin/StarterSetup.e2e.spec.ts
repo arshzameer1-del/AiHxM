@@ -44,7 +44,7 @@ test("HR Admin sees a nudge on Home that leads to the starter setup; an Employee
   const other = await browser.newPage();
   await loginToApp(other, essToken);
   await other.goto("/app");
-  await expect(other.getByRole("heading", { name: /Good to see you/ })).toBeVisible();
+  await expect(other.getByRole("heading", { name: /Good to see you/ }).or(other.getByRole("region", { name: "My workspace" }))).toBeVisible();
   await expect(other.getByTestId("starter-setup-nudge")).toHaveCount(0);
   await other.close();
 });

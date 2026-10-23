@@ -2,8 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 import { createHrAdminSession, loginToApp } from "../e2e-support/real-session";
 
 /**
- * Theme switcher: "AiHxM Enterprise" (default, dark sidebar) and "BoostFactor" (iOS style, white sidebar,
- * pill buttons). The choice sits in the account menu and survives a reload.
+ * Theme switcher: "AiHxM Standard" (default, purple top bar), "AiHxM Enterprise" (dark sidebar) and "BoostFactor" (iOS style,
+ * white sidebar, pill buttons). The choice sits in the account menu and survives a reload.
  */
 
 const SHOTS = process.env.THEME_SHOTS_DIR;
@@ -21,12 +21,19 @@ async function chooseTheme(page: Page, label: string) {
   await page.keyboard.press("Escape");
 }
 
-test("starts on the enterprise theme, switches to BoostFactor and back, and remembers the choice", async ({ page }) => {
+test("starts on AiHxM Standard, switches to Enterprise and BoostFactor and back, and remembers the choice", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await loginToApp(page, token);
   await page.goto("/app");
 
   const html = page.locator("html");
+  await expect(html).toHaveAttribute("data-theme", "onexd");
+  await page.getByRole("button", { name: "Account menu" }).click();
+  await expect(page.getByRole("menuitemradio", { name: /AiHxM Standard/ })).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByRole("menuitemradio", { name: /One exD/ })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  await chooseTheme(page, "AiHxM Enterprise");
   await expect(html).toHaveAttribute("data-theme", "enterprise");
   expect(await bg(page, "aside")).toBe("rgb(15, 23, 42)");
   expect(await bg(page, "body")).toBe("rgb(248, 250, 252)");
@@ -54,9 +61,9 @@ test("starts on the enterprise theme, switches to BoostFactor and back, and reme
   await page.screenshot({ path: SHOTS ? `${SHOTS}/organization-boostfactor-pills.png` : undefined });
   await page.getByRole("button", { name: "Account menu" }).click();
   await expect(page.getByRole("menuitemradio", { name: /BoostFactor/ })).toHaveAttribute("aria-checked", "true");
-  await page.getByRole("menuitemradio", { name: /AiHxM Enterprise/ }).click();
-  await expect(html).toHaveAttribute("data-theme", "enterprise");
-  await expect.poll(() => bg(page, "aside")).toBe("rgb(15, 23, 42)");
+  await page.getByRole("menuitemradio", { name: /AiHxM Standard/ }).click();
+  await expect(html).toHaveAttribute("data-theme", "onexd");
+  expect(await bg(page, "header")).toBe("rgb(113, 99, 158)");
 });
 
 test("the saved choice applies on a fresh page load", async ({ page }) => {
@@ -67,18 +74,17 @@ test("the saved choice applies on a fresh page load", async ({ page }) => {
   await expect.poll(() => bg(page, "body")).toBe("rgb(242, 242, 247)");
 });
 
-test("an unknown saved theme falls back to enterprise", async ({ page }) => {
+test("an unknown saved theme falls back to AiHxM Standard", async ({ page }) => {
   await loginToApp(page, token);
   await page.evaluate(() => localStorage.setItem("aihxm.theme", "neon"));
   await page.goto("/app");
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "enterprise");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "onexd");
 });
 
-test("One exD theme: purple top bar, warm page, light sidebar, readable account menu", async ({ page }) => {
+test("AiHxM Standard theme: purple top bar, warm page, light sidebar, readable account menu", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await loginToApp(page, token);
   await page.goto("/app");
-  await chooseTheme(page, "One exD");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "onexd");
   expect(await bg(page, "header")).toBe("rgb(113, 99, 158)");
   expect(await bg(page, "body")).toBe("rgb(246, 243, 244)");
@@ -91,7 +97,7 @@ test("One exD theme: purple top bar, warm page, light sidebar, readable account 
   await page.screenshot({ path: SHOTS ? `${SHOTS}/menu-onexd.png` : undefined });
 });
 
-test("One exD home: workspace header and coloured tiles", async ({ page }) => {
+test("AiHxM Standard home: workspace header and coloured tiles", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await loginToApp(page, token);
   await page.evaluate(() => localStorage.setItem("aihxm.theme", "onexd"));

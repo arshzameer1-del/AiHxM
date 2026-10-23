@@ -7,9 +7,9 @@ function fakeStorage(initial: Record<string, string> = {}) {
   return { data, getItem: (k: string) => data[k] ?? null, setItem: (k: string, v: string) => void (data[k] = v) };
 }
 
-test("defaults to the enterprise theme when nothing is saved", () => {
-  assert.equal(readStoredTheme(fakeStorage()), "enterprise");
-  assert.equal(readStoredTheme(null), "enterprise");
+test("defaults to the AiHxM Standard theme when nothing is saved", () => {
+  assert.equal(readStoredTheme(fakeStorage()), "onexd");
+  assert.equal(readStoredTheme(null), "onexd");
 });
 
 test("ignores a saved value that is not a known theme", () => {
@@ -30,8 +30,8 @@ test("apply sets the document theme and remembers it", () => {
 
 test("an unknown theme falls back to the default instead of being applied", () => {
   const root = { dataset: {} as Record<string, string | undefined> };
-  assert.equal(applyTheme("neon" as never, fakeStorage(), root), "enterprise");
-  assert.equal(root.dataset.theme, "enterprise");
+  assert.equal(applyTheme("neon" as never, fakeStorage(), root), "onexd");
+  assert.equal(root.dataset.theme, "onexd");
 });
 
 test("storage that throws never breaks the theme", () => {
@@ -44,7 +44,7 @@ test("storage that throws never breaks the theme", () => {
     },
   };
   const root = { dataset: {} as Record<string, string | undefined> };
-  assert.equal(readStoredTheme(broken), "enterprise");
+  assert.equal(readStoredTheme(broken), "onexd");
   assert.equal(applyTheme("boostfactor", broken, root), "boostfactor");
   assert.equal(root.dataset.theme, "boostfactor");
 });

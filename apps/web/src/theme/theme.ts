@@ -3,19 +3,20 @@
  * are switched by `data-theme` on <html>. The choice is a per-browser convenience kept in
  * localStorage (it can be unavailable, so every access is guarded and the default is used).
  *
- *  - "enterprise": the AiHxM Enterprise Master Design System (dark sidebar, #2563EB). Default.
+ *  - "onexd": shown to people as "AiHxM Standard" and the default (purple top bar #71639e, warm light page, soft light sidebar, rounded
+ *    cards). The stored key stays "onexd" so choices saved earlier keep working.
+ *  - "enterprise": the AiHxM Enterprise Master Design System (dark sidebar, #2563EB).
  *  - "boostfactor": the iOS-style look of the BoostFactor prototype (white sidebar, #007AFF, pill buttons).
- *  - "onexd": the One exD workspace look (purple top bar #71639e, warm light page, soft light sidebar, rounded cards).
  */
 export type ThemeKey = "enterprise" | "boostfactor" | "onexd";
 
 export const THEMES: ReadonlyArray<{ key: ThemeKey; label: string; hint: string }> = [
+  { key: "onexd", label: "AiHxM Standard", hint: "Purple top bar, warm light, rounded" },
   { key: "enterprise", label: "AiHxM Enterprise", hint: "Dark sidebar, blue accent" },
   { key: "boostfactor", label: "BoostFactor", hint: "Light, iOS style, pill buttons" },
-  { key: "onexd", label: "One exD", hint: "Purple top bar, warm light, rounded" },
 ];
 
-export const DEFAULT_THEME: ThemeKey = "enterprise";
+export const DEFAULT_THEME: ThemeKey = "onexd";
 export const THEME_STORAGE_KEY = "aihxm.theme";
 
 type StorageLike = Pick<Storage, "getItem" | "setItem">;
