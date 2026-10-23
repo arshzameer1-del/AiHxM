@@ -23,7 +23,7 @@ import {
   UserPlus,
 } from "lucide-react";
 import type { ModuleKey, PublicTenantBranding, TenantRoleKey } from "@aihxm/shared-types";
-import { api, prefetchRoute, publicTenantBrandingAssetUrl, startKeepWarm, warmForRoles } from "../api/client";
+import { api, doneLoadOnEntry, prefetchRoute, publicTenantBrandingAssetUrl, startKeepWarm, takeLoadOnEntry, warmForRoles } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Topbar, type QuickJumpItem } from "../components/shell/Topbar";
 import { hueOf } from "../components/shell/hue";
@@ -441,6 +441,25 @@ function flattenNavItems(items: NavItem[]): QuickJumpItem[] {
   return flat;
 }
 
+const MAX_ENTRY_WAIT_MS = 25_000;
+
+/** The screen shown right after sign-in while the workspace's data loads, so the home page opens with everything ready. */
+function WorkspaceLoading({ name, done, total }: { name: string; done: number; total: number }) {
+  const percent = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  return (
+    <div className="min-h-screen flex items-center justify-center px-6 bg-surface" data-testid="workspace-loading" role="status" aria-live="polite">
+      <div className="w-full max-w-sm text-center">
+        <p className="text-lg font-semibold text-label-primary">{name ? `Welcome, ${name.split(" ")[0]}` : "Welcome"}</p>
+        <p className="mt-1 text-sm text-label-secondary">Preparing your workspace so every page opens at once.</p>
+        <div className="mt-5 h-2 rounded-full bg-border overflow-hidden" aria-hidden="true">
+          <div className="h-full rounded-full bg-accent transition-all duration-300" style={{ width: `${Math.max(percent, 4)}%` }} />
+        </div>
+        <p className="mt-2 text-xs text-label-secondary tabular-nums">{total > 0 ? `${percent}%` : "Starting…"}</p>
+      </div>
+    </div>
+  );
+}
+
 export function PortalLayout() {
   const { identity, logout, impersonation, endImpersonation } = useAuth();
 
@@ -453,14 +472,41 @@ export function PortalLayout() {
 
   // Right after sign-in, load the main screens' data in the background (and keep it fresh), so a click finds it ready.
   const navKey = navItems.map((n) => n.to).join("|");
+
+  // Just signed in: show "Preparing your workspace" until the data of every screen this login can open is loaded, then open the home page.
+  // A slow or failing server never traps anyone here: after MAX_ENTRY_WAIT_MS the app opens with whatever has arrived.
+  const [entryLoading, setEntryLoading] = useState(() => takeLoadOnEntry());
+  const [entryProgress, setEntryProgress] = useState({ done: 0, total: 0 });
   useEffect(() => {
-    if (!identity) return;
+    if (!entryLoading || !identity) return;
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      doneLoadOnEntry();
+      setEntryLoading(false);
+    };
+    const cap = window.setTimeout(finish, MAX_ENTRY_WAIT_MS);
+    void warmForRoles(roleKeys, 120, {
+      lanes: 4,
+      waitForPage: false,
+      onProgress: (done, total) => {
+        if (!finished) setEntryProgress({ done, total });
+      }
+    })
+      .catch(() => undefined)
+      .then(finish);
+    return () => window.clearTimeout(cap);
+  }, [entryLoading, identity?.email]);
+
+  useEffect(() => {
+    if (!identity || entryLoading) return;
     startKeepWarm();
     const timer = window.setTimeout(() => {
       void warmForRoles(roleKeys);
     }, 600);
     return () => window.clearTimeout(timer);
-  }, [identity?.email, navKey, roleKeys.join(",")]);
+  }, [identity?.email, navKey, roleKeys.join(","), entryLoading]);
 
   const sidebar = useSidebar();
   // Escape closes a floating menu.
@@ -499,6 +545,10 @@ export function PortalLayout() {
       </div>
     </aside>
   );
+
+  if (entryLoading) {
+    return <WorkspaceLoading name={identity?.fullName ?? ""} done={entryProgress.done} total={entryProgress.total} />;
+  }
 
   return (
     <div className="min-h-screen flex flex-col">

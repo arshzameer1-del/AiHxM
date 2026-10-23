@@ -586,9 +586,35 @@ export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
 
+const LOAD_ON_ENTRY_KEY = "aihxm.loadWorkspaceFor";
+
 export function setToken(token: string): void {
   localStorage.setItem(TOKEN_KEY, token);
   swr.setOwner(cacheOwnerOf(token));
+  // A fresh sign-in: the first screen waits until the workspace's data is loaded (see `loadWorkspaceOnEntry`).
+  try {
+    sessionStorage.setItem(LOAD_ON_ENTRY_KEY, cacheOwnerOf(token));
+  } catch {
+    /* without storage the app simply opens at once */
+  }
+}
+
+/** True while a just-signed-in session still has to show the loading screen (stays true until `doneLoadOnEntry`). */
+export function takeLoadOnEntry(): boolean {
+  try {
+    const mine = cacheOwnerOf(getToken());
+    return Boolean(mine) && sessionStorage.getItem(LOAD_ON_ENTRY_KEY) === mine;
+  } catch {
+    return false;
+  }
+}
+
+export function doneLoadOnEntry(): void {
+  try {
+    sessionStorage.removeItem(LOAD_ON_ENTRY_KEY);
+  } catch {
+    /* nothing to clear */
+  }
 }
 
 export function clearToken(): void {
@@ -690,7 +716,11 @@ export function startKeepWarm(): void {
  * Right after sign-in: loads, one after another with at most two requests in flight, and only while no call for the open page is waiting, the data of every module
  * this login can open (the recorded list for its roles, plus whatever this browser learned) so a click finds it ready.
  */
-export async function warmForRoles(roleKeys: string[], max = 120): Promise<void> {
+export async function warmForRoles(
+  roleKeys: string[],
+  max = 120,
+  options: { lanes?: number; onProgress?: (done: number, total: number) => void; waitForPage?: boolean } = {}
+): Promise<void> {
   const queue: string[] = [];
   const add = (p: string) => {
     if (!queue.includes(p) && isCacheablePath(p)) queue.push(p);
@@ -701,16 +731,22 @@ export async function warmForRoles(roleKeys: string[], max = 120): Promise<void>
   const year = new Date().getFullYear();
   if (roles.some((r) => r !== "system_admin")) add(`/holidays?year=${year}`);
   const work = queue.slice(0, max);
+  const total = work.length;
+  let done = 0;
+  options.onProgress?.(0, total);
   async function lane() {
     for (;;) {
       const next = work.shift();
       if (!next) return;
-      await foreground.idle();
+      if (options.waitForPage !== false) await foreground.idle();
       await swr.prefetch(next, () => fetchText(next, {}));
+      done += 1;
+      options.onProgress?.(done, total);
     }
   }
-  // Two lanes: the page the person opens next must not queue behind a crowd of background reads.
-  await Promise.all([lane(), lane()]);
+  // Background warming uses two lanes so the page the person opens next does not queue behind a crowd of reads;
+  // the loading screen at sign-in has nobody waiting on a page, so it uses more.
+  await Promise.all(Array.from({ length: options.lanes ?? 2 }, () => lane()));
 }
 
 // Which tenant's own /:companySlug/login this session's identity last
