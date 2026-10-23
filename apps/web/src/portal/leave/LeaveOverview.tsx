@@ -16,10 +16,10 @@ import {
   type CalendarCell,
 } from "./leaveCalendar";
 import { STATUS_LABELS, leaveTypeLabel } from "./leaveLabels";
-import { approverStepLabel, approverSummary, groupApprovalSteps } from "./leaveApprovals";
+import { approverStepLabel, approverSummary } from "./leaveApprovals";
 import { TeamCalendar } from "./TeamCalendar";
 import { SapSection } from "../shared/FormSections";
-import { localDayKey, todayIso } from "../shared/dates";
+import { formatDateTime, todayIso } from "../shared/dates";
 
 /**
  * "My Leave Request" overview, laid out like the SAP Fiori screen the product owner asked us to match:
@@ -110,6 +110,67 @@ const APPROVAL_STATUS_CLASS: Record<string, string> = {
 };
 
 /**
+ * Who did what and when, in order: sent, then each approver line with the decision, the date and time the system recorded it, and the
+ * comment. A line still waiting says so, and says if its step will ask for a comment.
+ */
+export function ApprovalHistory({ request }: { request: LeaveRequestView }) {
+  const lines = request.approvals ?? [];
+  return (
+    <section aria-label="Approval history" data-testid="leave-approval-chain">
+      <h4 className="text-xs font-semibold text-label-tertiary mb-2">History</h4>
+      <ol className="space-y-2.5 border-l border-black/10 ml-1.5 pl-4">
+        <li className="relative text-xs">
+          <span className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full bg-accent" aria-hidden="true" />
+          <div className="flex flex-wrap items-baseline gap-x-3">
+            <span className="font-medium">Sent{request.employeeName ? ` by ${request.employeeName}` : ""}{request.isOnBehalf ? " (on behalf)" : ""}</span>
+            <span className="text-label-tertiary tabular-nums" data-testid="history-time-submitted">{formatDateTime(request.createdAt)}</span>
+          </div>
+          {request.reason && <div className="text-label-secondary mt-0.5">&ldquo;{request.reason}&rdquo;</div>}
+        </li>
+        {lines.map((line, i) => {
+          const decided = line.status === "approved" || line.status === "rejected";
+          const dot = line.status === "approved" ? "bg-green-600" : line.status === "rejected" ? "bg-red-600" : "bg-amber-500";
+          const who = line.approverName ?? line.stepName;
+          const actedBy = line.decidedByName && line.decidedByName !== line.approverName ? line.decidedByName : null;
+          return (
+            <li key={`${line.stepOrder}-${i}`} className="relative text-xs" data-testid={`history-line-${i}`}>
+              <span className={`absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full ${dot}`} aria-hidden="true" />
+              <div className="flex flex-wrap items-baseline gap-x-3">
+                <span className="text-label-tertiary">{approverStepLabel(line.stepOrder)}</span>
+                <span className="font-medium">{who}</span>
+                <span className={`font-semibold ${APPROVAL_STATUS_CLASS[line.status]}`}>{APPROVAL_STATUS_TEXT[line.status]}</span>
+                {decided && line.decidedAt && (
+                  <span className="text-label-tertiary tabular-nums" data-testid={`history-time-${i}`}>
+                    {formatDateTime(line.decidedAt)}
+                    {actedBy ? ` · by ${actedBy}` : ""}
+                  </span>
+                )}
+              </div>
+              {line.comment && <div className="text-label-secondary mt-0.5">&ldquo;{line.comment}&rdquo;</div>}
+              {!decided && (line.requireCommentOnApprove || line.requireCommentOnReject) && (
+                <div className="text-label-tertiary mt-0.5">
+                  A comment is needed to {[line.requireCommentOnApprove ? "approve" : "", line.requireCommentOnReject ? "reject" : ""].filter(Boolean).join(" or ")}.
+                </div>
+              )}
+            </li>
+          );
+        })}
+        {request.cancellationStatus && request.cancellationRequestedAt && (
+          <li className="relative text-xs">
+            <span className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full bg-slate-400" aria-hidden="true" />
+            <div className="flex flex-wrap items-baseline gap-x-3">
+              <span className="font-medium">Cancellation requested</span>
+              <span className="text-label-tertiary tabular-nums">{formatDateTime(request.cancellationRequestedAt)}</span>
+            </div>
+            {request.cancellationReason && <div className="text-label-secondary mt-0.5">&ldquo;{request.cancellationReason}&rdquo;</div>}
+          </li>
+        )}
+      </ol>
+    </section>
+  );
+}
+
+/**
  * The request's own page, laid out like the reference's "Show Request Details": a header (leave type, dates,
  * absence days, quota used, created on, approver, status), the approval chain, the rest of the fields, and the
  * Team calendar underneath.
@@ -124,7 +185,6 @@ export function RequestDetail({
   weekend: readonly number[];
 }) {
   const approver = approverSummary(request.status, request.approvals);
-  const steps = groupApprovalSteps(request.approvals);
   const absenceDays = request.absenceDays ?? 0;
   return (
     <div className="rounded-lg border border-black/10 bg-surface p-4 space-y-4" data-testid="leave-request-detail">
@@ -142,7 +202,7 @@ export function RequestDetail({
           <dt className="text-label-tertiary">Quota Used:</dt>
           <dd className="tabular-nums">{request.daysRequested} {request.daysRequested === 1 ? "Day" : "Days"}</dd>
           <dt className="text-label-tertiary">Created on:</dt>
-          <dd className="tabular-nums">{formatDisplayDate(localDayKey(request.createdAt))}</dd>
+          <dd className="tabular-nums" title="Set by the system when the request was sent">{formatDateTime(request.createdAt)}</dd>
           {approver && (
             <>
               <dt className="text-label-tertiary">Approver:</dt>
@@ -154,11 +214,13 @@ export function RequestDetail({
         </dl>
       </header>
 
-      <ApprovalStepper
-        steps={["Submitted", "Approver", request.status === "approved" ? "Approved" : request.status === "rejected" ? "Rejected" : request.status === "cancelled" ? "Cancelled" : "Decision"]}
-        current={request.status === "pending" ? 1 : 2}
-        failed={request.status === "rejected" || request.status === "cancelled"}
-      />
+      <div className="max-w-2xl">
+        <ApprovalStepper
+          steps={["Submitted", "Approver", request.status === "approved" ? "Approved" : request.status === "rejected" ? "Rejected" : request.status === "cancelled" ? "Cancelled" : "Decision"]}
+          current={request.status === "pending" ? 1 : 2}
+          failed={request.status === "rejected" || request.status === "cancelled"}
+        />
+      </div>
 
       <dl className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 text-xs">
         {request.employeeName && (
@@ -223,20 +285,7 @@ export function RequestDetail({
         )}
       </dl>
 
-      {steps.length > 0 && (
-        <section aria-label="Approval chain" data-testid="leave-approval-chain">
-          <h4 className="text-xs font-semibold text-label-tertiary mb-1">Approval</h4>
-          <ol className="space-y-1">
-            {steps.map((step) => (
-              <li key={step.stepOrder} className="flex flex-wrap items-baseline gap-x-3 text-xs">
-                <span className="text-label-tertiary w-36 shrink-0">{approverStepLabel(step.stepOrder)}</span>
-                <span className="font-medium">{step.names.length > 0 ? step.names.join(", ") : step.stepName}</span>
-                <span className={`font-semibold ${APPROVAL_STATUS_CLASS[step.status]}`}>{APPROVAL_STATUS_TEXT[step.status]}</span>
-              </li>
-            ))}
-          </ol>
-        </section>
-      )}
+      <ApprovalHistory request={request} />
 
       <TeamCalendar employeeId={request.employeeId} holidays={holidays} weekend={weekend} initialDate={request.startDate} />
     </div>

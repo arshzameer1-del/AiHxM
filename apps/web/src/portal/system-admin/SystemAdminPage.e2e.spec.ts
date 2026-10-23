@@ -106,8 +106,16 @@ test.describe("System Admin Portal (Task #52)", () => {
     const form = card.locator("form");
     await expect(form.getByLabel("Approver type").first()).toBeVisible();
     await form.getByPlaceholder("SLA hours (optional)").first().fill("72");
+    await form.getByLabel("Approve", { exact: true }).first().check();
+    await form.getByLabel("Reject", { exact: true }).first().check();
     await form.getByRole("button", { name: "Save changes" }).click();
     await expect(card.locator("li").first()).toContainText("SLA 72h", { timeout: 5000 });
+    await expect(card.locator("li").first()).toContainText("comment needed to approve and reject");
+    // The ticks are what was saved: opening the form again shows them.
+    await card.getByRole("button", { name: "Edit approvers" }).click();
+    await expect(card.locator("form").getByLabel("Approve", { exact: true }).first()).toBeChecked();
+    await expect(card.locator("form").getByLabel("Reject", { exact: true }).first()).toBeChecked();
+    await card.locator("form").getByRole("button", { name: "Cancel" }).click();
 
     await card.getByRole("button", { name: "Switch off" }).click();
     await expect(card.getByText("Switched off")).toBeVisible();

@@ -103,7 +103,9 @@ function DetailPanel({ detail }: { detail: ApprovalDetail }) {
 }
 
 function Row({ item, mine, onDone }: { item: ApprovalItem; mine: boolean; onDone: () => void }) {
-  const [refusing, setRefusing] = useState<null | "rejected" | "returned">(null);
+  const [refusing, setRefusing] = useState<null | "approved" | "rejected" | "returned">(null);
+  // Whether approving needs a comment: known up front for leave, learned from the server's answer for the rest.
+  const [approveNeedsComment, setApproveNeedsComment] = useState(Boolean(item.commentOnApprove));
   const [showDetail, setShowDetail] = useState(false);
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);
@@ -115,13 +117,24 @@ function Row({ item, mine, onDone }: { item: ApprovalItem; mine: boolean; onDone
       setError("Say why, so the person knows.");
       return;
     }
+    if (decision === "approved" && approveNeedsComment && !comment.trim()) {
+      setRefusing("approved");
+      setError("This step needs a comment to approve. Write it below.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
       await decide(item, decision, comment);
       onDone();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "That didn't work.");
+      if (decision === "approved" && err instanceof ApiError && /comment is required when approving/i.test(err.message)) {
+        setApproveNeedsComment(true);
+        setRefusing("approved");
+        setError("This step needs a comment to approve. Write it below.");
+      } else {
+        setError(err instanceof ApiError ? err.message : "That didn't work.");
+      }
     } finally {
       setBusy(false);
     }
@@ -177,12 +190,12 @@ function Row({ item, mine, onDone }: { item: ApprovalItem; mine: boolean; onDone
       {showDetail && item.record && <DetailPanel detail={item.record} />}
       {refusing && (
         <div className="mt-3 pt-3 border-t border-black/5 flex items-center gap-2 flex-wrap">
-          <label htmlFor={`why-${item.key}`} className="sr-only">Reason</label>
-          <input id={`why-${item.key}`} value={comment} onChange={(e) => setComment(e.target.value)} placeholder={refusing === "returned" ? "What should they change? (required)" : "Reason (required)"} className="flex-1 min-w-[12rem] rounded-lg border border-black/10 px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-accent" />
-          <button disabled={busy} onClick={() => run(refusing)} className={`text-xs font-semibold rounded-lg px-3 py-1.5 text-white disabled:opacity-50 ${refusing === "returned" ? "bg-accent" : "bg-danger"}`} data-testid={`confirm-${refusing}-${item.key}`}>
-            {refusing === "returned" ? "Send back" : "Confirm refusal"}
+          <label htmlFor={`why-${item.key}`} className="sr-only">{refusing === "approved" ? "Comment" : "Reason"}</label>
+          <input id={`why-${item.key}`} value={comment} onChange={(e) => setComment(e.target.value)} placeholder={refusing === "returned" ? "What should they change? (required)" : refusing === "approved" ? "Comment (required)" : "Reason (required)"} className="flex-1 min-w-[12rem] rounded-lg border border-black/10 px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-accent" />
+          <button disabled={busy} onClick={() => run(refusing)} className={`text-xs font-semibold rounded-lg px-3 py-1.5 text-white disabled:opacity-50 ${refusing === "returned" ? "bg-accent" : refusing === "approved" ? "bg-success" : "bg-danger"}`} data-testid={`confirm-${refusing}-${item.key}`}>
+            {refusing === "returned" ? "Send back" : refusing === "approved" ? "Confirm approval" : "Confirm refusal"}
           </button>
-          <button onClick={() => setRefusing(null)} className="text-xs text-label-tertiary">Cancel</button>
+          <button onClick={() => { setRefusing(null); setError(null); }} className="text-xs text-label-tertiary">Cancel</button>
         </div>
       )}
       {error && <p className="text-xs text-danger mt-2" role="alert">{error}</p>}
@@ -200,7 +213,7 @@ export function ApprovalsPanel() {
 
   return (
     <div>
-      <PageHeader title="Approvals" subtitle={canDecide ? "Items waiting for your decision, and the requests you have sent. Approving is one click; refusing asks for a reason." : "The requests you have sent and where they are."} />
+      <PageHeader title="Approvals" subtitle={canDecide ? "Items waiting for your decision, and the requests you have sent. Approving is one click unless the step asks for a comment; refusing asks for a reason." : "The requests you have sent and where they are."} />
       <div className="flex flex-wrap gap-2 mb-4" role="tablist" aria-label="Approvals">
         {visible.map((t) => {
           const n = tabCount(t.key, toDecide, mine);

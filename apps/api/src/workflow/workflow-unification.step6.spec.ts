@@ -282,6 +282,33 @@ describe("Workflow unification (Step 6)", () => {
     });
   });
 
+  describe("comment on approve", () => {
+    it("a step can require a comment to approve; the comment and the time are kept on the line", async () => {
+      await tpl("appcomment", [{ stepOrder: 1, name: "One", requireCommentOnApprove: true, approvers: [user("a1")] }]);
+      const inst = await submit("appcomment");
+      expect(inst.steps[0].requireCommentOnApprove).toBe(true);
+      expect(inst.steps[0].requireCommentOnReject).toBe(false);
+      await expect(workflow.decide(users.a1.claims, inst.steps[0].id, { decision: "approved" })).rejects.toThrow(/comment is required when approving/);
+      await expect(workflow.decide(users.a1.claims, inst.steps[0].id, { decision: "approved", comment: "   " })).rejects.toThrow(/comment is required when approving/);
+      const before = Date.now();
+      const done = await workflow.decide(users.a1.claims, inst.steps[0].id, { decision: "approved", comment: "Covered by the team" });
+      expect(done.status).toBe("approved");
+      expect(done.steps[0].approvals[0].comment).toBe("Covered by the team");
+      expect(new Date(done.steps[0].approvals[0].decidedAt as string).getTime()).toBeGreaterThanOrEqual(before - 2000);
+    });
+
+    it("rejecting still needs no comment unless that box is ticked, and a step without the box approves without one", async () => {
+      await tpl("appcomment2", [{ stepOrder: 1, name: "One", requireCommentOnApprove: true, approvers: [user("a1")] }]);
+      const inst = await submit("appcomment2");
+      const rejected = await workflow.decide(users.a1.claims, inst.steps[0].id, { decision: "rejected" });
+      expect(rejected.status).toBe("rejected");
+      await tpl("nocomment", [{ stepOrder: 1, name: "One", approvers: [user("a1")] }]);
+      const plain = await submit("nocomment");
+      const ok = await workflow.decide(users.a1.claims, plain.steps[0].id, { decision: "approved" });
+      expect(ok.status).toBe("approved");
+    });
+  });
+
   // ------------------------------------------------------------------ approval modes + parallel (WFL-05)
   describe("approval modes and parallel groups", () => {
     it("'any' completes on the first approval and withdraws the other lines", async () => {

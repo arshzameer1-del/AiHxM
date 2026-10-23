@@ -936,11 +936,14 @@ export class LeaveRequestsService {
     const byInstance = new Map<string, LeaveApprovalLineView[]>();
     if (instanceIds.length === 0) return byInstance;
     const result = await client.query(
-      `SELECT s.workflow_instance_id, s.step_order, s.name AS step_name, a.status, a.decided_at,
-              COALESCE(NULLIF(trim(concat_ws(' ', ee.first_name, ee.last_name)), ''), r.name) AS approver_name
+      `SELECT s.workflow_instance_id, s.step_order, s.name AS step_name, a.status, a.decided_at, a.comment,
+              s.require_comment_on_approve, s.require_comment_on_reject,
+              COALESCE(NULLIF(trim(concat_ws(' ', ee.first_name, ee.last_name)), ''), r.name) AS approver_name,
+              NULLIF(trim(concat_ws(' ', de.first_name, de.last_name)), '') AS decided_by_name
          FROM workflow_step_instances s
          JOIN workflow_step_approvals a ON a.step_instance_id = s.id
          LEFT JOIN employees ee ON ee.user_account_id = COALESCE(a.delegated_to_user_account_id, a.user_account_id)
+         LEFT JOIN employees de ON de.user_account_id = a.decided_by_user_account_id
          LEFT JOIN roles r ON r.id = a.role_id
         WHERE s.workflow_instance_id = ANY($1::uuid[])
         ORDER BY s.workflow_instance_id, s.step_order, a.created_at`,
@@ -954,6 +957,10 @@ export class LeaveRequestsService {
         approverName: r.approver_name ?? null,
         status: r.status,
         decidedAt: r.decided_at ? toIso(r.decided_at) : null,
+        decidedByName: r.decided_by_name ?? null,
+        comment: r.comment ?? null,
+        requireCommentOnApprove: Boolean(r.require_comment_on_approve),
+        requireCommentOnReject: Boolean(r.require_comment_on_reject),
       });
       byInstance.set(r.workflow_instance_id, list);
     }

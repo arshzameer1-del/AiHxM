@@ -1530,6 +1530,8 @@ export type WorkflowStepConfig = {
   reminderHours?: number;
   /** WFL-05: a rejection must carry a comment. */
   requireCommentOnReject?: boolean;
+  /** An approval must carry a comment. */
+  requireCommentOnApprove?: boolean;
   /** Hours until a pending approval on this step is escalated. Omit for no SLA. */
   slaHours?: number;
   /** One entry per required approval line — more than one means every line must approve ("parallel"). */
@@ -1578,6 +1580,8 @@ export type WorkflowStepApprovalView = {
   escalatedAt: string | null;
   escalatedToUserAccountId: string | null;
   decidedByUserAccountId: string | null;
+  /** When the decision was taken (set by the server). */
+  decidedAt?: string | null;
   decision: WorkflowDecision | null;
   comment: string | null;
   /** ACC-06 */
@@ -1595,6 +1599,7 @@ export type WorkflowStepInstanceView = {
   quorumCount?: number | null;
   parallelGroup?: string | null;
   requireCommentOnReject?: boolean;
+  requireCommentOnApprove?: boolean;
 };
 
 export type WorkflowInstanceView = {
@@ -3599,7 +3604,15 @@ export type LeaveApprovalLineView = {
   /** A person's name, or the role's name when the line is "anyone holding this role". */
   approverName: string | null;
   status: "pending" | "escalated" | "approved" | "rejected";
+  /** When the decision was taken, set by the server at that moment. */
   decidedAt: string | null;
+  /** Who actually decided (differs from `approverName` when a delegate or a role holder acted). */
+  decidedByName?: string | null;
+  /** The comment given with the decision. */
+  comment?: string | null;
+  /** The step's rules: the approver must (or need not) write a comment. */
+  requireCommentOnApprove?: boolean;
+  requireCommentOnReject?: boolean;
 };
 
 /** LV-UP: edit a request that is still pending. Omitted fields are left as they are; `delegateEmployeeId: null` clears the relief person. */

@@ -32,6 +32,8 @@ export type ApprovalItem = {
   /** Where the full record lives (a leave request opens its own page; timesheets and corrections show their details in the row). */
   to: string;
   record?: ApprovalDetail;
+  /** The step this item waits at needs a comment to approve (known for leave; the others learn it from the server's answer). */
+  commentOnApprove?: boolean;
 };
 
 export const KIND_LABELS: Record<ApprovalKind, string> = { leave: "Time off", timesheet: "Timesheet", correction: "Correction" };
@@ -64,6 +66,7 @@ export function leaveItem(r: LeaveRequestView): ApprovalItem {
     waitingOn: approverSummary(r.status, r.approvals),
     submittedAt: r.createdAt,
     to: `/app/leave/${r.id}`,
+    commentOnApprove: Boolean(r.approvals?.find((l) => l.status === "pending" || l.status === "escalated")?.requireCommentOnApprove),
   };
 }
 

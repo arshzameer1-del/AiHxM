@@ -95,6 +95,10 @@ export class WorkflowStepConfigDto {
   @IsBoolean()
   requireCommentOnReject?: boolean;
 
+  @IsOptional()
+  @IsBoolean()
+  requireCommentOnApprove?: boolean;
+
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })

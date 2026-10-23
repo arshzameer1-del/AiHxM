@@ -62,7 +62,15 @@ function RequestRow({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // The step this request is waiting at can ask for a comment before approving or rejecting.
+  const openLine = request.approvals?.find((l) => l.status === "pending" || l.status === "escalated");
+  const commentRequired = (decision: "approved" | "rejected") => Boolean(decision === "approved" ? openLine?.requireCommentOnApprove : openLine?.requireCommentOnReject);
+
   async function submitDecision(decision: "approved" | "rejected") {
+    if (commentRequired(decision) && !comment.trim()) {
+      setError(`Write a comment to ${decision === "approved" ? "approve" : "reject"} this request.`);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -207,12 +215,19 @@ function RequestRow({
         <div className="mt-3 pt-3 border-t border-black/5">
           {deciding ? (
             <div className="space-y-2">
+              <label className="block text-xs text-label-secondary" htmlFor={`leave-comment-${request.id}`}>
+                Comment {commentRequired(deciding) ? <b className="text-danger">(required)</b> : "(optional)"}
+              </label>
               <input
+                id={`leave-comment-${request.id}`}
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
-                placeholder="Comment (optional)"
+                placeholder={commentRequired(deciding) ? `Why are you ${deciding === "approved" ? "approving" : "rejecting"} this?` : "Comment (optional)"}
+                aria-required={commentRequired(deciding)}
+                data-testid={`leave-comment-${request.id}`}
                 className="w-full rounded-lg border border-black/10 px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-accent"
               />
+              <p className="text-[11px] text-label-tertiary">Your name, the date and the time are recorded automatically.</p>
               <div className="flex gap-3 items-center">
                 <button
                   onClick={() => submitDecision(deciding)}
@@ -223,7 +238,13 @@ function RequestRow({
                 >
                   Confirm {deciding === "approved" ? "approval" : "rejection"}
                 </button>
-                <button onClick={() => setDeciding(null)} className="text-xs text-label-tertiary">
+                <button
+                  onClick={() => {
+                    setDeciding(null);
+                    setError(null);
+                  }}
+                  className="text-xs text-label-tertiary"
+                >
                   Cancel
                 </button>
               </div>

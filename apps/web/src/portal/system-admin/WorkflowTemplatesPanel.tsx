@@ -21,6 +21,9 @@ type ApproverDraft = {
 type StepDraft = {
   name: string;
   slaHours: string;
+  /** The approver must write a comment to approve / to reject at this step. */
+  commentOnApprove: boolean;
+  commentOnReject: boolean;
   approvers: ApproverDraft[];
   /** The step as stored, when editing, so settings this screen does not show (conditions, quorum...) survive a save. */
   base?: WorkflowStepConfig;
@@ -32,6 +35,8 @@ function draftFromTemplate(t: WorkflowTemplate): StepDraft[] {
   return t.steps.map((s) => ({
     name: s.name,
     slaHours: s.slaHours ? String(s.slaHours) : "",
+    commentOnApprove: Boolean(s.requireCommentOnApprove),
+    commentOnReject: Boolean(s.requireCommentOnReject),
     base: s,
     approvers: s.approvers.map((a) => ({ approverType: a.approverType, roleId: a.roleId ?? "", userAccountId: a.userAccountId ?? "", base: a })),
   }));
@@ -42,7 +47,7 @@ function emptyApprover(defaultRoleId: string): ApproverDraft {
 }
 
 function emptyStep(defaultRoleId: string): StepDraft {
-  return { name: "", slaHours: "", approvers: [emptyApprover(defaultRoleId)] };
+  return { name: "", slaHours: "", commentOnApprove: false, commentOnReject: false, approvers: [emptyApprover(defaultRoleId)] };
 }
 
 /**
@@ -133,6 +138,8 @@ function TemplateForm({
         stepOrder: i + 1,
         name: step.name || `Step ${i + 1}`,
         slaHours: step.slaHours ? Number(step.slaHours) : undefined,
+        requireCommentOnApprove: step.commentOnApprove,
+        requireCommentOnReject: step.commentOnReject,
         approvers: step.approvers.map((a): WorkflowApproverConfig => {
           if (a.base && !EDITABLE_APPROVER_TYPES.includes(a.base.approverType)) return a.base;
           const escalation = a.base
@@ -200,6 +207,29 @@ function TemplateForm({
                 className="rounded-lg border border-black/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
               />
             </div>
+
+            <fieldset className="flex flex-wrap items-center gap-x-5 gap-y-1">
+              <legend className="sr-only">Comments at this step</legend>
+              <span className="text-xs text-label-tertiary">Comment is required to</span>
+              <label className="inline-flex items-center gap-1.5 text-xs">
+                <input
+                  type="checkbox"
+                  checked={step.commentOnApprove}
+                  onChange={(e) => updateStep(stepIdx, { commentOnApprove: e.target.checked })}
+                  data-testid={`step-${stepIdx}-comment-approve`}
+                />
+                Approve
+              </label>
+              <label className="inline-flex items-center gap-1.5 text-xs">
+                <input
+                  type="checkbox"
+                  checked={step.commentOnReject}
+                  onChange={(e) => updateStep(stepIdx, { commentOnReject: e.target.checked })}
+                  data-testid={`step-${stepIdx}-comment-reject`}
+                />
+                Reject
+              </label>
+            </fieldset>
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
@@ -317,7 +347,8 @@ function stepSummary(step: WorkflowStepConfig, roles: Role[], people: { userAcco
       return approverTypeText(a.approverType);
     })
     .join(" AND ");
-  return `${step.name} — ${approverText}${step.slaHours ? ` (SLA ${step.slaHours}h)` : ""}`;
+  const comments = [step.requireCommentOnApprove ? "approve" : "", step.requireCommentOnReject ? "reject" : ""].filter(Boolean).join(" and ");
+  return `${step.name} — ${approverText}${step.slaHours ? ` (SLA ${step.slaHours}h)` : ""}${comments ? ` · comment needed to ${comments}` : ""}`;
 }
 
 export function WorkflowTemplatesPanel() {

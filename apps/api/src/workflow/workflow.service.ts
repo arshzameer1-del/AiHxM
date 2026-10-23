@@ -49,6 +49,7 @@ export type StepDef = {
   parallelGroup: string | null;
   reminderHours: number | null;
   requireCommentOnReject: boolean;
+  requireCommentOnApprove: boolean;
   approvers: ApproverDef[];
 };
 export type TemplateDefinition = {
@@ -74,6 +75,7 @@ export type CreateTemplateInput = {
     parallelGroup?: string | null;
     reminderHours?: number;
     requireCommentOnReject?: boolean;
+    requireCommentOnApprove?: boolean;
     approvers: Array<{
       approverType: ApproverType;
       roleId?: string;
@@ -179,6 +181,7 @@ export class WorkflowService {
           parallelGroup: s.parallelGroup?.trim() || null,
           reminderHours: s.reminderHours ?? null,
           requireCommentOnReject: s.requireCommentOnReject ?? false,
+          requireCommentOnApprove: s.requireCommentOnApprove ?? false,
           approvers: s.approvers.map((a) => ({
             approverType: a.approverType,
             roleId: a.roleId ?? null,
@@ -247,8 +250,8 @@ export class WorkflowService {
     for (const step of def.steps) {
       const stepResult = await client.query<{ id: string }>(
         `INSERT INTO workflow_template_steps
-           (template_id, step_order, name, condition, sla_hours, approval_mode, quorum_count, parallel_group, reminder_hours, require_comment_on_reject)
-         VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10) RETURNING id`,
+           (template_id, step_order, name, condition, sla_hours, approval_mode, quorum_count, parallel_group, reminder_hours, require_comment_on_reject, require_comment_on_approve)
+         VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
         [
           templateId,
           step.stepOrder,
@@ -260,6 +263,7 @@ export class WorkflowService {
           step.parallelGroup,
           step.reminderHours,
           step.requireCommentOnReject,
+          step.requireCommentOnApprove,
         ]
       );
       for (const a of step.approvers) {
@@ -517,6 +521,7 @@ export class WorkflowService {
         parallelGroup: s.parallel_group ?? undefined,
         reminderHours: s.reminder_hours ?? undefined,
         requireCommentOnReject: s.require_comment_on_reject,
+        requireCommentOnApprove: s.require_comment_on_approve ?? false,
         approvers: approversResult.rows
           .filter((a) => a.step_id === s.id)
           .map((a) => ({
@@ -724,6 +729,9 @@ export class WorkflowService {
 
     if (dto.decision === "rejected" && step.require_comment_on_reject && !dto.comment?.trim()) {
       throw new BadRequestException("A comment is required when rejecting at this step");
+    }
+    if (dto.decision === "approved" && step.require_comment_on_approve && !dto.comment?.trim()) {
+      throw new BadRequestException("A comment is required when approving at this step");
     }
     if (dto.decision === "send_back" && !dto.comment?.trim()) {
       throw new BadRequestException("A comment explaining what to change is required when sending back");
@@ -1235,14 +1243,14 @@ export class WorkflowService {
       const upsert = async (status: "pending" | "skipped") => {
         const r = await client.query<{ id: string }>(
           `INSERT INTO workflow_step_instances
-             (workflow_instance_id, step_order, name, status, approval_mode, quorum_count, parallel_group, reminder_hours, require_comment_on_reject)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+             (workflow_instance_id, step_order, name, status, approval_mode, quorum_count, parallel_group, reminder_hours, require_comment_on_reject, require_comment_on_approve)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
            ON CONFLICT (workflow_instance_id, step_order) DO UPDATE
              SET status = EXCLUDED.status, name = EXCLUDED.name, approval_mode = EXCLUDED.approval_mode, quorum_count = EXCLUDED.quorum_count,
                  parallel_group = EXCLUDED.parallel_group, reminder_hours = EXCLUDED.reminder_hours,
-                 require_comment_on_reject = EXCLUDED.require_comment_on_reject, updated_at = now()
+                 require_comment_on_reject = EXCLUDED.require_comment_on_reject, require_comment_on_approve = EXCLUDED.require_comment_on_approve, updated_at = now()
            RETURNING id`,
-          [instanceId, step.stepOrder, step.name, status, step.approvalMode, step.quorumCount, step.parallelGroup, step.reminderHours, step.requireCommentOnReject]
+          [instanceId, step.stepOrder, step.name, status, step.approvalMode, step.quorumCount, step.parallelGroup, step.reminderHours, step.requireCommentOnReject, Boolean(step.requireCommentOnApprove)]
         );
         return r.rows[0].id;
       };
@@ -1473,6 +1481,7 @@ export class WorkflowService {
           escalatedAt: a.escalated_at ? toIso(a.escalated_at) : null,
           escalatedToUserAccountId: a.escalated_to_user_account_id as string | null,
           decidedByUserAccountId: a.decided_by_user_account_id as string | null,
+          decidedAt: a.decided_at ? toIso(a.decided_at) : null,
           decision: a.decision as WorkflowStepApprovalView["decision"],
           comment: a.comment as string | null,
           delegatedToUserAccountId: (a.delegated_to_user_account_id as string | null) ?? null,
@@ -1488,6 +1497,7 @@ export class WorkflowService {
         quorumCount: s.quorum_count,
         parallelGroup: s.parallel_group,
         requireCommentOnReject: s.require_comment_on_reject,
+        requireCommentOnApprove: s.require_comment_on_approve ?? false,
       };
     });
 

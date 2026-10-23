@@ -74,11 +74,11 @@ test.beforeAll(async () => {
   const staffToken = await employeeLogin(hr.companySlug, staff.employeeNumber);
 
   await api("/leave-policies", "POST", { name: "Default Policy", annualLeaveDays: 14, casualLeaveDays: 10, sickLeaveDays: 8, isDefault: true }, hrToken);
-  await api("/workflow/templates", "POST", { key: "leave_request", name: "Leave Approval", objectKey: "leave_request", steps: [{ stepOrder: 1, name: "Manager approves", approvers: [{ approverType: "manager_of_submitter" }] }] }, managerToken);
+  await api("/workflow/templates", "POST", { key: "leave_request", name: "Leave Approval", objectKey: "leave_request", steps: [{ stepOrder: 1, name: "Manager approves", requireCommentOnApprove: true, requireCommentOnReject: true, approvers: [{ approverType: "manager_of_submitter" }] }] }, managerToken);
 
   const mate = await api<{ request: { id: string } }>("/leave-requests", "POST", { employeeId: teammate.id, leaveType: "annual", startDate: tuesday, endDate: tuesday }, hrToken);
   mateRequestId = mate.request.id;
-  await api(`/leave-requests/${mateRequestId}/decision`, "PATCH", { decision: "approved" }, managerToken);
+  await api(`/leave-requests/${mateRequestId}/decision`, "PATCH", { decision: "approved", comment: "Fine by me" }, managerToken);
   const own = await api<{ request: { id: string } }>("/leave-requests", "POST", { employeeId: staff.id, leaveType: "annual", startDate: monday, endDate: wednesday, reason: "Family trip" }, staffToken);
   staffRequestId = own.request.id;
 });
@@ -109,12 +109,30 @@ test("Details shows the balance, the approval chain, the note and the team calen
   await expect(panel).toHaveCount(0);
 });
 
-test("approving from the list moves the request out of the waiting tab", async ({ page }) => {
+test("the step asks for a comment before approving or rejecting, then records who, when and why", async ({ page }) => {
   await loginToApp(page, managerToken);
   await page.goto("/app/leave/approvals");
+  await page.getByTestId(`leave-details-${staffRequestId}`).click();
+  await expect(page.getByTestId(`leave-details-panel-${staffRequestId}`)).toContainText("A comment is needed to approve or reject");
+
+  await page.getByRole("button", { name: "Reject", exact: true }).first().click();
+  await expect(page.getByTestId(`leave-comment-${staffRequestId}`)).toHaveAttribute("aria-required", "true");
+  await page.getByRole("button", { name: /Confirm rejection/ }).click();
+  await expect(page.getByText("Write a comment to reject this request.")).toBeVisible();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+
   await page.getByRole("button", { name: "Approve", exact: true }).first().click();
   await page.getByRole("button", { name: /Confirm approval/ }).click();
+  await expect(page.getByText("Write a comment to approve this request.")).toBeVisible();
+  await page.getByTestId(`leave-comment-${staffRequestId}`).fill("Plan agreed with the team");
+  await page.getByRole("button", { name: /Confirm approval/ }).click();
   await expect(page.getByTestId("leave-requests-empty")).toContainText("Nothing is waiting for your decision.");
+
   await page.getByTestId("leave-filter-all").click();
-  await expect(page.getByText(staffName)).toBeVisible();
+  await page.getByTestId(`leave-details-${staffRequestId}`).click();
+  const panel = page.getByTestId(`leave-details-panel-${staffRequestId}`);
+  await expect(panel.getByTestId("history-time-submitted")).toContainText(/\d{1,2} \w{3} \d{4}, \d{1,2}:\d{2} (AM|PM)/);
+  await expect(panel.getByTestId("history-line-0")).toContainText("Approved");
+  await expect(panel.getByTestId("history-line-0")).toContainText("Plan agreed with the team");
+  await expect(panel.getByTestId("history-time-0")).toContainText(/\d{1,2} \w{3} \d{4}, \d{1,2}:\d{2} (AM|PM)/);
 });
