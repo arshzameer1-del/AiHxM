@@ -3971,7 +3971,8 @@ export type TimesheetView = {
 };
 
 export type SaveTimesheetEntriesRequest = { entries: TimesheetEntryInput[] };
-export type DecideTimesheetRequest = { decision: "approved" | "rejected"; comment?: string };
+/** "returned" sends the week back to the employee to change and submit again (a reason is required). */
+export type DecideTimesheetRequest = { decision: "approved" | "rejected" | "returned"; comment?: string };
 
 
 // --- Step 8C: TLM-07 / TLM-08 / TLM-10 / TLM-11 -----------------------------

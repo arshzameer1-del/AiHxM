@@ -64,7 +64,7 @@ export class TimesheetsService {
         await ctx.client.query(
           `UPDATE timesheets SET status = CASE WHEN $2 = 'pending' THEN 'pending' ELSE $2 END, updated_at = now(),
                   decided_by_user_account_id = CASE WHEN $3 THEN $4::uuid ELSE decided_by_user_account_id END,
-                  decision_comment = CASE WHEN $3 THEN $5 ELSE decision_comment END,
+                  decision_comment = CASE WHEN $3 OR $2 = 'returned' THEN $5 ELSE decision_comment END,
                   decided_at = CASE WHEN $3 THEN now() ELSE decided_at END
             WHERE id = $1`,
           [ctx.recordId, status, decided, ctx.claims.sub, ctx.comment ?? null]
@@ -200,8 +200,10 @@ export class TimesheetsService {
     return this.db.withClaims(claims, async (client) => {
       const ts = await this.loadSheet(client, id);
       if (ts.status !== "pending") throw new ConflictException("This timesheet is not awaiting a decision");
+      // "returned" = sent back to the employee to change and submit again; it always needs a reason they can read.
+      if (input.decision === "returned" && !input.comment?.trim()) throw new BadRequestException("Say what should be changed");
       if (ts.workflow_instance_id && this.workflow) {
-        await decideInEngine(this.workflow, client, claims, ts.workflow_instance_id, { decision: input.decision, comment: input.comment });
+        await decideInEngine(this.workflow, client, claims, ts.workflow_instance_id, { decision: input.decision === "returned" ? "send_back" : input.decision, comment: input.comment });
         return this.view(client, id);
       }
       const emp = await this.loadEmployee(client, ts.employee_id);

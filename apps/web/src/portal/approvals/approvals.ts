@@ -4,6 +4,18 @@ import { approverSummary, groupApprovalSteps } from "../leave/leaveApprovals";
 
 export type ApprovalKind = "leave" | "timesheet" | "correction";
 
+/** What the approver needs to see before deciding, without leaving the page. */
+export type TimesheetDetail = {
+  kind: "timesheet";
+  days: string[];
+  lines: { key: string; task: string; costCenterId: string | null; description: string; minutesByDay: Record<string, number>; total: number }[];
+  recordedByDay: Record<string, number>;
+  totalMinutes: number;
+  recordedMinutes: number;
+};
+export type CorrectionDetail = { kind: "correction"; date: string; clockIn: string | null; clockOut: string | null; reason: string; onBehalf: boolean };
+export type ApprovalDetail = TimesheetDetail | CorrectionDetail;
+
 /** One row on the Approvals page, whatever it came from. */
 export type ApprovalItem = {
   key: string;
@@ -17,8 +29,9 @@ export type ApprovalItem = {
   stage: string;
   waitingOn: string | null;
   submittedAt: string | null;
-  /** Where the full record lives. */
+  /** Where the full record lives (a leave request opens its own page; timesheets and corrections show their details in the row). */
   to: string;
+  record?: ApprovalDetail;
 };
 
 export const KIND_LABELS: Record<ApprovalKind, string> = { leave: "Time off", timesheet: "Timesheet", correction: "Correction" };
@@ -54,6 +67,33 @@ export function leaveItem(r: LeaveRequestView): ApprovalItem {
   };
 }
 
+function addDay(day: string, n: number): string {
+  const d = new Date(`${day}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+/** The submitted lines (project and task) with minutes per day, next to what the clock recorded. */
+export function timesheetDetail(t: TimesheetView): TimesheetDetail {
+  const days = Array.from({ length: 7 }, (_, i) => addDay(t.periodStart.slice(0, 10), i));
+  const lines = new Map<string, TimesheetDetail["lines"][number]>();
+  for (const e of t.entries ?? []) {
+    const task = (e.taskRef ?? "").trim();
+    const id = `${e.costCenterId ?? ""}|${task}`;
+    let line = lines.get(id);
+    if (!line) {
+      line = { key: id, task, costCenterId: e.costCenterId ?? null, description: "", minutesByDay: {}, total: 0 };
+      lines.set(id, line);
+    }
+    const day = e.workDate.slice(0, 10);
+    line.minutesByDay[day] = (line.minutesByDay[day] ?? 0) + e.minutes;
+    line.total += e.minutes;
+    if (e.description && !line.description.split("; ").includes(e.description)) line.description = line.description ? `${line.description}; ${e.description}` : e.description;
+  }
+  const recordedMinutes = days.reduce((sum, d) => sum + (t.recordedMinutesByDay?.[d] ?? 0), 0);
+  return { kind: "timesheet", days, lines: [...lines.values()], recordedByDay: t.recordedMinutesByDay ?? {}, totalMinutes: t.totalMinutes, recordedMinutes };
+}
+
 export function timesheetItem(t: TimesheetView): ApprovalItem {
   return {
     key: `timesheet:${t.id}`,
@@ -66,6 +106,7 @@ export function timesheetItem(t: TimesheetView): ApprovalItem {
     waitingOn: null,
     submittedAt: t.submittedAt,
     to: "/app/attendance/timesheet",
+    record: timesheetDetail(t),
   };
 }
 
@@ -81,6 +122,7 @@ export function correctionItem(c: AttendanceCorrectionRequestView): ApprovalItem
     waitingOn: null,
     submittedAt: c.createdAt,
     to: "/app/attendance/approvals",
+    record: { kind: "correction", date: c.requestedDate, clockIn: c.requestedClockIn, clockOut: c.requestedClockOut, reason: c.reason, onBehalf: c.isOnBehalf },
   };
 }
 

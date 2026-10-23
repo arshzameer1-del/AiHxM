@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { CalendarDays, CheckCircle2, ClipboardCheck, FileClock, Inbox, Timer } from "lucide-react";
 import { api, ApiError } from "../../api/client";
 import { useModuleContext, useBuildModuleContext, type ModuleContext } from "../shared/ModuleContext";
 import { LoadingNote, PageHeader } from "../shared/PageChrome";
-import { formatDay } from "../shared/dates";
-import { ageText, itemsForTab, KIND_LABELS, tabCount, type ApprovalItem, type ApprovalKind, type ApprovalTab } from "./approvals";
+import { formatDay, formatWeekdayAndDate } from "../shared/dates";
+import { ageText, itemsForTab, KIND_LABELS, tabCount, type ApprovalDetail, type ApprovalItem, type ApprovalKind, type ApprovalTab } from "./approvals";
 import { useApprovals } from "./useApprovals";
 import { Outlet, Route, Routes } from "react-router-dom";
 
@@ -19,22 +19,99 @@ const TABS: { key: ApprovalTab; label: string }[] = [
   { key: "mine", label: "My requests" },
 ];
 
-async function decide(item: ApprovalItem, decision: "approved" | "rejected", comment: string) {
+type Decision = "approved" | "rejected" | "returned";
+
+async function decide(item: ApprovalItem, decision: Decision, comment: string) {
   const note = comment.trim() || undefined;
   if (item.kind === "timesheet") await api.decideTimesheet(item.id, { decision, comment: note });
-  else if (item.kind === "correction") await api.decideAttendanceCorrection(item.id, { decision, comment: note });
-  else await api.decideLeaveRequest(item.id, { decision, comment: note });
+  else if (item.kind === "correction") await api.decideAttendanceCorrection(item.id, { decision: decision === "returned" ? "rejected" : decision, comment: note });
+  else await api.decideLeaveRequest(item.id, { decision: decision === "returned" ? "rejected" : decision, comment: note });
+}
+
+function hoursText(minutes: number): string {
+  return `${(minutes / 60).toFixed(2).replace(/\.?0+$/, "") || "0"}`;
+}
+
+function timeText(iso: string | null): string {
+  if (!iso) return "not given";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "not given" : d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+/** The submitted record, read-only, so the approver can decide without opening another page. */
+function DetailPanel({ detail }: { detail: ApprovalDetail }) {
+  const [projects, setProjects] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (detail.kind !== "timesheet" || !detail.lines.some((l) => l.costCenterId)) return;
+    api.listCostCenters().then((c) => setProjects(Object.fromEntries(c.map((x) => [x.id, x.code ? `${x.code} · ${x.name}` : x.name])))).catch(() => undefined);
+  }, [detail]);
+
+  if (detail.kind === "correction") {
+    return (
+      <div className="mt-3 pt-3 border-t border-black/5 text-sm" data-testid="approval-detail">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div><div className="text-xs text-label-tertiary">Day</div>{formatDay(detail.date)}</div>
+          <div><div className="text-xs text-label-tertiary">Clock in</div>{timeText(detail.clockIn)}</div>
+          <div><div className="text-xs text-label-tertiary">Clock out</div>{timeText(detail.clockOut)}</div>
+          <div><div className="text-xs text-label-tertiary">Entered by</div>{detail.onBehalf ? "HR, on their behalf" : "The employee"}</div>
+        </div>
+        <p className="mt-2"><span className="text-xs text-label-tertiary">Reason: </span>{detail.reason}</p>
+      </div>
+    );
+  }
+  const shown = detail.days.filter((d) => {
+    const w = new Date(`${d}T00:00:00Z`).getUTCDay();
+    return (w !== 0 && w !== 6) || detail.lines.some((l) => (l.minutesByDay[d] ?? 0) > 0);
+  });
+  return (
+    <div className="mt-3 pt-3 border-t border-black/5 overflow-x-auto" data-testid="approval-detail">
+      <table className="w-full text-xs min-w-[520px]">
+        <thead>
+          <tr className="text-left text-label-tertiary">
+            <th className="font-semibold py-1 pr-2">Task</th>
+            {shown.map((d) => <th key={d} className="font-normal text-center px-1">{formatWeekdayAndDate(d)}</th>)}
+            <th className="font-semibold text-right pl-2">Total (h)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {detail.lines.map((l) => (
+            <tr key={l.key} className="border-t border-black/5">
+              <td className="py-1 pr-2">
+                <div className="font-semibold">{l.task || "No task"}</div>
+                {(l.costCenterId || l.description) && (
+                  <div className="text-label-tertiary">{[l.costCenterId ? projects[l.costCenterId] ?? "Project" : null, l.description || null].filter(Boolean).join(" · ")}</div>
+                )}
+              </td>
+              {shown.map((d) => <td key={d} className="text-center tabular-nums">{l.minutesByDay[d] ? hoursText(l.minutesByDay[d]) : "·"}</td>)}
+              <td className="text-right tabular-nums font-semibold pl-2">{hoursText(l.total)}</td>
+            </tr>
+          ))}
+          <tr className="border-t border-black/10 font-semibold">
+            <td className="py-1 pr-2">Submitted</td>
+            {shown.map((d) => <td key={d} className="text-center tabular-nums">{hoursText(detail.lines.reduce((s, l) => s + (l.minutesByDay[d] ?? 0), 0))}</td>)}
+            <td className="text-right tabular-nums pl-2">{hoursText(detail.totalMinutes)}</td>
+          </tr>
+          <tr className="text-label-tertiary">
+            <td className="py-1 pr-2">Clock recorded</td>
+            {shown.map((d) => <td key={d} className="text-center tabular-nums">{hoursText(detail.recordedByDay[d] ?? 0)}</td>)}
+            <td className="text-right tabular-nums pl-2">{hoursText(detail.recordedMinutes)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 function Row({ item, mine, onDone }: { item: ApprovalItem; mine: boolean; onDone: () => void }) {
-  const [refusing, setRefusing] = useState(false);
+  const [refusing, setRefusing] = useState<null | "rejected" | "returned">(null);
+  const [showDetail, setShowDetail] = useState(false);
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const Icon = KIND_ICON[item.kind];
 
-  async function run(decision: "approved" | "rejected") {
-    if (decision === "rejected" && !comment.trim()) {
+  async function run(decision: Decision) {
+    if (decision !== "approved" && !comment.trim()) {
       setError("Say why, so the person knows.");
       return;
     }
@@ -57,7 +134,11 @@ function Row({ item, mine, onDone }: { item: ApprovalItem; mine: boolean; onDone
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-[11px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-accent/10 text-accent">{KIND_LABELS[item.kind]}</span>
-            <Link to={item.to} className="font-semibold text-sm hover:underline">{mine ? item.title : item.who}</Link>
+            {item.kind === "leave" || mine ? (
+              <Link to={item.to} className="font-semibold text-sm hover:underline">{mine ? item.title : item.who}</Link>
+            ) : (
+              <span className="font-semibold text-sm">{item.who}</span>
+            )}
           </div>
           <div className="text-sm text-label-secondary mt-0.5">{mine ? item.detail : `${item.title} · ${item.detail}`}</div>
           <div className="text-xs text-label-tertiary mt-1">
@@ -73,21 +154,35 @@ function Row({ item, mine, onDone }: { item: ApprovalItem; mine: boolean; onDone
                 <button disabled={busy} onClick={() => run("approved")} className="text-xs font-semibold rounded-lg px-3 py-1.5 text-white bg-success disabled:opacity-50" data-testid={`approve-${item.key}`}>
                   Approve
                 </button>
-                <button disabled={busy} onClick={() => setRefusing(true)} className="text-xs font-semibold rounded-lg px-3 py-1.5 bg-black/5 text-danger">
+                {item.kind === "timesheet" && (
+                  <button disabled={busy} onClick={() => setRefusing("returned")} className="text-xs font-semibold rounded-lg px-3 py-1.5 bg-black/5 text-label-secondary" data-testid={`send-back-${item.key}`}>
+                    Send back
+                  </button>
+                )}
+                <button disabled={busy} onClick={() => setRefusing("rejected")} className="text-xs font-semibold rounded-lg px-3 py-1.5 bg-black/5 text-danger" data-testid={`refuse-${item.key}`}>
                   Refuse
                 </button>
               </>
             )}
-            <Link to={item.to} className="text-xs font-semibold text-accent hover:underline">Open</Link>
+            {item.kind === "leave" || !item.record ? (
+              <Link to={item.to} className="text-xs font-semibold text-accent hover:underline">Open</Link>
+            ) : (
+              <button type="button" onClick={() => setShowDetail(!showDetail)} aria-expanded={showDetail} data-testid={`details-${item.key}`} className="text-xs font-semibold text-accent hover:underline">
+                {showDetail ? "Hide details" : "Details"}
+              </button>
+            )}
           </div>
         )}
       </div>
+      {showDetail && item.record && <DetailPanel detail={item.record} />}
       {refusing && (
         <div className="mt-3 pt-3 border-t border-black/5 flex items-center gap-2 flex-wrap">
           <label htmlFor={`why-${item.key}`} className="sr-only">Reason</label>
-          <input id={`why-${item.key}`} value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Reason (required)" className="flex-1 min-w-[12rem] rounded-lg border border-black/10 px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-accent" />
-          <button disabled={busy} onClick={() => run("rejected")} className="text-xs font-semibold rounded-lg px-3 py-1.5 text-white bg-danger disabled:opacity-50">Confirm refusal</button>
-          <button onClick={() => setRefusing(false)} className="text-xs text-label-tertiary">Cancel</button>
+          <input id={`why-${item.key}`} value={comment} onChange={(e) => setComment(e.target.value)} placeholder={refusing === "returned" ? "What should they change? (required)" : "Reason (required)"} className="flex-1 min-w-[12rem] rounded-lg border border-black/10 px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-accent" />
+          <button disabled={busy} onClick={() => run(refusing)} className={`text-xs font-semibold rounded-lg px-3 py-1.5 text-white disabled:opacity-50 ${refusing === "returned" ? "bg-accent" : "bg-danger"}`} data-testid={`confirm-${refusing}-${item.key}`}>
+            {refusing === "returned" ? "Send back" : "Confirm refusal"}
+          </button>
+          <button onClick={() => setRefusing(null)} className="text-xs text-label-tertiary">Cancel</button>
         </div>
       )}
       {error && <p className="text-xs text-danger mt-2" role="alert">{error}</p>}

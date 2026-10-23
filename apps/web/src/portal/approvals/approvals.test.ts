@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { AttendanceCorrectionRequestView, LeaveRequestView, TimesheetView } from "@aihxm/shared-types";
-import { ageText, correctionItem, isoWeek, itemsForTab, leaveItem, tabCount, timesheetItem } from "./approvals";
+import { ageText, correctionItem, isoWeek, itemsForTab, leaveItem, tabCount, timesheetDetail, timesheetItem } from "./approvals";
 
 const leave = {
   id: "l1", employeeId: "e1", employeeName: "Ayesha Khan", leaveType: "annual", leaveTypeName: "Annual leave", startDate: "2026-10-26", endDate: "2026-10-28",
@@ -50,4 +50,33 @@ test("age of a submission", () => {
   assert.equal(ageText("2026-10-22T08:00:00Z", now), "1 day");
   assert.equal(ageText("2026-10-20T08:00:00Z", now), "3 days");
   assert.equal(ageText(null, now), "");
+});
+
+test("the timesheet detail groups entries into task lines with minutes per day and the clock beside them", () => {
+  const t = {
+    ...sheet,
+    entries: [
+      { id: "1", workDate: "2026-10-19", minutes: 120, costCenterId: "cc1", taskRef: "Payroll", description: "Run" },
+      { id: "2", workDate: "2026-10-20", minutes: 60, costCenterId: "cc1", taskRef: "Payroll", description: "Run" },
+      { id: "3", workDate: "2026-10-20", minutes: 30, costCenterId: null, taskRef: null, description: null },
+    ],
+    totalMinutes: 210,
+    recordedMinutesByDay: { "2026-10-19": 480, "2026-10-20": 450 },
+  } as unknown as TimesheetView;
+  const d = timesheetDetail(t);
+  assert.equal(d.days.length, 7);
+  assert.equal(d.days[0], "2026-10-19");
+  assert.equal(d.lines.length, 2);
+  assert.equal(d.lines[0].total, 180);
+  assert.deepEqual(d.lines[0].minutesByDay, { "2026-10-19": 120, "2026-10-20": 60 });
+  assert.equal(d.lines[1].task, "");
+  assert.equal(d.recordedMinutes, 930);
+  assert.equal(timesheetItem(t).record?.kind, "timesheet");
+});
+
+test("a correction carries what was asked for and why", () => {
+  const c = { ...fix, requestedClockIn: "2026-10-21T04:00:00Z", requestedClockOut: null, reason: "Forgot to clock", isOnBehalf: false } as unknown as AttendanceCorrectionRequestView;
+  const r = correctionItem(c).record;
+  assert.equal(r?.kind, "correction");
+  assert.equal(r && r.kind === "correction" ? r.reason : "", "Forgot to clock");
 });

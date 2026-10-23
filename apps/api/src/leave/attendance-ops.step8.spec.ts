@@ -391,6 +391,20 @@ describe("Attendance daily results, devices and timesheets (Step 8B)", () => {
       await expect(timesheets.cancel(staffClaims, sheetId)).rejects.toBeInstanceOf(ConflictException);
     });
 
+    it("without a workflow the approver can send a week back with a reason; the employee edits it and submits again", async () => {
+      const sheet = await timesheets.getOrCreate(staffClaims, staffEmployeeId, "2027-03-17");
+      await timesheets.saveEntries(staffClaims, sheet.id, { entries: [{ workDate: "2027-03-17", minutes: 120 }] });
+      await timesheets.submit(staffClaims, sheet.id);
+
+      await expect(timesheets.decide(managerClaims, sheet.id, { decision: "returned" })).rejects.toBeInstanceOf(BadRequestException);
+      const returned = await timesheets.decide(managerClaims, sheet.id, { decision: "returned", comment: "Add the afternoon" });
+      expect(returned).toMatchObject({ status: "returned", decisionComment: "Add the afternoon" });
+
+      await timesheets.saveEntries(staffClaims, sheet.id, { entries: [{ workDate: "2027-03-17", minutes: 120 }, { workDate: "2027-03-17", minutes: 240, taskRef: "PM" }] });
+      expect((await timesheets.submit(staffClaims, sheet.id)).status).toBe("pending");
+      expect(await timesheets.decide(managerClaims, sheet.id, { decision: "approved" })).toMatchObject({ status: "approved", totalMinutes: 360 });
+    });
+
     it("with an active timesheet workflow the sheet is routed through the engine, can be sent back, edited and resubmitted", async () => {
       await workflow.createTemplate(hr, {
         key: "timesheet_approval", name: "Timesheet approval", objectKey: "timesheet",
@@ -407,6 +421,7 @@ describe("Attendance daily results, devices and timesheets (Step 8B)", () => {
       await workflow.decide(managerClaims, step.id, { decision: "send_back", comment: "Add the afternoon" });
       const returned = await timesheets.get(staffClaims, sheet.id);
       expect(returned.status).toBe("returned");
+      expect(returned.decisionComment).toBe("Add the afternoon"); // the employee can read why it came back
 
       await timesheets.saveEntries(staffClaims, sheet.id, { entries: [{ workDate: "2027-03-10", minutes: 240 }, { workDate: "2027-03-10", minutes: 240, taskRef: "PM" }] });
       const resubmitted = await timesheets.submit(staffClaims, sheet.id);

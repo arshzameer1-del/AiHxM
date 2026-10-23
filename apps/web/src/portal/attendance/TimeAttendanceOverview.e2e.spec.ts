@@ -151,6 +151,28 @@ test("the employee sees the submitted week under My requests and in the home Act
   await expect(page.getByTestId("requests-in-progress")).toContainText("Timesheet");
 });
 
+test("HR reads the week in the row, sends it back with a reason; the employee changes it and submits again", async ({ page }) => {
+  await loginToApp(page, hrToken);
+  await page.goto("/app/approvals");
+  await page.locator("[data-testid^='details-timesheet:']").first().click();
+  await expect(page.getByTestId("approval-detail")).toContainText("Clock recorded");
+  await expect(page.getByTestId("approval-detail")).toContainText("Submitted");
+  await page.locator("[data-testid^='send-back-timesheet:']").first().click();
+  await page.locator("[data-testid^='confirm-returned-timesheet:']").first().click();
+  await expect(page.getByRole("alert")).toContainText("Say why");
+  await page.locator("input[id^='why-timesheet:']").fill("Add the afternoon");
+  await page.locator("[data-testid^='confirm-returned-timesheet:']").first().click();
+  await expect(page.locator("[data-testid^='approve-timesheet:']")).toHaveCount(0);
+
+  await loginToApp(page, employeeToken);
+  await page.goto("/app/attendance/timesheet");
+  await expect(page.getByTestId("ts-status")).toHaveText("Sent back to you");
+  await expect(page.getByText("Add the afternoon")).toBeVisible();
+  await page.locator(`#ts-${todayIso()}`).fill("6");
+  await page.getByRole("button", { name: "Submit for approval" }).click();
+  await expect(page.getByTestId("ts-status")).toHaveText("Waiting for approval");
+});
+
 test("HR approves the week from Approvals and it leaves the list", async ({ page }) => {
   await loginToApp(page, hrToken);
   await page.goto("/app/approvals");

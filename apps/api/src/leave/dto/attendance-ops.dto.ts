@@ -67,6 +67,6 @@ export class SaveTimesheetEntriesDto {
 }
 
 export class DecideTimesheetDto {
-  @IsIn(["approved", "rejected"]) decision!: "approved" | "rejected";
+  @IsIn(["approved", "rejected", "returned"]) decision!: "approved" | "rejected" | "returned";
   @IsOptional() @IsString() @MaxLength(500) comment?: string;
 }
