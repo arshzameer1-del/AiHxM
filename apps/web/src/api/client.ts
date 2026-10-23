@@ -692,8 +692,14 @@ export function startKeepWarm(): void {
   };
   for (const ev of ["pointerdown", "keydown", "scroll", "touchstart"]) window.addEventListener(ev, mark, { passive: true });
   let running = false;
-  window.setInterval(async () => {
-    if (running || document.visibilityState !== "visible" || Date.now() - lastActivityAt > 10 * 60_000 || !getToken()) return;
+  /**
+   * One round of refreshing. It also runs while the tab is in the background (the person is in another tab or window), so the data
+   * is still fresh when they come back; the browser slows background timers to about one a minute, which is enough. Only a tab nobody
+   * has touched for 10 minutes stops.
+   * `minAgeMs`: an answer younger than this is not asked for again.
+   */
+  const tick = async (minAgeMs: number) => {
+    if (running || Date.now() - lastActivityAt > 10 * 60_000 || !getToken()) return;
     running = true;
     try {
       const work = swr.inUse(200);
@@ -702,14 +708,24 @@ export function startKeepWarm(): void {
           const next = work.shift();
           if (!next) return;
           await foreground.idle();
-          await swr.refresh(next, () => fetchText(next, {}), 45_000);
+          await swr.refresh(next, () => fetchText(next, {}), minAgeMs);
         }
       }
-      await Promise.all([lane(), lane()]);
+      await Promise.all([lane(), lane(), lane()]);
     } finally {
       running = false;
     }
-  }, 60_000);
+  };
+  window.setInterval(() => void tick(45_000), 60_000);
+  // Coming back to the tab (or the window, or the network): bring everything up to date at once instead of waiting for the next minute.
+  const comeBack = () => {
+    if (document.visibilityState !== "visible") return;
+    mark();
+    void tick(20_000);
+  };
+  document.addEventListener("visibilitychange", comeBack);
+  window.addEventListener("focus", comeBack);
+  window.addEventListener("online", comeBack);
 }
 
 /**
