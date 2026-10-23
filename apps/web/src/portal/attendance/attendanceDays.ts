@@ -33,6 +33,8 @@ export type DayRow = {
   earlyLeaveMinutes: number;
   /** "Corrected by HR", "No clock-out"... */
   notes: string[];
+  /** The day was an approved on-duty / work-from-elsewhere day (the attendance engine's "on_duty"). */
+  onDuty: boolean;
 };
 
 const MINUTE = 60_000;
@@ -102,6 +104,7 @@ export function buildDays(records: AttendanceRecordView[], results: AttendanceDa
     let earlyLeaveMinutes = 0;
     const notes: string[] = [];
     let kind: DayKind = "none";
+    const onDuty = result?.status === "on_duty";
 
     if (result) {
       kind = FROM_RESULT[result.status] ?? "none";
@@ -120,7 +123,7 @@ export function buildDays(records: AttendanceRecordView[], results: AttendanceDa
       if (!open && last && last.clockOutAt === null) notes.push("No clock-out");
     }
 
-    rows.set(date, { date, kind, firstIn, lastOut, workedMinutes: worked, breakMinutes, sessions, open, lateMinutes, earlyLeaveMinutes, notes });
+    rows.set(date, { date, kind, firstIn, lastOut, workedMinutes: worked, breakMinutes, sessions, open, lateMinutes, earlyLeaveMinutes, notes, onDuty });
   }
   return rows;
 }

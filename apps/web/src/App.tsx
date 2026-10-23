@@ -252,6 +252,10 @@ const LeavePage = lazy(() =>
 const AttendancePage = lazy(() =>
   import("./portal/attendance/AttendanceRoutes").then((m) => ({ default: m.AttendanceRoutes })),
 );
+// One place for everything waiting on a decision (leave, timesheets, attendance corrections) and for requests in progress.
+const ApprovalsPage = lazy(() =>
+  import("./portal/approvals/ApprovalsPage").then((m) => ({ default: m.ApprovalsRoutes })),
+);
 // ESS build-out (2026-10, Part 2 category 6) — new module, built end to
 // end since no Expense module existed in this app before it (see
 // claude/ui-reskin-design-system-and-migration-plan-2026-10.md §3).
@@ -507,6 +511,7 @@ export default function App() {
                     pattern as Task #48/#49. */}
                   <Route path="leave/*" element={<LeavePage />} />
                   <Route path="attendance/*" element={<AttendancePage />} />
+                  <Route path="approvals/*" element={<ApprovalsPage />} />
                   {/* ESS build-out (2026-10) — Expense Management.
                     expense_claim.view.self/.team/.all mirror Leave's own
                     three-role split exactly (0115_expense_management.sql),

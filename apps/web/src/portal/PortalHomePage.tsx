@@ -32,6 +32,7 @@ import { useAuth } from "../auth/AuthContext";
 import { useTheme } from "../theme/useTheme";
 import { hueOf } from "../components/shell/hue";
 import { WorkspaceHero } from "./WorkspaceHero";
+import { ActionCentre } from "./ActionCentre";
 import { api } from "../api/client";
 import { leaveTypeLabel, STATUS_LABELS, STATUS_STYLES } from "./leave/leaveLabels";
 import { MyAttendanceCard, MyTimesheetCard } from "./attendance/AttendanceCards";
@@ -427,6 +428,8 @@ export function PortalHomePage() {
       {identity.employeeId && enabledModules.includes("leave") && (
         <MyDaySection employeeId={identity.employeeId} enabledModules={enabledModules} roleKeys={roleKeys} />
       )}
+
+      {identity.employeeId && enabledModules.includes("leave") && <ActionCentre employeeId={identity.employeeId} />}
 
       {hasEssPortalRole(roleKeys) ? (
         <div className="mb-6">

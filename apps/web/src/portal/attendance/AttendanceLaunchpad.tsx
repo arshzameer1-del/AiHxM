@@ -5,6 +5,8 @@ import { api } from "../../api/client";
 import { useModuleContext } from "../shared/ModuleContext";
 import { PageHeader } from "../shared/PageChrome";
 import { TileGrid, TileGroup, type TileSpec } from "../shared/Tiles";
+import { AttendanceOverview } from "./AttendanceOverview";
+import { useMyAttendance } from "./useMyAttendance";
 
 /** Time & Attendance launchpad: clock, attendance days, timesheet and corrections, each on its own page. */
 export function AttendanceLaunchpad() {
@@ -12,6 +14,7 @@ export function AttendanceLaunchpad() {
   const { identity } = useAuth();
   const [clockedIn, setClockedIn] = useState<boolean | null>(null);
   const [waiting, setWaiting] = useState(0);
+  const attendance = useMyAttendance(employeeId && canSubmitSelf ? employeeId : undefined, refreshKey);
 
   useEffect(() => {
     if (employeeId && canSubmitSelf) {
@@ -49,6 +52,7 @@ export function AttendanceLaunchpad() {
   return (
     <div>
       <PageHeader title="Time & Attendance" subtitle="Choose what you want to do. Each tile opens its own page." />
+      {employeeId && canSubmitSelf && <AttendanceOverview employeeId={employeeId} data={attendance} refreshKey={refreshKey} />}
       {mine.length > 0 && (
         <TileGroup title="My time">
           <TileGrid tiles={mine} label="My time" />

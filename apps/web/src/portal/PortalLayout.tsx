@@ -12,6 +12,7 @@ import {
   Terminal,
   CalendarDays,
   Clock,
+  ClipboardCheck,
   Briefcase,
   Target,
   Wallet,
@@ -199,6 +200,7 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): 
   }
 
   if (hasModule("leave") && roleKeys.length > 0) {
+    items.push({ to: "/app/approvals", label: "Approvals", icon: ClipboardCheck });
     items.push({ to: "/app/leave", label: "Leave Management", icon: CalendarDays });
     items.push({ to: "/app/attendance", label: "Time & Attendance", icon: Clock });
   }
