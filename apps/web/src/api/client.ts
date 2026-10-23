@@ -2940,6 +2940,9 @@ export const api = {
   resetEmployeePassword: (employeeId: string, newPassword: string) =>
     request<{ message: string }>(`/system-admin/users/${encodeURIComponent(employeeId)}/reset-password`, { method: "POST", body: JSON.stringify({ newPassword }) }),
 
+  resetEmployeeMfa: (employeeId: string) =>
+    request<{ message: string }>(`/system-admin/users/${encodeURIComponent(employeeId)}/reset-mfa`, { method: "POST" }),
+
   listAssignableUsers: () => request<AssignableUserView[]>("/system-admin/assignable-users"),
 
   listSystemAdminRoleAssignments: () => request<SystemAdminRoleAssignmentView[]>("/system-admin/role-assignments"),

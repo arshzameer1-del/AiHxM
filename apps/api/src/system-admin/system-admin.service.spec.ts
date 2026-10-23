@@ -359,4 +359,47 @@ describe("SystemAdminService", () => {
       await expect(systemAdmin.resetPassword(sanaSelfServiceClaims, ayeshaId, "Another-pass-123")).rejects.toThrow(ForbiddenException);
     });
   });
+
+  describe("resetMfa", () => {
+    async function mfaState(employeeId: string) {
+      return db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const r = await client.query("SELECT ua.id, ua.mfa_enabled, ua.mfa_secret_encrypted FROM employees e JOIN user_accounts ua ON ua.id = e.user_account_id WHERE e.id = $1", [employeeId]);
+        const codes = await client.query("SELECT count(*)::int AS n FROM mfa_recovery_codes WHERE user_account_id = $1", [r.rows[0].id]);
+        const open = await client.query("SELECT count(*)::int AS n FROM user_sessions WHERE user_account_id = $1 AND revoked_at IS NULL", [r.rows[0].id]);
+        return { id: r.rows[0].id as string, enabled: r.rows[0].mfa_enabled as boolean, secret: r.rows[0].mfa_secret_encrypted as string | null, codes: codes.rows[0].n as number, openSessions: open.rows[0].n as number };
+      });
+    }
+
+    it("a System Admin clears the authenticator, recovery codes and sessions, keeping the password", async () => {
+      const before = await mfaState(ayeshaId);
+      const pw = await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        await client.query("UPDATE user_accounts SET mfa_enabled = true, mfa_secret_encrypted = 'x:y:z' WHERE id = $1", [before.id]);
+        await client.query("INSERT INTO user_sessions (user_account_id, company_id, expires_at) VALUES ($1,$2, now() + interval '1 day')", [before.id, companyId]);
+        return (await client.query("SELECT password_hash FROM user_accounts WHERE id = $1", [before.id])).rows[0].password_hash as string;
+      });
+
+      await systemAdmin.resetMfa(bilalClaims, ayeshaId);
+
+      const after = await mfaState(ayeshaId);
+      expect(after).toMatchObject({ enabled: false, secret: null, codes: 0, openSessions: 0 });
+      const pwAfter = await db.withClaims(FIXTURE_CLAIMS, async (client) => (await client.query("SELECT password_hash FROM user_accounts WHERE id = $1", [before.id])).rows[0].password_hash as string);
+      expect(pwAfter).toBe(pw);
+      const audit = await db.withClaims(FIXTURE_CLAIMS, async (client) => (await client.query("SELECT count(*)::int AS n FROM audit_log WHERE action = 'system_admin.mfa_reset' AND target = $1", [before.id])).rows[0].n as number);
+      expect(audit).toBeGreaterThanOrEqual(1);
+    });
+
+    it("an HR Admin cannot reset a System Admin's authenticator, but can for an ordinary login", async () => {
+      await expect(systemAdmin.resetMfa(ayeshaClaims, bilalId)).rejects.toThrow(ForbiddenException);
+      await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const r = await client.query("SELECT user_account_id FROM employees WHERE id = $1", [sanaId]);
+        if (!r.rows[0].user_account_id) await employees.createLogin(ayeshaClaims, sanaId, { initialPassword: "Password123!", roleKeys: ["employee_self_service"] });
+      }).catch(() => undefined);
+      await expect(systemAdmin.resetMfa(ayeshaClaims, sanaId)).resolves.toBeUndefined();
+    });
+
+    it("refuses another company's employee and a caller with no rights", async () => {
+      await expect(systemAdmin.resetMfa(bilalClaims, otherCoEmployeeId)).rejects.toThrow(NotFoundException);
+      await expect(systemAdmin.resetMfa(sanaSelfServiceClaims, ayeshaId)).rejects.toThrow(ForbiddenException);
+    });
+  });
 });

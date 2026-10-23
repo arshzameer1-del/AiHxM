@@ -278,6 +278,50 @@ export class SystemAdminService {
   }
 
   /**
+   * "Reset MFA" for an employee who lost their authenticator (phone lost or changed). Clears the stored secret and any unused recovery codes and
+   * signs the person out everywhere, so their next sign-in goes through first-time authenticator setup again (QR code, new recovery codes).
+   * The password is not touched. Same who-may-do-it rule as resetPassword: a System Admin for anyone in the company; an HR Admin only for
+   * ordinary logins (never an HR Admin, System Admin or Payroll Approver), so MFA cannot be stripped from a more powerful account.
+   */
+  async resetMfa(claims: RequestClaims, employeeId: string): Promise<void> {
+    if (!claims.company_id) throw new ForbiddenException();
+    const [canAccounts, canEmployees] = await Promise.all([
+      this.rbac.can(claims, "user_account.manage.all"),
+      this.rbac.can(claims, "employee.manage.all"),
+    ]);
+    if (!canAccounts && !canEmployees) throw new ForbiddenException("Not permitted to reset sign-in security");
+
+    const elevatedClaims: RequestClaims = { is_platform_admin: false, is_service: true, company_id: claims.company_id, sub: "system-admin-service" };
+    await this.db.withClaims(elevatedClaims, async (client) => {
+      const employee = await client.query("SELECT id, user_account_id FROM employees WHERE id = $1 AND company_id = $2", [employeeId, claims.company_id]);
+      if (employee.rowCount === 0) throw new NotFoundException("Employee not found");
+      const userAccountId = employee.rows[0].user_account_id as string | null;
+      if (!userAccountId) throw new BadRequestException("This employee has no login yet - create one first");
+
+      if (!canAccounts) {
+        const privileged = await client.query(
+          `SELECT 1 FROM user_role_assignments ura JOIN roles r ON r.id = ura.role_id
+            WHERE ura.user_account_id = $1 AND ura.company_id = $2 AND r.key = ANY($3::text[]) LIMIT 1`,
+          [userAccountId, claims.company_id, ["hr_admin", "system_admin", "payroll_approver"]]
+        );
+        if ((privileged.rowCount ?? 0) > 0) {
+          throw new ForbiddenException("Only a System Admin can reset the authenticator of an HR Admin, System Admin or Payroll Approver");
+        }
+      }
+
+      await client.query("UPDATE user_accounts SET mfa_enabled = false, mfa_secret_encrypted = NULL, updated_at = now() WHERE id = $1", [userAccountId]);
+      await client.query("DELETE FROM mfa_recovery_codes WHERE user_account_id = $1", [userAccountId]);
+      await client.query("UPDATE user_sessions SET revoked_at = now(), revoked_by = $2 WHERE user_account_id = $1 AND revoked_at IS NULL", [userAccountId, "mfa_reset"]);
+      await this.audit.record(client, claims, {
+        companyId: claims.company_id ?? null,
+        action: "system_admin.mfa_reset",
+        target: userAccountId,
+        metadata: { employeeId },
+      });
+    });
+  }
+
+  /**
    * No "last System Admin" guard exists yet — a System Admin can revoke
    * their own (or the last remaining) `system_admin` assignment in their
    * company, which would leave nobody able to reach this module or

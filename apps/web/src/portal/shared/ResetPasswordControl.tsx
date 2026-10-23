@@ -17,6 +17,68 @@ function generatePassword(): string {
  * logins only).
  */
 export function ResetPasswordControl({ employeeId, employeeName }: { employeeId: string; employeeName: string }) {
+  return (
+    <div className="flex gap-4 flex-wrap items-start">
+      <ResetPasswordForm employeeId={employeeId} employeeName={employeeName} />
+      <ResetMfaControl employeeId={employeeId} employeeName={employeeName} />
+    </div>
+  );
+}
+
+/**
+ * "Reset authenticator" for a person who lost or changed their phone: clears the authenticator and recovery codes and signs them out
+ * everywhere, so the next sign-in shows the first-time QR code setup again. The password is not changed. Asks to confirm first.
+ */
+function ResetMfaControl({ employeeId, employeeName }: { employeeId: string; employeeName: string }) {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  async function run() {
+    setError(null);
+    setBusy(true);
+    try {
+      await api.resetEmployeeMfa(employeeId);
+      setDone(true);
+      setConfirming(false);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not reset the authenticator.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (done) {
+    return (
+      <div className="mt-2 bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs space-y-1" role="status">
+        <div className="font-semibold text-amber-900">Authenticator reset for {employeeName}. They are signed out and will set up the authenticator again at their next sign-in.</div>
+        <button type="button" onClick={() => setDone(false)} className="text-accent font-semibold hover:underline">Done</button>
+      </div>
+    );
+  }
+  if (!confirming) {
+    return (
+      <button type="button" onClick={() => setConfirming(true)} className="mt-2 text-xs font-semibold text-accent hover:underline">
+        Reset authenticator
+      </button>
+    );
+  }
+  return (
+    <div className="mt-2 space-y-2 bg-black/5 rounded-lg p-3 text-xs max-w-sm">
+      <p>{employeeName} is signed out everywhere and must scan a new QR code at the next sign-in. The password stays the same. Only do this after confirming who is asking.</p>
+      {error && <div className="text-danger" role="alert">{error}</div>}
+      <div className="flex gap-3">
+        <button type="button" onClick={run} disabled={busy} className="bg-accent text-white rounded-lg px-3 py-1.5 font-semibold disabled:opacity-50">
+          {busy ? "Resetting…" : "Reset authenticator"}
+        </button>
+        <button type="button" onClick={() => { setConfirming(false); setError(null); }} className="text-label-secondary hover:text-label-primary">Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+function ResetPasswordForm({ employeeId, employeeName }: { employeeId: string; employeeName: string }) {
   const [open, setOpen] = useState(false);
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);

@@ -44,6 +44,13 @@ export class SystemAdminController {
     return { message: "Password changed." };
   }
 
+  /** Clears a person's authenticator so their next sign-in sets it up again (lost or changed phone). Signs them out everywhere. */
+  @Post("users/:employeeId/reset-mfa")
+  async resetMfa(@CurrentClaims() claims: RequestClaims, @Param("employeeId") employeeId: string) {
+    await this.systemAdmin.resetMfa(claims, employeeId);
+    return { message: "Authenticator reset." };
+  }
+
   @Delete("role-assignments/:id")
   async revokeRole(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
     await this.systemAdmin.revokeRole(claims, id);
