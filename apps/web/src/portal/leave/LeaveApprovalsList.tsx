@@ -1,25 +1,62 @@
 import { LoadingNote } from "../shared/PageChrome";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import type { EmployeeView, LeaveRequestView } from "@aihxm/shared-types";
+import type { EmployeeView, HolidayView, LeaveBalanceView, LeaveRequestView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { describeError } from "../shared/describeError";
 import { leaveTypeLabel, STATUS_LABELS, STATUS_STYLES } from "./leaveLabels";
 import { formatDay, formatPeriod } from "../shared/dates";
+import { DetailLoader } from "./LeaveOverview";
+
+/** The approver's balance line for the request: what the employee has left of this leave type this year, and what is left if it is approved. */
+function BalanceLine({ request }: { request: LeaveRequestView }) {
+  const [balance, setBalance] = useState<LeaveBalanceView | null | undefined>(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    const year = Number(request.startDate.slice(0, 4));
+    api
+      .getLeaveBalances(request.employeeId)
+      .then((all) => {
+        if (!cancelled) setBalance(all.find((b) => b.leaveType === request.leaveType && b.year === year) ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setBalance(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [request.employeeId, request.leaveType, request.startDate]);
+  if (balance === undefined) return <p className="text-xs text-label-tertiary">Reading the leave balance…</p>;
+  if (balance === null) return <p className="text-xs text-label-tertiary" data-testid="leave-balance-line">No yearly balance is kept for this leave type.</p>;
+  const after = request.status === "pending" ? balance.remainingDays - request.daysRequested : null;
+  return (
+    <p className="text-xs text-label-secondary tabular-nums" data-testid="leave-balance-line">
+      {balance.leaveTypeName ?? leaveTypeLabel(balance.leaveType)} {balance.year}: {balance.entitledDays} entitled, {balance.usedDays} used, <b>{balance.remainingDays} left</b>
+      {after !== null && (
+        <>
+          {" "}· {after >= 0 ? `${after} left after this request` : <span className="text-danger font-semibold">{Math.abs(after)} over the balance if approved</span>}
+        </>
+      )}
+    </p>
+  );
+}
 
 function RequestRow({
   request,
   employee,
   canDecide,
   canCancel,
+  holidays,
   onChanged,
 }: {
   request: LeaveRequestView;
   employee: EmployeeView | undefined;
   canDecide: boolean;
   canCancel: boolean;
+  holidays: ReadonlyMap<string, string>;
   onChanged: () => void;
 }) {
+  const [showDetails, setShowDetails] = useState(false);
   const [deciding, setDeciding] = useState<"approved" | "rejected" | null>(null);
   const [comment, setComment] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -94,11 +131,14 @@ function RequestRow({
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="font-medium text-sm">
-            {employee ? `${employee.firstName} ${employee.lastName}` : "Employee"}
+            {request.employeeName ?? (employee ? `${employee.firstName} ${employee.lastName}` : "Employee")}
+            {(request.employeeNumber ?? employee?.employeeNumber) && (
+              <span className="text-xs text-label-tertiary ml-1.5 tabular-nums">{request.employeeNumber ?? employee?.employeeNumber}</span>
+            )}
             {request.isOnBehalf && <span className="text-xs text-label-tertiary ml-1.5">(on behalf)</span>}
           </div>
           <div className="text-sm text-label-secondary mt-0.5">
-            {leaveTypeLabel(request.leaveType)} · {formatPeriod(request.startDate, request.endDate)} · {request.daysRequested}{" "}
+            {request.leaveTypeName ?? leaveTypeLabel(request.leaveType)} · {formatPeriod(request.startDate, request.endDate)} · {request.daysRequested}{" "}
             day{request.daysRequested === 1 ? "" : "s"}
           </div>
           {request.dayPart !== "full" && (
@@ -118,6 +158,24 @@ function RequestRow({
         >
           {STATUS_LABELS[request.status]}
         </span>
+      </div>
+
+      <div className="mt-3 pt-3 border-t border-black/5">
+        <button
+          type="button"
+          onClick={() => setShowDetails((v) => !v)}
+          aria-expanded={showDetails}
+          data-testid={`leave-details-${request.id}`}
+          className="text-xs font-semibold text-accent hover:underline"
+        >
+          {showDetails ? "Hide details" : "Details"}
+        </button>
+        {showDetails && (
+          <div className="mt-3 space-y-3" data-testid={`leave-details-panel-${request.id}`}>
+            <BalanceLine request={request} />
+            <DetailLoader request={request} holidays={holidays} weekend={[0, 6]} />
+          </div>
+        )}
       </div>
 
       {request.status === "approved" && !request.cancellationStatus && (
@@ -215,6 +273,15 @@ export function RequestsSection({
   const [requests, setRequests] = useState<LeaveRequestView[] | null>(null);
   const [employees, setEmployees] = useState<EmployeeView[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<"waiting" | "all" | null>(null);
+  const [holidayList, setHolidayList] = useState<HolidayView[]>([]);
+  useEffect(() => {
+    const y = new Date().getUTCFullYear();
+    Promise.all([api.listHolidays(String(y)), api.listHolidays(String(y + 1))])
+      .then(([a, b]) => setHolidayList([...a, ...b]))
+      .catch(() => undefined);
+  }, []);
+  const holidays = useMemo(() => new Map(holidayList.filter((h) => !h.isOptional).map((h) => [h.holidayDate.slice(0, 10), h.name])), [holidayList]);
   useEffect(() => {
     Promise.all([api.listLeaveRequests(), api.listEmployees()])
       .then(([reqs, emps]) => {
@@ -227,6 +294,11 @@ export function RequestsSection({
   if (error) return <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-secondary">{error}</div>;
 
   const employeeById = new Map(employees.map((e) => [e.id, e]));
+  const needsDecision = (r: LeaveRequestView) => r.status === "pending" || (r.status === "approved" && r.cancellationStatus === "requested");
+  const waiting = requests?.filter(needsDecision) ?? [];
+  // Approvers open on what waits for them; everyone else sees all of it.
+  const active = filter ?? (canDecide ? "waiting" : "all");
+  const shown = !requests ? [] : active === "waiting" ? waiting : requests;
 
   return (
     <section>
@@ -239,21 +311,39 @@ export function RequestsSection({
         )}
       </div>
 
+      {requests && canDecide && (
+        <div role="tablist" aria-label="Which requests" className="flex gap-2 mb-3">
+          {([["waiting", "Waiting for a decision", waiting.length], ["all", "All requests", requests.length]] as const).map(([key, label, count]) => (
+            <button
+              key={key}
+              role="tab"
+              aria-selected={active === key}
+              onClick={() => setFilter(key)}
+              data-testid={`leave-filter-${key}`}
+              className={`approvals-tab px-3 py-1.5 rounded-full text-sm font-semibold border ${active === key ? "is-active" : ""}`}
+            >
+              {label} <span className="approvals-count">{count}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {!requests ? (
         <LoadingNote />
-      ) : requests.length === 0 ? (
-        <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-tertiary">
-          No leave requests to show.
+      ) : shown.length === 0 ? (
+        <div className="bg-card rounded-card p-6 shadow-sm text-sm text-label-tertiary" data-testid="leave-requests-empty">
+          {active === "waiting" ? "Nothing is waiting for your decision." : "No leave requests to show."}
         </div>
       ) : (
         <div className="space-y-3">
-          {requests.map((r) => (
+          {shown.map((r) => (
             <RequestRow
               key={r.id}
               request={r}
               employee={employeeById.get(r.employeeId)}
               canDecide={canDecide}
               canCancel={canCancel}
+              holidays={holidays}
               onChanged={onChanged}
             />
           ))}

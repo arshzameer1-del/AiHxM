@@ -164,13 +164,16 @@ test("HR reads the week in the row, sends it back with a reason; the employee ch
   await page.locator("[data-testid^='confirm-returned-timesheet:']").first().click();
   await expect(page.locator("[data-testid^='approve-timesheet:']")).toHaveCount(0);
 
-  await loginToApp(page, employeeToken);
-  await page.goto("/app/attendance/timesheet");
-  await expect(page.getByTestId("ts-status")).toHaveText("Sent back to you");
-  await expect(page.getByText("Add the afternoon")).toBeVisible();
-  await page.locator(`#ts-${todayIso()}`).fill("6");
-  await page.getByRole("button", { name: "Submit for approval" }).click();
-  await expect(page.getByTestId("ts-status")).toHaveText("Waiting for approval");
+  // The employee signs in on a fresh page: switching the token under HR's open page races with HR's own redirects.
+  const staffPage = await page.context().newPage();
+  await page.close();
+  await loginToApp(staffPage, employeeToken);
+  await staffPage.goto("/app/attendance/timesheet");
+  await expect(staffPage.getByTestId("ts-status")).toHaveText("Sent back to you");
+  await expect(staffPage.getByText("Add the afternoon")).toBeVisible();
+  await staffPage.locator(`#ts-${todayIso()}`).fill("6");
+  await staffPage.getByRole("button", { name: "Submit for approval" }).click();
+  await expect(staffPage.getByTestId("ts-status")).toHaveText("Waiting for approval");
 });
 
 test("HR approves the week from Approvals and it leaves the list", async ({ page }) => {

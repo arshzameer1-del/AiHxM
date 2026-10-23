@@ -1,3 +1,4 @@
+import { announceAttendanceChanged } from "../portal/attendance/attendanceEvents";
 import { createResponseCache, isCacheablePath } from "./responseCache";
 import { WARM_READS_BY_ROLE } from "./warmReads";
 import { createForegroundGate } from "./foregroundGate";
@@ -2617,10 +2618,16 @@ export const api = {
     request<LeaveBalanceView[]>(`/employees/${employeeId}/leave-balances`),
 
   clockIn: (input: ClockInRequest) =>
-    request<AttendanceRecordView>("/attendance/clock-in", { method: "POST", body: JSON.stringify(input) }),
+    request<AttendanceRecordView>("/attendance/clock-in", { method: "POST", body: JSON.stringify(input) }).then((r) => {
+      announceAttendanceChanged();
+      return r;
+    }),
 
   clockOut: (input: ClockOutRequest) =>
-    request<AttendanceRecordView>("/attendance/clock-out", { method: "POST", body: JSON.stringify(input) }),
+    request<AttendanceRecordView>("/attendance/clock-out", { method: "POST", body: JSON.stringify(input) }).then((r) => {
+      announceAttendanceChanged();
+      return r;
+    }),
 
   /** Newest first. `limit` keeps the answer (and the server's work) small; the server default is 200. */
   listAttendance: (employeeId: string, limit?: number) =>

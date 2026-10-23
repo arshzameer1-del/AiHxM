@@ -8,6 +8,7 @@ import {
   getImpersonationStash,
   getLastTenantSlug,
   getToken,
+  ApiError,
   setImpersonationStash,
   setLastTenantSlug,
   setToken,
@@ -45,6 +46,9 @@ type AuthContextValue = {
   isAuthenticated: boolean;
   identity: MeResponse | null;
   identityLoading: boolean;
+  /** True when a stored session could not be checked because the server could not be reached (offline, slow start). The session is kept. */
+  identityUnreachable: boolean;
+  retryIdentity: () => void;
   impersonation: ImpersonationStash | null;
   setSessionToken: (token: string) => Promise<MeResponse>;
   beginImpersonation: (response: ImpersonateResponse) => Promise<MeResponse>;
@@ -59,6 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(getToken()));
   const [identity, setIdentity] = useState<MeResponse | null>(null);
   const [identityLoading, setIdentityLoading] = useState(() => Boolean(getToken()));
+  const [identityUnreachable, setIdentityUnreachable] = useState(false);
   const [impersonation, setImpersonation] = useState<ImpersonationStash | null>(() => getImpersonationStash());
 
   // Real bug reported straight from production: every "Log out" (and every
@@ -90,33 +95,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     navigate(tenantSlug && !hostTenantSlug() ? `/${tenantSlug}/login` : "/login", { replace: true });
   }, [identity, navigate]);
 
-  const fetchIdentity = useCallback(async (): Promise<MeResponse> => {
-    setIdentityLoading(true);
-    try {
-      const me = await api.getMe();
-      setIdentity(me);
-      setLastTenantSlug(me.companySlug);
-      return me;
-    } catch (err) {
-      // api/client's `request()` already clears the stored token on a 401
-      // — this mirrors that into the rest of this context's own state
-      // (isAuthenticated/identity) so route guards react immediately
-      // instead of only on the next page load.
-      logout();
-      throw err;
-    } finally {
-      setIdentityLoading(false);
-    }
-  }, [logout]);
+  /**
+   * `keepSessionWhenUnreachable` is for a page load that already has a stored session: if the server cannot be reached (the phone is
+   * offline, or the free server is still waking up) the person stays signed in and sees a Retry screen. Only a real "401, this session
+   * is not valid" signs them out. A fresh sign-in keeps the old behaviour: any failure ends that attempt.
+   */
+  const fetchIdentity = useCallback(
+    async (keepSessionWhenUnreachable = false): Promise<MeResponse> => {
+      setIdentityLoading(true);
+      try {
+        const me = await api.getMe();
+        setIdentity(me);
+        setIdentityUnreachable(false);
+        setLastTenantSlug(me.companySlug);
+        return me;
+      } catch (err) {
+        const sessionRejected = err instanceof ApiError && (err.status === 401 || err.status === 403 || err.status === 404);
+        if (keepSessionWhenUnreachable && !sessionRejected) {
+          setIdentityUnreachable(true);
+          throw err;
+        }
+        // api/client's `request()` already clears the stored token on a 401
+        // — this mirrors that into the rest of this context's own state
+        // (isAuthenticated/identity) so route guards react immediately
+        // instead of only on the next page load.
+        logout();
+        throw err;
+      } finally {
+        setIdentityLoading(false);
+      }
+    },
+    [logout]
+  );
+
+  const retryIdentity = useCallback(() => {
+    fetchIdentity(true).catch(() => undefined);
+  }, [fetchIdentity]);
 
   // A page load (or refresh) that already has a stored token has no
   // `identity` yet — fetch it once, up front, so route guards can tell
   // "still finding out" apart from "definitely not allowed."
   useEffect(() => {
     if (isAuthenticated) {
-      fetchIdentity().catch(() => {
-        // fetchIdentity() already logged this session out; nothing
-        // further to do here.
+      fetchIdentity(true).catch(() => {
+        // A rejected session was already signed out by fetchIdentity(); an unreachable server leaves the Retry screen up.
       });
     }
     // Intentionally once-on-mount only (no eslint-plugin-react-hooks in
@@ -124,6 +146,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // setSessionToken() is what drives every later identity fetch (a
     // fresh login), not a dependency-array re-run of this effect.
   }, []);
+
+  // The connection came back: check the kept session again without anyone pressing Retry.
+  useEffect(() => {
+    if (!identityUnreachable) return;
+    const again = () => retryIdentity();
+    window.addEventListener("online", again);
+    return () => window.removeEventListener("online", again);
+  }, [identityUnreachable, retryIdentity]);
 
   // The other half of client.ts's SESSION_EXPIRED_EVENT — a 401 from ANY
   // API call (not just this context's own getMe()) already clears the
@@ -223,6 +253,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAuthenticated,
       identity,
       identityLoading,
+      identityUnreachable,
+      retryIdentity,
       impersonation,
       setSessionToken,
       beginImpersonation,
@@ -233,6 +265,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAuthenticated,
       identity,
       identityLoading,
+      identityUnreachable,
+      retryIdentity,
       impersonation,
       setSessionToken,
       beginImpersonation,

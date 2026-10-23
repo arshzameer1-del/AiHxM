@@ -36,12 +36,16 @@ test("Home shows today's shift time on the attendance tile and the tile opens Cl
 test("Clock in shows running time and the punch; clock out fills check-out and worked; Home reflects it", async ({ page }) => {
   await loginToApp(page, employeeToken);
   await page.goto("/app/attendance/clock");
+  // The top-bar pill follows the punches without a page reload.
+  await expect(page.getByTestId("status-pill")).toContainText("Not checked in");
   await page.getByRole("button", { name: "Clock in", exact: true }).click();
+  await expect(page.getByTestId("status-pill")).toContainText(/^In \d{1,2}:\d{2} (AM|PM)/);
   await expect(page.getByTestId("running-time")).toBeVisible();
   await expect(page.getByTestId("today-punches").locator("li")).toHaveCount(1);
   await expect(page.getByTestId("today-summary")).toContainText("Working…");
 
   await page.getByRole("button", { name: "Clock out", exact: true }).click();
+  await expect(page.getByTestId("status-pill")).toContainText(/Out · in \d{1,2}:\d{2} (AM|PM)/);
   // One clock-in and one clock-out per day: the button now says so and cannot start a second shift.
   await expect(page.getByTestId("clock-button")).toHaveText("Done for today");
   await expect(page.getByTestId("clock-button")).toBeDisabled();
