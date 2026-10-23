@@ -3,6 +3,11 @@ import { createResponseCache, isCacheablePath } from "./responseCache";
 import { WARM_READS_BY_ROLE } from "./warmReads";
 import { createForegroundGate } from "./foregroundGate";
 import type {
+  ReportCatalogEntry,
+  ReportCatalogResponse,
+  ReportFilterOptions,
+  ReportFilterValues,
+  ReportResult,
   HireManagerSuggestion,
   PersonVersionView,
   PersonView,
@@ -2252,6 +2257,45 @@ export const api = {
     request<CsvImportResult<EmployeeView>>("/employees/bulk-import", { method: "POST", body: JSON.stringify({ csv }) }),
 
   getWorkforceAnalyticsSummary: () => request<EmployeeAnalyticsSummary>("/employees/analytics/summary"),
+
+  // --- Reports & Analytics Intelligence Center ------------------------------
+  getReportCatalog: () => request<ReportCatalogResponse>("/reports/catalog"),
+  getReportEntry: (id: string) => request<ReportCatalogEntry>(`/reports/catalog/${id}`),
+  getReportFilterOptions: (id: string) => request<ReportFilterOptions>(`/reports/catalog/${id}/filter-options`),
+  runReport: (id: string, filters: ReportFilterValues) =>
+    request<ReportResult>(`/reports/${id}/run`, { method: "POST", body: JSON.stringify({ filters }) }),
+  setReportFavorite: (id: string, favorite: boolean) =>
+    request<{ favorite: boolean }>(`/reports/${id}/favorite`, { method: favorite ? "PUT" : "DELETE" }),
+  // Streams the CSV the server builds (formula-injection safe, audited); the browser saves it under the server's name.
+  async exportReport(id: string, filters: ReportFilterValues): Promise<void> {
+    const token = getToken();
+    const res = await fetch(`${API_PREFIX}/reports/${id}/export`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ filters }),
+    });
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = await res.json();
+        message = body.message ?? message;
+      } catch {
+        // not JSON — keep the generic message
+      }
+      throw new ApiError(res.status, message);
+    }
+    const disposition = res.headers.get("Content-Disposition") ?? "";
+    const match = /filename="?([^";]+)"?/.exec(disposition);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = match?.[1] ?? `${id}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  },
 
   // --- Employee Groups & Leave Policies (Task #49) --------------------------
   // Admin Center's own screen for the Phase 8 resolver: the API already

@@ -21,6 +21,7 @@ import {
   GraduationCap,
   LayoutGrid,
   UserPlus,
+  BarChart3,
 } from "lucide-react";
 import type { ModuleKey, PublicTenantBranding, TenantRoleKey } from "@aihxm/shared-types";
 import { api, doneLoadOnEntry, prefetchRoute, publicTenantBrandingAssetUrl, startKeepWarm, takeLoadOnEntry, warmForRoles } from "../api/client";
@@ -165,6 +166,12 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): 
         ...(roleKeys.includes("hr_admin") ? [{ to: "/app/organization/legacy-reconciliation", label: "Legacy Data Reconciliation" }] : []),
       ],
     });
+  }
+
+  // Reports & Analytics: reports.view is seeded for hr_admin and line_manager (0164); the report library itself shows
+  // only what the caller's data permissions allow, so this link is a courtesy, never the gate.
+  if (hasRole("hr_admin", "line_manager")) {
+    items.push({ to: "/app/reports", label: "Reports & Analytics", icon: BarChart3 });
   }
 
   // Configuration Center is a read-only index over config domains this

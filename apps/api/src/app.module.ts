@@ -39,6 +39,7 @@ import { SystemAdminModule } from "./system-admin/system-admin.module";
 import { PayrollModule } from "./payroll/payroll.module";
 import { SignupModule } from "./signup/signup.module";
 import { DemoRequestsModule } from "./demo-requests/demo-requests.module";
+import { ReportsModule } from "./reports/reports.module";
 import { ConfigurationCenterModule } from "./configuration-center/configuration-center.module";
 import { StarterSetupModule } from "./starter-setup/starter-setup.module";
 import { OnboardingOffboardingModule } from "./onboarding-offboarding/onboarding-offboarding.module";
@@ -118,6 +119,7 @@ import { HrAdministrationModule } from "./hr-administration/hr-administration.mo
     OnboardingOffboardingModule,
     SignupModule,
     DemoRequestsModule,
+    ReportsModule,
     TenantManagementModule,
     PublicBrandingModule,
     PlatformBrandingModule,

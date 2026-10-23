@@ -542,6 +542,31 @@ export class RbacService {
     );
     return result.rowCount > 0;
   }
+
+  /**
+   * Which of `keys` the caller holds, in ONE round trip (same assignment-window rules as `can()`; nothing cached).
+   * For screens that must decide many permissions at once (the report library). Scope suffix rules (`.self` owner
+   * match) are NOT applied: this answers "is the grant held", the caller applies any record scope itself.
+   */
+  async heldPermissionKeys(claims: RequestClaims, keys: readonly string[]): Promise<Set<string>> {
+    if (!claims.company_id || keys.length === 0) return new Set();
+    const rows = await this.db.withClaims(claims, async (client) => {
+      const result = await client.query<{ key: string }>(
+        `SELECT DISTINCT p.key
+           FROM user_role_assignments ura
+           JOIN roles r ON r.id = ura.role_id AND r.is_active
+           JOIN role_permissions rp ON rp.role_id = ura.role_id
+           JOIN permissions p ON p.id = rp.permission_id
+           WHERE ura.user_account_id = $1
+             AND ura.company_id = $2
+             AND ${ASSIGNMENT_ACTIVE}
+             AND p.key = ANY($3::text[])`,
+        [claims.sub, claims.company_id, [...keys]]
+      );
+      return result.rows;
+    });
+    return new Set(rows.map((r) => r.key));
+  }
 }
 
 function conditionMatches(condition: FieldCondition, record: Record<string, unknown>): boolean {

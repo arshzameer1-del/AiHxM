@@ -139,6 +139,10 @@ const EmployeeBulkImportPage = lazy(() =>
     default: m.EmployeeBulkImportPage,
   })),
 );
+const ReportsLibraryPage = lazy(() =>
+  import("./portal/reports/ReportsLibraryPage").then((m) => ({ default: m.ReportsLibraryPage })),
+);
+const ReportPage = lazy(() => import("./portal/reports/ReportPage").then((m) => ({ default: m.ReportPage })));
 const WorkforceAnalyticsPage = lazy(() =>
   import("./portal/employees/WorkforceAnalyticsPage").then((m) => ({
     default: m.WorkforceAnalyticsPage,
@@ -421,6 +425,8 @@ export default function App() {
                   <Route path="employees/new" element={<Navigate to="/app/hire/quick" replace />} />
                   <Route path="employees/bulk-import" element={<Navigate to="/app/hire/bulk" replace />} />
                   <Route path="employees/analytics" element={<WorkforceAnalyticsPage />} />
+                  <Route path="reports" element={<ReportsLibraryPage />} />
+                  <Route path="reports/:id" element={<ReportPage />} />
                   {/* Organization Management Phase 1 — the Hierarchy
                     Explorer. org_unit.view.all/org_unit.manage.all (both
                     seeded in 0066) are the real gates, enforced server-

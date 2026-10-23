@@ -9127,3 +9127,114 @@ export type DemoRequest = {
   createdAt: string;
   lastSubmittedAt: string;
 };
+
+// ---------------------------------------------------------------------------
+// Reports & Analytics Intelligence Center
+// ---------------------------------------------------------------------------
+
+export type ReportStatus = "available" | "planned" | "blocked" | "unavailable";
+export type ReportSensitivity = "standard" | "internal" | "sensitive" | "restricted";
+export type ReportCategoryKey = "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "M" | "N" | "O";
+export type ReportFilterKey = "dateRange" | "department" | "location" | "employmentType" | "employmentStatus" | "leaveType" | "requestStatus" | "runStatus";
+export type ReportVisualization = "kpi" | "bar" | "line" | "donut" | "stackedBar" | "table";
+/**
+ * Whose records the caller may see in a report: the whole company, only their direct reports ("team"), or only the
+ * payroll areas they are assigned to ("scoped").
+ */
+export type ReportScope = "tenant" | "team" | "scoped";
+
+export type ReportCatalogEntry = {
+  id: string;
+  version: number;
+  title: string;
+  description: string;
+  categoryKey: ReportCategoryKey;
+  categoryLabel: string;
+  tags: string[];
+  sourceModule: string;
+  status: ReportStatus;
+  /** Why a report is planned/blocked/unavailable; null when available. */
+  statusReason: string | null;
+  sensitivity: ReportSensitivity;
+  visualizations: ReportVisualization[];
+  filters: ReportFilterKey[];
+  /** True when the caller may download it (report is available AND the caller holds reports.export). */
+  canExport: boolean;
+  scope: ReportScope;
+  favorite: boolean;
+  lastViewedAt: string | null;
+};
+
+export type ReportCatalogResponse = {
+  generatedAt: string;
+  /** All stable ids in the catalog, regardless of who is asking. */
+  catalogTotal: number;
+  /** Counts over the entries this caller may see. */
+  counts: { visible: number; available: number; planned: number; blocked: number; unavailable: number };
+  categories: { key: ReportCategoryKey; label: string; count: number }[];
+  entries: ReportCatalogEntry[];
+  recent: string[];
+  favorites: string[];
+};
+
+export type ReportFilterValues = {
+  dateFrom?: string;
+  dateTo?: string;
+  department?: string;
+  location?: string;
+  employmentType?: string;
+  employmentStatus?: string;
+  leaveType?: string;
+  requestStatus?: string;
+  runStatus?: string;
+};
+
+export type ReportFilterOption = { value: string; label: string };
+
+export type ReportColumn = { key: string; label: string; type: "text" | "number" | "percent" | "date" };
+export type ReportRow = Record<string, string | number | null>;
+
+export type ReportKpi = {
+  key: string;
+  label: string;
+  value: number | null;
+  unit: "count" | "percent" | "days" | "hours";
+  /** Short plain-language note shown under the value (period, denominator). */
+  note?: string;
+  /** Change versus the comparison period, in the same unit, when the report defines one. */
+  delta?: number | null;
+};
+
+export type ReportChartSpec = {
+  kind: "bar" | "line" | "donut" | "stackedBar";
+  title: string;
+  /** What the numbers count, for the axis and the screen-reader summary. */
+  unit: string;
+  xKey: string;
+  series: { key: string; label: string }[];
+  data: ReportRow[];
+};
+
+export type ReportResult = {
+  reportId: string;
+  version: number;
+  title: string;
+  generatedAt: string;
+  /** The data is live; asOf is the moment the query ran. */
+  asOf: string;
+  scope: ReportScope;
+  appliedFilters: ReportFilterValues;
+  dateRange: { from: string; to: string } | null;
+  kpis: ReportKpi[];
+  charts: ReportChartSpec[];
+  columns: ReportColumn[];
+  rows: ReportRow[];
+  totalRows: number;
+  truncated: boolean;
+  /** How the numbers are calculated, one sentence each. Shown in "How is this calculated?". */
+  calculation: string[];
+  /** Set when some inputs are missing, e.g. employees with no department; never silently counted as zero. */
+  notes: string[];
+};
+
+export type ReportFilterOptions = Partial<Record<Exclude<ReportFilterKey, "dateRange">, ReportFilterOption[]>>;

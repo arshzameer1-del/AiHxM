@@ -14,7 +14,8 @@
     "reset-tenant": "node -r ts-node/register/transpile-only src/database/reset-tenant-data.ts",
     "seed-demo": "node -r ts-node/register/transpile-only src/database/seed-tenant-demo.ts",
     "grant-role": "node -r ts-node/register/transpile-only src/database/grant-role.ts",
-    "encrypt-backfill": "node -r ts-node/register/transpile-only src/database/encrypt-backfill.ts"
+    "encrypt-backfill": "node -r ts-node/register/transpile-only src/database/encrypt-backfill.ts",
+    "docs:reports": "node -r ts-node/register/transpile-only src/reports/tools/generate-report-docs.ts"
   },
   "dependencies": {
     "@aihxm/shared-types": "*",
