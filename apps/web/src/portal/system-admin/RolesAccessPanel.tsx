@@ -174,6 +174,71 @@ function RevokeButton({ assignmentId, onChanged }: { assignmentId: string; onCha
   );
 }
 
+/**
+ * Per login: sign in with an authenticator code (the default) or with login ID and password only. Switching to password only asks to
+ * confirm because it weakens that login; switching back on signs the person out so the rule applies straight away. The server refuses
+ * admin accounts and the caller's own login.
+ */
+function SignInSecurityControl({ user, onChanged }: { user: AssignableUserView; onChanged: () => void }) {
+  const [confirmingOff, setConfirmingOff] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function change(required: boolean) {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.setEmployeeMfaRequired(user.employeeId, required);
+      setConfirmingOff(false);
+      onChanged();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not change the sign-in rule.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-2 text-xs">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-label-tertiary">Sign-in:</span>
+        <span
+          className={`inline-block px-2.5 py-0.5 rounded-full font-semibold ${user.mfaRequired ? "bg-success/15 text-green-700" : "bg-amber-100 text-amber-800"}`}
+        >
+          {user.mfaRequired ? "Password + authenticator code" : "Password only"}
+        </span>
+        {user.mfaRequired && !confirmingOff && (
+          <button type="button" onClick={() => setConfirmingOff(true)} className="font-semibold text-accent hover:underline">
+            Allow password only
+          </button>
+        )}
+        {!user.mfaRequired && (
+          <button type="button" onClick={() => change(true)} disabled={busy} className="font-semibold text-accent hover:underline disabled:opacity-50">
+            {busy ? "Saving…" : "Require authenticator"}
+          </button>
+        )}
+      </div>
+      {confirmingOff && (
+        <div className="mt-2 space-y-2 bg-black/5 rounded-lg p-3 max-w-md">
+          <p>
+            {user.fullName} will sign in with login ID and password only, no authenticator code. Anyone who learns the password can then get in.
+            Use this only for people who really need it.
+          </p>
+          <div className="flex gap-3">
+            <button type="button" onClick={() => change(false)} disabled={busy} className="bg-accent text-white rounded-lg px-3 py-1.5 font-semibold disabled:opacity-50">
+              {busy ? "Saving…" : "Allow password only"}
+            </button>
+            <button type="button" onClick={() => { setConfirmingOff(false); setError(null); }} className="text-label-secondary hover:text-label-primary">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {error && <div className="text-danger mt-1" role="alert">{error}</div>}
+    </div>
+  );
+}
+
 function UserRow({
   user,
   roles,
@@ -232,6 +297,7 @@ function UserRow({
         </button>
       )}
 
+      {user.hasLogin && <SignInSecurityControl user={user} onChanged={onChanged} />}
       {user.hasLogin && <AssignRoleControl user={user} roles={roles} onChanged={onChanged} />}
       {user.hasLogin && <ResetPasswordControl employeeId={user.employeeId} employeeName={user.fullName} />}
     </div>

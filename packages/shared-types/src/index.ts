@@ -5178,6 +5178,8 @@ export type AssignableUserView = {
   userAccountId: string | null;
   hasLogin: boolean;
   roleKeys: TenantRoleKey[];
+  /** false = this login signs in with password only (no authenticator code). Only meaningful when hasLogin. */
+  mfaRequired: boolean;
 };
 
 export type SystemAdminRoleAssignmentView = {

@@ -219,7 +219,7 @@ describe("System Admin HTTP surface (e2e) — Roles & Access panel", () => {
       expect(sana.hasLogin).toBe(false);
       expect(sana.roleKeys).toEqual([]);
       expect(Object.keys(ayesha).sort()).toEqual(
-        ["email", "employeeId", "employeeNumber", "fullName", "hasLogin", "roleKeys", "userAccountId"].sort()
+        ["email", "employeeId", "employeeNumber", "fullName", "hasLogin", "mfaRequired", "roleKeys", "userAccountId"].sort()
       );
     });
   });

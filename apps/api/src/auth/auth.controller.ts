@@ -62,16 +62,16 @@ export class AuthController {
 
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post("login")
-  login(@Body() dto: LoginDto) {
-    return this.auth.login(dto.email, dto.password);
+  login(@Body() dto: LoginDto, @Req() req: Request) {
+    return this.auth.login(dto.email, dto.password, sessionRequestContext(req));
   }
 
   // A tenant's own login page (leadhcm.aihxm.com/login) — see
   // AuthService.loginWithEmployeeNumber's doc comment.
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post("login/employee")
-  loginWithEmployeeNumber(@Body() dto: LoginWithEmployeeNumberDto) {
-    return this.auth.loginWithEmployeeNumber(dto.companySlug, dto.employeeNumber, dto.password);
+  loginWithEmployeeNumber(@Body() dto: LoginWithEmployeeNumberDto, @Req() req: Request) {
+    return this.auth.loginWithEmployeeNumber(dto.companySlug, dto.employeeNumber, dto.password, sessionRequestContext(req));
   }
 
   @Throttle({ default: { limit: 10, ttl: 60_000 } })

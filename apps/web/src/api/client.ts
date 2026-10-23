@@ -2943,6 +2943,9 @@ export const api = {
   resetEmployeeMfa: (employeeId: string) =>
     request<{ message: string }>(`/system-admin/users/${encodeURIComponent(employeeId)}/reset-mfa`, { method: "POST" }),
 
+  setEmployeeMfaRequired: (employeeId: string, required: boolean) =>
+    request<{ message: string }>(`/system-admin/users/${encodeURIComponent(employeeId)}/mfa-requirement`, { method: "PUT", body: JSON.stringify({ required }) }),
+
   listAssignableUsers: () => request<AssignableUserView[]>("/system-admin/assignable-users"),
 
   listSystemAdminRoleAssignments: () => request<SystemAdminRoleAssignmentView[]>("/system-admin/role-assignments"),

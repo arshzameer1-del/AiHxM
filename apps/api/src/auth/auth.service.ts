@@ -115,19 +115,15 @@ export class AuthService {
 
   // --- Login ------------------------------------------------------------
 
-  // Neither login() nor loginWithEmployeeNumber() ever issues a session
-  // directly — MFA is mandatory (see authenticate() below), so every real
-  // login always ends at confirmMfaEnrollment()/verifyMfa()/
-  // verifyMfaRecoveryCode() instead, which is where a `SessionRequestContext`
-  // actually matters and is threaded through. The request that completes
-  // MFA is the one that establishes the session, so that request's own
-  // IP/User-Agent — not this earlier password-check request's — is what
-  // gets recorded.
-  async login(email: string, password: string): Promise<LoginResult> {
+  // login() and loginWithEmployeeNumber() issue a session directly only for a company login whose System Admin switched
+  // `mfa_required` off (see authenticate() below); every other login ends at confirmMfaEnrollment()/verifyMfa()/
+  // verifyMfaRecoveryCode(). Whichever request establishes the session, its own IP/User-Agent is what gets recorded.
+  async login(email: string, password: string, requestContext: SessionRequestContext = NO_REQUEST_CONTEXT): Promise<LoginResult> {
     const account = await this.findAccountByEmail(email);
     return this.authenticate(account, password, {
       invalidCredentialsMessage: "Invalid email or password",
       otpLabel: email,
+      requestContext,
     });
   }
 
@@ -150,12 +146,14 @@ export class AuthService {
   async loginWithEmployeeNumber(
     companySlug: string,
     employeeNumber: string,
-    password: string
+    password: string,
+    requestContext: SessionRequestContext = NO_REQUEST_CONTEXT
   ): Promise<LoginResult> {
     const account = await this.findAccountByEmployeeNumber(companySlug, employeeNumber);
     return this.authenticate(account, password, {
       invalidCredentialsMessage: "Invalid login ID or password",
       otpLabel: `${employeeNumber} (${companySlug})`,
+      requestContext,
     });
   }
 
@@ -163,7 +161,7 @@ export class AuthService {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     account: any | undefined,
     password: string,
-    opts: { invalidCredentialsMessage: string; otpLabel: string }
+    opts: { invalidCredentialsMessage: string; otpLabel: string; requestContext?: SessionRequestContext }
   ): Promise<LoginResult> {
     // Same generic message whether the identifier doesn't exist or the
     // password is wrong — the account lookup itself must never leak
@@ -212,9 +210,12 @@ export class AuthService {
 
     await this.resetFailedAttempts(account.id);
 
-    // MFA is mandatory for all three tiers (plan doc Phase 3 row,
-    // extended by Decision #12 to cover tenant RBAC users too) — a
-    // password-only session is never issued for any of them.
+    // MFA is mandatory for Platform Admins and Company Admins always, and for company users by default (plan doc Phase 3 row, extended by
+    // Decision #12). The one exception: a company's System Admin can switch `mfa_required` off for an ordinary company login
+    // (Roles & Access), and that login then gets a session right after the password check. Admin accounts ignore the switch.
+    if (account.mfa_required === false && !identity.is_platform_admin && !(await this.isCompanyAdminAccount(account.id))) {
+      return { status: "ok", token: await this.issueSessionToken(identity, account.id, opts.requestContext ?? NO_REQUEST_CONTEXT) };
+    }
     if (!account.mfa_enabled) {
       const secret = generateSecret();
       await this.setPendingMfaSecret(account.id, encryptMfaSecret(secret));
@@ -227,6 +228,13 @@ export class AuthService {
     }
 
     return { status: "mfa_required", mfaTicket: signMfaTicket("mfa_verify", account.id) };
+  }
+
+  private async isCompanyAdminAccount(userAccountId: string): Promise<boolean> {
+    return this.db.withClaims(SERVICE_CLAIMS, async (client) => {
+      const r = await client.query("SELECT 1 FROM company_admins WHERE user_account_id = $1 LIMIT 1", [userAccountId]);
+      return (r.rowCount ?? 0) > 0;
+    });
   }
 
   async confirmMfaEnrollment(

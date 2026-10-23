@@ -1,9 +1,10 @@
-import { Body, Controller, Delete, Get, Param, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Put, UseGuards } from "@nestjs/common";
 import { SessionGuard } from "../auth/session.guard";
 import { CurrentClaims } from "../auth/current-claims.decorator";
 import type { RequestClaims } from "../database/tenant-context";
 import { SystemAdminService } from "./system-admin.service";
 import { AssignSystemAdminRoleDto } from "./dto/assign-system-admin-role.dto";
+import { SetMfaRequirementDto } from "./dto/set-mfa-requirement.dto";
 import { ResetEmployeePasswordDto } from "./dto/reset-employee-password.dto";
 
 /**
@@ -49,6 +50,13 @@ export class SystemAdminController {
   async resetMfa(@CurrentClaims() claims: RequestClaims, @Param("employeeId") employeeId: string) {
     await this.systemAdmin.resetMfa(claims, employeeId);
     return { message: "Authenticator reset." };
+  }
+
+  /** Per login: must the person enter an authenticator code at sign-in (true) or only login ID + password (false)? */
+  @Put("users/:employeeId/mfa-requirement")
+  async setMfaRequired(@CurrentClaims() claims: RequestClaims, @Param("employeeId") employeeId: string, @Body() dto: SetMfaRequirementDto) {
+    await this.systemAdmin.setMfaRequired(claims, employeeId, dto.required);
+    return { message: dto.required ? "Authenticator is now required for this login." : "This login can now sign in with password only." };
   }
 
   @Delete("role-assignments/:id")

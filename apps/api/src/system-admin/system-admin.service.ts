@@ -131,6 +131,13 @@ export class SystemAdminService {
         list.push(row.role_key);
         rolesByAccount.set(row.user_account_id, list);
       }
+      const accountIds = employeesResult.rows.map((e: any) => e.user_account_id).filter(Boolean) as string[];
+      const mfaByAccount = new Map<string, boolean>();
+      if (accountIds.length > 0) {
+        const elevated: RequestClaims = { is_platform_admin: false, is_service: true, company_id: claims.company_id, sub: "system-admin-service" };
+        const flags = await this.db.withClaims(elevated, (c) => c.query("SELECT id, mfa_required FROM user_accounts WHERE id = ANY($1::uuid[])", [accountIds]));
+        for (const r of flags.rows) mfaByAccount.set(r.id, r.mfa_required !== false);
+      }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return employeesResult.rows.map((e: any) => ({
         employeeId: e.id,
@@ -140,6 +147,7 @@ export class SystemAdminService {
         userAccountId: e.user_account_id,
         hasLogin: Boolean(e.user_account_id),
         roleKeys: e.user_account_id ? (rolesByAccount.get(e.user_account_id) ?? []) : [],
+        mfaRequired: e.user_account_id ? (mfaByAccount.get(e.user_account_id) ?? true) : true,
       }));
     });
   }
@@ -317,6 +325,44 @@ export class SystemAdminService {
         action: "system_admin.mfa_reset",
         target: userAccountId,
         metadata: { employeeId },
+      });
+    });
+  }
+
+  /**
+   * Decides, per login, whether the person must enter an authenticator code at sign-in (`required: true`, the default for everyone) or
+   * signs in with login ID and password only (`required: false`). System Admin only (`user_account.manage.all`); an HR Admin cannot,
+   * because switching it off weakens a login. Never applies to a Platform Admin or Company Admin account (those always use MFA), and the
+   * caller cannot switch it off for their own login. Switching it back on keeps any authenticator the person already had; if they never
+   * had one they set it up at the next sign-in. Switching it on also signs the person out so the rule applies straight away.
+   */
+  async setMfaRequired(claims: RequestClaims, employeeId: string, required: boolean): Promise<void> {
+    if (!claims.company_id) throw new ForbiddenException();
+    if (!(await this.rbac.can(claims, "user_account.manage.all"))) throw new ForbiddenException("Only a System Admin can change who signs in with an authenticator");
+
+    const elevatedClaims: RequestClaims = { is_platform_admin: false, is_service: true, company_id: claims.company_id, sub: "system-admin-service" };
+    await this.db.withClaims(elevatedClaims, async (client) => {
+      const employee = await client.query("SELECT id, user_account_id FROM employees WHERE id = $1 AND company_id = $2", [employeeId, claims.company_id]);
+      if (employee.rowCount === 0) throw new NotFoundException("Employee not found");
+      const userAccountId = employee.rows[0].user_account_id as string | null;
+      if (!userAccountId) throw new BadRequestException("This employee has no login yet - create one first");
+
+      const admin = await client.query(
+        "SELECT 1 FROM platform_admins WHERE user_account_id = $1 UNION ALL SELECT 1 FROM company_admins WHERE user_account_id = $1 LIMIT 1",
+        [userAccountId]
+      );
+      if ((admin.rowCount ?? 0) > 0) throw new BadRequestException("Admin accounts always sign in with an authenticator");
+      if (!required && userAccountId === claims.sub) throw new BadRequestException("You cannot switch off the authenticator for your own login");
+
+      await client.query("UPDATE user_accounts SET mfa_required = $2, updated_at = now() WHERE id = $1", [userAccountId, required]);
+      if (required) {
+        await client.query("UPDATE user_sessions SET revoked_at = now(), revoked_by = $2 WHERE user_account_id = $1 AND revoked_at IS NULL", [userAccountId, "mfa_required"]);
+      }
+      await this.audit.record(client, claims, {
+        companyId: claims.company_id ?? null,
+        action: "system_admin.mfa_requirement_changed",
+        target: userAccountId,
+        metadata: { employeeId, mfaRequired: required },
       });
     });
   }

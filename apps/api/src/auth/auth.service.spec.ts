@@ -276,6 +276,37 @@ describe("AuthService", () => {
       expect(result.status).toBe("mfa_setup_required");
     });
 
+    it("a login switched to password only gets a session straight after the password; switching back asks for the authenticator again", async () => {
+      const { companySlug, employeeNumber, password } = await createEmployeeLogin();
+      await db.withClaims(FIXTURE_CLAIMS, (c) =>
+        c.query("UPDATE user_accounts SET mfa_required = false WHERE id = (SELECT user_account_id FROM employees WHERE employee_number = $1 AND company_id = (SELECT id FROM companies WHERE slug = $2))", [employeeNumber, companySlug])
+      );
+
+      const direct = await service.loginWithEmployeeNumber(companySlug, employeeNumber, password);
+      expect(direct.status).toBe("ok");
+      expect((direct as { token: string }).token).toEqual(expect.any(String));
+
+      await expect(service.loginWithEmployeeNumber(companySlug, employeeNumber, "wrong-password")).rejects.toThrow("Invalid login ID or password");
+
+      await db.withClaims(FIXTURE_CLAIMS, (c) =>
+        c.query("UPDATE user_accounts SET mfa_required = true WHERE id = (SELECT user_account_id FROM employees WHERE employee_number = $1 AND company_id = (SELECT id FROM companies WHERE slug = $2))", [employeeNumber, companySlug])
+      );
+      expect((await service.loginWithEmployeeNumber(companySlug, employeeNumber, password)).status).toBe("mfa_setup_required");
+    });
+
+    it("the password-only switch is ignored for a Company Admin and a Platform Admin", async () => {
+      const admin = await createUserAccount();
+      const loginId = `NoSkip_${Math.floor(Math.random() * 100000)}`;
+      const companySlug = await db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const slug = `auth-admin-nomfaskip-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const co = await client.query("INSERT INTO companies (name, slug, status, package_tier) VALUES ($1, $2, 'active', 'starter') RETURNING id", [`NoSkip Co ${Date.now()}`, slug]);
+        await client.query("INSERT INTO company_admins (company_id, full_name, email, user_account_id, login_id) VALUES ($1, 'No Skip', $2, $3, $4)", [co.rows[0].id, `noskip-${Date.now()}@example.com`, admin.id, loginId]);
+        await client.query("UPDATE user_accounts SET mfa_required = false WHERE id = $1", [admin.id]);
+        return slug;
+      });
+      expect((await service.loginWithEmployeeNumber(companySlug, loginId, admin.password)).status).toBe("mfa_setup_required");
+    });
+
     it("rejects the right employee number under the WRONG company with a generic message", async () => {
       const { employeeNumber, password } = await createEmployeeLogin();
       const otherSlug = await db.withClaims(FIXTURE_CLAIMS, async (client) => {

@@ -179,7 +179,7 @@ describe("SystemAdminService", () => {
       expect(sana.roleKeys).toEqual([]);
       // Deliberately not EmployeeView — no cnic/salaryBand/etc. keys at all.
       expect(Object.keys(ayesha).sort()).toEqual(
-        ["email", "employeeId", "employeeNumber", "fullName", "hasLogin", "roleKeys", "userAccountId"].sort()
+        ["email", "employeeId", "employeeNumber", "fullName", "hasLogin", "mfaRequired", "roleKeys", "userAccountId"].sort()
       );
     });
   });
@@ -400,6 +400,41 @@ describe("SystemAdminService", () => {
     it("refuses another company's employee and a caller with no rights", async () => {
       await expect(systemAdmin.resetMfa(bilalClaims, otherCoEmployeeId)).rejects.toThrow(NotFoundException);
       await expect(systemAdmin.resetMfa(sanaSelfServiceClaims, ayeshaId)).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe("setMfaRequired", () => {
+    async function flag(employeeId: string) {
+      return db.withClaims(FIXTURE_CLAIMS, async (client) => {
+        const r = await client.query("SELECT ua.id, ua.mfa_required FROM employees e JOIN user_accounts ua ON ua.id = e.user_account_id WHERE e.id = $1", [employeeId]);
+        return { id: r.rows[0].id as string, required: r.rows[0].mfa_required as boolean };
+      });
+    }
+
+    it("a System Admin switches a login to password only and back, audited; switching on signs the person out", async () => {
+      const before = await flag(ayeshaId);
+      expect(before.required).toBe(true);
+
+      await systemAdmin.setMfaRequired(bilalClaims, ayeshaId, false);
+      expect((await flag(ayeshaId)).required).toBe(false);
+      const listed = (await systemAdmin.listAssignableUsers(bilalClaims)).find((u) => u.employeeId === ayeshaId);
+      expect(listed?.mfaRequired).toBe(false);
+
+      await db.withClaims(FIXTURE_CLAIMS, (client) =>
+        client.query("INSERT INTO user_sessions (user_account_id, company_id, expires_at) VALUES ($1,$2, now() + interval '1 day')", [before.id, companyId])
+      );
+      await systemAdmin.setMfaRequired(bilalClaims, ayeshaId, true);
+      expect((await flag(ayeshaId)).required).toBe(true);
+      const open = await db.withClaims(FIXTURE_CLAIMS, async (client) => (await client.query("SELECT count(*)::int AS n FROM user_sessions WHERE user_account_id = $1 AND revoked_at IS NULL", [before.id])).rows[0].n as number);
+      expect(open).toBe(0);
+      const audits = await db.withClaims(FIXTURE_CLAIMS, async (client) => (await client.query("SELECT count(*)::int AS n FROM audit_log WHERE action = 'system_admin.mfa_requirement_changed' AND target = $1", [before.id])).rows[0].n as number);
+      expect(audits).toBeGreaterThanOrEqual(2);
+    });
+
+    it("an HR Admin cannot change it, nobody can switch off their own, and other companies are not reachable", async () => {
+      await expect(systemAdmin.setMfaRequired(ayeshaClaims, sanaId, false)).rejects.toThrow(ForbiddenException);
+      await expect(systemAdmin.setMfaRequired(bilalClaims, bilalId, false)).rejects.toThrow(BadRequestException);
+      await expect(systemAdmin.setMfaRequired(bilalClaims, otherCoEmployeeId, false)).rejects.toThrow(NotFoundException);
     });
   });
 });
