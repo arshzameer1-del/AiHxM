@@ -58,7 +58,7 @@ test("Work timer: a running timer shows in the top bar and Stop adds its time to
   await page.getByTestId("timer-stop").click();
   await expect(page.getByTestId("timer-pill")).toHaveCount(0);
   await expect(page.getByTestId("timer-start")).toBeVisible();
-  await expect(page.getByTestId(`ts-note-${todayIso()}`)).toContainText("Fiori app");
+  await expect(page.getByTestId("ts-task-0")).toHaveValue("Fiori app"); // the timer's label becomes the task line
   await expect(page.getByTestId("ts-logged")).toContainText("0:4");
 });
 
@@ -90,6 +90,50 @@ test("Timesheet: tiles, progress and the approval stepper follow what is typed a
   await page.getByRole("button", { name: "Submit for approval" }).click();
   await expect(page.getByTestId("ts-status")).toHaveText("Waiting for approval");
   await expect(page.getByTestId("ts-approval").locator("[aria-current=step]")).toContainText("Manager");
+});
+
+test("Timesheet lines: several tasks per week are saved, and the Month view shows the hours", async ({ page }) => {
+  await loginToApp(page, employeeToken);
+  await page.goto("/app/attendance/timesheet");
+  await page.getByRole("button", { name: "Previous week" }).click();
+  await expect(page.getByTestId("ts-status")).toHaveText("Draft");
+  const firstDay = (await page.locator("th[data-testid^='ts-day-']").first().getAttribute("data-testid"))!.replace("ts-day-", "");
+
+  await page.getByTestId("ts-task-0").fill("Payroll run");
+  await page.locator(`#ts-${firstDay}`).fill("2");
+  await page.getByTestId("ts-add-line").click();
+  await page.getByTestId("ts-task-1").fill("Support");
+  await page.getByTestId("ts-desc-1").fill("Tickets");
+  await page.getByTestId("ts-line-1").locator("input[inputmode=decimal]").first().fill("1.5");
+  await expect(page.getByTestId("ts-line-total-0")).toHaveText("2");
+  await expect(page.getByTestId("ts-line-total-1")).toHaveText("1.5");
+  await expect(page.getByTestId(`ts-day-total-${firstDay}`)).toContainText("3.5");
+  await page.getByRole("button", { name: "Save draft" }).click();
+  await expect(page.getByTestId("ts-total")).toContainText("Total 3.5 h");
+
+  // Saved as two lines: still two after a reload.
+  await page.reload();
+  await page.getByRole("button", { name: "Previous week" }).click();
+  await expect(page.getByTestId("ts-task-0")).toHaveValue("Payroll run");
+  await expect(page.getByTestId("ts-task-1")).toHaveValue("Support");
+  await expect(page.getByTestId("ts-desc-1")).toHaveValue("Tickets");
+  await expect(page.getByTestId("ts-total")).toContainText("Total 3.5 h");
+
+  // A line can be removed again.
+  await page.getByTestId("ts-remove-1").click();
+  await expect(page.getByTestId("ts-line-1")).toHaveCount(0);
+  await expect(page.getByTestId("ts-total")).toContainText("Total 2 h");
+  await page.getByRole("button", { name: "Save draft" }).click();
+
+  // Month view.
+  await page.getByTestId("ts-view-month").click();
+  await expect(page.getByTestId("timesheet-month")).toBeVisible();
+  await expect(page.getByTestId("ts-month-tiles")).toContainText("Target");
+  if (firstDay.slice(0, 7) !== todayIso().slice(0, 7)) await page.getByRole("button", { name: "Previous month" }).click();
+  await expect(page.getByTestId(`ts-month-${firstDay}`)).toContainText("2 h");
+  await page.getByTestId(`ts-month-${firstDay}`).click();
+  await expect(page.getByTestId("timesheet-week")).toBeVisible();
+  await expect(page.getByTestId("ts-task-0")).toHaveValue("Payroll run");
 });
 
 test("the employee sees the submitted week under My requests and in the home Action centre", async ({ page }) => {

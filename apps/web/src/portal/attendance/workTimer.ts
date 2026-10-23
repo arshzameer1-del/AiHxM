@@ -78,26 +78,20 @@ export function minutesToLog(seconds: number): number {
 }
 
 /**
- * The sheet's entries with `minutes` added to `workDate` (one entry per day: other entries are kept as they are; the
- * timer's label is added to the day's note).
+ * The sheet's entries with `minutes` added to `workDate` on the line for this task (the timer's label is the task). An existing entry for
+ * that day and task is topped up, otherwise a new one is added; every other entry stays exactly as it is.
  */
 export function mergeIntoDay(entries: TimesheetEntryView[], workDate: string, minutes: number, label: string): TimesheetEntryInput[] {
-  const out: TimesheetEntryInput[] = [];
-  let merged = false;
-  for (const e of entries) {
-    if (e.workDate.slice(0, 10) === workDate) {
-      const parts = [e.description, label.trim() || null].filter((x): x is string => Boolean(x));
-      const existing = out.find((o) => o.workDate === workDate);
-      if (existing) {
-        existing.minutes += e.minutes;
-        continue;
-      }
-      out.push({ workDate, minutes: e.minutes + minutes, costCenterId: e.costCenterId, taskRef: e.taskRef, description: [...new Set(parts)].join("; ") || null });
-      merged = true;
-    } else {
-      out.push({ workDate: e.workDate.slice(0, 10), minutes: e.minutes, costCenterId: e.costCenterId, taskRef: e.taskRef, description: e.description });
-    }
-  }
-  if (!merged) out.push({ workDate, minutes, description: label.trim() || null });
+  const task = label.trim() || null;
+  const out: TimesheetEntryInput[] = entries.map((e) => ({
+    workDate: e.workDate.slice(0, 10),
+    minutes: e.minutes,
+    costCenterId: e.costCenterId,
+    taskRef: e.taskRef,
+    description: e.description,
+  }));
+  const target = out.find((o) => o.workDate === workDate && (o.taskRef?.trim() || null) === task);
+  if (target) target.minutes += minutes;
+  else out.push({ workDate, minutes, taskRef: task });
   return out;
 }
