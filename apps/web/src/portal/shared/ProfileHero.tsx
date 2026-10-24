@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import { bannerBackground } from "../employees/appearance";
+import { useCompanyAppearance } from "../employees/useCompanyAppearance";
 
 function initialsOf(name: string): string {
   return (
@@ -20,6 +22,7 @@ export function ProfileHero({
   line,
   facts,
   actions,
+  photoUrl,
 }: {
   name: string;
   badge?: string;
@@ -27,11 +30,16 @@ export function ProfileHero({
   line?: string | null;
   facts: { label: string; value: string; dot?: "on" | "off" }[];
   actions?: ReactNode;
+  /** The person's profile photo (blob: URL); initials are shown without one. */
+  photoUrl?: string | null;
 }) {
+  // BACKLOG55: the company's banner background (System Admin > Appearance) applies to every banner of this kind.
+  const appearance = useCompanyAppearance();
+  const background = bannerBackground(appearance?.view ?? null, appearance?.imageUrl ?? null);
   return (
-    <section className="ws-hero" aria-label="Profile">
-      <div className="ws-hero-avatar" aria-hidden="true">
-        {initialsOf(name)}
+    <section className="ws-hero" aria-label="Profile" style={background ? { background } : undefined}>
+      <div className="ws-hero-avatar" aria-hidden={photoUrl ? undefined : "true"}>
+        {photoUrl ? <img src={photoUrl} alt="" className="ws-hero-photo" /> : initialsOf(name)}
       </div>
       <div className="ws-hero-body">
         <div className="ws-hero-name">

@@ -39,6 +39,7 @@ export function Topbar({
   onLogout,
   leading,
   accountPath,
+  avatarUrl,
 }: {
   items: QuickJumpItem[];
   userName: string;
@@ -50,6 +51,8 @@ export function Topbar({
   leading?: ReactNode;
   /** BACKLOG51 - where "Account & security" lives. When given, the bell and the menu entry are shown. */
   accountPath?: string;
+  /** The person's profile photo (blob: URL). Initials are shown when there is none. */
+  avatarUrl?: string | null;
 }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -158,8 +161,8 @@ export function Topbar({
             aria-label="Account menu"
             className="flex items-center gap-2.5 pl-1.5 pr-1.5 sm:pr-2.5 py-1.5 rounded-lg hover:bg-surface transition-colors"
           >
-            <span className="w-8 h-8 rounded-full bg-accent/10 text-accent font-semibold text-xs flex items-center justify-center shrink-0">
-              {initials}
+            <span className="w-8 h-8 rounded-full bg-accent/10 text-accent font-semibold text-xs flex items-center justify-center shrink-0 overflow-hidden">
+              {avatarUrl ? <img src={avatarUrl} alt="" className="w-full h-full object-cover" data-testid="topbar-photo" /> : initials}
             </span>
             <span className="hidden sm:flex flex-col items-start leading-tight">
               <span className="text-sm font-medium text-label-primary truncate max-w-[140px]">{userName}</span>

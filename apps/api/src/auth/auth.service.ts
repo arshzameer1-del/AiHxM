@@ -701,6 +701,7 @@ export class AuthService {
         roleKeys: [],
         employeeId: null,
         enabledModules: [],
+        permissions: [],
       };
     }
 
@@ -740,6 +741,18 @@ export class AuthService {
         [claims.sub, companyId]
       );
       const enabledModules = await this.entitlements.getEnabledModuleKeys(client, companyId);
+      // BACKLOG55: what this login may do, so screens can offer (or hide) things by permission instead of by role name.
+      const held = await client.query<{ key: string }>(
+        `SELECT DISTINCT p.key FROM user_role_assignments ura
+           JOIN roles r ON r.id = ura.role_id AND r.is_active
+           JOIN role_permissions rp ON rp.role_id = r.id
+           JOIN permissions p ON p.id = rp.permission_id
+          WHERE ura.user_account_id = $1 AND ura.company_id = $2
+            AND (ura.effective_from IS NULL OR ura.effective_from <= CURRENT_DATE)
+            AND (ura.effective_to IS NULL OR ura.effective_to >= CURRENT_DATE)
+          ORDER BY p.key`,
+        [claims.sub, companyId]
+      );
 
       const employeeRow = employee.rows[0];
       let fullName = employeeRow ? `${employeeRow.first_name} ${employeeRow.last_name}` : undefined;
@@ -764,6 +777,7 @@ export class AuthService {
         roleKeys: roles.rows.map((r) => r.key),
         employeeId: employeeRow?.id ?? null,
         enabledModules,
+        permissions: held.rows.map((r) => r.key),
       };
     });
   }

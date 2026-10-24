@@ -27,6 +27,8 @@ import { EmployeeAdditionalPaymentsPanel } from "./EmployeeAdditionalPaymentsPan
 import { SubEntityPanel } from "./subentities/SubEntityPanel";
 import { StatutoryIdsPanel } from "./StatutoryIdsPanel";
 import { LanguagesPanel } from "./LanguagesPanel";
+import { ProfilePhoto } from "./ProfilePhoto";
+import { useEmployeePhoto } from "./employeePhoto";
 import { MedicalInfoPanel } from "./MedicalInfoPanel";
 import { DisciplinaryRecordsPanel } from "./DisciplinaryRecordsPanel";
 import { EmployeeDocumentsPanel } from "./EmployeeDocumentsPanel";
@@ -111,6 +113,7 @@ export function EmployeeDetailPage() {
   const [tab, setTab] = useState<Tab>("Overview");
 
   const canManage = identity?.roleKeys.includes("hr_admin") ?? false;
+  const photo = useEmployeePhoto(id);
 
   async function load() {
     if (!id) return;
@@ -167,6 +170,7 @@ export function EmployeeDetailPage() {
         <div className="mb-5">
           <ProfileHero
             name={`${employee.firstName} ${employee.lastName}`}
+            photoUrl={photo}
             badge={employee.employeeNumber}
             title={employee.designation}
             line={[employee.department, employee.location].filter(Boolean).join(" / ")}
@@ -200,6 +204,18 @@ export function EmployeeDetailPage() {
           <p className="text-label-tertiary text-sm font-mono mb-4">{employee.employeeNumber}</p>
         </>
       )}
+
+      {/* BACKLOG55: the profile photo. HR (hr_admin) can change it here and it shows at once; others only see it. */}
+      <div className="bg-card rounded-card shadow-sm p-3 mb-4 flex items-center gap-4" data-testid="employee-photo-row">
+        {canManage ? (
+          <ProfilePhoto employeeId={employee.id} initials={(employee.firstName[0] ?? "") + (employee.lastName[0] ?? "")} mode="hr" />
+        ) : photo ? (
+          <img src={photo} alt="Profile photo" className="w-14 h-14 rounded-full object-cover" data-testid="profile-photo" />
+        ) : (
+          <div className="w-14 h-14 rounded-full bg-accent/10 text-accent font-semibold text-lg flex items-center justify-center">{(employee.firstName[0] ?? "") + (employee.lastName[0] ?? "")}</div>
+        )}
+        <div className="text-sm text-label-secondary">Profile photo{canManage ? ". Changing it here shows at once; the employee can also change their own." : ""}</div>
+      </div>
 
       <div className="flex gap-1 border-b border-black/10 mb-4 overflow-x-auto">
         {TABS.filter((t) => t !== "Medical & Discipline" || canManage).map((t) => (

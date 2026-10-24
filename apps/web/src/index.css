@@ -178,6 +178,8 @@
   background: rgb(255 255 255 / 0.14);
   box-shadow: 0 0 0 4px rgb(255 255 255 / 0.18);
 }
+.ws-hero-avatar { overflow: hidden; }
+.ws-hero-photo { width: 100%; height: 100%; object-fit: cover; display: block; }
 .ws-hero-body { min-width: 0; flex: 1; }
 .ws-hero-greet { font-size: 13px; color: rgb(255 255 255 / 0.85); }
 .ws-hero-name { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }

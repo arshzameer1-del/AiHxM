@@ -1217,7 +1217,16 @@ export class EmployeesService {
     if (pending >= MAX_PENDING_SELF_UPLOADS) {
       throw new BadRequestException(`You already have ${MAX_PENDING_SELF_UPLOADS} documents waiting for HR. Wait for a decision before uploading more.`);
     }
-    return this.storeDocument(claims, employeeId, documentType, file, { ...extra, reviewStatus: "pending" });
+    // BACKLOG55: a profile photo shows at once unless the company asks for HR approval (Appearance setting). Every other document still waits for HR.
+    let reviewStatus: "approved" | "pending" = "pending";
+    if (documentType === "photograph") {
+      const needs = await this.db.withClaims(claims, async (client) => {
+        const r = await client.query("SELECT photo_needs_hr_approval FROM company_appearance WHERE company_id = $1", [claims.company_id]);
+        return Boolean(r.rows[0]?.photo_needs_hr_approval);
+      });
+      if (!needs) reviewStatus = "approved";
+    }
+    return this.storeDocument(claims, employeeId, documentType, file, { ...extra, reviewStatus });
   }
 
   private async storeDocument(
@@ -1228,6 +1237,9 @@ export class EmployeesService {
     opts: { expiryDate?: string | null; note?: string | null; reviewStatus: "approved" | "pending" }
   ): Promise<EmployeeDocumentView> {
     if (!file) throw new BadRequestException("Choose a file to upload");
+    if (documentType === "photograph" && !["image/jpeg", "image/png", "image/webp"].includes(file.mimetype)) {
+      throw new BadRequestException("A profile photo must be a JPEG, PNG or WEBP image");
+    }
     if (file.size > MAX_DOCUMENT_BYTES) {
       throw new BadRequestException(`File exceeds the ${MAX_DOCUMENT_BYTES / (1024 * 1024)}MB limit`);
     }

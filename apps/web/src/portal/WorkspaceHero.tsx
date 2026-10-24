@@ -3,6 +3,9 @@ import { api } from "../api/client";
 import type { EmployeeView } from "@aihxm/shared-types";
 import { formatTime } from "./shared/dates";
 import { useMyAttendance } from "./attendance/useMyAttendance";
+import { useEmployeePhoto } from "./employees/employeePhoto";
+import { bannerBackground } from "./employees/appearance";
+import { useCompanyAppearance } from "./employees/useCompanyAppearance";
 
 /**
  * The One exD "My Workspace" header: greeting, name, employee number chip, job line and four fact chips
@@ -48,6 +51,9 @@ export function WorkspaceHero({
   const [employee, setEmployee] = useState<EmployeeView | null>(null);
   const [managerName, setManagerName] = useState<string | null>(null);
   const attendance = useMyAttendance(employeeId ?? undefined);
+  const photo = useEmployeePhoto(employeeId);
+  const appearance = useCompanyAppearance();
+  const background = bannerBackground(appearance?.view ?? null, appearance?.imageUrl ?? null);
   const now = new Date();
   const todayRow = attendance.days.get(attendance.today);
   let statusText: string | undefined;
@@ -89,9 +95,9 @@ export function WorkspaceHero({
   ];
 
   return (
-    <section className="ws-hero" aria-label="My workspace">
-      <div className="ws-hero-avatar" aria-hidden="true">
-        {initialsOf(fullName)}
+    <section className="ws-hero" aria-label="My workspace" style={background ? { background } : undefined} data-testid="ws-hero">
+      <div className="ws-hero-avatar" aria-hidden={photo ? undefined : "true"}>
+        {photo ? <img src={photo} alt="" className="ws-hero-photo" data-testid="hero-photo" /> : initialsOf(fullName)}
       </div>
       <div className="ws-hero-body">
         <div className="ws-hero-greet">{greeting(now)}</div>

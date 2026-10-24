@@ -27,6 +27,7 @@ import type { ModuleKey, PublicTenantBranding, TenantRoleKey } from "@aihxm/shar
 import { api, doneLoadOnEntry, prefetchRoute, publicTenantBrandingAssetUrl, startKeepWarm, takeLoadOnEntry, warmForRoles } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Topbar, type QuickJumpItem } from "../components/shell/Topbar";
+import { useEmployeePhoto } from "./employees/employeePhoto";
 import { hueOf } from "../components/shell/hue";
 import { RAIL_GROUP_CHILDREN_CLASS, railChildClass, railContainerClass, railLinkClassFor } from "../components/shell/sidebarTheme";
 import { MobileMenuButton, SidebarToggle } from "../components/shell/SidebarToggle";
@@ -64,8 +65,9 @@ type NavItem = { to: string; label: string; end?: boolean; children?: NavItem[];
  * RbacService server-side regardless of what this function decides to
  * show.
  */
-function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): NavItem[] {
+function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[], permissions: string[] = []): NavItem[] {
   const hasRole = (...keys: TenantRoleKey[]) => keys.some((k) => roleKeys.includes(k));
+  const hasPermission = (...keys: string[]) => keys.some((k) => permissions.includes(k));
   const hasModule = (key: ModuleKey) => enabledModules.includes(key);
 
   const items: NavItem[] = [{ to: "/app", label: "Home", end: true, icon: Home }];
@@ -205,7 +207,8 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): 
   // Decision #20 — deliberately not module-gated: workflow/role
   // configuration is a core platform capability, not a licensed module,
   // same posture as Admin Center above.
-  if (hasRole("system_admin")) {
+  // BACKLOG55: also for a custom role that was given one of the things this page configures.
+  if (hasRole("system_admin") || hasPermission("workflow_template.manage.all", "company_appearance.manage")) {
     items.push({ to: "/app/system-admin", label: "System Admin", icon: Terminal });
   }
 
@@ -532,7 +535,8 @@ export function PortalLayout() {
   // non-platform-admin before this ever renders.
   const roleKeys = identity?.roleKeys ?? [];
   const enabledModules = identity?.enabledModules ?? [];
-  const navItems = buildNavItems(roleKeys, enabledModules);
+  const navItems = buildNavItems(roleKeys, enabledModules, identity?.permissions ?? []);
+  const myPhoto = useEmployeePhoto(identity?.employeeId);
   const roleLabel = roleKeys.length > 0 ? roleKeys.map((k) => ROLE_LABELS[k] ?? k).join(" · ") : "Member";
 
   // Right after sign-in, load the main screens' data in the background (and keep it fresh), so a click finds it ready.
@@ -652,6 +656,7 @@ export function PortalLayout() {
             roleLabel={roleLabel}
             onLogout={logout}
             accountPath="/app/account"
+            avatarUrl={myPhoto}
             leading={sidebar.narrow ? <MobileMenuButton open={sidebar.drawer} onToggle={sidebar.toggle} /> : null}
           />
           <main className="flex-1 min-w-0 app-main px-4 py-5 sm:px-8 sm:py-8 max-w-5xl overflow-y-auto">

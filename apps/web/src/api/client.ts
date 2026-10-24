@@ -495,6 +495,8 @@ import type {
   EmployeeChangeRequestView,
   EmployeeStatutoryIdsView,
   EmployeeLanguageView,
+  CompanyAppearanceView,
+  UpdateCompanyAppearanceRequest,
   CreateEmployeeLanguageRequest,
   UpdateEmployeeLanguageRequest,
   EmployeeMedicalInfoView,
@@ -2405,6 +2407,37 @@ export const api = {
   getNotificationPreferences: () => request<NotificationPreferenceView[]>("/notifications/preferences"),
   saveNotificationPreferences: (preferences: Array<{ category: string; email?: boolean; inApp?: boolean }>) =>
     request<NotificationPreferenceView[]>("/notifications/preferences", { method: "PUT", body: JSON.stringify({ preferences }) }),
+
+  // --- BACKLOG55: company appearance (home banner) ---
+  getCompanyAppearance: () => request<CompanyAppearanceView>("/company/appearance"),
+  updateCompanyAppearance: (input: UpdateCompanyAppearanceRequest) =>
+    request<CompanyAppearanceView>("/company/appearance", { method: "PUT", body: JSON.stringify(input) }),
+  async uploadBannerImage(file: File): Promise<CompanyAppearanceView> {
+    const token = getToken();
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch(`${API_PREFIX}/company/appearance/banner-image`, { method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : {}, body: formData });
+    invalidateResponseCache();
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = await res.json();
+        message = Array.isArray(body.message) ? body.message.join(", ") : (body.message ?? message);
+      } catch {
+        // not JSON - keep the generic message
+      }
+      throw new ApiError(res.status, message);
+    }
+    return (await res.json()) as CompanyAppearanceView;
+  },
+  removeBannerImage: () => request<CompanyAppearanceView>("/company/appearance/banner-image", { method: "DELETE" }),
+  /** A blob: URL for the uploaded banner picture, or null. */
+  async getBannerImageUrl(): Promise<string | null> {
+    const token = getToken();
+    const res = await fetch(`${API_PREFIX}/company/appearance/banner-image`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    if (!res.ok) return null;
+    return URL.createObjectURL(await res.blob());
+  },
 
   // --- BACKLOG54: languages, medical information, disciplinary records ---
   listEmployeeLanguages: (employeeId: string) => request<EmployeeLanguageView[]>(`/employees/languages?employeeId=${employeeId}`),

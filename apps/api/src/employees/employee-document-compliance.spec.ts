@@ -183,7 +183,9 @@ describe("Employee documents - review, checklist, photo", () => {
     expect(expired.some((r) => r.id === me && String(r.detail).includes("cnic"))).toBe(true);
   });
 
-  it("the profile photo is the latest APPROVED image of type photograph", async () => {
+  it("the profile photo is the latest APPROVED image of type photograph (company rule: employee photos wait for HR)", async () => {
+    // BACKLOG55: by default an employee's photo shows at once; this company asks for HR approval first.
+    await fx((c) => c.query("INSERT INTO company_appearance (company_id, photo_needs_hr_approval) VALUES ($1, true) ON CONFLICT (company_id) DO UPDATE SET photo_needs_hr_approval = true", [a]));
     expect(await svc.photo(ess, me)).toBeNull();
     await expect(employees.addOwnDocument(ess, me, "photograph", pdf("not-an-image.pdf"))).rejects.toBeInstanceOf(BadRequestException);
     const mine = await employees.addOwnDocument(ess, me, "photograph", png);

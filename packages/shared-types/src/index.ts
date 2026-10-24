@@ -1114,6 +1114,8 @@ export type MeResponse = {
   /** The `employees` row linked to this login, if any — null for Platform Admin and for a Company Admin with no Employee record. */
   employeeId: string | null;
   enabledModules: ModuleKey[];
+  /** The permission keys this login holds through its active roles (BACKLOG55). Screens use it to decide what to offer; the server still decides what is allowed. */
+  permissions?: string[];
 };
 
 export type PasswordResetRequestBody = {
@@ -9793,3 +9795,45 @@ export type CreateEmployeeDisciplinaryRecordRequest = {
   issuedDate?: string | null;
   actionTaken?: string | null;
 };
+
+// ---- BACKLOG55 - company appearance (home banner background) and profile photo rule
+export const HOME_BANNER_PRESETS = [
+  { key: "aurora", label: "Aurora (standard)", from: "#614059", to: "#2a2b65" },
+  { key: "ocean", label: "Ocean", from: "#0f4c75", to: "#1b262c" },
+  { key: "forest", label: "Forest", from: "#1f6f5c", to: "#10302b" },
+  { key: "sunset", label: "Sunset", from: "#9b3d4f", to: "#3d2a5c" },
+  { key: "graphite", label: "Graphite", from: "#4a5568", to: "#1a202c" },
+  { key: "royal", label: "Royal blue", from: "#2b4fb8", to: "#16235c" },
+] as const;
+export type HomeBannerPresetKey = (typeof HOME_BANNER_PRESETS)[number]["key"];
+export type HomeBannerMode = "default" | "preset" | "color" | "image";
+
+export type CompanyAppearanceView = {
+  bannerMode: HomeBannerMode;
+  bannerPreset: HomeBannerPresetKey | null;
+  /** #rrggbb, dark enough for white text. */
+  bannerColor: string | null;
+  hasBannerImage: boolean;
+  /** When true a photo an employee uploads waits for HR; when false it shows at once. HR's own change is always immediate. */
+  photoNeedsHrApproval: boolean;
+  updatedAt: string | null;
+};
+export type UpdateCompanyAppearanceRequest = {
+  bannerMode?: HomeBannerMode;
+  bannerPreset?: HomeBannerPresetKey | null;
+  bannerColor?: string | null;
+  photoNeedsHrApproval?: boolean;
+};
+
+/** True when white text is easy to read on this #rrggbb colour (WCAG contrast of at least 4.5:1 against white). */
+export function isDarkEnoughForWhiteText(hex: string): boolean {
+  const m = /^#([0-9a-fA-F]{6})$/.exec(hex);
+  if (!m) return false;
+  const v = m[1];
+  const lin = (i: number) => {
+    const c = parseInt(v.slice(i, i + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  };
+  const luminance = 0.2126 * lin(0) + 0.7152 * lin(2) + 0.0722 * lin(4);
+  return 1.05 / (luminance + 0.05) >= 4.5;
+}
