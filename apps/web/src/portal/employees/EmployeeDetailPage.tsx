@@ -25,6 +25,7 @@ import { EmployeeLoansPanel } from "./EmployeeLoansPanel";
 import { EmployeeSchemeAccountsPanel } from "../payroll/PayrollSettlementPanels";
 import { EmployeeAdditionalPaymentsPanel } from "./EmployeeAdditionalPaymentsPanel";
 import { SubEntityPanel } from "./subentities/SubEntityPanel";
+import { StatutoryIdsPanel } from "./StatutoryIdsPanel";
 import {
   addressesConfig,
   assetsConfig,
@@ -281,7 +282,12 @@ export function EmployeeDetailPage() {
       )}
 
       {/* Employee maintenance: the person record behind the employee (what the hiring wizard's Personal Identity card collected). */}
-      {tab === "Personal Details" && <PersonDetailsPanel employee={employee} canManage={canManage} />}
+      {tab === "Personal Details" && (
+        <>
+          <PersonDetailsPanel employee={employee} canManage={canManage} />
+          <StatutoryIdsPanel employeeId={employee.id} canManage={canManage} />
+        </>
+      )}
 
       {/* Core Employee Enterprise Phase 6 — Contact and Address cards' own CRUD surface, outside the hiring flow. */}
       {tab === "Contact & Address" && (

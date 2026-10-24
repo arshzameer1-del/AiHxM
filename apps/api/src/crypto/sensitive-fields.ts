@@ -58,6 +58,7 @@ const ENCRYPTED_TEXT_COLUMNS: Record<string, string[]> = {
   persons: ["cnic", "passport_number", "ntn"],
   payslips: ["bank_account_number"],
   employee_family_members: ["cnic"],
+  employee_statutory_ids: ["eobi_number", "social_security_number", "work_permit_number"],
   employee_payment_accounts: ["account_number", "iban"],
   candidates: ["national_id"],
 };

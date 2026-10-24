@@ -355,7 +355,7 @@ export const F20 = listReport({
   sensitivity: "restricted",
   filters: [DEPT, LOC, ETYPE],
   defaultRange: "last12Months",
-  tables: ["payslips", "payroll_runs", "employees", "employee_tax_profiles"],
+  tables: ["payslips", "payroll_runs", "employees", "employee_tax_profiles", "employee_statutory_ids"],
   tags: ["eobi", "social security", "contributions"],
   countLabel: "Employees",
   columns: [
@@ -363,6 +363,7 @@ export const F20 = listReport({
     col("unit", "Organisation unit"),
     col("scheme", "Provincial scheme"),
     col("months", "Months", "number"),
+    col("eobiNumber", "EOBI number on file"),
     col("eobiEmployee", "EOBI (employee)", "number"),
     col("eobiEmployer", "EOBI (employer)", "number"),
     col("social", "Social security (employer)", "number"),
@@ -370,6 +371,7 @@ export const F20 = listReport({
   ],
   sql: (q) => `
     SELECT e.employee_number AS number, ${NAME("e")} AS name, ${UNIT} AS unit, ${LABEL("tx.provincial_scheme")} AS scheme, COUNT(DISTINCT date_trunc('month', pr.period_end))::int AS months,
+           CASE WHEN EXISTS (SELECT 1 FROM employee_statutory_ids si WHERE si.company_id = e.company_id AND si.employee_id = e.id AND si.eobi_number IS NOT NULL) THEN 'Yes' ELSE 'No' END AS "eobiNumber",
            SUM(ps.eobi_employee_contribution) AS "eobiEmployee", SUM(ps.eobi_employer_contribution) AS "eobiEmployer", SUM(ps.social_security_employer_contribution) AS social,
            SUM(ps.eobi_employee_contribution + ps.eobi_employer_contribution + ps.social_security_employer_contribution) AS total
       FROM ${SLIPS} ${UNIT_JOIN}
@@ -380,7 +382,7 @@ export const F20 = listReport({
     count("eobiEmployer", "EOBI paid by employer (PKR)", round2(sum(rows, "eobiEmployer"))),
     count("social", "Social security by employer (PKR)", round2(sum(rows, "social"))),
   ],
-  calculation: ["Adds the contributions recorded on finalised payslips for runs ending in the range. The provincial scheme shown is the one on the tax profile today.", "CNIC and EOBI registration numbers are stored encrypted and are not shown. " + MONEY_NOTE],
+  calculation: ["Adds the contributions recorded on finalised payslips for runs ending in the range. The provincial scheme shown is the one on the tax profile today.", "EOBI and CNIC numbers are stored encrypted and are never shown here; the \"EOBI number on file\" column only says whether one has been recorded (Employee, Statutory IDs). " + MONEY_NOTE],
 });
 
 export const F21 = sqlReport({

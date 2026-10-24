@@ -2502,6 +2502,8 @@ export type EmployeeFamilyMemberView = {
   cnic: string | null;
   isDependent: boolean;
   isBeneficiary: boolean;
+  /** BACKLOG49: this beneficiary's share of the nominee total, in percent (the shares of one employee may not exceed 100). */
+  beneficiarySharePercent: number | null;
   status: "active" | "ended";
   createdAt: string;
   updatedAt: string;
@@ -2515,6 +2517,7 @@ export type CreateEmployeeFamilyMemberRequest = {
   cnic?: string;
   isDependent?: boolean;
   isBeneficiary?: boolean;
+  beneficiarySharePercent?: number;
 };
 
 export type UpdateEmployeeFamilyMemberRequest = Partial<Omit<CreateEmployeeFamilyMemberRequest, "employeeId">>;
@@ -3193,6 +3196,29 @@ export type EmployeeHeadcountBreakdown = {
   key: string;
   count: number;
 };
+
+/** BACKLOG49 - Pakistan statutory identifiers, one record per employee. */
+export type EmployeeSocialSecurityScheme = "pessi" | "sessi" | "other";
+export type EmployeeStatutoryIdsView = {
+  employeeId: string;
+  eobiNumber: string | null;
+  eobiRegistrationDate: string | null;
+  socialSecurityScheme: EmployeeSocialSecurityScheme | null;
+  socialSecurityNumber: string | null;
+  socialSecurityRegistrationDate: string | null;
+  providentFundNumber: string | null;
+  providentFundMemberSince: string | null;
+  cnicIssueDate: string | null;
+  cnicExpiryDate: string | null;
+  /** Lifetime CNIC: no expiry date applies. */
+  cnicLifetime: boolean;
+  visaType: string | null;
+  visaExpiryDate: string | null;
+  workPermitNumber: string | null;
+  workPermitExpiryDate: string | null;
+  updatedAt: string | null;
+};
+export type UpsertEmployeeStatutoryIdsRequest = Partial<Omit<EmployeeStatutoryIdsView, "employeeId" | "updatedAt">> & { employeeId: string };
 
 /** BACKLOG48 — an employee asks HR to change their own record; nothing changes until HR approves. */
 export type EmployeeChangeRequestType = "contact" | "address" | "family_member" | "marital_status" | "bank_account";

@@ -270,7 +270,8 @@ export function familyMembersConfig(relationshipOptions: { value: string; label:
       { key: "dateOfBirth", label: "Date of birth", type: "date" },
       { key: "cnic", label: "CNIC", type: "text" },
       { key: "isDependent", label: "Dependent", type: "checkbox", defaultChecked: true },
-      { key: "isBeneficiary", label: "Beneficiary", type: "checkbox" },
+      { key: "isBeneficiary", label: "Beneficiary (nominee)", type: "checkbox" },
+      { key: "beneficiarySharePercent", label: "Nominee share (%)", type: "number", placeholder: "e.g. 50" },
     ],
     updateFields: [
       { key: "relationship", label: "Relationship", type: "select", required: true, options },
@@ -278,10 +279,11 @@ export function familyMembersConfig(relationshipOptions: { value: string; label:
       { key: "dateOfBirth", label: "Date of birth", type: "date" },
       { key: "cnic", label: "CNIC", type: "text" },
       { key: "isDependent", label: "Dependent", type: "checkbox" },
-      { key: "isBeneficiary", label: "Beneficiary", type: "checkbox" },
+      { key: "isBeneficiary", label: "Beneficiary (nominee)", type: "checkbox" },
+      { key: "beneficiarySharePercent", label: "Nominee share (%)", type: "number" },
     ],
     renderSummary: (item) => ({
-      primary: `${item.fullName} (${options.find((o) => o.value === item.relationship)?.label ?? item.relationship})${item.isBeneficiary ? " ★" : ""}`,
+      primary: `${item.fullName} (${options.find((o) => o.value === item.relationship)?.label ?? item.relationship})${item.isBeneficiary ? ` ★${item.beneficiarySharePercent != null ? ` ${item.beneficiarySharePercent}%` : ""}` : ""}`,
       secondary: item.dateOfBirth ? `Born ${formatDay(item.dateOfBirth)}` : undefined,
     }),
     openStatus: "active",

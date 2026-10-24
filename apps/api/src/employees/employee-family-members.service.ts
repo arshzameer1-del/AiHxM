@@ -1,6 +1,6 @@
 import { assertValidCnic } from "../crypto/identifier-validation";
 import { sensitive } from "../crypto/sensitive-fields";
-import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
@@ -36,6 +36,7 @@ function rowToView(row: any): EmployeeFamilyMemberView {
     cnic: sensitive.decrypt(row.company_id, row.cnic),
     isDependent: row.is_dependent,
     isBeneficiary: row.is_beneficiary,
+    beneficiarySharePercent: row.beneficiary_share_percent == null ? null : Number(row.beneficiary_share_percent),
     status: row.status,
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
@@ -80,11 +81,12 @@ export class EmployeeFamilyMembersService {
     await this.hrCatalog.validateActiveCode(client, claims.company_id!, "family_relationship_type", input.relationship);
 
     assertValidCnic(input.cnic);
+    await this.assertShares(client, input.employeeId, null, input.isBeneficiary ?? false, input.beneficiarySharePercent);
     const inserted = await client.query(
       `INSERT INTO employee_family_members
          (company_id, employee_id, relationship, full_name, date_of_birth, cnic, is_dependent, is_beneficiary,
-          date_of_birth_enc, cnic_bidx)
-       VALUES ($1, $2, $3, $4, NULL, $6, $7, $8, $5, $9) RETURNING *`,
+          date_of_birth_enc, cnic_bidx, beneficiary_share_percent)
+       VALUES ($1, $2, $3, $4, NULL, $6, $7, $8, $5, $9, $10) RETURNING *`,
       [
         claims.company_id,
         input.employeeId,
@@ -95,6 +97,7 @@ export class EmployeeFamilyMembersService {
         input.isDependent ?? true,
         input.isBeneficiary ?? false,
         sensitive.cnicIndex(claims.company_id!, input.cnic),
+        input.isBeneficiary === false ? null : input.beneficiarySharePercent ?? null,
       ]
     );
     const view = rowToView(inserted.rows[0]);
@@ -128,6 +131,8 @@ export class EmployeeFamilyMembersService {
         await this.hrCatalog.validateActiveCode(client, claims.company_id!, "family_relationship_type", patch.relationship);
       }
       assertValidCnic(patch.cnic);
+      const willBeBeneficiary = patch.isBeneficiary ?? before.is_beneficiary;
+      await this.assertShares(client, before.employee_id, id, willBeBeneficiary, patch.beneficiarySharePercent ?? (before.beneficiary_share_percent == null ? undefined : Number(before.beneficiary_share_percent)));
       const result = await client.query(
         `UPDATE employee_family_members SET
            relationship = COALESCE($2, relationship),
@@ -138,6 +143,7 @@ export class EmployeeFamilyMembersService {
            cnic_bidx = COALESCE($8, cnic_bidx),
            is_dependent = COALESCE($6, is_dependent),
            is_beneficiary = COALESCE($7, is_beneficiary),
+           beneficiary_share_percent = CASE WHEN NOT COALESCE($7, is_beneficiary) THEN NULL ELSE COALESCE($9::numeric, beneficiary_share_percent) END,
            updated_at = now()
          WHERE id = $1 RETURNING *`,
         [
@@ -149,6 +155,7 @@ export class EmployeeFamilyMembersService {
           patch.isDependent ?? null,
           patch.isBeneficiary ?? null,
           sensitive.cnicIndex(claims.company_id!, patch.cnic),
+          patch.beneficiarySharePercent ?? null,
         ]
       );
       await this.audit.record(client, claims, {
@@ -173,6 +180,20 @@ export class EmployeeFamilyMembersService {
       await this.audit.record(client, claims, { companyId: claims.company_id ?? null, action: "employee_family_member.end", target: id });
       return rowToView(result.rows[0]);
     });
+  }
+
+  /** The shares of one employee's active beneficiaries may not add up to more than 100 percent. */
+  private async assertShares(client: PoolClient, employeeId: string, ownId: string | null, isBeneficiary: boolean, share: number | undefined): Promise<void> {
+    if (!isBeneficiary || share == null) return;
+    const others = await client.query(
+      `SELECT COALESCE(SUM(beneficiary_share_percent), 0)::numeric AS total FROM employee_family_members
+        WHERE employee_id = $1 AND status = 'active' AND is_beneficiary AND ($2::uuid IS NULL OR id <> $2)`,
+      [employeeId, ownId]
+    );
+    const total = Number(others.rows[0].total) + Number(share);
+    if (total > 100.0001) {
+      throw new BadRequestException(`Beneficiary shares would add up to ${total}%. They cannot be more than 100%.`);
+    }
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

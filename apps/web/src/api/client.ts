@@ -480,6 +480,8 @@ import type {
   EmployeeAnalyticsSummary,
   EmployeeConsistencyReport,
   EmployeeChangeRequestView,
+  EmployeeStatutoryIdsView,
+  UpsertEmployeeStatutoryIdsRequest,
   EmployeeChangeRequestStatus,
   SubmitEmployeeChangeRequest,
   EmployeeConsistencyRepairResult,
@@ -2310,6 +2312,11 @@ export const api = {
     request<CsvImportResult<EmployeeView>>("/employees/bulk-import", { method: "POST", body: JSON.stringify({ csv }) }),
 
   getWorkforceAnalyticsSummary: () => request<EmployeeAnalyticsSummary>("/employees/analytics/summary"),
+
+  // --- BACKLOG49: statutory IDs (EOBI, social security, provident fund, CNIC expiry, visa / work permit) ---
+  getEmployeeStatutoryIds: (employeeId: string) => request<EmployeeStatutoryIdsView>(`/employees/statutory?employeeId=${employeeId}`),
+  saveEmployeeStatutoryIds: (input: UpsertEmployeeStatutoryIdsRequest) =>
+    request<EmployeeStatutoryIdsView>("/employees/statutory", { method: "PUT", body: JSON.stringify(input) }),
 
   // --- BACKLOG48: change requests (employee asks, HR decides) ---
   submitEmployeeChangeRequest: (dto: SubmitEmployeeChangeRequest) =>

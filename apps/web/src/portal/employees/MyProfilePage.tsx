@@ -7,6 +7,7 @@ import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { EmployeeFields } from "./EmployeeFields";
 import { PersonalDataCard } from "./PersonalDataCard";
+import { StatutoryIdsPanel } from "./StatutoryIdsPanel";
 import { MyChangeRequestsPanel } from "./MyChangeRequestsPanel";
 import { MaritalStatusRequest } from "./MaritalStatusRequest";
 import { SubEntityPanel } from "./subentities/SubEntityPanel";
@@ -241,6 +242,8 @@ export function MyProfilePage() {
       )}
 
       {/* BACKLOG47: the person's own records, read-only. HR keeps the only edit rights (changes come in BACKLOG48). */}
+      {activeTab === "Personal Information" && <div className="mt-6"><StatutoryIdsPanel employeeId={employee.id} canManage={false} /></div>}
+
       {activeTab === "Job Details" && (
         <>
           <section className="bg-card rounded-card p-5 shadow-sm mb-6">

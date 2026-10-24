@@ -52,6 +52,7 @@ Which source tables the 218 available reports read. Every table is protected by 
 | `employee_onboarding_items` | C14, C15, I14 |
 | `employee_payment_accounts` | B16, B19, I10 |
 | `employee_qualifications` | B14, B16, B20, L09 |
+| `employee_statutory_ids` | F20 |
 | `employee_tax_profiles` | B19, F17, F19, F20 |
 | `employee_versions` | B02, J09 |
 | `employee_work_profiles` | B17, M02, M03, M12 |
