@@ -8,10 +8,28 @@ import { api } from "../../api/client";
 const urls = new Map<string, Promise<string | null>>();
 const EVENT = "aihxm:photo-changed";
 
+/** At most this many photo downloads run at once; the rest wait their turn (a long list must not flood the API). */
+const MAX_PARALLEL = 6;
+let running = 0;
+const waiting: Array<() => void> = [];
+function slot<T>(job: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const start = () => {
+      running += 1;
+      job().then(resolve, reject).finally(() => {
+        running -= 1;
+        waiting.shift()?.();
+      });
+    };
+    if (running < MAX_PARALLEL) start();
+    else waiting.push(start);
+  });
+}
+
 export function loadEmployeePhoto(employeeId: string): Promise<string | null> {
   let p = urls.get(employeeId);
   if (!p) {
-    p = api.getEmployeePhotoUrl(employeeId).catch(() => null);
+    p = slot(() => api.getEmployeePhotoUrl(employeeId)).catch(() => null);
     urls.set(employeeId, p);
   }
   return p;

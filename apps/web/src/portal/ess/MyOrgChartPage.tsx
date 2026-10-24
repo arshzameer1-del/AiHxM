@@ -3,11 +3,7 @@ import { ChevronDown, ChevronUp } from "lucide-react";
 import type { MyOrgChart, MyOrgChartNode, MyOrgChartPerson } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { BackLink, PageHeader } from "../shared/PageChrome";
-
-function initials(name: string): string {
-  const parts = name.split(/\s+/).filter(Boolean);
-  return ((parts[0]?.[0] ?? "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase() || "?";
-}
+import { EmployeeAvatar } from "../shared/EmployeeAvatar";
 
 function countAll(nodes: MyOrgChartNode[]): number {
   return nodes.reduce((n, x) => n + 1 + countAll(x.directReports), 0);
@@ -42,12 +38,7 @@ function OrgBox({ node, open, onToggle }: { node: ChartNode; open: boolean; onTo
   return (
     <div className="relative">
       <div data-testid={TEST_ID[node.kind]} className={`orgnode rounded-lg p-3 text-center ${isMe ? "orgnode-me" : ""}`}>
-        <div
-          className={`mx-auto h-10 w-10 rounded-full grid place-items-center text-sm font-semibold ${isMe ? "bg-accent text-white" : "bg-accent/15 text-accent"}`}
-          aria-hidden="true"
-        >
-          {initials(node.person.fullName)}
-        </div>
+        <EmployeeAvatar employeeId={node.person.id} name={node.person.fullName} size="md" tone={isMe ? "solid" : "soft"} className="mx-auto" />
         <p className="mt-2 text-sm font-semibold leading-tight break-words">
           {node.person.fullName}
           {isMe && <span className="ml-1.5 text-xs font-medium text-accent">(You)</span>}

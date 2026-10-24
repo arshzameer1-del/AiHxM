@@ -194,7 +194,12 @@ describe("Employee documents - review, checklist, photo", () => {
     const photo = await svc.photo(hr, me);
     expect(photo!.mimeType).toBe("image/png");
     expect(photo!.buffer.toString()).toBe("fakepng");
-    await expect(svc.photo(other, me)).rejects.toBeInstanceOf(NotFoundException);
+    // BACKLOG59: a photo is directory information - a colleague (no HR / manager rights) sees it too ...
+    const seenByColleague = await svc.photo(other, me);
+    expect(seenByColleague!.buffer.toString()).toBe("fakepng");
+    // ... but never across companies
+    const stranger = { is_platform_admin: false, company_id: "00000000-0000-4000-8000-000000000001", sub: other.sub } as RequestClaims;
+    await expect(svc.photo(stranger, me)).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it("approving writes an audit entry", async () => {

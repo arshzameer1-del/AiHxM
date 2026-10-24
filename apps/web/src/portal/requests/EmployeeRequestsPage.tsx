@@ -2,6 +2,7 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { DataSubjectRequestView, EmployeeServiceRequestKind, EmployeeServiceRequestStatus, EmployeeServiceRequestView, RequestableLoanTypeView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
+import { EmployeeAvatar } from "../shared/EmployeeAvatar";
 import { PageHeader, LoadingNote } from "../shared/PageChrome";
 import { formatDateTime, formatDay } from "../shared/dates";
 import { DSR_BADGE, DSR_LABELS, STATUS_BADGE, requestTitle } from "./serviceRequests";
@@ -144,7 +145,7 @@ function ServiceCard({ r, types, onChanged }: { r: EmployeeServiceRequestView; t
         <div className="min-w-0">
           <div className="text-sm font-semibold">{requestTitle(r)}{r.loanTypeName ? ` · ${r.loanTypeName}` : ""}</div>
           <div className="text-xs text-label-tertiary mt-0.5">
-            <Link className="text-accent hover:underline" to={`/app/employees/${r.employeeId}`}>{r.employeeNumber} · {r.employeeName}</Link> · sent {formatDateTime(r.createdAt)}
+            <Link className="text-accent hover:underline" to={`/app/employees/${r.employeeId}`}><EmployeeAvatar employeeId={r.employeeId} name={r.employeeName} size="xs" className="mr-1.5 align-middle" />{r.employeeNumber} · {r.employeeName}</Link> · sent {formatDateTime(r.createdAt)}
             {r.neededBy ? ` · needed by ${formatDay(r.neededBy)}` : ""}
           </div>
           <div className="text-sm mt-1">{r.purpose}</div>
@@ -251,7 +252,7 @@ function PrivacyQueue({ filter }: { filter: EmployeeServiceRequestStatus | "all"
               <div className="min-w-0">
                 <div className="text-sm font-semibold">{DSR_LABELS[r.requestType]}</div>
                 <div className="text-xs text-label-tertiary mt-0.5">
-                  <Link className="text-accent hover:underline" to={`/app/employees/${r.employeeId}`}>{r.employeeNumber} · {r.employeeName}</Link> · sent {formatDateTime(r.createdAt)}{r.isOnBehalf ? " · filed by HR" : ""}
+                  <Link className="text-accent hover:underline" to={`/app/employees/${r.employeeId}`}><EmployeeAvatar employeeId={r.employeeId} name={r.employeeName} size="xs" className="mr-1.5 align-middle" />{r.employeeNumber} · {r.employeeName}</Link> · sent {formatDateTime(r.createdAt)}{r.isOnBehalf ? " · filed by HR" : ""}
                 </div>
                 <div className="text-sm mt-1">{r.description}</div>
                 {r.decisionComment && <div className="text-xs mt-1">Decision: {r.decisionComment}</div>}

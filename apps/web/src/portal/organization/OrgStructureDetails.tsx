@@ -17,6 +17,7 @@ import type {
 import { api, ApiError } from "../../api/client";
 import { formatValidFrom, formatValidTo } from "./orgStructure";
 import { UNIT_TYPE_LABELS } from "./OrgStructurePanels";
+import { EmployeeAvatar } from "../shared/EmployeeAvatar";
 
 /**
  * "Details for ..." under the structure table: the selected row's own data on tabs, the way a structure editor shows
@@ -325,7 +326,7 @@ function PositionDetails({
               const inc = incumbents.find((i) => i.employeeId === h.id);
               return (
                 <tr key={h.key} className="border-b border-black/5 tabular-nums">
-                  <td className="py-1 pr-3"><Link to={`/app/employees/${h.id}`} className="text-accent hover:underline">{h.name}</Link> <span className="text-xs text-label-tertiary">{h.code ?? ""}</span></td>
+                  <td className="py-1 pr-3"><Link to={`/app/employees/${h.id}`} className="inline-flex items-center gap-1.5 text-accent hover:underline"><EmployeeAvatar employeeId={h.id} name={h.name} size="xs" />{h.name}</Link> <span className="text-xs text-label-tertiary">{h.code ?? ""}</span></td>
                   <td className="py-1 pr-3 text-right">{percent(h.fte ?? inc?.fte)}</td>
                   <td className="py-1 pr-3">{formatValidFrom(h.validFrom)}</td><td className="py-1 pr-3">{formatValidTo(h.validTo)}</td>
                   <td className="py-1 text-right">{canManage && <button type="button" onClick={() => onUnassign(node, h)} className="text-xs font-medium text-label-secondary hover:text-danger">Remove</button>}</td>

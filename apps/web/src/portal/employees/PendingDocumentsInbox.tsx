@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import type { PendingEmployeeDocumentView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
+import { EmployeeAvatar } from "../shared/EmployeeAvatar";
 import { formatDateTime, formatDay } from "../shared/dates";
 import { DEFAULT_DOCUMENT_TYPES, expiryState, typeLabel } from "./employeeDocuments";
 
@@ -54,7 +55,7 @@ export function PendingDocumentsInbox() {
               <div className="min-w-0">
                 <div className="text-sm font-semibold">{typeLabel(d.documentType, DEFAULT_DOCUMENT_TYPES)} · {d.fileName}</div>
                 <div className="text-xs text-label-tertiary mt-0.5">
-                  <Link className="text-accent hover:underline" to={`/app/employees/${d.employeeId}`}>{d.employeeNumber} · {d.employeeName}</Link> · sent {formatDateTime(d.createdAt)}
+                  <Link className="text-accent hover:underline" to={`/app/employees/${d.employeeId}`}><EmployeeAvatar employeeId={d.employeeId} name={d.employeeName} size="xs" className="mr-1.5 align-middle" />{d.employeeNumber} · {d.employeeName}</Link> · sent {formatDateTime(d.createdAt)}
                   {d.expiryDate && (
                     <span className={expiryState(d.expiryDate, today) === "expired" ? "text-danger font-medium" : ""}> · expires {formatDay(d.expiryDate)}</span>
                   )}

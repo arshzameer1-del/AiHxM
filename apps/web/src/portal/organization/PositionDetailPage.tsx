@@ -14,6 +14,7 @@ import type {
   PositionView,
 } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
+import { EmployeeAvatar } from "../shared/EmployeeAvatar";
 import { formatDay } from "../shared/dates";
 
 const STATUS_LABELS: Record<PositionStatus, string> = {
@@ -222,6 +223,7 @@ export function PositionDetailPage() {
             {incumbents && incumbents.length === 0 && <div className="text-sm text-label-tertiary">Nobody holds this position.</div>}
             {incumbents?.map((i) => (
               <div key={i.id} className="flex items-center gap-3 py-2 border-b border-black/5 last:border-0 text-sm">
+                <EmployeeAvatar employeeId={i.employeeId} name={i.employeeName} size="sm" />
                 <span className="font-medium">{i.employeeName ?? i.employeeId}</span>
                 <span className="text-xs text-label-tertiary">{i.fte} FTE · since {formatDay(i.effectiveFrom)}</span>
                 <button onClick={() => endIncumbent(i.employeeId)} className="ml-auto text-xs font-semibold text-danger hover:underline">

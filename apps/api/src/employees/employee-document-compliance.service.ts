@@ -204,21 +204,9 @@ export class EmployeeDocumentComplianceService {
 
   // ---- profile photo ----------------------------------------------------------------------------------------------
 
-  /** The latest APPROVED image of type `photograph`, or null when there is none. */
+  /** The latest APPROVED image of type `photograph` for anyone in the company, or null when there is none (BACKLOG59). */
   async photo(claims: RequestClaims, employeeId: string): Promise<{ buffer: Buffer; mimeType: string } | null> {
-    await this.employees.get(claims, employeeId);
-    const row = await this.db.withClaims(claims, async (client) => {
-      const r = await client.query(
-        `SELECT id FROM employee_documents
-          WHERE employee_id = $1 AND document_type = 'photograph' AND review_status = 'approved' AND mime_type = ANY($2::text[])
-          ORDER BY created_at DESC LIMIT 1`,
-        [employeeId, PHOTO_MIMES]
-      );
-      return r.rows[0] as { id: string } | undefined;
-    });
-    if (!row) return null;
-    const { buffer, mimeType } = await this.employees.downloadDocument(claims, employeeId, row.id);
-    return { buffer, mimeType };
+    return this.employees.readApprovedPhoto(claims, employeeId, PHOTO_MIMES);
   }
 
   // ---- guards -----------------------------------------------------------------------------------------------------

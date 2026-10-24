@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type { EmployeeView, HolidayView, LeaveBalanceView, LeaveRequestView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
+import { EmployeeAvatar } from "../shared/EmployeeAvatar";
 import { describeError } from "../shared/describeError";
 import { leaveTypeLabel, STATUS_LABELS, STATUS_STYLES } from "./leaveLabels";
 import { formatDay, formatPeriod } from "../shared/dates";
@@ -137,7 +138,8 @@ function RequestRow({
   return (
     <div className="bg-card rounded-card p-4 shadow-sm">
       <div className="flex items-start justify-between gap-4">
-        <div>
+        <EmployeeAvatar employeeId={request.employeeId} name={request.employeeName ?? (employee ? `${employee.firstName} ${employee.lastName}` : null)} size="md" />
+        <div className="flex-1 min-w-0">
           <div className="font-medium text-sm">
             {request.employeeName ?? (employee ? `${employee.firstName} ${employee.lastName}` : "Employee")}
             {(request.employeeNumber ?? employee?.employeeNumber) && (

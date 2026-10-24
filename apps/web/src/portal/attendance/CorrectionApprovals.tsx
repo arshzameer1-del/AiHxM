@@ -2,6 +2,7 @@ import { LoadingNote } from "../shared/PageChrome";
 import { useEffect, useState } from "react";
 import type { AttendanceCorrectionRequestView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
+import { EmployeeAvatar } from "../shared/EmployeeAvatar";
 import { describeError } from "../shared/describeError";
 import { formatDay, formatTime } from "../shared/dates";
 
@@ -29,7 +30,8 @@ function CorrectionRow({ request, onChanged }: { request: AttendanceCorrectionRe
   return (
     <div className="bg-card rounded-card p-4 shadow-sm">
       <div className="flex items-start justify-between gap-4">
-        <div>
+        <EmployeeAvatar employeeId={request.employeeId} name={request.employeeName} size="md" />
+        <div className="flex-1 min-w-0">
           <div className="font-medium text-sm">
             {request.employeeName}
             {request.isOnBehalf && <span className="text-xs text-label-tertiary ml-1.5">(submitted by HR)</span>}

@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { CalendarDays, ChevronLeft, ChevronRight, Pencil, XCircle } from "lucide-react";
 import type { HolidayView, LeaveBalanceView, LeaveRequestStatus, LeaveRequestView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
+import { EmployeeAvatar } from "../shared/EmployeeAvatar";
 import {
   buildMonth,
   formatDisplayDate,
@@ -226,9 +227,12 @@ export function RequestDetail({
         {request.employeeName && (
           <div>
             <dt className="text-label-tertiary">Employee</dt>
-            <dd className="font-medium">
-              {request.employeeName}
-              {request.employeeNumber ? ` (${request.employeeNumber})` : ""}
+            <dd className="font-medium flex items-center gap-1.5">
+              <EmployeeAvatar employeeId={request.employeeId} name={request.employeeName} size="xs" />
+              <span>
+                {request.employeeName}
+                {request.employeeNumber ? ` (${request.employeeNumber})` : ""}
+              </span>
             </dd>
           </div>
         )}

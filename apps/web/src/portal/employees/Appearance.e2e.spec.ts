@@ -85,6 +85,30 @@ test.describe("Company appearance and profile photo", () => {
     await expect(row.getByRole("status")).toContainText(/image|JPEG|PNG/i);
   });
 
+  test("a colleague or manager sees the photo too, and the employee list shows it", async ({ browser }) => {
+    const essToken = getSharedSession("employee_self_service");
+    const hrToken = getSharedSession("hr_admin");
+    const mgrToken = getSharedSession("line_manager");
+    const me = (await api(essToken, "/auth/me")).body as { employeeId: string };
+    // make sure a photo is on file (HR uploads it, so it is approved at once)
+    const form = new FormData();
+    form.append("file", new Blob([PNG], { type: "image/png" }), "p.png");
+    form.append("documentType", "photograph");
+    const up = await fetch(`${API_BASE_URL}/employees/${me.employeeId}/documents`, { method: "POST", headers: { Authorization: `Bearer ${hrToken}` }, body: form });
+    expect(up.ok).toBe(true);
+    // a viewer who is neither HR nor the employee (BACKLOG59: used to get 404, so only initials showed)
+    const seen = await fetch(`${API_BASE_URL}/employees/${me.employeeId}/photo`, { headers: { Authorization: `Bearer ${mgrToken}` } });
+    expect(seen.status).toBe(200);
+    expect(seen.headers.get("content-type")).toContain("image/png");
+
+    const ctx = await browser.newContext();
+    const hr = await ctx.newPage();
+    await loginToApp(hr, hrToken);
+    await hr.goto("/app/employees");
+    await expect(hr.getByTestId("employee-avatar").first()).toBeVisible();
+    await expect(hr.locator('[data-testid="employee-avatar"][data-has-photo="true"]').first()).toBeVisible();
+  });
+
   test("with the company rule switched on, an employee's photo waits for HR", async ({ browser }) => {
     const sysToken = getSharedSession("system_admin");
     const essToken = getSharedSession("employee_self_service");

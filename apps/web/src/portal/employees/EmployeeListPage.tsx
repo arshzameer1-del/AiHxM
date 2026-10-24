@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type { EmployeeView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
+import { EmployeeAvatar } from "../shared/EmployeeAvatar";
 import { useAuth } from "../../auth/AuthContext";
 import { compareEmployeeNumbers } from "./employeeNumberOrder";
 import { StatTile } from "../../components/StatTile";
@@ -172,7 +173,7 @@ export function EmployeeListPage() {
                 {e.department && <span className="emp-card-tag">{e.department}</span>}
               </div>
               <div className="emp-card-avatar" aria-hidden="true">
-                {`${e.firstName[0] ?? ""}${e.lastName[0] ?? ""}`.toUpperCase()}
+                <EmployeeAvatar employeeId={e.id} name={`${e.firstName} ${e.lastName}`} size="fill" className="!bg-transparent" />
               </div>
               <div className="emp-card-body">
                 <div className="emp-card-name">
@@ -210,8 +211,9 @@ export function EmployeeListPage() {
                     </Link>
                   </td>
                   <td className="px-4 py-3">
-                    <Link to={`/app/employees/${e.id}`} className="font-medium hover:underline">
-                      {e.firstName} {e.lastName}
+                    <Link to={`/app/employees/${e.id}`} className="flex items-center gap-2.5 font-medium hover:underline">
+                      <EmployeeAvatar employeeId={e.id} name={`${e.firstName} ${e.lastName}`} size="sm" />
+                      <span>{e.firstName} {e.lastName}</span>
                     </Link>
                   </td>
                   <td className="px-4 py-3 text-label-secondary">{e.department ?? "—"}</td>

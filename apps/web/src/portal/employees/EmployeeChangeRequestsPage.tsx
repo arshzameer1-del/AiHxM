@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import type { EmployeeChangeRequestStatus, EmployeeChangeRequestView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
+import { EmployeeAvatar } from "../shared/EmployeeAvatar";
 import { PageHeader, LoadingNote } from "../shared/PageChrome";
 import { formatDateTime } from "../shared/dates";
 import { PendingDocumentsInbox } from "./PendingDocumentsInbox";
@@ -111,7 +112,7 @@ export function EmployeeChangeRequestsPage() {
                 <div className="text-sm font-semibold">{r.summary}</div>
                 <div className="text-xs text-label-tertiary mt-0.5">
                   <Link className="text-accent hover:underline" to={`/app/employees/${r.employeeId}`}>
-                    {r.employeeNumber} · {r.employeeName}
+                    <EmployeeAvatar employeeId={r.employeeId} name={r.employeeName} size="xs" className="mr-1.5 align-middle" />{r.employeeNumber} · {r.employeeName}
                   </Link>{" "}
                   · sent {formatDateTime(r.submittedAt)}
                   {r.status !== "pending" && r.decidedAt ? ` · ${r.status} ${formatDateTime(r.decidedAt)}` : ""}

@@ -23,6 +23,8 @@ export type ApprovalItem = {
   kind: ApprovalKind;
   /** Who it is about (the requester). */
   who: string;
+  /** The requester's employee id (for the avatar). */
+  whoId?: string;
   /** What it is: "Annual leave", "Week 43", "Attendance correction". */
   title: string;
   detail: string;
@@ -60,6 +62,7 @@ export function leaveItem(r: LeaveRequestView): ApprovalItem {
     id: r.id,
     kind: "leave",
     who: r.employeeName ?? "Employee",
+    whoId: r.employeeId,
     title: r.leaveTypeName ?? r.leaveType,
     detail: `${formatDay(r.startDate)}${r.endDate !== r.startDate ? ` to ${formatDay(r.endDate)}` : ""} · ${days} day${days === 1 ? "" : "s"}`,
     stage: waiting?.stepName ?? "Approval",
@@ -103,6 +106,7 @@ export function timesheetItem(t: TimesheetView): ApprovalItem {
     id: t.id,
     kind: "timesheet",
     who: t.employeeName ?? "Employee",
+    whoId: t.employeeId,
     title: `Week ${isoWeek(t.periodStart)} · ${formatPeriod(t.periodStart, t.periodEnd)}`,
     detail: `${hoursText(t.totalMinutes)} submitted`,
     stage: "Line manager",
@@ -119,6 +123,7 @@ export function correctionItem(c: AttendanceCorrectionRequestView): ApprovalItem
     id: c.id,
     kind: "correction",
     who: c.employeeName,
+    whoId: c.employeeId,
     title: "Attendance correction",
     detail: formatDay(c.requestedDate),
     stage: "Line manager",

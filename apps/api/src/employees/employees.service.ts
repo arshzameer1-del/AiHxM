@@ -1310,6 +1310,29 @@ export class EmployeesService {
     });
   }
 
+  /**
+   * BACKLOG59 - the approved profile photo of anyone in the caller's company. A photo is directory information (the
+   * org chart, the approvals inbox and the team calendar all show it), so unlike the rest of the record it is not
+   * limited to HR / self / direct manager. Tenant isolation still comes from RLS, and only an APPROVED image of a
+   * photo type is ever returned. Reading a photo deliberately writes no view-audit entry.
+   */
+  async readApprovedPhoto(claims: RequestClaims, employeeId: string, mimes: string[]): Promise<{ buffer: Buffer; mimeType: string } | null> {
+    if (!claims.company_id) return null;
+    if (!(await this.entitlements.isModuleEnabled(claims, MODULE_KEY))) throw new NotFoundException("Employee not found");
+    const row = await this.db.withClaims(claims, async (client) => {
+      const r = await client.query(
+        `SELECT d.storage_path, d.mime_type
+           FROM employee_documents d JOIN employees e ON e.id = d.employee_id
+          WHERE d.employee_id = $1 AND d.document_type = 'photograph' AND d.review_status = 'approved' AND d.mime_type = ANY($2::text[])
+          ORDER BY d.created_at DESC LIMIT 1`,
+        [employeeId, mimes]
+      );
+      return r.rows[0] as { storage_path: string; mime_type: string } | undefined;
+    });
+    if (!row) return null;
+    return { buffer: await this.fileStorage.read(row.storage_path), mimeType: row.mime_type };
+  }
+
   async downloadDocument(
     claims: RequestClaims,
     employeeId: string,

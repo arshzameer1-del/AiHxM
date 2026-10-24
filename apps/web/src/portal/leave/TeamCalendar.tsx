@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Search } from "lucide-react";
 import type { TeamLeaveEntryView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
+import { EmployeeAvatar } from "../shared/EmployeeAvatar";
 import { covers, dayKind, eachDate, formatDisplayDate, monthWindow, shiftWindow, weekWindow, weekdayLabels } from "./leaveCalendar";
 import { todayIso } from "../shared/dates";
 
@@ -166,8 +167,9 @@ function PersonRow({
 }) {
   return (
     <>
-      <div className="py-1.5 pr-2 text-xs truncate border-t border-black/5" title={`${person.name} (${person.number})`}>
-        {person.name}
+      <div className="py-1.5 pr-2 text-xs border-t border-black/5 flex items-center gap-1.5 min-w-0" title={`${person.name} (${person.number})`}>
+        <EmployeeAvatar employeeId={person.id} name={person.name} size="xs" />
+        <span className="truncate">{person.name}</span>
       </div>
       {days.map((d) => {
         const hit = person.entries.find((e) => covers(e.startDate, e.endDate, d));

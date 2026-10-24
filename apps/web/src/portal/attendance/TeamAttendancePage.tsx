@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { TeamAttendanceView } from "@aihxm/shared-types";
 import { api } from "../../api/client";
+import { EmployeeAvatar } from "../shared/EmployeeAvatar";
 import { BackLink, LoadingNote, PageHeader } from "../shared/PageChrome";
 import { formatDay } from "../shared/dates";
 import { STATUS_LABELS, STATUS_STYLES } from "./MyAttendanceDays";
@@ -46,7 +47,12 @@ export function TeamAttendancePage() {
                 return (
                   <tr key={m.employeeId} data-testid="team-attendance-row">
                     <td className="px-4 py-2">
-                      <span className="font-medium">{m.employeeName}</span> <span className="text-xs text-label-tertiary">({m.employeeNumber})</span>
+                      <div className="flex items-center gap-2">
+                        <EmployeeAvatar employeeId={m.employeeId} name={m.employeeName} size="sm" />
+                        <div>
+                          <span className="font-medium">{m.employeeName}</span> <span className="text-xs text-label-tertiary">({m.employeeNumber})</span>
+                        </div>
+                      </div>
                     </td>
                     <td className="px-4 py-2 text-xs">
                       {m.clockedInSince ? (

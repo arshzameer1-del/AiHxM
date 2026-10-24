@@ -9,6 +9,7 @@ import { ageText, itemsForTab, KIND_LABELS, tabCount, type ApprovalDetail, type 
 import { useApprovals } from "./useApprovals";
 import { DelegationPage } from "./DelegationPage";
 import { Outlet, Route, Routes } from "react-router-dom";
+import { EmployeeAvatar } from "../shared/EmployeeAvatar";
 
 const KIND_ICON: Record<ApprovalKind, typeof Inbox> = { leave: CalendarDays, timesheet: Timer, correction: FileClock };
 
@@ -144,7 +145,11 @@ function Row({ item, mine, onDone }: { item: ApprovalItem; mine: boolean; onDone
   return (
     <li className="approval-row bg-card rounded-card shadow-sm border border-black/5 p-4" data-testid={`approval-${item.key}`}>
       <div className="flex items-start gap-3 flex-wrap">
-        <span className="approval-kind-icon" aria-hidden="true"><Icon size={18} strokeWidth={1.75} /></span>
+        {item.whoId && !mine ? (
+          <EmployeeAvatar employeeId={item.whoId} name={item.who} size="md" />
+        ) : (
+          <span className="approval-kind-icon" aria-hidden="true"><Icon size={18} strokeWidth={1.75} /></span>
+        )}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-[11px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-accent/10 text-accent">{KIND_LABELS[item.kind]}</span>
