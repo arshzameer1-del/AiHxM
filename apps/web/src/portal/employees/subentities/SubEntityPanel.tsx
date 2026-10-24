@@ -1,6 +1,7 @@
 import { LoadingNote } from "../../shared/PageChrome";
 import { FormEvent, useEffect, useId, useState } from "react";
-import { ApiError } from "../../../api/client";
+import { api, ApiError } from "../../../api/client";
+import type { EmployeeChangeRequestType } from "@aihxm/shared-types";
 
 /**
  * Core Employee Enterprise Phases 6-9's frontend catch-up (2026-09-27) —
@@ -242,16 +243,39 @@ export function SubEntityPanel<TView extends SubEntityRow>({
   employeeId,
   canManage,
   config,
+  requestChange,
 }: {
   employeeId: string;
   canManage: boolean;
   config: SubEntityPanelConfig<TView>;
+  /**
+   * BACKLOG48 - for the employee's own read-only view: instead of editing, they ask HR. "Add" and per-row "Change" /
+   * "Remove" send a change request; nothing changes until HR approves.
+   */
+  requestChange?: {
+    type: EmployeeChangeRequestType;
+    /** Fields shown when asking to add; defaults to the panel's create fields. */
+    addFields?: SubEntityFieldSpec[];
+    /** Bank accounts have no per-row change: the employee submits the new account instead. */
+    rowActions?: boolean;
+    addLabel?: string;
+  };
 }) {
   const [items, setItems] = useState<TView[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
+  const [sentNote, setSentNote] = useState<string | null>(null);
+  const [asking, setAsking] = useState<"add" | string | null>(null);
+  const canAsk = !canManage && !!requestChange;
+
+  async function ask(action: "add" | "update" | "end", targetId: string | undefined, values: Record<string, unknown>) {
+    await api.submitEmployeeChangeRequest({ requestType: requestChange!.type, action, targetId, payload: values });
+    setAsking(null);
+    setSentNote("Sent to HR for approval. You can follow it under My change requests.");
+    window.dispatchEvent(new Event("change-request-sent"));
+  }
 
   function load() {
     config
@@ -287,7 +311,23 @@ export function SubEntityPanel<TView extends SubEntityRow>({
             {config.addLabel}
           </button>
         )}
+        {canAsk && asking !== "add" && (
+          <button onClick={() => { setSentNote(null); setAsking("add"); }} className="text-xs font-semibold text-accent hover:underline">
+            {requestChange!.addLabel ?? "Ask HR to add"}
+          </button>
+        )}
       </div>
+      {sentNote && <div className="text-xs text-accent mb-2" role="status">{sentNote}</div>}
+      {canAsk && asking === "add" && (
+        <div className="mb-3">
+          <SubEntityForm
+            fields={requestChange!.addFields ?? config.createFields}
+            submitLabel="Send to HR"
+            onCancel={() => setAsking(null)}
+            onSubmit={(values) => ask("add", undefined, values)}
+          />
+        </div>
+      )}
 
       {rowError && <div className="text-danger text-xs mb-2">{rowError}</div>}
 
@@ -331,7 +371,15 @@ export function SubEntityPanel<TView extends SubEntityRow>({
             const isOpen = item.status === config.openStatus;
             return (
               <div key={item.id} className="py-2.5">
-                {editingId === item.id ? (
+                {canAsk && asking === item.id ? (
+                  <SubEntityForm
+                    fields={config.updateFields}
+                    initial={item}
+                    submitLabel="Send to HR"
+                    onCancel={() => setAsking(null)}
+                    onSubmit={(values) => ask("update", item.id, values)}
+                  />
+                ) : editingId === item.id ? (
                   <SubEntityForm
                     fields={config.updateFields}
                     initial={item}
@@ -395,6 +443,27 @@ export function SubEntityPanel<TView extends SubEntityRow>({
                             {config.closeActionLabel}
                           </button>
                         )}
+                      </div>
+                    )}
+                    {canAsk && requestChange!.rowActions !== false && isOpen && (
+                      <div className="flex items-center gap-3 shrink-0">
+                        <button onClick={() => { setSentNote(null); setAsking(item.id); }} className="text-xs font-medium text-accent hover:underline">
+                          Ask HR to change
+                        </button>
+                        <button
+                          onClick={async () => {
+                            setRowError(null);
+                            if (!window.confirm("Ask HR to remove this?")) return;
+                            try {
+                              await ask("end", item.id, {});
+                            } catch (err) {
+                              setRowError(err instanceof ApiError ? err.message : "Could not send the request.");
+                            }
+                          }}
+                          className="text-xs font-medium text-label-tertiary hover:text-danger"
+                        >
+                          Ask HR to remove
+                        </button>
                       </div>
                     )}
                   </div>

@@ -479,6 +479,9 @@ import type {
   UpdateCardDefinitionRequest,
   EmployeeAnalyticsSummary,
   EmployeeConsistencyReport,
+  EmployeeChangeRequestView,
+  EmployeeChangeRequestStatus,
+  SubmitEmployeeChangeRequest,
   EmployeeConsistencyRepairResult,
   CsvImportResult,
 } from "@aihxm/shared-types";
@@ -2307,6 +2310,19 @@ export const api = {
     request<CsvImportResult<EmployeeView>>("/employees/bulk-import", { method: "POST", body: JSON.stringify({ csv }) }),
 
   getWorkforceAnalyticsSummary: () => request<EmployeeAnalyticsSummary>("/employees/analytics/summary"),
+
+  // --- BACKLOG48: change requests (employee asks, HR decides) ---
+  submitEmployeeChangeRequest: (dto: SubmitEmployeeChangeRequest) =>
+    request<EmployeeChangeRequestView>("/employees/change-requests", { method: "POST", body: JSON.stringify(dto) }),
+  listMyChangeRequests: () => request<EmployeeChangeRequestView[]>("/employees/change-requests/mine"),
+  cancelEmployeeChangeRequest: (id: string) =>
+    request<EmployeeChangeRequestView>(`/employees/change-requests/${id}/cancel`, { method: "POST" }),
+  listEmployeeChangeRequests: (status?: EmployeeChangeRequestStatus) =>
+    request<EmployeeChangeRequestView[]>(`/employees/change-requests${status ? `?status=${status}` : ""}`),
+  approveEmployeeChangeRequest: (id: string, note?: string) =>
+    request<EmployeeChangeRequestView>(`/employees/change-requests/${id}/approve`, { method: "POST", body: JSON.stringify({ note }) }),
+  rejectEmployeeChangeRequest: (id: string, note: string) =>
+    request<EmployeeChangeRequestView>(`/employees/change-requests/${id}/reject`, { method: "POST", body: JSON.stringify({ note }) }),
 
   // --- BACKLOG46: employee data consistency ---
   getEmployeeDataConsistency: () => request<EmployeeConsistencyReport>("/employees/data-consistency"),

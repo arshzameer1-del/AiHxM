@@ -100,6 +100,7 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[]): 
             children: [
               { to: "/app/employees", label: "Directory", end: true },
               { to: "/app/employees/analytics", label: "Workforce Analytics" },
+              { to: "/app/employees/change-requests", label: "Change Requests" },
               { to: "/app/employees/data-consistency", label: "Data Consistency" },
             ],
           }

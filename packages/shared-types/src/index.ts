@@ -3194,6 +3194,39 @@ export type EmployeeHeadcountBreakdown = {
   count: number;
 };
 
+/** BACKLOG48 — an employee asks HR to change their own record; nothing changes until HR approves. */
+export type EmployeeChangeRequestType = "contact" | "address" | "family_member" | "marital_status" | "bank_account";
+export type EmployeeChangeRequestAction = "add" | "update" | "end";
+export type EmployeeChangeRequestStatus = "pending" | "approved" | "rejected" | "cancelled";
+
+export type SubmitEmployeeChangeRequest = {
+  requestType: EmployeeChangeRequestType;
+  action: EmployeeChangeRequestAction;
+  /** The existing record being changed or ended (not used for "add", marital status or bank account). */
+  targetId?: string;
+  /** The new values. Not needed for "end". */
+  payload?: Record<string, unknown>;
+};
+
+export type EmployeeChangeRequestView = {
+  id: string;
+  employeeId: string;
+  employeeNumber: string;
+  employeeName: string;
+  requestType: EmployeeChangeRequestType;
+  action: EmployeeChangeRequestAction;
+  targetId: string | null;
+  payload: Record<string, unknown>;
+  /** For "update"/"end": what the record says today, for the same fields, so HR can compare. */
+  current: Record<string, unknown> | null;
+  summary: string;
+  status: EmployeeChangeRequestStatus;
+  paymentAccountId: string | null;
+  submittedAt: string;
+  decidedAt: string | null;
+  decisionNote: string | null;
+};
+
 /** BACKLOG46 — one "does the employee record agree with the place that owns the value" check and what it found. */
 export type EmployeeConsistencyCheckResult = {
   id: string;

@@ -201,6 +201,52 @@ export class EmployeePaymentAccountsService {
     });
   }
 
+  /**
+   * BACKLOG48: the employee proposes a bank account for themselves. It is stored as a PENDING account that replaces the
+   * current primary (or becomes the first one) and takes effect only when HR approves it - the submitter can never approve
+   * their own submission (maker-checker in approve()).
+   */
+  async submitForSelf(
+    client: PoolClient,
+    claims: RequestClaims,
+    employeeId: string,
+    input: Omit<CreateEmployeePaymentAccountRequest, "employeeId" | "isPrimary" | "priority" | "validFrom" | "validTo" | "splitPercent">
+  ): Promise<EmployeePaymentAccountView> {
+    assertValidIban(input.iban);
+    const existingPrimary = await this.livePrimary(client, employeeId);
+    const submitter = await this.actorUserId(client, claims);
+    const inserted = await this.insertRow(
+      client,
+      claims,
+      { ...input, employeeId },
+      {
+        isPrimary: false,
+        priority: await this.nextPriority(client, employeeId),
+        approvalStatus: "pending",
+        submittedBy: submitter,
+        replacesAccountId: existingPrimary?.id ?? null,
+      }
+    );
+    const view = rowToView(inserted);
+    await this.audit.record(client, claims, {
+      companyId: claims.company_id ?? null,
+      action: "employee_payment_account.change_requested",
+      target: view.id,
+      metadata: { employeeId, paymentMethod: input.paymentMethod, replaces: view.replacesAccountId, requestedBy: "employee" },
+    });
+    return view;
+  }
+
+  /** Withdraws a pending account the employee submitted (used when they cancel their change request). */
+  async withdrawPending(client: PoolClient, accountId: string): Promise<void> {
+    await client.query(
+      `UPDATE employee_payment_accounts SET approval_status = 'rejected', status = 'ended', is_primary = false,
+              rejection_reason = 'Withdrawn by the employee', valid_to = GREATEST(CURRENT_DATE, valid_from), updated_at = now()
+        WHERE id = $1 AND approval_status = 'pending'`,
+      [accountId]
+    );
+  }
+
   async update(claims: RequestClaims, id: string, patch: UpdateEmployeePaymentAccountRequest): Promise<EmployeePaymentAccountView> {
     await this.requireManage(claims);
     return this.db.withClaims(claims, async (client) => {
@@ -310,6 +356,9 @@ export class EmployeePaymentAccountsService {
 
       let priority = pending.priority;
       let makePrimary = pending.is_primary;
+      // A pending account that replaces nothing (an employee's first account) becomes the primary when approved,
+      // unless the employee already has a live primary.
+      if (!makePrimary && !pending.replaces_account_id && !(await this.livePrimary(client, pending.employee_id))) makePrimary = true;
       if (pending.replaces_account_id) {
         const old = (await client.query("SELECT * FROM employee_payment_accounts WHERE id = $1 FOR UPDATE", [pending.replaces_account_id])).rows[0];
         if (old && old.status === "active") {

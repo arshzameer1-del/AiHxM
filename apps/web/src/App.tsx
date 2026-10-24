@@ -162,6 +162,11 @@ const EmployeeDataConsistencyPage = lazy(() =>
     default: m.EmployeeDataConsistencyPage,
   })),
 );
+const EmployeeChangeRequestsPage = lazy(() =>
+  import("./portal/employees/EmployeeChangeRequestsPage").then((m) => ({
+    default: m.EmployeeChangeRequestsPage,
+  })),
+);
 const AdminCenterPage = lazy(() =>
   import("./portal/admin/AdminCenterPage").then((m) => ({
     default: m.AdminCenterPage,
@@ -440,6 +445,7 @@ export default function App() {
                   <Route path="employees/bulk-import" element={<Navigate to="/app/hire/bulk" replace />} />
                   <Route path="employees/analytics" element={<WorkforceAnalyticsPage />} />
                   <Route path="employees/data-consistency" element={<EmployeeDataConsistencyPage />} />
+                  <Route path="employees/change-requests" element={<EmployeeChangeRequestsPage />} />
                   <Route path="reports" element={<ReportsShell />}>
                     <Route index element={<ReportsOverviewPage />} />
                     <Route path="library" element={<ReportsLibraryPage />} />

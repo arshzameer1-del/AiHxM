@@ -7,6 +7,8 @@ import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { EmployeeFields } from "./EmployeeFields";
 import { PersonalDataCard } from "./PersonalDataCard";
+import { MyChangeRequestsPanel } from "./MyChangeRequestsPanel";
+import { MaritalStatusRequest } from "./MaritalStatusRequest";
 import { SubEntityPanel } from "./subentities/SubEntityPanel";
 import {
   addressesConfig,
@@ -234,6 +236,7 @@ export function MyProfilePage() {
       {activeTab === "Personal Information" && (
         <section className="bg-card rounded-card p-5 shadow-sm">
           {personalSettled ? <PersonalDataCard employee={employee} data={personal} /> : <LoadingNote />}
+          <MaritalStatusRequest current={personal?.person?.maritalStatus ?? employee.maritalStatus} />
         </section>
       )}
 
@@ -253,21 +256,33 @@ export function MyProfilePage() {
           <section className="bg-card rounded-card p-5 shadow-sm mb-6">
             <EmployeeFields employee={employee} sections={["contact"]} />
           </section>
-          <SubEntityPanel employeeId={employee.id} canManage={false} config={contactsConfig([])} />
+          <SubEntityPanel employeeId={employee.id} canManage={false} config={contactsConfig([])} requestChange={{ type: "contact", addLabel: "Ask HR to add" }} />
         </>
       )}
 
-      {activeTab === "Addresses" && <SubEntityPanel employeeId={employee.id} canManage={false} config={addressesConfig([])} />}
+      {activeTab === "Addresses" && <SubEntityPanel employeeId={employee.id} canManage={false} config={addressesConfig([])} requestChange={{ type: "address", addLabel: "Ask HR to add" }} />}
 
       {activeTab === "Family & Education" && (
         <>
-          <SubEntityPanel employeeId={employee.id} canManage={false} config={familyMembersConfig([])} />
+          <SubEntityPanel employeeId={employee.id} canManage={false} config={familyMembersConfig([])} requestChange={{ type: "family_member", addLabel: "Ask HR to add" }} />
           <SubEntityPanel employeeId={employee.id} canManage={false} config={educationConfig} />
           <SubEntityPanel employeeId={employee.id} canManage={false} config={qualificationsConfig([])} />
         </>
       )}
 
-      {activeTab === "Bank Details" && <SubEntityPanel employeeId={employee.id} canManage={false} config={paymentAccountsConfig} />}
+      {activeTab === "Bank Details" && (
+        <SubEntityPanel
+          employeeId={employee.id}
+          canManage={false}
+          config={paymentAccountsConfig}
+          requestChange={{
+            type: "bank_account",
+            addLabel: "Ask HR to change my bank account",
+            rowActions: false,
+            addFields: paymentAccountsConfig.createFields.filter((f) => f.key !== "isPrimary"),
+          }}
+        />
+      )}
 
       {activeTab === "Employment History" && (
         <section className="bg-card rounded-card p-5 shadow-sm">
@@ -302,8 +317,10 @@ export function MyProfilePage() {
         </section>
       )}
 
+      <MyChangeRequestsPanel />
+
       <p className="text-xs text-label-tertiary mt-4">
-        Only your HR Admin can update this record. Contact them if anything here is out of date.
+        You can ask HR to change your contact details, addresses, family members, marital status and bank account. HR checks each request before anything on your record changes.
       </p>
 
       <div className="mt-6">
