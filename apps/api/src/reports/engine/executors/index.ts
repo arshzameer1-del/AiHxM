@@ -1,5 +1,6 @@
 import type { ReportExecutor } from "./types";
-import type { ReportMeta } from "../report-spec";
+import { runSections, type ReportMeta } from "../report-spec";
+import { DEPTH_SECTIONS, STATIC_DEPTH_REPORTS } from "../depth";
 import type { DefaultRange } from "../filters";
 import { a01, a03, a04, a05, a06, a07, a08 } from "./people";
 import { e02, e03 } from "./leave";
@@ -42,10 +43,27 @@ for (const mod of MODULES) {
 const LEGACY: Record<string, ReportExecutor> = { A01: a01, A03: a03, A04: a04, A05: a05, A06: a06, A07: a07, A08: a08, E02: e02, E03: e03, F01: f01 };
 const LEGACY_RANGES: Record<string, DefaultRange | null> = { A07: "last12Months", A08: "last12Months", E02: "yearToDate", E03: "yearToDate", F01: "last12Months" };
 
-export const EXECUTORS: Readonly<Record<string, ReportExecutor>> = {
-  ...LEGACY,
-  ...Object.fromEntries([...declared].map(([id, d]) => [id, d.run])),
-};
+/**
+ * Adds the extra tables defined in engine/depth to a report. They run after the report's own query, under the same scope
+ * rules, and are left out of the earlier period of a comparison (which only needs the figures).
+ */
+function withDepth(id: string, run: ReportExecutor): ReportExecutor {
+  const extra = DEPTH_SECTIONS[id];
+  if (!extra || extra.length === 0) return run;
+  return async (ctx) => {
+    const out = await run(ctx);
+    if (ctx.skipSections) return out;
+    const more = await runSections(extra, ctx, STATIC_DEPTH_REPORTS.has(id));
+    return { ...out, sections: [...(out.sections ?? []), ...more] };
+  };
+}
+
+export const EXECUTORS: Readonly<Record<string, ReportExecutor>> = Object.fromEntries(
+  Object.entries({
+    ...LEGACY,
+    ...Object.fromEntries([...declared].map(([id, d]) => [id, d.run])),
+  }).map(([id, run]) => [id, withDepth(id, run)])
+);
 
 /** Metadata declared by the report itself (absent for the ten hand-written ones). */
 export const REPORT_META: Readonly<Record<string, ReportMeta>> = Object.fromEntries([...declared].map(([id, d]) => [id, d.meta]));

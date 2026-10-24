@@ -61,6 +61,14 @@ None of them changes or removes an existing object. Rolling back drops only repo
 - A section is held to exactly the same rules as its report (company limit, team or payroll-area scope, filters) and the same row limits. A section may never show more than its report's sensitivity allows.
 - B16 to B20 are the employee master data reports: B16 consolidated, B17 personal/employment/organisation, B18 contact/address/emergency, B19 identity/bank/tax/pay (payroll rights, restricted), B20 family/education/qualifications/documents/assets. CNIC, date of birth, bank account number, IBAN, NTN and passport number are stored encrypted and are only reported as "on file".
 
+### Report depth (every available report)
+
+- Every available report carries extra tables beyond its headline table: breakdowns (by unit, location, type, month, weekday), trends, bands, and the individual records behind the figures. B16 to B20 carry theirs inside the report; every other report gets them from `apps/api/src/reports/engine/depth/` (one file per data family: workforce, talent, time and leave, payroll, performance, workflow, self-service and audit, platform and governance). They are merged in `depth/index.ts` and attached to the report's executor in `executors/index.ts`.
+- To add a table: add a `ReportSectionSpec` (`key`, `title`, optional `description`, `columns`, `sql(q)`) to the report's list in its depth file. Build the query from `q.emp()`, `q.current()`, `q.co(alias)`, `q.area(alias)` and `q.from` / `q.to` only where the report has a date range. Declared column keys must exist in the result (case sensitive; quote camelCase aliases).
+- `report-depth-coverage.spec.ts` fails if an available report has none, if depth is attached to a report that is not available, or if table keys or column keys repeat. `report-smoke.spec.ts` runs every table of every report (all permissions, every filter, line-manager team scope, CSV export). `report-depth-data.spec.ts` checks hand-counted figures and that no table names an identity number, bank number, password, secret, token or IP address.
+- Privacy limits that the tables keep: encrypted values are never decrypted; pay per person appears only in F02 (restricted); payroll groups under 3 people are merged into "Other"; ratings appear only in groups of at least 5 rated people; free text (comments, assessments, goal text, hold reasons) is never shown; audit tables never show before/after values or IP addresses; private saved reports and dashboards are shown without their name.
+- Sections that need no date range (headcount, balances, open work, configuration) use today or the last 12 months, and say so in their description.
+
 ## Watching it in production
 
 - `report_run_log` (company, report, kind, status, duration, rows) is the usage and failure record. O01 to O05, O10, O11 and O15 are built on it, so an administrator sees the same in the product.

@@ -30,6 +30,7 @@ By category (available of total): A 14/15, B 15/15, C 15/15, D 15/15, E 14/15, F
 | Loading, no-data, blocked, error, denied and partial-data states | Done. |
 | Overview landing page with role-aware KPIs and presets (Today, This month, and so on) | Done. `/app/reports` is the Overview: headline figures and a short list of things that need attention, each only for what the caller may see. Every report has period presets. |
 | Comparison period on a report | Done. A switch compares every figure with the equal period before and shows the change; refused on reports with no date range. |
+| Report depth: extra tables under every available report (breakdowns, trends, record lists) | Done: tabs on screen, one sheet each in Excel, `# Section:` blocks in CSV, tables in PDF. See OPERATIONS.md. |
 | My Reports, Shared with me, Report Builder, Dashboards, Scheduled Reports, Export history | Done (tabs on the Reports page). |
 | Drill-down | Done for the headcount reports (A03, A04, A05 open the matching employees in B01). |
 | Administration screen for the whole company's saved reports, shares, schedules and dashboards | Done as reports: O06, O07, O08, O09, O13, O14 and N06. |

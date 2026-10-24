@@ -115,6 +115,13 @@ describe("every available report runs (real database)", () => {
         if (r.calculation.length === 0) failures.push(`${e.id}: no calculation notes`);
         if (r.reportId !== e.id || r.title !== e.title) failures.push(`${e.id}: identity mismatch`);
         for (const ch of r.charts) if (ch.series.length === 0) failures.push(`${e.id}: chart without series`);
+        const secKeys = (r.sections ?? []).map((x) => x.key);
+        if (new Set(secKeys).size !== secKeys.length) failures.push(`${e.id}: duplicate section keys ${secKeys.join(",")}`);
+        for (const sec of r.sections ?? []) {
+          if (!sec.title || sec.columns.length === 0) failures.push(`${e.id}/${sec.key}: section without title or columns`);
+          if (sec.totalRows < sec.rows.length) failures.push(`${e.id}/${sec.key}: totalRows below rows`);
+          for (const row of sec.rows) for (const c of sec.columns) if (!(c.key in row)) failures.push(`${e.id}/${sec.key}: row is missing "${c.key}"`);
+        }
         for (const k of r.kpis) if (!k.label) failures.push(`${e.id}: KPI without label`);
         const keys = r.kpis.map((k) => k.key);
         if (new Set(keys).size !== keys.length) failures.push(`${e.id}: duplicate KPI keys ${keys.join(",")}`);

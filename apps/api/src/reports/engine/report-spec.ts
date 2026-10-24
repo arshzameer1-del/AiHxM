@@ -95,6 +95,12 @@ export type SqlReportSpec = ReportOverrides & {
 
 const CHART_ROW_CAP = 2000;
 
+/** A query must return a column for every column it declares, even when it returns no rows. */
+function assertColumns(columns: readonly ReportColumn[], fields: ReadonlyArray<{ name: string }>, where: string): void {
+  const names = new Set(fields.map((f) => f.name));
+  for (const c of columns) if (!names.has(c.key)) throw new Error(`${where} is missing the column "${c.key}"`);
+}
+
 function normalise(columns: readonly ReportColumn[], raw: Record<string, unknown>): ReportRow {
   const out: ReportRow = {};
   for (const c of columns) {
@@ -178,13 +184,14 @@ function makeQ(ctx: ExecutorContext): { q: Q; p: Params; used: Set<string> } {
 }
 
 /** Runs each extra table with its own parameter list, the same guards and the same row limit as the report's own table. */
-async function runSections(specs: readonly ReportSectionSpec[], ctx: ExecutorContext, staticData: boolean): Promise<ReportSection[]> {
+export async function runSections(specs: readonly ReportSectionSpec[], ctx: ExecutorContext, staticData: boolean): Promise<ReportSection[]> {
   const out: ReportSection[] = [];
   for (const sec of specs) {
     const { q, p } = makeQ(ctx);
     const inner = sec.sql(q);
     guardScope(inner, ctx, staticData);
     const res = await ctx.client.query(`SELECT * FROM (${inner}) AS section_rows LIMIT ${ctx.rowLimit + 1}`, p.values);
+    assertColumns(sec.columns, res.fields, `Section "${sec.key}"`);
     const truncated = res.rows.length > ctx.rowLimit;
     const rows = res.rows.slice(0, ctx.rowLimit).map((r) => normalise(sec.columns, r));
     let total = rows.length;
@@ -199,7 +206,9 @@ async function runSections(specs: readonly ReportSectionSpec[], ctx: ExecutorCon
 
 /** Refuses a query that ignores the caller's scope. A missing limit is an error, never a wider answer. */
 function guardScope(inner: string, ctx: ExecutorContext, staticData: boolean): void {
-    if (ctx.scope === "team" && !inner.includes("org_relationships")) throw new Error("Team-scoped report query ignored the reporting line");
+    // A manager with no employee record has no team: employeeConditions then adds a plain FALSE, which is the closed answer (no rows).
+    const closedTeam = !ctx.callerEmployeeId && /\bFALSE\b/.test(inner);
+    if (ctx.scope === "team" && !inner.includes("org_relationships") && !closedTeam) throw new Error("Team-scoped report query ignored the reporting line");
     if (ctx.payrollAccess && !ctx.payrollAccess.unrestricted && !inner.includes("payroll_area_id = ANY")) throw new Error("Area-scoped report query ignored the payroll area limit");
     // Either the query limits its tables to the company itself, or it reads only through the app.report_company_*() functions,
     // which return nothing but the current company's rows by construction (migrations 0165 and 0166).
@@ -230,6 +239,7 @@ export function sqlReport(spec: SqlReportSpec): { run: ReportExecutor; meta: Rep
 
     const cap = Math.max(ctx.rowLimit, CHART_ROW_CAP);
     const res = await ctx.client.query(`SELECT * FROM (${inner}) AS report_rows LIMIT ${cap + 1}`, p.values);
+    assertColumns(spec.columns, res.fields, "Report query");
     const capped = res.rows.length > cap;
     const fetched = res.rows.slice(0, cap).map((r) => normalise(spec.columns, r));
     let total = fetched.length;
