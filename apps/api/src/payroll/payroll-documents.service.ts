@@ -544,6 +544,20 @@ export class PayrollDocumentsService {
       if (access && isPayrollAreaInScope(access, row.payroll_area_id)) return toView(row, true);
       const own = row.user_account_id === claims.sub && (await this.rbac.can(claims, SELF_VIEW_PERMISSION, { ownerId: row.user_account_id }));
       if (!own || row.status !== "issued" || !row.published_at) throw new NotFoundException("Document not found");
+      if (claims.company_id) {
+        try {
+          await client.query("SAVEPOINT document_access");
+          await client.query(
+            `INSERT INTO payslip_access_log (company_id, employee_id, document_id, kind, viewer_user_account_id)
+             SELECT $1, $2, $3, 'document', $4
+              WHERE NOT EXISTS (SELECT 1 FROM payslip_access_log WHERE document_id = $3 AND viewer_user_account_id = $4 AND created_at > now() - interval '10 minutes')`,
+            [claims.company_id, row.employee_id, documentId, claims.sub]
+          );
+          await client.query("RELEASE SAVEPOINT document_access");
+        } catch {
+          await client.query("ROLLBACK TO SAVEPOINT document_access").catch(() => undefined);
+        }
+      }
       return toView(row, true);
     });
   }

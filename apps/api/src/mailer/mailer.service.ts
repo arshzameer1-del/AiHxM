@@ -39,7 +39,7 @@ export class MailerService {
     return !!process.env.SMTP_HOST;
   }
 
-  async sendMail(input: { to: string; subject: string; text: string; html?: string }): Promise<void> {
+  async sendMail(input: { to: string; subject: string; text: string; html?: string; attachments?: Array<{ filename: string; content: Buffer; contentType?: string }> }): Promise<void> {
     if (!this.isConfigured()) {
       throw new Error("MailerService.sendMail called while unconfigured — callers must check isConfigured() first");
     }
@@ -53,7 +53,7 @@ export class MailerService {
     });
     const from = process.env.SMTP_FROM ?? "no-reply@aihxm.local";
     try {
-      await transport.sendMail({ from, to: input.to, subject: input.subject, text: input.text, html: input.html });
+      await transport.sendMail({ from, to: input.to, subject: input.subject, text: input.text, html: input.html, ...(input.attachments ? { attachments: input.attachments } : {}) });
     } catch (err) {
       this.logger.warn(`Failed to send email to ${input.to}: ${(err as Error).message}`);
       throw err;

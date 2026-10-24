@@ -650,3 +650,42 @@ export const K15 = listReport({
   calculation: ["Combines three checks over runs ending in the range: reconciliation checks that are variance or pending, draft or posted journals where debit and credit differ, and finalised runs more than 14 days old with no draft or posted journal.", "Amount is the variance, the journal difference, or the run's total employer cost for a missing journal."],
 });
 
+
+// ---------------------------------------------------------------- I05 payslip access (metadata only)
+
+export const I05 = sqlReport({
+  description: "How many finalised payslips each month were opened by the employee, and how many times. Counts only; no amounts and no names.",
+  domain: "payroll",
+  filters: [],
+  defaultRange: "last12Months",
+  tables: ["payslips", "payroll_runs", "payslip_access_log"],
+  viz: ["line", "kpi", "table"],
+  tags: ["payslip", "self service", "access"],
+  columns: [
+    { key: "month", label: "Pay period month", type: "text" },
+    { key: "payslips", label: "Finalised payslips", type: "number" },
+    { key: "opened", label: "Opened by the employee", type: "number" },
+    { key: "openRate", label: "Opened (%)", type: "percent" },
+    { key: "opens", label: "Times opened", type: "number" },
+  ],
+  sql: (q) => `
+    WITH mo AS (${q.months()}),
+         p AS (SELECT date_trunc('month', pr.period_end)::date AS ms, ps.id,
+                      (SELECT COUNT(*) FROM payslip_access_log l WHERE l.payslip_id = ps.id AND ${q.co("l")}) AS opens
+                 FROM payslips ps JOIN payroll_runs pr ON pr.id = ps.payroll_run_id
+                WHERE ${RUN(q)} AND ${FINAL} AND ps.status <> 'voided' AND ${PERIOD(q)})
+    SELECT to_char(mo.ms, 'YYYY-MM') AS month, COUNT(p.id)::int AS payslips, COUNT(p.id) FILTER (WHERE p.opens > 0)::int AS opened,
+           ROUND(COUNT(p.id) FILTER (WHERE p.opens > 0) * 100.0 / NULLIF(COUNT(p.id), 0), 1) AS "openRate", COALESCE(SUM(p.opens), 0)::int AS opens
+      FROM mo LEFT JOIN p ON p.ms = mo.ms GROUP BY mo.ms ORDER BY mo.ms`,
+  chart: ({ rows }) => lineChart({ title: "Payslips opened by the employee (%)", unit: "percent", rows: rows.filter((r) => r.openRate !== null), xKey: "month", series: [{ key: "openRate", label: "Opened (%)" }] }),
+  kpis: ({ rows }) => {
+    const slips = sum(rows, "payslips");
+    return [percent("rate", "Opened by the employee", slips ? round1((sum(rows, "opened") * 100) / slips) : null, "Finalised payslips in the period"), count("opens", "Times opened", sum(rows, "opens"))];
+  },
+  notes: () => ["Opens are recorded from the day this report was introduced. Earlier months show 0 opened because nothing was recorded then, not because nobody looked."],
+  calculation: [
+    "Takes finalised payslips (and beyond) for pay periods ending in the month, in your payroll areas, and counts those the employee opened at least once.",
+    "Only the employee opening their own payslip or published payslip document counts. Payroll staff and managers viewing it do not. Opening the same payslip again within ten minutes counts once.",
+    "Nothing about the payslip content is stored here. Payslips hidden from employees count as not opened.",
+  ],
+});

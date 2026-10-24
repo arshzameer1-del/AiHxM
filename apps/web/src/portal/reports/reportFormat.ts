@@ -1,4 +1,4 @@
-import type { ReportColumn, ReportFilterValues, ReportKpi, ReportRow } from "@aihxm/shared-types";
+import type { ReportColumn, ReportDatePreset, ReportFilterValues, ReportKpi, ReportRow } from "@aihxm/shared-types";
 import { formatDay } from "../shared/dates";
 
 const nf = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
@@ -88,3 +88,23 @@ export function describeSeries(
   if (points.length === 1) return `${base} ${max.x}: ${formatNumber(max.y)}.`;
   return `${base} Highest ${max.x}: ${formatNumber(max.y)}. Lowest ${min.x}: ${formatNumber(min.y)}.`;
 }
+
+/** The named periods offered next to the date pickers; the server turns each into dates in the company's own time zone. */
+export const PRESET_OPTIONS: { value: ReportDatePreset; label: string }[] = [
+  { value: "today", label: "Today" },
+  { value: "yesterday", label: "Yesterday" },
+  { value: "thisWeek", label: "This week" },
+  { value: "lastWeek", label: "Last week" },
+  { value: "last7Days", label: "Last 7 days" },
+  { value: "last30Days", label: "Last 30 days" },
+  { value: "last90Days", label: "Last 90 days" },
+  { value: "thisMonth", label: "This month" },
+  { value: "lastMonth", label: "Last month" },
+  { value: "quarterToDate", label: "This quarter so far" },
+  { value: "lastQuarter", label: "Last quarter" },
+  { value: "yearToDate", label: "This year so far" },
+  { value: "lastYear", label: "Last year" },
+  { value: "custom", label: "Custom dates" },
+];
+
+export const presetLabel = (p: ReportDatePreset | null | undefined): string => PRESET_OPTIONS.find((o) => o.value === p)?.label ?? "Default period";

@@ -1,4 +1,4 @@
-import { barChart, count, donutChart, lineChart, listReport, num, pct, percent, sqlReport, sum, type Q } from "../report-spec";
+import { barChart, count, donutChart, lineChart, listReport, num, pct, percent, round1, sqlReport, stackedChart, sum, type Q } from "../report-spec";
 
 /**
  * Reports about the reports (catalog O01 to O05, O10 to O12, O15). They read report_run_log, which stores only safe
@@ -239,4 +239,218 @@ export const O15 = listReport({
         FROM report_run_log l WHERE ${q.co("l")} AND l.status = 'error' AND ${IN_RANGE(q)} GROUP BY l.report_id HAVING COUNT(*) >= ${ERROR_BURST}
     ) t ORDER BY t.times DESC, t.exception`,
   calculation: [`Lists people who exported ${EXPORT_BURST} or more reports, people refused ${DENIAL_BURST} or more times on one report, and reports that failed ${ERROR_BURST} or more times in the range.`, "The limits are fixed review thresholds, not policy: they are meant to prompt a look, not to prove a problem."],
+});
+
+// ---------------------------------------------------------------- reports about saved reports, sharing, schedules, builder and dashboards (v2)
+// These read the Reports v2 tables. Names of private saved reports are never shown, only that one exists: a private report is
+// the owner's own working note, and the title can be as telling as the contents.
+
+const OWNER = (emp = "oe") => `COALESCE(NULLIF(TRIM(COALESCE(${emp}.first_name, '') || ' ' || COALESCE(${emp}.last_name, '')), ''), 'A user without an employee record')`;
+const OWNER_JOIN = (alias: string, emp = "oe") => `LEFT JOIN employees ${emp} ON ${emp}.user_account_id = ${alias}.owner_user_account_id AND ${emp}.company_id = ${alias}.company_id`;
+
+export const O06 = listReport({
+  description: "Every saved report in the company: who owns it, what it is built on, whether it is shared and whether it is scheduled. Private report names are not shown.",
+  tables: ["saved_reports", "report_shares", "report_schedules"],
+  tags: ["saved reports", "inventory"],
+  countLabel: "Saved reports",
+  columns: [
+    { key: "owner", label: "Owner", type: "text" },
+    { key: "name", label: "Name", type: "text" },
+    { key: "kind", label: "Kind", type: "text" },
+    { key: "source", label: "Built on", type: "text" },
+    { key: "visibility", label: "Visibility", type: "text" },
+    { key: "sharedWith", label: "Shared with", type: "number" },
+    { key: "schedules", label: "Schedules", type: "number" },
+    { key: "updated", label: "Last changed", type: "date" },
+  ],
+  sql: (q) => `
+    SELECT ${OWNER()} AS owner, CASE WHEN s.visibility = 'shared' THEN s.name ELSE 'Private report' END AS name,
+           CASE WHEN s.kind = 'custom' THEN 'Built in Report Builder' ELSE 'Library report' END AS kind,
+           CASE WHEN s.kind = 'custom' THEN INITCAP(REPLACE(s.definition->>'dataset', '_', ' ')) ELSE s.report_id END AS source,
+           INITCAP(s.visibility) AS visibility,
+           (SELECT COUNT(*)::int FROM report_shares h WHERE h.saved_report_id = s.id) AS "sharedWith",
+           (SELECT COUNT(*)::int FROM report_schedules sc WHERE sc.saved_report_id = s.id) AS schedules,
+           s.updated_at::date::text AS updated
+      FROM saved_reports s ${OWNER_JOIN("s")}
+     WHERE ${q.co("s")} AND s.archived_at IS NULL
+     ORDER BY s.updated_at DESC, owner`,
+  kpis: ({ rows }) => [count("shared", "Shared", rows.filter((r) => r.visibility === "Shared").length), count("custom", "Built in Report Builder", rows.filter((r) => r.kind === "Built in Report Builder").length)],
+  calculation: ["Lists saved reports that have not been archived. A report is Shared when its owner has shared it with at least one person or role.", "Schedules counts the schedules that deliver the saved report. The name of a private report is replaced with “Private report”."],
+});
+
+export const O07 = listReport({
+  description: "Saved reports and dashboards that have been shared: who shared them and with how many people and roles.",
+  tables: ["saved_reports", "dashboards", "report_shares"],
+  tags: ["sharing", "inventory"],
+  countLabel: "Shared items",
+  columns: [
+    { key: "owner", label: "Shared by", type: "text" },
+    { key: "type", label: "Type", type: "text" },
+    { key: "name", label: "Name", type: "text" },
+    { key: "people", label: "People", type: "number" },
+    { key: "roles", label: "Roles", type: "number" },
+    { key: "since", label: "First shared", type: "date" },
+  ],
+  sql: (q) => `
+    SELECT x.owner, x.type, x.name, x.people, x.roles, x.since FROM (
+      SELECT ${OWNER()} AS owner, 'Saved report' AS type, s.name AS name,
+             COUNT(*) FILTER (WHERE h.grantee_type = 'user')::int AS people, COUNT(*) FILTER (WHERE h.grantee_type = 'role')::int AS roles, MIN(h.created_at)::date::text AS since
+        FROM saved_reports s ${OWNER_JOIN("s")} JOIN report_shares h ON h.saved_report_id = s.id
+       WHERE ${q.co("s")} AND s.archived_at IS NULL GROUP BY s.id, oe.id, oe.first_name, oe.last_name
+      UNION ALL
+      SELECT ${OWNER()}, 'Dashboard', d.name,
+             COUNT(*) FILTER (WHERE h.grantee_type = 'user')::int, COUNT(*) FILTER (WHERE h.grantee_type = 'role')::int, MIN(h.created_at)::date::text
+        FROM dashboards d ${OWNER_JOIN("d")} JOIN report_shares h ON h.dashboard_id = d.id
+       WHERE ${q.co("d")} AND d.archived_at IS NULL GROUP BY d.id, oe.id, oe.first_name, oe.last_name
+    ) x ORDER BY x.since DESC, x.owner`,
+  kpis: ({ rows }) => [count("people", "People given access", sum(rows, "people")), count("roles", "Roles given access", sum(rows, "roles"))],
+  calculation: ["Counts every saved report and dashboard that has at least one share. Sharing never gives anyone more data than their own permissions allow: each viewer runs the report with their own access."],
+});
+
+export const O08 = listReport({
+  description: "Every scheduled report: owner, what it delivers, how often, in which format, to how many people, and how the last run went.",
+  tables: ["report_schedules", "report_deliveries"],
+  tags: ["schedules", "inventory"],
+  countLabel: "Schedules",
+  columns: [
+    { key: "owner", label: "Owner", type: "text" },
+    { key: "name", label: "Schedule", type: "text" },
+    { key: "source", label: "Report", type: "text" },
+    { key: "frequency", label: "Repeats", type: "text" },
+    { key: "format", label: "Format", type: "text" },
+    { key: "recipients", label: "Recipients", type: "number" },
+    { key: "status", label: "Status", type: "text" },
+    { key: "last", label: "Last run", type: "date" },
+    { key: "next", label: "Next run", type: "date" },
+  ],
+  sql: (q) => `
+    SELECT ${OWNER()} AS owner, sc.name AS name, COALESCE(sc.report_id, 'Saved report') AS source, INITCAP(sc.frequency) AS frequency, UPPER(sc.format) AS format,
+           jsonb_array_length(sc.recipients)::int AS recipients, INITCAP(sc.status) AS status, sc.last_run_at::date::text AS last, sc.next_run_at::date::text AS next
+      FROM report_schedules sc ${OWNER_JOIN("sc")}
+     WHERE ${q.co("sc")}
+     ORDER BY (sc.status = 'failed') DESC, sc.next_run_at NULLS LAST, owner`,
+  kpis: ({ rows }) => [count("active", "Active", rows.filter((r) => r.status === "Active").length), count("failed", "Failed", rows.filter((r) => r.status === "Failed").length)],
+  calculation: ["Lists every schedule in the company, including paused and failed ones. Recipients is the number of people named on the schedule; people who may not receive the report are skipped at delivery time."],
+});
+
+export const O09 = sqlReport({
+  description: "Month by month, how many scheduled deliveries succeeded: delivered by email, stored in the app, failed or skipped.",
+  defaultRange: "last90Days",
+  tables: ["report_deliveries", "report_schedules"],
+  viz: ["bar", "kpi", "table"],
+  tags: ["schedules", "delivery", "success rate"],
+  columns: [
+    { key: "month", label: "Month", type: "text" },
+    { key: "runs", label: "Runs", type: "number" },
+    { key: "sent", label: "Emailed", type: "number" },
+    { key: "stored", label: "Kept in the app", type: "number" },
+    { key: "failed", label: "Failed", type: "number" },
+    { key: "skipped", label: "Skipped", type: "number" },
+    { key: "success", label: "Success (%)", type: "percent" },
+  ],
+  sql: (q) => `
+    WITH mo AS (${q.months()}),
+         d AS (SELECT date_trunc('month', r.run_at)::date AS ms, r.status FROM report_deliveries r WHERE ${q.co("r")} AND r.run_at::date BETWEEN ${q.from} AND ${q.to})
+    SELECT to_char(mo.ms, 'YYYY-MM') AS month, COUNT(d.status)::int AS runs, COUNT(*) FILTER (WHERE d.status = 'sent')::int AS sent, COUNT(*) FILTER (WHERE d.status = 'stored')::int AS stored,
+           COUNT(*) FILTER (WHERE d.status = 'failed')::int AS failed, COUNT(*) FILTER (WHERE d.status = 'skipped')::int AS skipped,
+           ROUND(COUNT(*) FILTER (WHERE d.status IN ('sent', 'stored')) * 100.0 / NULLIF(COUNT(*) FILTER (WHERE d.status <> 'skipped'), 0), 1) AS success
+      FROM mo LEFT JOIN d ON d.ms = mo.ms GROUP BY mo.ms ORDER BY mo.ms`,
+  chart: ({ rows }) => stackedChart({ title: "Scheduled deliveries by outcome", unit: "runs", rows, xKey: "month", series: [{ key: "sent", label: "Emailed" }, { key: "stored", label: "Kept in the app" }, { key: "failed", label: "Failed" }, { key: "skipped", label: "Skipped" }] }),
+  kpis: ({ rows }) => {
+    const ok = sum(rows, "sent") + sum(rows, "stored");
+    const tried = ok + sum(rows, "failed");
+    return [percent("success", "Delivery success", tried ? round1((ok * 100) / tried) : null, "Skipped runs are not counted"), count("runs", "Runs", sum(rows, "runs")), count("failed", "Failed", sum(rows, "failed"))];
+  },
+  calculation: ["Counts each run of a schedule in the range. Success is emailed plus kept in the app, divided by all runs that were attempted; skipped runs (no recipient was allowed to receive the file) are left out of the rate."],
+});
+
+export const O13 = sqlReport({
+  description: "Which fields people use in reports they build: how often each is a column, a grouping, a measure or a filter.",
+  tables: ["saved_reports"],
+  viz: ["bar", "table"],
+  tags: ["report builder", "fields"],
+  columns: [
+    { key: "dataset", label: "Data", type: "text" },
+    { key: "field", label: "Field", type: "text" },
+    { key: "reports", label: "Saved reports using it", type: "number" },
+    { key: "asColumn", label: "As a column", type: "number" },
+    { key: "asGroup", label: "To group by", type: "number" },
+    { key: "asMeasure", label: "As a measure", type: "number" },
+    { key: "asFilter", label: "As a filter", type: "number" },
+  ],
+  sql: (q) => `
+    SELECT INITCAP(REPLACE(s.definition->>'dataset', '_', ' ')) AS dataset, INITCAP(REPLACE(u.field, '_', ' ')) AS field, COUNT(DISTINCT s.id)::int AS reports,
+           COUNT(*) FILTER (WHERE u.role = 'column')::int AS "asColumn", COUNT(*) FILTER (WHERE u.role = 'group')::int AS "asGroup",
+           COUNT(*) FILTER (WHERE u.role = 'measure')::int AS "asMeasure", COUNT(*) FILTER (WHERE u.role = 'filter')::int AS "asFilter"
+      FROM saved_reports s
+     CROSS JOIN LATERAL (
+        SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof(s.definition->'columns') = 'array' THEN s.definition->'columns' ELSE '[]'::jsonb END) AS field, 'column' AS role
+        UNION ALL SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof(s.definition->'groupBy') = 'array' THEN s.definition->'groupBy' ELSE '[]'::jsonb END), 'group'
+        UNION ALL SELECT m->>'field', 'measure' FROM jsonb_array_elements(CASE WHEN jsonb_typeof(s.definition->'measures') = 'array' THEN s.definition->'measures' ELSE '[]'::jsonb END) m WHERE m->>'field' IS NOT NULL
+        UNION ALL SELECT f->>'field', 'filter' FROM jsonb_array_elements(CASE WHEN jsonb_typeof(s.definition->'filters') = 'array' THEN s.definition->'filters' ELSE '[]'::jsonb END) f
+     ) u
+     WHERE ${q.co("s")} AND s.kind = 'custom' AND s.archived_at IS NULL AND u.field IS NOT NULL
+     GROUP BY s.definition->>'dataset', u.field ORDER BY reports DESC, dataset, field`,
+  chart: ({ rows }) => (rows.length ? barChart({ title: "Most used fields", unit: "reports", rows: rows.map((r) => ({ ...r, label: `${r.dataset}: ${r.field}` })), labelKey: "label", valueKey: "reports", max: 12 }) : null),
+  kpis: ({ rows }) => [count("fields", "Different fields used", rows.length)],
+  notes: ({ rows }) => (rows.length === 0 ? ["No one has saved a report built in Report Builder yet."] : []),
+  calculation: ["Reads the definitions of saved reports built in Report Builder (not archived) and counts each field wherever it appears. A saved report counts once per field in the “Saved reports using it” column even if it uses the field in more than one way."],
+});
+
+export const O14 = sqlReport({
+  description: "What dashboards are made of: how many widgets and dashboards use each report, and as a number, chart or table.",
+  tables: ["dashboard_widgets", "dashboards", "saved_reports"],
+  viz: ["bar", "table"],
+  tags: ["dashboards", "widgets"],
+  columns: [
+    { key: "source", label: "Report", type: "text" },
+    { key: "widgets", label: "Widgets", type: "number" },
+    { key: "dashboards", label: "Dashboards", type: "number" },
+    { key: "numbers", label: "As a number", type: "number" },
+    { key: "charts", label: "As a chart", type: "number" },
+    { key: "tables", label: "As a table", type: "number" },
+  ],
+  sql: (q) => `
+    SELECT COALESCE(w.report_id, CASE WHEN sr.kind = 'custom' THEN 'Custom report (Report Builder)' ELSE sr.report_id END) AS source,
+           COUNT(*)::int AS widgets, COUNT(DISTINCT w.dashboard_id)::int AS dashboards,
+           COUNT(*) FILTER (WHERE w.widget_type = 'kpi')::int AS numbers, COUNT(*) FILTER (WHERE w.widget_type = 'chart')::int AS charts, COUNT(*) FILTER (WHERE w.widget_type = 'table')::int AS tables
+      FROM dashboard_widgets w JOIN dashboards d ON d.id = w.dashboard_id AND d.archived_at IS NULL
+      LEFT JOIN saved_reports sr ON sr.id = w.saved_report_id
+     WHERE ${q.co("w")}
+     GROUP BY 1 ORDER BY widgets DESC, source`,
+  chart: ({ rows }) => (rows.length ? barChart({ title: "Widgets per report", unit: "widgets", rows, labelKey: "source", valueKey: "widgets", max: 12 }) : null),
+  kpis: ({ rows }) => [count("widgets", "Widgets", sum(rows, "widgets")), count("reports", "Reports on dashboards", rows.length)],
+  notes: ({ rows }) => (rows.length === 0 ? ["No dashboards have been built yet."] : []),
+  calculation: ["Counts widgets on dashboards that are not archived, grouped by the library report (or saved Report Builder report) each one shows."],
+});
+
+export const N06 = listReport({
+  description: "Scheduled report jobs and their health: failing, overdue, paused or running normally, with the last error category.",
+  tables: ["report_schedules", "report_deliveries"],
+  tags: ["schedules", "jobs", "health"],
+  countLabel: "Schedules",
+  columns: [
+    { key: "owner", label: "Owner", type: "text" },
+    { key: "name", label: "Schedule", type: "text" },
+    { key: "health", label: "Health", type: "text" },
+    { key: "failures", label: "Failures in a row", type: "number" },
+    { key: "last", label: "Last run", type: "date" },
+    { key: "error", label: "Last error", type: "text" },
+    { key: "next", label: "Next run", type: "date" },
+  ],
+  sql: (q) => `
+    SELECT ${OWNER()} AS owner, sc.name AS name,
+           CASE WHEN sc.status = 'failed' THEN 'Failed'
+                WHEN sc.status = 'paused' THEN 'Paused'
+                WHEN sc.consecutive_failures > 0 THEN 'Failing'
+                WHEN sc.next_run_at IS NOT NULL AND sc.next_run_at < now() - interval '30 minutes' THEN 'Overdue'
+                ELSE 'Healthy' END AS health,
+           sc.consecutive_failures AS failures, sc.last_run_at::date::text AS last,
+           (SELECT d.error_category FROM report_deliveries d WHERE d.schedule_id = sc.id AND d.status = 'failed' ORDER BY d.run_at DESC LIMIT 1) AS error,
+           sc.next_run_at::date::text AS next
+      FROM report_schedules sc ${OWNER_JOIN("sc")}
+     WHERE ${q.co("sc")}
+     ORDER BY (CASE WHEN sc.status = 'failed' THEN 0 WHEN sc.consecutive_failures > 0 THEN 1 WHEN sc.next_run_at < now() - interval '30 minutes' THEN 2 ELSE 3 END), sc.next_run_at NULLS LAST, owner`,
+  kpis: ({ rows }) => [count("healthy", "Healthy", rows.filter((r) => r.health === "Healthy").length), count("attention", "Need attention", rows.filter((r) => r.health === "Failed" || r.health === "Failing" || r.health === "Overdue").length), count("paused", "Paused", rows.filter((r) => r.health === "Paused").length)],
+  calculation: ["Failed means three runs in a row failed and the schedule stopped. Failing means the last run failed and it will try again. Overdue means an active schedule is more than 30 minutes past its next run time. Only a category of error is shown, never the report data."],
 });

@@ -49,8 +49,8 @@ Small groups are withheld or combined (fewer than 5 people) in demographic, rati
 ## 5. Export
 
 - Needs `reports.export`, plus `reports.export.sensitive` for Sensitive and Restricted reports. A catalog entry says whether the caller may export (`canExport`); the button is disabled otherwise and the API refuses anyway.
-- CSV only in this release. 10,000 rows at most; a partial file says so in its header lines. Screen runs are capped at 500 rows and say so.
-- Formula injection is closed: a text cell starting with `=`, `+`, `-`, `@`, tab or carriage return is prefixed with a quote (`csv.ts`, tested in `report-engine.spec.ts`).
+- CSV, XLSX and PDF. 10,000 rows at most for CSV and XLSX (a partial file says so); PDF stops at 2,000 rows and says so. Screen runs are capped at 500 rows and say so.
+- Formula injection is closed: in CSV a text cell starting with `=`, `+`, `-`, `@`, tab or carriage return is prefixed with a quote (`csv.ts`, tested in `report-engine.spec.ts`); in XLSX text is stored as a plain string, never a formula (`export/formats.ts`, tested in `reports-v2.spec.ts`).
 - The file is built from the same run the screen shows, so scope, suppression and filters cannot differ between screen and file.
 - `Cache-Control: no-store`; throttled to 10 exports a minute per user.
 - Every export is written to `audit_log` (`report.export`) with report id, version, row count, scope and filters, and never the rows. A refused export is recorded in `report_run_log` as denied.
@@ -65,8 +65,24 @@ Small groups are withheld or combined (fewer than 5 people) in demographic, rati
 
 A statement timeout of 15 seconds applies to every report transaction, a date range may not exceed five years, runs are throttled to 60 a minute and exports to 10 a minute per user, and a timed-out report answers with a plain instruction to narrow the range. Failures are logged by category, never with the SQL.
 
-## 8. Known limits, stated plainly
+## 8. Saved reports, sharing, builder, dashboards, schedules (Reports v2, migration 0167)
+
+New permissions: `reports.build`, `reports.share`, `reports.schedule`, `reports.dashboard`. HR Admin holds all four; Line Manager holds build, schedule and dashboard. Everything here is additional to `reports.view` and the data permissions of the report: holding a new permission never opens data by itself.
+
+- **Sharing never widens access.** A shared saved report or dashboard stores a definition, not data. Every viewer runs it with their own claims, so a manager sees only their team and a person without the data permission gets 403 (“shared with you, but you do not have access to the data in it”). A report that was not shared with the caller answers 404, so its existence is not revealed. Targets are people and roles of the same company; the list of people who can be picked needs `reports.share` or `reports.schedule`. Changing shares is audited (`report.share`).
+- **Report Builder** compiles a definition to SQL from an allow-list of datasets and fields (`builder/datasets.ts`): employees, leave requests, leave balances, attendance days, performance reviews (sensitive), payslips (sensitive, payroll-area scoped) and applications (company-wide only). It offers no free text, contact, ID-number or bank fields. All values are bound parameters, ORDER BY uses output positions, and the compiler enforces the same invariants the framework does: company limit, team limit through the reporting line, payroll-area limit. Limits: 20 columns, 3 groupings, 6 measures, 20 filters. Custom runs are logged under the id X00 and counted in O13.
+- **Dashboards** hold at most 12 widgets, each a library or saved report. Each widget runs separately with the viewer's access; a widget the viewer may not see shows as unavailable, not as an error for the whole page.
+- **Schedules** run in the company time zone, with the owner's access at run time. If the owner has lost access the run fails with the category `forbidden` and nothing is generated; it is retried at the next time and stops after three failures. Recipients who may not receive it are skipped, and a run where no one could receive it is recorded as skipped. A recipient receives the file only if they could export that report themselves (the owner needs export rights; any other recipient also needs company-wide scope, so a scoped file is never forwarded to someone with a wider or different view). Files are kept 14 days in `report_deliveries.file_bytes` and then removed by a nightly job. After three failures in a row a schedule stops (status `failed`). Email is sent only if SMTP is configured; otherwise the run is stored and downloadable in the app. `REPORT_SCHEDULER_DISABLED=true` pauses scheduling and the nightly snapshot on one instance.
+- **Export history** (`report_export_history`) stores the report name, format, row count and size, never the data. It is visible only to the person who exported.
+- **Reports about reports** (O06 O07 O08 O09 O13 O14 N06) need administration rights. They never show the name of a private saved report, only that one exists, and they never show data or filter values.
+- **Payslip access log** (`payslip_access_log`, migration 0168) records that an employee opened their own payslip or published payslip document: who, which, when. Never amounts. Opening it again within ten minutes counts once. Payroll staff and managers viewing a payslip are not recorded. A logging failure never blocks the employee.
+- **Data quality snapshots** (`data_quality_snapshots`, migration 0168) store per day and per field only how many employees there are and how many have the field filled in. No values.
+- All new tables have row-level security on `company_id` and are granted to the application role.
+
+## 9. Known limits, stated plainly
 
 - Attendance reports borrow the leave-request permissions because attendance has no permission of its own yet. When one is added, change the `attendance` domain in `catalog/categories.ts`.
-- Reports read live data; there are no snapshots. History-only reports are blocked until capture exists (see the blocked-reports plan).
-- Saved reports, sharing, scheduling, dashboards and the report builder are not in this release. When they are built, each needs its own access rules and tests before the O-series reports on them unlock.
+- Reports read live data. The only history is what is captured on purpose: payslip opens and the nightly data quality snapshot (both start on the day they shipped and are never back-filled) and the report run log. Other history-only reports stay blocked until capture exists (see the blocked-reports plan).
+- Scheduled files and data are held in the database for 14 days. There is no separate file store.
+- The builder cannot add calculated fields, and joins across datasets are not offered.
+- AI-assisted analytics is not built.

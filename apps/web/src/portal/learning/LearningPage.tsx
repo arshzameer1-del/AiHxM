@@ -141,6 +141,8 @@ function AddCourseForm({ onCancel, onCreated }: { onCancel: () => void; onCreate
   const [category, setCategory] = useState<CourseCategory>("compliance");
   const [durationMinutes, setDurationMinutes] = useState("30");
   const [description, setDescription] = useState("");
+  const [isMandatory, setIsMandatory] = useState(false);
+  const [cost, setCost] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -152,9 +154,14 @@ function AddCourseForm({ onCancel, onCreated }: { onCancel: () => void; onCreate
       setError("Enter a duration greater than zero.");
       return;
     }
+    const costAmount = cost.trim() === "" ? null : Number(cost);
+    if (costAmount !== null && (!Number.isFinite(costAmount) || costAmount < 0)) {
+      setError("Enter the cost as a number, or leave it empty.");
+      return;
+    }
     setSubmitting(true);
     try {
-      await api.createCourse({ title, category, durationMinutes: duration, description: description || undefined });
+      await api.createCourse({ title, category, durationMinutes: duration, description: description || undefined, isMandatory, costAmount });
       onCreated();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not create this course.");
@@ -207,6 +214,24 @@ function AddCourseForm({ onCancel, onCreated }: { onCancel: () => void; onCreate
         placeholder="Description (optional)"
         className="w-full rounded-lg border border-black/10 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
       />
+      <div className="flex flex-wrap items-end gap-4">
+        <label htmlFor="course-mandatory" className="flex items-center gap-2 text-sm">
+          <input id="course-mandatory" type="checkbox" checked={isMandatory} onChange={(e) => setIsMandatory(e.target.checked)} />
+          Mandatory for every employee
+        </label>
+        <div>
+          <label htmlFor="course-cost" className="block text-xs font-medium mb-1">Cost per participant (optional)</label>
+          <input
+            id="course-cost"
+            type="number"
+            min="0"
+            step="0.01"
+            value={cost}
+            onChange={(e) => setCost(e.target.value)}
+            className="w-40 rounded-lg border border-black/10 px-3 py-1.5 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-accent"
+          />
+        </div>
+      </div>
       {error && <div className="text-danger text-xs">{error}</div>}
       <div className="flex gap-3">
         <button
@@ -273,7 +298,7 @@ function CourseCard({
     <div className="bg-card rounded-card p-4 shadow-sm flex flex-col gap-2">
       <div className="font-medium text-sm">{course.title}</div>
       <div className="text-xs text-label-tertiary">
-        {COURSE_CATEGORY_LABELS[course.category]} · {course.durationMinutes} min
+        {COURSE_CATEGORY_LABELS[course.category]} · {course.durationMinutes} min{course.isMandatory ? " · Mandatory" : ""}
       </div>
       {course.description && <div className="text-xs text-label-secondary">{course.description}</div>}
       <div className="mt-auto pt-2 flex items-center justify-between gap-2">

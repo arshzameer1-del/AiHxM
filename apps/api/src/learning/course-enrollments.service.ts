@@ -38,6 +38,8 @@ function rowToCourse(row: any): CourseView {
     description: row.description,
     category: row.category,
     durationMinutes: row.duration_minutes,
+    isMandatory: row.is_mandatory ?? false,
+    costAmount: row.cost_amount == null ? null : Number(row.cost_amount),
     isActive: row.is_active,
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
@@ -73,6 +75,8 @@ function rowToEnrollment(row: any, employeeUserAccountId: string | null): Course
       description: row.course_description,
       category: row.course_category,
       duration_minutes: row.course_duration_minutes,
+      is_mandatory: row.course_is_mandatory,
+      cost_amount: row.course_cost_amount,
       is_active: row.course_is_active,
       created_at: row.course_created_at,
       updated_at: row.course_updated_at,
@@ -94,7 +98,7 @@ function rowToEnrollment(row: any, employeeUserAccountId: string | null): Course
 const ENROLLMENT_SELECT = `
   SELECT ce.*,
          c.title AS course_title, c.description AS course_description, c.category AS course_category,
-         c.duration_minutes AS course_duration_minutes, c.is_active AS course_is_active,
+         c.duration_minutes AS course_duration_minutes, c.is_mandatory AS course_is_mandatory, c.cost_amount AS course_cost_amount, c.is_active AS course_is_active,
          c.created_at AS course_created_at, c.updated_at AS course_updated_at,
          e.user_account_id AS employee_user_account_id, mgr.user_account_id AS manager_user_account_id,
          e.first_name AS employee_first_name, e.last_name AS employee_last_name, e.employee_number AS employee_number

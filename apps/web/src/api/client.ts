@@ -3,6 +3,24 @@ import { createResponseCache, isCacheablePath } from "./responseCache";
 import { WARM_READS_BY_ROLE } from "./warmReads";
 import { createForegroundGate } from "./foregroundGate";
 import type {
+  BuilderCatalogResponse,
+  DashboardData,
+  DashboardDetail,
+  DashboardSummary,
+  ReportDatePreset,
+  ReportDeliverySummary,
+  ReportExportFormat,
+  ReportExportHistoryItem,
+  ReportInboxItem,
+  ReportScheduleSummary,
+  ReportsOverview,
+  SaveDashboardRequest,
+  SaveReportRequest,
+  SaveScheduleRequest,
+  SavedReportDetail,
+  SavedReportSummary,
+  ShareGrantee,
+  ShareTargets,
   ReportCatalogEntry,
   ReportCatalogResponse,
   ReportFilterOptions,
@@ -1002,6 +1020,36 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     // A save (or anything that is not a plain read) may have changed what other screens show.
     if (method !== "GET") swr.invalidateAll();
   }
+}
+
+/** Fetches a file the server builds and hands it to the browser under the server's own file name. */
+async function downloadFile(path: string, init: RequestInit, fallbackName: string): Promise<void> {
+  const token = getToken();
+  const res = await fetch(`${API_PREFIX}${path}`, {
+    ...init,
+    headers: { ...(init.body ? { "Content-Type": "application/json" } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+  });
+  if (!res.ok) {
+    let message = `Request failed (${res.status})`;
+    try {
+      const body = await res.json();
+      message = body.message ?? message;
+    } catch {
+      // not JSON — keep the generic message
+    }
+    throw new ApiError(res.status, message);
+  }
+  const disposition = res.headers.get("Content-Disposition") ?? "";
+  const match = /filename="?([^";]+)"?/.exec(disposition);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = match?.[1] ?? fallbackName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 export const api = {
@@ -2262,40 +2310,54 @@ export const api = {
   getReportCatalog: () => request<ReportCatalogResponse>("/reports/catalog"),
   getReportEntry: (id: string) => request<ReportCatalogEntry>(`/reports/catalog/${id}`),
   getReportFilterOptions: (id: string) => request<ReportFilterOptions>(`/reports/catalog/${id}/filter-options`),
-  runReport: (id: string, filters: ReportFilterValues) =>
-    request<ReportResult>(`/reports/${id}/run`, { method: "POST", body: JSON.stringify({ filters }) }),
+  runReport: (id: string, filters: ReportFilterValues, extra: { preset?: ReportDatePreset; compare?: boolean } = {}) =>
+    request<ReportResult>(`/reports/${id}/run`, { method: "POST", body: JSON.stringify({ filters, ...extra }) }),
   setReportFavorite: (id: string, favorite: boolean) =>
     request<{ favorite: boolean }>(`/reports/${id}/favorite`, { method: favorite ? "PUT" : "DELETE" }),
-  // Streams the CSV the server builds (formula-injection safe, audited); the browser saves it under the server's name.
-  async exportReport(id: string, filters: ReportFilterValues): Promise<void> {
-    const token = getToken();
-    const res = await fetch(`${API_PREFIX}/reports/${id}/export`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      body: JSON.stringify({ filters }),
-    });
-    if (!res.ok) {
-      let message = `Request failed (${res.status})`;
-      try {
-        const body = await res.json();
-        message = body.message ?? message;
-      } catch {
-        // not JSON — keep the generic message
-      }
-      throw new ApiError(res.status, message);
-    }
-    const disposition = res.headers.get("Content-Disposition") ?? "";
-    const match = /filename="?([^";]+)"?/.exec(disposition);
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = match?.[1] ?? `${id}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-  },
+  // Streams the file the server builds (formula-injection safe, audited); the browser saves it under the server's name.
+  exportReport: (id: string, filters: ReportFilterValues, format: ReportExportFormat = "csv", preset?: ReportDatePreset) =>
+    downloadFile(`/reports/${id}/export?format=${format}`, { method: "POST", body: JSON.stringify({ filters, ...(preset ? { preset } : {}) }) }, `${id}.${format}`),
+
+  // --- Reports v2: overview, saved reports, builder, dashboards, schedules ---
+  getReportsOverview: () => request<ReportsOverview>("/reports/overview"),
+  listSavedReports: () => request<{ mine: SavedReportSummary[]; shared: SavedReportSummary[] }>("/reports/saved"),
+  getSavedReport: (id: string) => request<SavedReportDetail>(`/reports/saved/${id}`),
+  saveReport: (body: SaveReportRequest) => request<SavedReportDetail>("/reports/saved", { method: "POST", body: JSON.stringify(body) }),
+  updateSavedReport: (id: string, body: SaveReportRequest) => request<SavedReportDetail>(`/reports/saved/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  archiveSavedReport: (id: string) => request<{ archived: true }>(`/reports/saved/${id}`, { method: "DELETE" }),
+  runSavedReport: (id: string) => request<{ saved: SavedReportDetail; result: ReportResult; canExport: boolean }>(`/reports/saved/${id}/run`, { method: "POST", body: "{}" }),
+  exportSavedReport: (id: string, format: ReportExportFormat) => downloadFile(`/reports/saved/${id}/export?format=${format}`, { method: "POST", body: "{}" }, `report.${format}`),
+  getReportShareTargets: () => request<ShareTargets>("/reports/saved/share-targets"),
+  getSavedReportShares: (id: string) => request<ShareGrantee[]>(`/reports/saved/${id}/shares`),
+  setSavedReportShares: (id: string, grantees: Array<{ type: "user" | "role"; id: string }>) =>
+    request<ShareGrantee[]>(`/reports/saved/${id}/shares`, { method: "PUT", body: JSON.stringify({ grantees }) }),
+
+  getBuilderDatasets: () => request<BuilderCatalogResponse>("/reports/builder/datasets"),
+  getBuilderFieldValues: (dataset: string, field: string) => request<string[]>(`/reports/builder/datasets/${dataset}/fields/${field}/values`),
+  runBuilder: (definition: unknown, title?: string) => request<ReportResult>("/reports/builder/run", { method: "POST", body: JSON.stringify({ definition, title }) }),
+  exportBuilder: (definition: unknown, format: ReportExportFormat, title?: string) =>
+    downloadFile(`/reports/builder/export`, { method: "POST", body: JSON.stringify({ definition, title, format }) }, `report.${format}`),
+
+  listDashboards: () => request<{ mine: DashboardSummary[]; shared: DashboardSummary[] }>("/reports/dashboards"),
+  getDashboard: (id: string) => request<DashboardDetail>(`/reports/dashboards/${id}`),
+  getDashboardData: (id: string) => request<DashboardData>(`/reports/dashboards/${id}/data`),
+  saveDashboard: (body: SaveDashboardRequest) => request<DashboardDetail>("/reports/dashboards", { method: "POST", body: JSON.stringify(body) }),
+  updateDashboard: (id: string, body: SaveDashboardRequest) => request<DashboardDetail>(`/reports/dashboards/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  archiveDashboard: (id: string) => request<{ archived: true }>(`/reports/dashboards/${id}`, { method: "DELETE" }),
+  getDashboardShares: (id: string) => request<ShareGrantee[]>(`/reports/dashboards/${id}/shares`),
+  setDashboardShares: (id: string, grantees: Array<{ type: "user" | "role"; id: string }>) =>
+    request<ShareGrantee[]>(`/reports/dashboards/${id}/shares`, { method: "PUT", body: JSON.stringify({ grantees }) }),
+
+  listReportSchedules: () => request<ReportScheduleSummary[]>("/reports/schedules"),
+  createReportSchedule: (body: SaveScheduleRequest) => request<ReportScheduleSummary>("/reports/schedules", { method: "POST", body: JSON.stringify(body) }),
+  updateReportSchedule: (id: string, body: SaveScheduleRequest) => request<ReportScheduleSummary>(`/reports/schedules/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  setReportScheduleStatus: (id: string, status: "active" | "paused") => request<ReportScheduleSummary>(`/reports/schedules/${id}/status`, { method: "PUT", body: JSON.stringify({ status }) }),
+  deleteReportSchedule: (id: string) => request<{ deleted: true }>(`/reports/schedules/${id}`, { method: "DELETE" }),
+  runReportScheduleNow: (id: string) => request<ReportDeliverySummary>(`/reports/schedules/${id}/run-now`, { method: "POST", body: "{}" }),
+  getReportScheduleDeliveries: (id: string) => request<ReportDeliverySummary[]>(`/reports/schedules/${id}/deliveries`),
+  getReportInbox: () => request<ReportInboxItem[]>("/reports/schedules/inbox"),
+  downloadReportDelivery: (deliveryId: string) => downloadFile(`/reports/schedules/deliveries/${deliveryId}/download`, { method: "GET" }, "report"),
+  getReportExportHistory: () => request<ReportExportHistoryItem[]>("/reports/exports/history"),
 
   // --- Employee Groups & Leave Policies (Task #49) --------------------------
   // Admin Center's own screen for the Phase 8 resolver: the API already

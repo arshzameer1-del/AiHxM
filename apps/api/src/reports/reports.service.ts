@@ -1,5 +1,8 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, RequestTimeoutException } from "@nestjs/common";
 import type {
+  ReportDatePreset,
+  ReportDrill,
+  ReportKpi,
   ReportCatalogEntry,
   ReportCatalogResponse,
   ReportCategoryKey,
@@ -20,14 +23,34 @@ import type { ReportDefinition } from "./catalog/report-catalog.types";
 import { allPermissionKeysForCatalog, decideAccess, type ReportAccess } from "./report-access";
 import { toCsv } from "./engine/csv";
 import { normalizeFilters } from "./engine/filters";
+import { previousRange, resolvePreset } from "./engine/presets";
 import { DEFAULT_RANGES, EXECUTORS } from "./engine/executors";
 import { Params, UNASSIGNED, employeeConditions, prettyKey } from "./engine/sql";
 import type { ExecutorOutput } from "./engine/executors/types";
 
-const SCREEN_ROWS = 500;
-const EXPORT_ROWS = 10_000;
+export const SCREEN_ROWS = 500;
+export const EXPORT_ROWS = 10_000;
 const STATEMENT_TIMEOUT_MS = 15_000;
 const PAYROLL_VIEW_BASES = ["payroll.calculate", "payroll.finalize", "payroll.disburse"];
+
+/** Which report a row of a grouped report opens, and with which filter. The row carries the value in `_key`. */
+const DRILLS: Record<string, ReportDrill> = {
+  A03: { reportId: "B01", filter: "department", rowKey: "_key", label: "Open the employees in this department" },
+  A04: { reportId: "B01", filter: "location", rowKey: "_key", label: "Open the employees at this location" },
+  A05: { reportId: "B01", filter: "employmentType", rowKey: "_key", label: "Open the employees of this type" },
+};
+
+export type RunOptions = { filters?: Record<string, unknown>; preset?: ReportDatePreset | null; compare?: boolean; /** do not count this run as "recently viewed" (Overview tiles, dashboards) */ quiet?: boolean };
+
+/** Fills `delta` and `previous` on each KPI that has a numeric twin in the comparison period. A missing twin stays unmarked. */
+export function applyComparison(current: ReportKpi[], previous: ReportKpi[]): ReportKpi[] {
+  const prev = new Map(previous.map((k) => [k.key, k]));
+  return current.map((k) => {
+    const o = prev.get(k.key);
+    if (!o || o.unit !== k.unit || k.value === null || o.value === null) return k;
+    return { ...k, previous: o.value, delta: Math.round((k.value - o.value) * 10) / 10 };
+  });
+}
 
 type CallerContext = { held: ReadonlySet<string>; modules: ReadonlySet<string> };
 
@@ -42,7 +65,8 @@ export class ReportsService {
 
   // ------------------------------------------------------------------ catalog
 
-  private async callerContext(claims: RequestClaims): Promise<CallerContext> {
+  /** @internal shared with the builder, dashboards and schedules */
+  async callerContext(claims: RequestClaims): Promise<CallerContext> {
     if (!claims.company_id) throw new ForbiddenException("Reports & Analytics needs a company sign-in");
     const keys = allPermissionKeysForCatalog(REPORT_CATALOG.map((d) => d.domain), REPORT_CATALOG.flatMap((d) => d.extraPermissions));
     const [held, modules] = await Promise.all([
@@ -121,6 +145,12 @@ export class ReportsService {
     return { def, access, ctx };
   }
 
+  /** @internal what the caller may do with one catalog report (403 when nothing). */
+  async accessOf(claims: RequestClaims, id: string): Promise<{ def: ReportDefinition; access: ReportAccess }> {
+    const { def, access } = await this.resolve(claims, id);
+    return { def, access };
+  }
+
   async entry(claims: RequestClaims, id: string): Promise<ReportCatalogEntry> {
     const { def, access } = await this.resolve(claims, id);
     const { fav, last } = await this.userState(claims);
@@ -146,7 +176,8 @@ export class ReportsService {
 
   // ------------------------------------------------------------------ running
 
-  private async todayFor(claims: RequestClaims): Promise<string> {
+  /** @internal */
+  async todayFor(claims: RequestClaims): Promise<string> {
     return this.db.withClaims(claims, async (client) => {
       try {
         const r = await client.query<{ d: string }>(
@@ -161,17 +192,19 @@ export class ReportsService {
     });
   }
 
-  private async payrollAccess(claims: RequestClaims, def: ReportDefinition): Promise<PayrollAreaAccess | null> {
+  /** @internal */
+  async payrollAccess(claims: RequestClaims, def: Pick<ReportDefinition, "domain">): Promise<PayrollAreaAccess | null> {
     if (def.domain !== "payroll") return null;
     const access = await resolvePayrollAreaAccess(this.db, this.rbac, claims, PAYROLL_VIEW_BASES);
     if (!access) throw new ForbiddenException("Not permitted to run this report");
     return access;
   }
 
-  private async execute(
+  /** @internal the one run path; also used by saved reports, dashboards, exports and schedules */
+  async execute(
     claims: RequestClaims,
     id: string,
-    rawFilters: Record<string, unknown>,
+    opts: RunOptions,
     rowLimit: number,
     kind: "run" | "export",
     auditAction: string | null
@@ -189,7 +222,14 @@ export class ReportsService {
     let filters;
     try {
       const today0 = await this.todayFor(claims);
+      let rawFilters = { ...(opts.filters ?? {}) };
+      if (opts.preset && opts.preset !== "custom") {
+        if (!def.filters.includes("dateRange")) throw new BadRequestException("This report has no date range, so a period cannot be chosen");
+        const r = resolvePreset(opts.preset, today0);
+        if (r) rawFilters = { ...rawFilters, dateFrom: r.from, dateTo: r.to };
+      }
       filters = { ...normalizeFilters(def.filters, rawFilters, today0, DEFAULT_RANGES[id] ?? null), today: today0 };
+      if (opts.compare && !filters.range) throw new BadRequestException("This report has no date range, so there is no earlier period to compare with");
     } catch (err) {
       await this.logUsage(claims, def, kind, "invalid", Date.now() - started, null, "invalid_filters");
       throw err;
@@ -210,18 +250,26 @@ export class ReportsService {
           const me = await client.query<{ id: string }>("SELECT id FROM employees WHERE user_account_id = $1 AND company_id = $2 LIMIT 1", [claims.sub, claims.company_id]);
           callerEmployeeId = me.rows[0]?.id ?? null;
         }
-        const out: ExecutorOutput = await executor({
-          client,
-          companyId: claims.company_id as string,
-          scope: access.scope,
-          callerEmployeeId,
-          filters: filters.values,
-          range: filters.range,
-          today: filters.today,
-          rowLimit,
-          payrollAccess,
-          catalog: REPORT_CATALOG.map((d) => ({ id: d.id, title: d.title, category: d.categoryKey, categoryLabel: CATEGORIES.find((c) => c.key === d.categoryKey)?.label ?? d.categoryKey, domain: d.domain, status: d.status })),
-        });
+        const runFor = (values: typeof filters.values, range: typeof filters.range): Promise<ExecutorOutput> =>
+          executor({
+            client,
+            companyId: claims.company_id as string,
+            scope: access.scope,
+            callerEmployeeId,
+            filters: values,
+            range,
+            today: filters.today,
+            rowLimit,
+            payrollAccess,
+            catalog: REPORT_CATALOG.map((d) => ({ id: d.id, title: d.title, category: d.categoryKey, categoryLabel: CATEGORIES.find((c) => c.key === d.categoryKey)?.label ?? d.categoryKey, domain: d.domain, status: d.status })),
+          });
+        const out: ExecutorOutput = await runFor(filters.values, filters.range);
+        let comparison: { from: string; to: string } | null = null;
+        if (opts.compare && filters.range) {
+          comparison = previousRange(filters.range);
+          const prev = await runFor({ ...filters.values, dateFrom: comparison.from, dateTo: comparison.to }, comparison);
+          out.kpis = applyComparison(out.kpis, prev.kpis);
+        }
         const asOf = new Date().toISOString();
         const full: ReportResult = {
           reportId: def.id,
@@ -233,6 +281,8 @@ export class ReportsService {
           appliedFilters: filters.values,
           dateRange: filters.range,
           ...out,
+          comparison,
+          drill: DRILLS[def.id] ?? null,
         };
         const sensitive = def.sensitivity === "sensitive" || def.sensitivity === "restricted";
         if (auditAction || sensitive) {
@@ -246,7 +296,7 @@ export class ReportsService {
         return full;
       });
       await this.logUsage(claims, def, kind, "ok", Date.now() - started, result.totalRows, null);
-      if (kind === "run") await this.touchRecent(claims, def.id);
+      if (kind === "run" && !opts.quiet) await this.touchRecent(claims, def.id);
       return result;
     } catch (err) {
       const code = (err as { code?: string }).code;
@@ -259,17 +309,17 @@ export class ReportsService {
     }
   }
 
-  run(claims: RequestClaims, id: string, filters: Record<string, unknown>): Promise<ReportResult> {
-    return this.execute(claims, id, filters ?? {}, SCREEN_ROWS, "run", null);
+  run(claims: RequestClaims, id: string, filters: Record<string, unknown>, extra: Omit<RunOptions, "filters"> = {}): Promise<ReportResult> {
+    return this.execute(claims, id, { ...extra, filters: filters ?? {} }, SCREEN_ROWS, "run", null);
   }
 
-  async exportCsv(claims: RequestClaims, id: string, filters: Record<string, unknown>): Promise<{ filename: string; csv: string }> {
+  async exportCsv(claims: RequestClaims, id: string, filters: Record<string, unknown>, extra: Omit<RunOptions, "filters"> = {}): Promise<{ filename: string; csv: string }> {
     const { def: exportDef, access } = await this.resolve(claims, id);
     if (!access.canExport) {
       await this.logUsage(claims, exportDef, "export", "denied", 0, null, "forbidden");
       throw new ForbiddenException("Not permitted to export this report");
     }
-    const result = await this.execute(claims, id, filters ?? {}, EXPORT_ROWS, "export", "report.export");
+    const result = await this.execute(claims, id, { ...extra, filters: filters ?? {}, compare: false }, EXPORT_ROWS, "export", "report.export");
     const meta = [
       `${result.title} (${result.reportId} v${result.version})`,
       `Generated ${result.asOf}`,
@@ -349,6 +399,21 @@ export class ReportsService {
           `INSERT INTO report_run_log (company_id, user_account_id, report_id, report_version, kind, status, duration_ms, row_count, error_category)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
           [claims.company_id, claims.sub, def.id, def.version, kind, status, durationMs, rowCount, errorCategory]
+        )
+      );
+    } catch {
+      // telemetry must never break a report
+    }
+  }
+
+  /** @internal telemetry for builder runs, which have no catalog definition. Uses the sentinel id X00. */
+  async logCustomUsage(claims: RequestClaims, kind: "run" | "export", status: "ok" | "denied" | "invalid" | "error", durationMs: number, rowCount: number | null, errorCategory: string | null): Promise<void> {
+    try {
+      await this.db.withClaims(claims, (client) =>
+        client.query(
+          `INSERT INTO report_run_log (company_id, user_account_id, report_id, report_version, kind, status, duration_ms, row_count, error_category)
+           VALUES ($1, $2, 'X00', 1, $3, $4, $5, $6, $7)`,
+          [claims.company_id, claims.sub, kind, status, durationMs, rowCount, errorCategory]
         )
       );
     } catch {

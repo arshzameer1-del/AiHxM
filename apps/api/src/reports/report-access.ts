@@ -2,11 +2,14 @@ import type { ReportScope } from "@aihxm/shared-types";
 import { DOMAIN_POLICIES, REPORTS_EXPORT, REPORTS_EXPORT_SENSITIVE, REPORTS_VIEW_SENSITIVE } from "./catalog/categories";
 import type { ReportDefinition } from "./catalog/report-catalog.types";
 
+/** Rights that gate the v2 tools around the reports (builder, sharing, schedules, dashboards), not any one report. */
+export const V2_PERMISSIONS = ["reports.build", "reports.share", "reports.schedule", "reports.dashboard"] as const;
+
 export type ReportAccess = { scope: ReportScope; canExport: boolean };
 
 /** Every permission key the catalog can ask about, so one query can answer them all. */
 export function allPermissionKeysForCatalog(domains: Iterable<ReportDefinition["domain"]>, extra: Iterable<string> = []): string[] {
-  const keys = new Set<string>(["reports.view", REPORTS_VIEW_SENSITIVE, REPORTS_EXPORT, REPORTS_EXPORT_SENSITIVE, ...extra]);
+  const keys = new Set<string>(["reports.view", REPORTS_VIEW_SENSITIVE, REPORTS_EXPORT, REPORTS_EXPORT_SENSITIVE, ...V2_PERMISSIONS, ...extra]);
   for (const d of domains) {
     for (const k of DOMAIN_POLICIES[d].tenantPermissions) keys.add(k);
     for (const k of DOMAIN_POLICIES[d].teamPermissions) keys.add(k);

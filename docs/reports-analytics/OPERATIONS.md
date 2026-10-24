@@ -15,7 +15,7 @@ Open `/app/reports` as an HR Admin. A fresh company shows reports with honest ze
 ## Tests
 
 ```
-cd apps/api && npx jest src/reports            # 126 tests, real database
+cd apps/api && npx jest src/reports            # real database; run it with the API stopped or allow a few minutes
 cd apps/api && npx jest src/database/rls-coverage.spec.ts
 cd apps/web && npx tsx --test src/portal/reports/*.test.ts
 cd apps/web && npx playwright test src/portal/reports   # needs API and web running
@@ -30,6 +30,8 @@ What the API tests prove: the catalog and the code agree in both directions (an 
 | 0164 | `reports.*` permissions and role grants; `report_favorites`, `report_recent_views`, `report_run_log` | In the file header |
 | 0165 | `app.report_company_accounts()`, `app.report_company_sessions()` | In the file header |
 | 0166 | `app.report_company_configuration/integrations/usage/exports/health()` | In the file header |
+| 0167 | `reports.build/share/schedule/dashboard` permissions and role grants; `saved_reports`, `dashboards`, `dashboard_widgets`, `report_shares`, `report_schedules`, `report_deliveries`, `report_export_history` | In the file header |
+| 0168 | `courses.is_mandatory`, `courses.cost_amount`; `payslip_access_log`; `data_quality_snapshots` | Drop the two tables and the two course columns |
 
 None of them changes or removes an existing object. Rolling back drops only report objects.
 
@@ -45,6 +47,14 @@ None of them changes or removes an existing object. Rolling back drops only repo
 4. Add a hand-computed test with fixture rows. The smoke test fails if the catalog and the executors disagree.
 5. Run `npm run docs:reports`.
 
+## Background work
+
+- The schedule worker runs every 5 minutes and claims due schedules with `FOR UPDATE SKIP LOCKED`, so two API instances never deliver the same run. At 4am it removes scheduled files older than 14 days.
+- At 02:30 (and 30 seconds after start-up) the data quality snapshot service records the A14 counts for every company. Running it twice in one day replaces that day.
+- `REPORT_SCHEDULER_DISABLED=true` stops all three on an instance (use it on a one-off worker or while restoring a backup).
+- Email needs SMTP settings; without them scheduled reports are stored and downloadable in the app, and the schedule list says so.
+- Disk: scheduled files live in the database (`report_deliveries.file_bytes`) for 14 days. Watch the table size if many large schedules are created.
+
 ## Watching it in production
 
 - `report_run_log` (company, report, kind, status, duration, rows) is the usage and failure record. O01 to O05, O10, O11 and O15 are built on it, so an administrator sees the same in the product.
@@ -54,4 +64,4 @@ None of them changes or removes an existing object. Rolling back drops only repo
 
 ## Known limitations
 
-See SECURITY_MODEL.md section 8 and BLOCKED_REPORTS_DEVELOPMENT_PLAN.md. In short: no saved reports, sharing, scheduling, dashboards, report builder, XLSX/PDF export or AI analytics yet; 38 reports wait on data AiHxM does not capture; live data only, no snapshots.
+See SECURITY_MODEL.md section 8 and BLOCKED_REPORTS_DEVELOPMENT_PLAN.md. In short: no AI analytics or calculated fields yet; 27 reports wait on data AiHxM does not capture; live data, with history only where capture was added on purpose.

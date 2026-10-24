@@ -22,6 +22,8 @@ function rowToCourse(row: any): CourseView {
     description: row.description,
     category: row.category,
     durationMinutes: row.duration_minutes,
+    isMandatory: row.is_mandatory ?? false,
+    costAmount: row.cost_amount == null ? null : Number(row.cost_amount),
     isActive: row.is_active,
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
@@ -54,16 +56,16 @@ export class CoursesService {
 
     return this.db.withClaims(claims, async (client) => {
       const result = await client.query(
-        `INSERT INTO courses (company_id, title, description, category, duration_minutes, created_by_user_account_id)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        `INSERT INTO courses (company_id, title, description, category, duration_minutes, created_by_user_account_id, is_mandatory, cost_amount)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING *`,
-        [claims.company_id, input.title, input.description ?? null, input.category, input.durationMinutes, claims.sub]
+        [claims.company_id, input.title, input.description ?? null, input.category, input.durationMinutes, claims.sub, input.isMandatory ?? false, input.costAmount ?? null]
       );
       await this.audit.record(client, claims, {
         companyId: claims.company_id ?? null,
         action: "course.create",
         target: result.rows[0].id,
-        metadata: { title: input.title, category: input.category },
+        metadata: { title: input.title, category: input.category, mandatory: input.isMandatory ?? false },
       });
       return rowToCourse(result.rows[0]);
     });

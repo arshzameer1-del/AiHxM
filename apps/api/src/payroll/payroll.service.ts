@@ -1922,8 +1922,30 @@ export class PayrollService {
         throw new NotFoundException("Payslip not found");
       }
       if ((await payslipsHiddenFromSelf(client, [row.id])).size) throw new NotFoundException("Payslip not found");
+      await this.recordSelfAccess(client, claims, row.employee_id, row.id);
       return rowToPayslip(row);
     });
+  }
+
+  /**
+   * I05 - an employee opening their own payslip. Only that fact is kept (who, which payslip, when); never the contents.
+   * Opening the same payslip again within ten minutes (the page loads the payslip and its detail) counts once. A logging
+   * failure never blocks the employee from seeing their payslip.
+   */
+  private async recordSelfAccess(client: PoolClient, claims: RequestClaims, employeeId: string, payslipId: string): Promise<void> {
+    if (!claims.company_id) return;
+    try {
+      await client.query("SAVEPOINT payslip_access");
+      await client.query(
+        `INSERT INTO payslip_access_log (company_id, employee_id, payslip_id, kind, viewer_user_account_id)
+         SELECT $1, $2, $3, 'payslip', $4
+          WHERE NOT EXISTS (SELECT 1 FROM payslip_access_log WHERE payslip_id = $3 AND viewer_user_account_id = $4 AND created_at > now() - interval '10 minutes')`,
+        [claims.company_id, employeeId, payslipId, claims.sub]
+      );
+      await client.query("RELEASE SAVEPOINT payslip_access");
+    } catch {
+      await client.query("ROLLBACK TO SAVEPOINT payslip_access").catch(() => undefined);
+    }
   }
 
   /**

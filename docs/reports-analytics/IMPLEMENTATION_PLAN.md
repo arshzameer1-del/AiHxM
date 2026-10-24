@@ -23,13 +23,13 @@
 |---|---|---|
 | 0 Audit and plan | Inventory, plan, risks | Done (this document) |
 | 1 Catalog and security foundation | 220 ids, permissions, access decision, scope, audit, telemetry, migration 0164 | Done |
-| 2 Core report execution | Query framework, filters, 182 reports, export (CSV) | Done. 38 blocked with reasons. |
+| 2 Core report execution | Query framework, filters, 193 reports, export (CSV, XLSX, PDF) | Done. 27 blocked with reasons. |
 | 3 Visual analytics | Library, report page, KPI cards, bar, stacked bar, donut, line, table alternative, empty, error and blocked states | Done. No heatmap or funnel (none needed yet). |
-| 4 Saved reports and report builder | Saved definitions, sharing, builder, calculated fields | **Not built** |
-| 5 Dashboard builder | Widgets and composition | **Not built** |
-| 6 Export and scheduling | XLSX, background export jobs, schedules, delivery | **Not built** (CSV done) |
+| 4 Saved reports and report builder | Saved definitions, sharing, builder | Done (migration 0167). Calculated fields not built. |
+| 5 Dashboard builder | Widgets and composition | Done (migration 0167). |
+| 6 Export and scheduling | XLSX, PDF, export history, schedules, delivery | Done. Background jobs for very large exports not built. |
 | 7 AI analytics | Optional | **Not built** |
-| 8 Hardening and release | Full regression, docs, release report | Done for the built scope (see the final report) |
+| 8 Hardening and release | Full regression, docs, release report | Done for the built scope. Overview page, period presets, comparison and drill-down added in v2. |
 
 ## 4. How the work was staged
 
@@ -37,7 +37,7 @@
 2. Framework and the first reports (workforce, planning, recruitment, attendance, leave, payroll, performance).
 3. Workflow, self-service, audit, learning, governance and operations reports, with migrations 0165 and 0166 for platform-held data.
 4. Frontend: client methods, library, report page, charts, navigation, tests.
-5. Reference docs generated from the code, and the plan to unlock the 38 blocked reports.
+5. Reference docs generated from the code, and the plan to unlock the blocked reports.
 
 ## 5. Risks and how they are held
 
@@ -52,4 +52,4 @@
 
 ## 6. Next steps
 
-BLOCKED_REPORTS_DEVELOPMENT_PLAN.md gives the sequence: Wave 1 small additions (11 reports), then saved reports and sharing, the Overview page and date presets, XLSX export and scheduling, the builder, and the Wave 3 modules.
+BLOCKED_REPORTS_DEVELOPMENT_PLAN.md gives the sequence for the 27 reports still waiting on data: the rest of Wave 1 (M09, M05, A02, I11, E07, K06, F09), then the Wave 2 and 3 modules. Optional later: AI analytics and calculated fields.

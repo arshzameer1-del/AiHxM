@@ -7,6 +7,8 @@ test.describe("Reports & Analytics", () => {
     await loginToApp(page, getSharedSession("hr_admin"), { menuPinned: true });
     await page.getByRole("link", { name: "Reports & Analytics" }).first().click();
     await expect(page.getByRole("heading", { name: "Reports & Analytics" })).toBeVisible();
+    await page.getByRole("navigation", { name: "Reports & Analytics sections" }).getByRole("link", { name: "Library" }).click();
+    await expect(page.getByRole("heading", { name: "Report library" })).toBeVisible();
 
     await page.getByLabel("Search reports").fill("headcount");
     const first = page.locator("[data-testid^='report-card-']").first();
@@ -21,13 +23,30 @@ test.describe("Reports & Analytics", () => {
 
   test("a report that needs data we do not capture explains what is missing", async ({ page }) => {
     await loginToApp(page, getSharedSession("hr_admin"), { menuPinned: true });
-    await page.goto("/app/reports");
+    await page.goto("/app/reports/library");
     await page.getByLabel("Status", { exact: true }).selectOption("blocked");
     const card = page.locator("[data-testid^='report-card-']").first();
     await expect(card).toBeVisible();
     await card.getByRole("link").click();
     await expect(page.getByTestId("report-unavailable")).toBeVisible();
     await expect(page.getByText("We do not estimate or invent figures.")).toBeVisible();
+  });
+
+  test("every Reports tab opens its page", async ({ page }) => {
+    await loginToApp(page, getSharedSession("hr_admin"), { menuPinned: true });
+    await page.goto("/app/reports");
+    const tabs = page.getByRole("navigation", { name: "Reports & Analytics sections" });
+    const pages: [string, string][] = [
+      ["My reports", "My reports"],
+      ["Dashboards", "Dashboards"],
+      ["Builder", "Report Builder"],
+      ["Scheduled", "Scheduled reports"],
+      ["Exports", "My exports"],
+    ];
+    for (const [tab, heading] of pages) {
+      await tabs.getByRole("link", { name: tab, exact: true }).click();
+      await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
+    }
   });
 
   test("an unknown report id says so", async ({ page }) => {

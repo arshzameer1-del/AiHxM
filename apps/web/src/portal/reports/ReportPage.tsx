@@ -1,13 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
-import { Download, Info, Lock, Star } from "lucide-react";
-import type { ReportCatalogEntry, ReportFilterKey, ReportFilterOption, ReportFilterOptions, ReportFilterValues, ReportKpi, ReportResult } from "@aihxm/shared-types";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Bookmark, Lock, Star } from "lucide-react";
+import type { ReportCatalogEntry, ReportDatePreset, ReportExportFormat, ReportFilterKey, ReportFilterOption, ReportFilterOptions, ReportFilterValues, ReportResult } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { BackLink, LoadingNote, PageHeader } from "../shared/PageChrome";
 import { describeError } from "../shared/describeError";
-import { formatDateTime, formatDay } from "../shared/dates";
-import { ReportChart } from "./charts";
-import { appliedFilterChips, formatCell, formatKpiDelta, formatKpiValue } from "./reportFormat";
+import { ExportMenu } from "./ExportMenu";
+import { ResultView } from "./ResultView";
+import { PRESET_OPTIONS, appliedFilterChips } from "./reportFormat";
 
 const OPTION_FILTERS: { key: Exclude<ReportFilterKey, "dateRange">; param: keyof ReportFilterValues; label: string }[] = [
   { key: "department", param: "department", label: "Department" },
@@ -19,110 +19,29 @@ const OPTION_FILTERS: { key: Exclude<ReportFilterKey, "dateRange">; param: keyof
   { key: "runStatus", param: "runStatus", label: "Run status" },
 ];
 
-const PAGE_SIZE = 50;
-
-function KpiCard({ kpi }: { kpi: ReportKpi }) {
-  const delta = formatKpiDelta(kpi);
-  return (
-    <div className="bg-card rounded-card p-4 shadow-sm" data-testid={`kpi-${kpi.key}`}>
-      <div className="text-xs uppercase tracking-wide text-label-tertiary">{kpi.label}</div>
-      <div className="text-2xl font-bold tabular-nums mt-1">{formatKpiValue(kpi)}</div>
-      {delta && <div className="text-xs tabular-nums text-label-secondary mt-0.5">{delta} vs previous period</div>}
-      {kpi.note && <div className="text-xs text-label-tertiary mt-1">{kpi.note}</div>}
-    </div>
-  );
-}
-
-function ResultTable({ result }: { result: ReportResult }) {
-  const [sort, setSort] = useState<{ key: string; dir: 1 | -1 } | null>(null);
-  const [limit, setLimit] = useState(PAGE_SIZE);
-  const rows = useMemo(() => {
-    if (!sort) return result.rows;
-    const col = result.columns.find((c) => c.key === sort.key);
-    const numeric = col?.type === "number" || col?.type === "percent";
-    return [...result.rows].sort((a, b) => {
-      const x = a[sort.key];
-      const y = b[sort.key];
-      if (x === null || x === undefined) return 1; // missing values always last
-      if (y === null || y === undefined) return -1;
-      return (numeric ? Number(x) - Number(y) : String(x).localeCompare(String(y))) * sort.dir;
-    });
-  }, [result, sort]);
-
-  if (result.columns.length === 0) return null;
-  return (
-    <section className="bg-card rounded-card p-5 shadow-sm" aria-labelledby="rows-h">
-      <h2 id="rows-h" className="text-sm font-semibold mb-3">
-        Detail <span className="font-normal text-label-tertiary">({result.totalRows.toLocaleString("en-US")} {result.totalRows === 1 ? "row" : "rows"})</span>
-      </h2>
-      {result.rows.length === 0 ? (
-        <p className="text-sm text-label-secondary" data-testid="report-empty">No records match these filters.</p>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs uppercase tracking-wide text-label-tertiary">
-                {result.columns.map((c) => {
-                  const active = sort?.key === c.key;
-                  const numeric = c.type === "number" || c.type === "percent";
-                  return (
-                    <th key={c.key} scope="col" aria-sort={active ? (sort!.dir === 1 ? "ascending" : "descending") : "none"} className={`py-1.5 pr-4 font-semibold ${numeric ? "text-right" : ""}`}>
-                      <button type="button" className="uppercase tracking-wide hover:underline" onClick={() => setSort(active && sort!.dir === 1 ? { key: c.key, dir: -1 } : { key: c.key, dir: 1 })}>
-                        {c.label}
-                        {active ? (sort!.dir === 1 ? " ▲" : " ▼") : ""}
-                      </button>
-                    </th>
-                  );
-                })}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.slice(0, limit).map((row, i) => (
-                <tr key={i} className="border-t border-border">
-                  {result.columns.map((c) => (
-                    <td key={c.key} className={`py-1.5 pr-4 ${c.type === "number" || c.type === "percent" ? "text-right tabular-nums" : ""}`}>
-                      {formatCell(row[c.key], c.type)}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-      {rows.length > limit && (
-        <button type="button" className="mt-3 text-sm font-semibold text-accent hover:underline" onClick={() => setLimit((l) => l + PAGE_SIZE)}>
-          Show {Math.min(PAGE_SIZE, rows.length - limit)} more
-        </button>
-      )}
-      {result.truncated && (
-        <p className="mt-3 text-xs text-warning" role="note">
-          Only the first {result.rows.length.toLocaleString("en-US")} of {result.totalRows.toLocaleString("en-US")} rows are shown. Narrow the filters to see the rest.
-        </p>
-      )}
-    </section>
-  );
-}
+type View = { filters: ReportFilterValues; preset: ReportDatePreset | null; compare: boolean };
 
 function FilterBar({
   entry,
   options,
-  draft,
+  view,
   onChange,
   onRun,
   running,
 }: {
   entry: ReportCatalogEntry;
   options: ReportFilterOptions;
-  draft: ReportFilterValues;
-  onChange: (next: ReportFilterValues) => void;
-  onRun: () => void;
+  view: View;
+  onChange: (next: View) => void;
+  onRun: (next?: View) => void;
   running: boolean;
 }) {
   const hasDates = entry.filters.includes("dateRange");
   const selects = OPTION_FILTERS.filter((f) => entry.filters.includes(f.key));
   if (!hasDates && selects.length === 0) return null;
-  const badRange = !!draft.dateFrom && !!draft.dateTo && draft.dateFrom > draft.dateTo;
+  const { filters: draft } = view;
+  const custom = view.preset === null || view.preset === "custom";
+  const badRange = custom && !!draft.dateFrom && !!draft.dateTo && draft.dateFrom > draft.dateTo;
   return (
     <form
       className="bg-card rounded-card p-4 shadow-sm mb-4 flex flex-wrap gap-3 items-end"
@@ -135,13 +54,42 @@ function FilterBar({
       {hasDates && (
         <>
           <div>
-            <label htmlFor="rf-from" className="block text-xs text-label-tertiary mb-1">From</label>
-            <input id="rf-from" type="date" value={draft.dateFrom ?? ""} max={draft.dateTo || undefined} onChange={(e) => onChange({ ...draft, dateFrom: e.target.value || undefined })} className="rounded border border-black/25 px-2 py-1.5 text-sm" />
+            <label htmlFor="rf-period" className="block text-xs text-label-tertiary mb-1">Period</label>
+            <select
+              id="rf-period"
+              value={view.preset ?? "default"}
+              onChange={(e) => {
+                const v = e.target.value;
+                const next: View = { ...view, preset: v === "default" ? null : (v as ReportDatePreset) };
+                if (v !== "custom" && v !== "default") next.filters = { ...view.filters, dateFrom: undefined, dateTo: undefined };
+                if (v === "default") next.filters = { ...view.filters, dateFrom: undefined, dateTo: undefined };
+                onChange(next);
+                if (v !== "custom") onRun(next);
+              }}
+              className="rounded border border-black/25 px-2 py-1.5 text-sm"
+            >
+              <option value="default">Report default</option>
+              {PRESET_OPTIONS.map((p) => (
+                <option key={p.value} value={p.value}>{p.label}</option>
+              ))}
+            </select>
           </div>
-          <div>
-            <label htmlFor="rf-to" className="block text-xs text-label-tertiary mb-1">To</label>
-            <input id="rf-to" type="date" value={draft.dateTo ?? ""} min={draft.dateFrom || undefined} onChange={(e) => onChange({ ...draft, dateTo: e.target.value || undefined })} className="rounded border border-black/25 px-2 py-1.5 text-sm" />
-          </div>
+          {view.preset === "custom" && (
+            <>
+              <div>
+                <label htmlFor="rf-from" className="block text-xs text-label-tertiary mb-1">From</label>
+                <input id="rf-from" type="date" value={draft.dateFrom ?? ""} max={draft.dateTo || undefined} onChange={(e) => onChange({ ...view, filters: { ...draft, dateFrom: e.target.value || undefined } })} className="rounded border border-black/25 px-2 py-1.5 text-sm" />
+              </div>
+              <div>
+                <label htmlFor="rf-to" className="block text-xs text-label-tertiary mb-1">To</label>
+                <input id="rf-to" type="date" value={draft.dateTo ?? ""} min={draft.dateFrom || undefined} onChange={(e) => onChange({ ...view, filters: { ...draft, dateTo: e.target.value || undefined } })} className="rounded border border-black/25 px-2 py-1.5 text-sm" />
+              </div>
+            </>
+          )}
+          <label className="flex items-center gap-2 text-sm pb-1.5">
+            <input type="checkbox" checked={view.compare} onChange={(e) => { const next = { ...view, compare: e.target.checked }; onChange(next); onRun(next); }} />
+            Compare with the previous period
+          </label>
         </>
       )}
       {selects.map((f) => {
@@ -149,7 +97,7 @@ function FilterBar({
         return (
           <div key={f.key}>
             <label htmlFor={`rf-${f.key}`} className="block text-xs text-label-tertiary mb-1">{f.label}</label>
-            <select id={`rf-${f.key}`} value={draft[f.param] ?? ""} onChange={(e) => onChange({ ...draft, [f.param]: e.target.value || undefined })} className="rounded border border-black/25 px-2 py-1.5 text-sm max-w-[14rem]">
+            <select id={`rf-${f.key}`} value={draft[f.param] ?? ""} onChange={(e) => onChange({ ...view, filters: { ...draft, [f.param]: e.target.value || undefined } })} className="rounded border border-black/25 px-2 py-1.5 text-sm max-w-[14rem]">
               <option value="">All</option>
               {list.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
@@ -166,26 +114,65 @@ function FilterBar({
   );
 }
 
+function SavePanel({ onSave, onCancel, busy, error }: { onSave: (name: string) => void; onCancel: () => void; busy: boolean; error: string | null }) {
+  const [name, setName] = useState("");
+  return (
+    <form
+      className="bg-card rounded-card p-4 shadow-sm mb-4 flex flex-wrap gap-3 items-end"
+      aria-label="Save this report view"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (name.trim()) onSave(name.trim());
+      }}
+    >
+      <div className="flex-1 min-w-[14rem]">
+        <label htmlFor="save-name" className="block text-xs text-label-tertiary mb-1">Name this view</label>
+        <input id="save-name" autoFocus maxLength={120} value={name} onChange={(e) => setName(e.target.value)} className="w-full rounded border border-black/25 px-2 py-1.5 text-sm" placeholder="e.g. Leave in the last 30 days" />
+      </div>
+      <button type="submit" disabled={busy || !name.trim()} className="bg-accent text-white rounded px-4 py-1.5 text-sm font-semibold disabled:opacity-50">{busy ? "Saving…" : "Save"}</button>
+      <button type="button" onClick={onCancel} className="rounded border border-black/25 px-3 py-1.5 text-sm font-semibold">Cancel</button>
+      <p className="basis-full text-xs text-label-tertiary">Saves the period and filters, not the numbers. It is re-run with the latest data every time you open it.</p>
+      {error && <p className="basis-full text-sm text-danger" role="alert">{error}</p>}
+    </form>
+  );
+}
+
+/** Filters from a drill-down link (?department=…) become the starting filters of the report that opens. */
+function filtersFromQuery(params: URLSearchParams): ReportFilterValues {
+  const out: ReportFilterValues = {};
+  for (const f of OPTION_FILTERS) {
+    const v = params.get(f.param);
+    if (v) (out as Record<string, string>)[f.param] = v;
+  }
+  return out;
+}
+
 export function ReportPage() {
   const { id = "" } = useParams();
+  const [params] = useSearchParams();
   const [entry, setEntry] = useState<ReportCatalogEntry | null>(null);
   const [options, setOptions] = useState<ReportFilterOptions>({});
-  const [draft, setDraft] = useState<ReportFilterValues>({});
+  const [view, setView] = useState<View>({ filters: {}, preset: null, compare: false });
   const [result, setResult] = useState<ReportResult | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [savePanel, setSavePanel] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [savedAs, setSavedAs] = useState<{ id: string; name: string } | null>(null);
   const seq = useRef(0);
+  const queryKey = params.toString();
 
   const run = useCallback(
-    async (filters: ReportFilterValues) => {
+    async (v: View) => {
       const mine = ++seq.current;
       setRunning(true);
       setRunError(null);
       try {
-        const r = await api.runReport(id, filters);
+        const r = await api.runReport(id, v.filters, { ...(v.preset && v.preset !== "custom" ? { preset: v.preset } : {}), ...(v.compare ? { compare: true } : {}) });
         if (mine === seq.current) setResult(r);
       } catch (e) {
         if (mine === seq.current) {
@@ -205,7 +192,10 @@ export function ReportPage() {
     setResult(null);
     setLoadError(null);
     setRunError(null);
-    setDraft({});
+    setSavedAs(null);
+    setSavePanel(false);
+    const start: View = { filters: filtersFromQuery(new URLSearchParams(queryKey)), preset: null, compare: false };
+    setView(start);
     api
       .getReportEntry(id)
       .then(async (e) => {
@@ -213,18 +203,18 @@ export function ReportPage() {
         setEntry(e);
         if (e.status !== "available") return;
         api.getReportFilterOptions(id).then((o) => !cancelled && setOptions(o)).catch(() => undefined);
-        void run({});
+        void run(start);
       })
       .catch((e) => !cancelled && setLoadError(e instanceof ApiError && e.status === 404 ? "This report does not exist, or you cannot see it." : describeError(e)));
     return () => {
       cancelled = true;
     };
-  }, [id, run]);
+  }, [id, run, queryKey]);
 
   if (loadError)
     return (
       <div>
-        <BackLink to="/app/reports">All reports</BackLink>
+        <BackLink to="/app/reports/library">All reports</BackLink>
         <div className="text-danger text-sm" role="alert">{loadError}</div>
       </div>
     );
@@ -241,23 +231,38 @@ export function ReportPage() {
     setEntry({ ...entry, favorite: next });
     api.setReportFavorite(entry.id, next).catch(() => setEntry((e) => (e ? { ...e, favorite: !next } : e)));
   };
-  const doExport = async () => {
+  const doExport = async (format: ReportExportFormat) => {
     setExporting(true);
     setExportError(null);
     try {
-      await api.exportReport(entry.id, result?.appliedFilters ?? draft);
+      await api.exportReport(entry.id, result?.appliedFilters ?? view.filters, format, view.preset && view.preset !== "custom" ? view.preset : undefined);
     } catch (e) {
       setExportError(describeError(e));
     } finally {
       setExporting(false);
     }
   };
+  const doSave = async (name: string) => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const usePreset = view.preset && view.preset !== "custom" ? view.preset : null;
+      const filters = { ...view.filters, ...(usePreset ? { dateFrom: undefined, dateTo: undefined } : {}) };
+      const clean = Object.fromEntries(Object.entries(filters).filter(([, v]) => v !== undefined && v !== ""));
+      const s = await api.saveReport({ name, kind: "catalog", reportId: entry.id, filters: clean, preset: usePreset, compare: view.compare });
+      setSavedAs({ id: s.id, name: s.name });
+      setSavePanel(false);
+    } catch (e) {
+      setSaveError(describeError(e));
+    } finally {
+      setSaving(false);
+    }
+  };
   const sensitive = entry.sensitivity === "sensitive" || entry.sensitivity === "restricted";
-  const noChartData = result && result.charts.length === 0 && result.kpis.length === 0;
 
   return (
     <div className="max-w-6xl">
-      <BackLink to="/app/reports">All reports</BackLink>
+      <BackLink to="/app/reports/library">All reports</BackLink>
       <PageHeader
         title={`${entry.id} · ${entry.title}`}
         subtitle={entry.description}
@@ -268,20 +273,28 @@ export function ReportPage() {
               {entry.favorite ? "Favorite" : "Add to favorites"}
             </button>
             {entry.status === "available" && (
-              <button
-                type="button"
-                onClick={doExport}
-                disabled={!entry.canExport || exporting || !result}
-                title={entry.canExport ? "Download the rows as CSV. Every export is recorded." : "You do not have permission to export this report."}
-                className="inline-flex items-center gap-1.5 rounded bg-accent text-white px-3 py-1.5 text-sm font-semibold disabled:opacity-50"
-              >
-                <Download size={15} aria-hidden="true" /> {exporting ? "Preparing…" : "Export CSV"}
-              </button>
+              <>
+                <button type="button" onClick={() => setSavePanel((s) => !s)} disabled={!result} className="inline-flex items-center gap-1.5 rounded border border-black/25 px-3 py-1.5 text-sm font-semibold disabled:opacity-50">
+                  <Bookmark size={15} aria-hidden="true" /> Save this view
+                </button>
+                <ExportMenu
+                  onExport={doExport}
+                  disabled={!entry.canExport || !result}
+                  busy={exporting}
+                  title={entry.canExport ? "Download the rows. Every export is recorded." : "You do not have permission to export this report."}
+                />
+              </>
             )}
           </>
         }
       />
       {exportError && <div className="text-danger text-sm mb-3" role="alert">{exportError}</div>}
+      {savedAs && (
+        <p className="mb-3 text-sm text-success" role="status">
+          Saved as “{savedAs.name}”. <Link to={`/app/reports/saved/${savedAs.id}`} className="font-semibold underline">Open it</Link> or find it under My reports.
+        </p>
+      )}
+      {savePanel && <SavePanel onSave={doSave} onCancel={() => setSavePanel(false)} busy={saving} error={saveError} />}
       {sensitive && (
         <p className="mb-3 inline-flex items-center gap-1.5 text-xs text-label-secondary">
           <Lock size={12} aria-hidden="true" /> {entry.sensitivity === "restricted" ? "Restricted" : "Sensitive"} report. Opening and exporting it is recorded in the audit log.
@@ -298,70 +311,17 @@ export function ReportPage() {
         </div>
       ) : (
         <>
-          <FilterBar entry={entry} options={options} draft={draft} onChange={setDraft} onRun={() => run(draft)} running={running} />
+          <FilterBar entry={entry} options={options} view={view} onChange={setView} onRun={(v) => run(v ?? view)} running={running} />
           {runError && (
             <div className="bg-card rounded-card p-4 shadow-sm mb-4" role="alert" data-testid="report-error">
               <p className="text-sm text-danger">{runError}</p>
-              <button type="button" className="mt-2 text-sm font-semibold text-accent hover:underline" onClick={() => run(draft)}>Try again</button>
+              <button type="button" className="mt-2 text-sm font-semibold text-accent hover:underline" onClick={() => run(view)}>Try again</button>
             </div>
           )}
           {running && !result && <LoadingNote what="report" />}
           {result && (
-            <div className={`space-y-4 ${running ? "opacity-60" : ""}`} aria-busy={running}>
-              <div className="flex flex-wrap items-center gap-2 text-xs text-label-secondary">
-                <span>
-                  {result.scope === "team" ? "Your team" : result.scope === "scoped" ? "Your payroll areas" : "Whole company"}
-                  {result.dateRange ? ` · ${formatDay(result.dateRange.from)} to ${formatDay(result.dateRange.to)}` : ""}
-                  {" · as of "}
-                  {formatDateTime(result.asOf)}
-                </span>
-                {chips.map((c) => (
-                  <span key={c.key} className="rounded-full bg-black/5 px-2 py-0.5">{c.text}</span>
-                ))}
-              </div>
-
-              {result.kpis.length > 0 && (
-                <div className="grid gap-3 grid-cols-2 lg:grid-cols-4" data-testid="report-kpis">
-                  {result.kpis.map((k) => (
-                    <KpiCard key={k.key} kpi={k} />
-                  ))}
-                </div>
-              )}
-
-              {result.charts.length > 0 && (
-                <div className={`grid gap-4 ${result.charts.length > 1 ? "lg:grid-cols-2" : ""}`}>
-                  {result.charts.map((c, i) => (
-                    <ReportChart key={`${c.title}-${i}`} spec={c} />
-                  ))}
-                </div>
-              )}
-
-              {noChartData && result.rows.length === 0 && <p className="text-sm text-label-secondary">There is nothing to show for these filters.</p>}
-
-              <ResultTable result={result} />
-
-              {result.notes.length > 0 && (
-                <aside className="rounded-card border border-warning/40 bg-warning/5 p-4 text-sm" aria-label="Data notes">
-                  <p className="font-semibold mb-1">Read with care</p>
-                  <ul className="list-disc pl-5 space-y-0.5 text-label-secondary">
-                    {result.notes.map((n, i) => (
-                      <li key={i}>{n}</li>
-                    ))}
-                  </ul>
-                </aside>
-              )}
-
-              <details className="bg-card rounded-card p-4 shadow-sm">
-                <summary className="cursor-pointer text-sm font-semibold inline-flex items-center gap-1.5">
-                  <Info size={15} aria-hidden="true" /> How is this calculated?
-                </summary>
-                <ul className="list-disc pl-5 mt-2 space-y-1 text-sm text-label-secondary">
-                  {result.calculation.map((c, i) => (
-                    <li key={i}>{c}</li>
-                  ))}
-                </ul>
-                <p className="text-xs text-label-tertiary mt-3">Version {result.version} · source: {entry.sourceModule} · run {formatDateTime(result.generatedAt)}</p>
-              </details>
+            <div className={running ? "opacity-60" : ""} aria-busy={running}>
+              <ResultView result={result} chips={chips} sourceNote={`source: ${entry.sourceModule}`} />
             </div>
           )}
         </>

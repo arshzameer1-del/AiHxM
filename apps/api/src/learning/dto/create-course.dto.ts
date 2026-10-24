@@ -1,4 +1,4 @@
-import { IsIn, IsInt, IsOptional, IsPositive, IsString, MinLength } from "class-validator";
+import { IsBoolean, IsIn, IsInt, IsNumber, IsOptional, IsPositive, IsString, Max, Min, MinLength } from "class-validator";
 import type { CourseCategory } from "@aihxm/shared-types";
 
 const COURSE_CATEGORIES: CourseCategory[] = ["compliance", "technical", "soft_skills", "leadership", "other"];
@@ -18,4 +18,14 @@ export class CreateCourseDto {
   @IsInt()
   @IsPositive()
   durationMinutes!: number;
+
+  @IsOptional()
+  @IsBoolean()
+  isMandatory?: boolean;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(99999999)
+  costAmount?: number | null;
 }

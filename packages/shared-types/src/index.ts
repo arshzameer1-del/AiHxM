@@ -3757,6 +3757,10 @@ export type CourseView = {
   description: string | null;
   category: CourseCategory;
   durationMinutes: number;
+  /** Required training: counted by the Mandatory Training Compliance report. */
+  isMandatory: boolean;
+  /** Cost per participant in the company currency; null when not recorded. */
+  costAmount: number | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -3767,6 +3771,8 @@ export type CreateCourseRequest = {
   description?: string;
   category: CourseCategory;
   durationMinutes: number;
+  isMandatory?: boolean;
+  costAmount?: number | null;
 };
 
 export type CourseEnrollmentRawStatus = "assigned" | "in_progress" | "completed";
@@ -9201,8 +9207,12 @@ export type ReportKpi = {
   unit: "count" | "percent" | "days" | "hours";
   /** Short plain-language note shown under the value (period, denominator). */
   note?: string;
-  /** Change versus the comparison period, in the same unit, when the report defines one. */
+  /** Change versus the comparison period, in the same unit, when a comparison was asked for. */
   delta?: number | null;
+  /** The same figure for the comparison period. */
+  previous?: number | null;
+  /** On the Overview page: the report this figure comes from, so the tile can open it. */
+  reportId?: string;
 };
 
 export type ReportChartSpec = {
@@ -9235,6 +9245,192 @@ export type ReportResult = {
   calculation: string[];
   /** Set when some inputs are missing, e.g. employees with no department; never silently counted as zero. */
   notes: string[];
+  /** Present when a comparison was asked for: the period the deltas are measured against. */
+  comparison?: { from: string; to: string } | null;
+  /** Rows can open another report filtered to that row (for example a department row opens the employee directory). */
+  drill?: ReportDrill | null;
 };
 
+/** A row's `rowKey` value becomes the `filter` of the target report. */
+export type ReportDrill = { reportId: string; filter: "department" | "location" | "employmentType"; rowKey: string; label: string };
+
+export type ReportDatePreset =
+  | "today" | "yesterday" | "thisWeek" | "lastWeek" | "last7Days" | "last30Days" | "last90Days"
+  | "thisMonth" | "lastMonth" | "quarterToDate" | "lastQuarter" | "yearToDate" | "lastYear" | "custom";
+
+/** Body of every "run / export" call. `preset` replaces dateFrom/dateTo; `compare` also runs the previous equal-length period. */
+export type RunReportRequest = { filters?: Record<string, unknown>; preset?: ReportDatePreset; compare?: boolean };
+
 export type ReportFilterOptions = Partial<Record<Exclude<ReportFilterKey, "dateRange">, ReportFilterOption[]>>;
+
+
+// ---------------------------------------------------------------- Reports & Analytics v2: builder, saved reports, dashboards, schedules
+
+export type ReportExportFormat = "csv" | "xlsx" | "pdf";
+
+export type BuilderFieldType = "text" | "number" | "date" | "boolean";
+export type BuilderAggregate = "count" | "sum" | "avg" | "min" | "max";
+export type BuilderFilterOp = "eq" | "neq" | "gt" | "gte" | "lt" | "lte" | "contains" | "in" | "isNull" | "notNull";
+
+export type BuilderFieldInfo = {
+  key: string;
+  label: string;
+  type: BuilderFieldType;
+  /** Can be used to group rows. */
+  groupable: boolean;
+  /** Can be summed / averaged. */
+  measure: boolean;
+  /** Allowed values when the field is a small fixed list. */
+  options?: string[];
+};
+export type BuilderDatasetInfo = {
+  key: string;
+  label: string;
+  description: string;
+  sensitivity: ReportSensitivity;
+  fields: BuilderFieldInfo[];
+  /** Who sees what: whole company, own direct reports or payroll areas. */
+  scope: ReportScope;
+};
+export type BuilderCatalogResponse = { datasets: BuilderDatasetInfo[] };
+
+export type BuilderFilter = { field: string; op: BuilderFilterOp; value?: string | number | boolean | Array<string | number> };
+export type BuilderMeasure = { field: string | null; aggregate: BuilderAggregate; label?: string };
+export type BuilderDefinition = {
+  dataset: string;
+  /** Plain list mode: these columns, one row per record. Ignored when `groupBy` or `measures` is set. */
+  columns?: string[];
+  groupBy?: string[];
+  measures?: BuilderMeasure[];
+  filters?: BuilderFilter[];
+  sort?: { by: string; direction: "asc" | "desc" } | null;
+  limit?: number;
+  chart?: "auto" | "bar" | "line" | "donut" | "none";
+};
+
+export type SavedReportKind = "catalog" | "custom";
+export type SavedReportSummary = {
+  id: string;
+  name: string;
+  description: string | null;
+  kind: SavedReportKind;
+  reportId: string | null;
+  datasetLabel: string | null;
+  ownerName: string | null;
+  isOwner: boolean;
+  visibility: "private" | "shared";
+  sharedWith: number;
+  compare: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+export type SavedReportDetail = SavedReportSummary & { filters: Record<string, unknown>; definition: BuilderDefinition | null; preset: ReportDatePreset | null };
+export type SaveReportRequest = {
+  name: string;
+  description?: string | null;
+  kind: SavedReportKind;
+  reportId?: string;
+  filters?: Record<string, unknown>;
+  preset?: ReportDatePreset | null;
+  compare?: boolean;
+  definition?: BuilderDefinition;
+};
+export type ShareGrantee = { type: "user" | "role"; id: string; label: string };
+export type ShareTargets = { users: { id: string; label: string }[]; roles: { key: string; label: string }[] };
+
+export type DashboardWidgetType = "kpi" | "chart" | "table";
+export type DashboardWidgetSummary = {
+  id: string;
+  position: number;
+  widgetType: DashboardWidgetType;
+  reportId: string | null;
+  savedReportId: string | null;
+  title: string | null;
+  /** kpi: which KPI key; chart: chart index. */
+  config: { kpiKey?: string; chartIndex?: number; rows?: number };
+};
+export type DashboardSummary = {
+  id: string;
+  name: string;
+  description: string | null;
+  ownerName: string | null;
+  isOwner: boolean;
+  visibility: "private" | "shared";
+  widgetCount: number;
+  updatedAt: string;
+};
+export type DashboardDetail = DashboardSummary & { widgets: DashboardWidgetSummary[] };
+export type DashboardWidgetData = {
+  widgetId: string;
+  ok: boolean;
+  /** Why a widget could not be drawn: the viewer may not run the report, or it failed. Never partial data. */
+  error: string | null;
+  title: string;
+  result: ReportResult | null;
+};
+export type DashboardData = { dashboard: DashboardDetail; widgets: DashboardWidgetData[] };
+export type SaveDashboardRequest = {
+  name: string;
+  description?: string | null;
+  widgets?: Array<{ widgetType: DashboardWidgetType; reportId?: string | null; savedReportId?: string | null; title?: string | null; config?: DashboardWidgetSummary["config"] }>;
+};
+
+export type ReportScheduleFrequency = "daily" | "weekly" | "monthly";
+export type ReportScheduleSummary = {
+  id: string;
+  name: string;
+  reportId: string | null;
+  savedReportId: string | null;
+  reportTitle: string;
+  frequency: ReportScheduleFrequency;
+  dayOfWeek: number | null;
+  dayOfMonth: number | null;
+  hourLocal: number;
+  format: ReportExportFormat;
+  recipients: ShareGrantee[];
+  status: "active" | "paused" | "failed";
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+  lastStatus: string | null;
+  isOwner: boolean;
+  /** Set when a schedule is saved: recipients who cannot receive this file today, and why. */
+  warnings?: string[];
+};
+export type ReportInboxItem = { deliveryId: string; scheduleName: string; reportTitle: string; runAt: string; fileName: string | null; expiresAt: string | null; ownerName: string | null };
+export type SaveScheduleRequest = {
+  name: string;
+  reportId?: string | null;
+  savedReportId?: string | null;
+  filters?: Record<string, unknown>;
+  frequency: ReportScheduleFrequency;
+  dayOfWeek?: number | null;
+  dayOfMonth?: number | null;
+  hourLocal: number;
+  format: ReportExportFormat;
+  preset?: ReportDatePreset | null;
+  recipientUserIds: string[];
+};
+export type ReportDeliverySummary = {
+  id: string;
+  runAt: string;
+  status: "sent" | "stored" | "failed" | "skipped";
+  rowCount: number | null;
+  recipientCount: number;
+  skippedRecipients: number;
+  errorCategory: string | null;
+  fileName: string | null;
+  downloadable: boolean;
+};
+export type ReportExportHistoryItem = { id: string; reportId: string; title: string | null; format: ReportExportFormat; rowCount: number | null; partial: boolean; createdAt: string };
+
+export type ReportsOverview = {
+  generatedAt: string;
+  kpis: ReportKpi[];
+  highlights: Array<{ reportId: string; title: string; severity: "info" | "attention"; message: string }>;
+  favorites: string[];
+  recent: string[];
+  mine: number;
+  sharedWithMe: number;
+  dashboards: number;
+  schedules: number;
+};

@@ -143,6 +143,15 @@ const ReportsLibraryPage = lazy(() =>
   import("./portal/reports/ReportsLibraryPage").then((m) => ({ default: m.ReportsLibraryPage })),
 );
 const ReportPage = lazy(() => import("./portal/reports/ReportPage").then((m) => ({ default: m.ReportPage })));
+const ReportsShell = lazy(() => import("./portal/reports/ReportsShell").then((m) => ({ default: m.ReportsShell })));
+const ReportsOverviewPage = lazy(() => import("./portal/reports/ReportsOverviewPage").then((m) => ({ default: m.ReportsOverviewPage })));
+const SavedReportsPage = lazy(() => import("./portal/reports/SavedReportsPage").then((m) => ({ default: m.SavedReportsPage })));
+const SavedReportPage = lazy(() => import("./portal/reports/SavedReportPage").then((m) => ({ default: m.SavedReportPage })));
+const BuilderPage = lazy(() => import("./portal/reports/BuilderPage").then((m) => ({ default: m.BuilderPage })));
+const DashboardsPage = lazy(() => import("./portal/reports/DashboardPages").then((m) => ({ default: m.DashboardsPage })));
+const ReportDashboardPage = lazy(() => import("./portal/reports/DashboardPages").then((m) => ({ default: m.DashboardPage })));
+const SchedulesPage = lazy(() => import("./portal/reports/SchedulesPage").then((m) => ({ default: m.SchedulesPage })));
+const ExportsPage = lazy(() => import("./portal/reports/ExportsPage").then((m) => ({ default: m.ExportsPage })));
 const WorkforceAnalyticsPage = lazy(() =>
   import("./portal/employees/WorkforceAnalyticsPage").then((m) => ({
     default: m.WorkforceAnalyticsPage,
@@ -425,8 +434,19 @@ export default function App() {
                   <Route path="employees/new" element={<Navigate to="/app/hire/quick" replace />} />
                   <Route path="employees/bulk-import" element={<Navigate to="/app/hire/bulk" replace />} />
                   <Route path="employees/analytics" element={<WorkforceAnalyticsPage />} />
-                  <Route path="reports" element={<ReportsLibraryPage />} />
-                  <Route path="reports/:id" element={<ReportPage />} />
+                  <Route path="reports" element={<ReportsShell />}>
+                    <Route index element={<ReportsOverviewPage />} />
+                    <Route path="library" element={<ReportsLibraryPage />} />
+                    <Route path="saved" element={<SavedReportsPage />} />
+                    <Route path="saved/:id" element={<SavedReportPage />} />
+                    <Route path="builder" element={<BuilderPage />} />
+                    <Route path="builder/:savedId" element={<BuilderPage />} />
+                    <Route path="dashboards" element={<DashboardsPage />} />
+                    <Route path="dashboards/:id" element={<ReportDashboardPage />} />
+                    <Route path="schedules" element={<SchedulesPage />} />
+                    <Route path="exports" element={<ExportsPage />} />
+                    <Route path=":id" element={<ReportPage />} />
+                  </Route>
                   {/* Organization Management Phase 1 — the Hierarchy
                     Explorer. org_unit.view.all/org_unit.manage.all (both
                     seeded in 0066) are the real gates, enforced server-

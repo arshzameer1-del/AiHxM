@@ -1,5 +1,5 @@
 import type { ReportRow } from "@aihxm/shared-types";
-import { CURRENT_HEADCOUNT, Params, employeeConditions, prettyKey } from "../sql";
+import { CURRENT_HEADCOUNT, Params, UNASSIGNED, employeeConditions, prettyKey } from "../sql";
 import { share, topWithOther, type ExecutorContext, type ExecutorOutput, type ReportExecutor } from "./types";
 
 const scopeOf = (ctx: ExecutorContext, p: Params, alias = "e") =>
@@ -70,7 +70,7 @@ function groupedOutput(
   g: { groups: Group[]; total: number },
   o: { dimension: string; chartTitle: string; chartKind: "bar" | "donut"; max: number; calculation: string[]; notes: string[]; otherLabel: (n: number) => string; countNoun: string }
 ): ExecutorOutput {
-  const rows: ReportRow[] = g.groups.slice(0, ctx.rowLimit).map((x) => ({ label: x.label, headcount: x.n, share: share(x.n, g.total) }));
+  const rows: ReportRow[] = g.groups.slice(0, ctx.rowLimit).map((x) => ({ label: x.label, headcount: x.n, share: share(x.n, g.total), _key: x.key ?? (o.dimension === "Employment type" ? "" : UNASSIGNED) }));
   const topChart = topWithOther(g.groups, o.max, o.otherLabel);
   return {
     kpis: [

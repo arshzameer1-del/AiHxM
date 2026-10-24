@@ -187,7 +187,7 @@ describe("every available report runs (real database)", () => {
       try {
         const out = await reports.exportCsv(all, e.id, {});
         const lines = out.csv.replace(/^\uFEFF/, "").split("\r\n").filter(Boolean);
-        if (!lines[0].startsWith("# ")) failures.push(`${e.id}: CSV has no metadata header`);
+        if (!lines[0].replace(/^"/, "").startsWith("# ")) failures.push(`${e.id}: CSV has no metadata header`);
         for (const line of lines.slice(1)) {
           for (const m of line.matchAll(/("(?:[^"]|"")*"|[^,]*)(?:,|$)/g)) {
             const cell = m[1].replace(/^"|"$/g, "").replace(/""/g, '"');

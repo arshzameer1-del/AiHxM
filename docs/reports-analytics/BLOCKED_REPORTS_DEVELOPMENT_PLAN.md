@@ -1,7 +1,7 @@
 # Blocked reports: what to build to unlock each one
 
 Status: written with the first release of the Reports & Analytics Intelligence Center.
-Catalog today: **220 reports, 182 available, 38 blocked, 0 planned.** Every blocked report is covered below: Wave 1 (11), Wave 2 (7), Wave 3 (9), Wave 4 (11).
+Catalog today: **220 reports, 193 available, 27 blocked, 0 planned.** Reports v2 (October 2026) unlocked 11 reports: **L03, L06, I05, M14** (Wave 1) and **O06, O07, O08, O09, O13, O14, N06** (Wave 4, because saved reports, sharing, schedules, the builder and dashboards now exist). Their rows below are kept for the record and marked *Done*. Open: Wave 1 (7), Wave 2 (7), Wave 3 (9), Wave 4 (4).
 A report is *blocked* when the data it needs does not exist in AiHxM. We do not estimate, sample or invent that data. Each report below names the missing data, the module or table to build, the screen that captures it, what the report can show once it exists, and a rough effort.
 
 Effort is engineer-days for one developer including migration, API, screen, tests and the report itself (S = 1 to 2, M = 3 to 5, L = 6 to 12, XL = more than 12). They are planning estimates, not commitments.
@@ -16,19 +16,19 @@ These add one column, one setting or one table to something that already exists.
 
 | Report | Missing | Build | Screen | Effort |
 |---|---|---|---|---|
-| **L03** Mandatory training compliance | `courses` has no mandatory flag or audience | `courses.is_mandatory`, `courses.mandatory_for` (all, org unit, employee type) and `renewal_months` | Learning: course form gets "Mandatory for" and "Renew every" | S |
-| **L06** Training cost summary | Course cost is not stored | `courses.cost_amount`, `cost_currency`; optional `course_enrollments.cost_override` | Learning: course form gets cost | S |
+| ~~**L03**~~ *Done* Mandatory training compliance | `courses` has no mandatory flag or audience | `courses.is_mandatory`, `courses.mandatory_for` (all, org unit, employee type) and `renewal_months` | Learning: course form gets "Mandatory for" and "Renew every" | S |
+| ~~**L06**~~ *Done* Training cost summary | Course cost is not stored | `courses.cost_amount`, `cost_currency`; optional `course_enrollments.cost_override` | Learning: course form gets cost | S |
 | **M09** Critical position vacancy watchlist | No critical flag on positions | `positions.is_critical boolean`, `criticality_reason` | Organisation: position form toggle | S |
 | **M05** Internal vs external hiring | Hire source is not recorded | `applications.candidate_source` (internal employee, referral, external) set when hired; for hires from outside the product, `employments.hire_source` | Recruitment: candidate form and hire-from-offer step | S |
 | **A02** Headcount by legal entity | Organisation units have no legal-entity type | Add `legal_entity` to the allowed unit types, with registration number and NTN; units roll up to an entity | Organisation: unit type picker and entity details | M |
-| **M14** Workforce data-quality trend | A14 is computed live, never stored | `data_quality_snapshots` (company, date, check key, passed, total) written by a nightly background job reusing A14's checks | None for users; report only | M |
+| ~~**M14**~~ *Done* Workforce data-quality trend | A14 is computed live, never stored | `data_quality_snapshots` (company, date, check key, passed, total) written by a nightly background job reusing A14's checks | None for users; report only | M |
 | **E07** Leave liability estimate | No valuation rule | `leave_valuation_rules` (basis: basic salary or gross, days per month, which leave types are liable); the report applies the rule to `leave_balances` and `employee_compensation` | Leave policy: "Valuation" tab | M |
-| **I05** Payslip access summary | Views and downloads are not recorded | Record each payslip open and download (who, when, channel; never the amount) in `payslip_access_log` | None; instrument the two payslip endpoints | S (history starts on release) |
+| ~~**I05**~~ *Done* Payslip access summary | Views and downloads are not recorded | Record each payslip open and download (who, when, channel; never the amount) in `payslip_access_log` | None; instrument the two payslip endpoints | S (history starts on release) |
 | **I11** Mobile/PWA usage | Installed-app use is not tracked | `client_usage_events` (day, user, mode: browser, installed app, mobile browser) sent once per session, no device ids | None; small client beacon | S (history starts on release) |
 | **K06** Budget vs actual people cost | Budgets exist per position only | `people_cost_budgets` (cost centre, period, amount, version) | Finance: budget grid with CSV import | M |
 | **F09** Tax withholding summary | Tax figures are not validated for reporting | A reporting reconciliation: re-compute tax for each finalised run from the published tax profile and compare to the payslip; the report shows only runs that reconcile, and lists the ones that do not | Payroll: "Tax reconciliation" result on a run | M |
 
-Order inside the wave: L03, L06, M09, M05 (one sprint, all one-column changes) then A02, M14, I05, I11, then E07, K06, F09 (these need a short design with Finance/Payroll first).
+What shipped from this wave: L03 and L06 (course form has "Mandatory for every employee" and "Cost per participant"; compliance is measured against every current employee), I05 (opens of a payslip or published payslip document by the employee themselves are logged; downloads are counted as opens; history starts on release) and M14 (nightly snapshot of the A14 checks, kept per day). Still to do, in this order: M09, M05 (one-column changes), then A02, I11, then E07, K06, F09 (these need a short design with Finance/Payroll first).
 
 ## Wave 2: new but self-contained modules (about 45 days, unlocks 7 reports)
 
@@ -61,10 +61,10 @@ Plan these as separate projects with their own design. The reports are a small p
 | Report | Depends on | Notes |
 |---|---|---|
 | **N02, N03, N13, N14** Active users, module adoption, entitlement usage, platform audit by tenant | Platform Admin console reports | Cross-company by nature. Build as Platform Admin reports with platform permissions; never expose through a company's Reports area. S each once the console has a report host |
-| **O06, O07** Saved and shared report inventory | Phase 4 of the contract: saved reports and sharing | The report is one query once `saved_reports` and `report_shares` exist |
-| **N06, O08, O09** Scheduled report job status, inventory, delivery success | Phase 6: scheduling | Needs `report_schedules`, `report_deliveries` and the background-job runner |
-| **O13** Custom report field usage | Phase 4: report builder | Needs saved custom definitions that record the fields used |
-| **O14** Dashboard widget usage | Phase 5: dashboards | Needs `dashboards` and `dashboard_widgets` |
+| *Done:* **O06, O07** Saved and shared report inventory | Phase 4 of the contract: saved reports and sharing | The report is one query once `saved_reports` and `report_shares` exist |
+| *Done:* **N06, O08, O09** Scheduled report job status, inventory, delivery success | Phase 6: scheduling | Needs `report_schedules`, `report_deliveries` and the background-job runner |
+| *Done:* **O13** Custom report field usage | Phase 4: report builder | Needs saved custom definitions that record the fields used |
+| *Done:* **O14** Dashboard widget usage | Phase 5: dashboards | Needs `dashboards` and `dashboard_widgets` |
 
 These come for free, in the sense that each report is a few hours once its feature is built, so the order follows the contract's later phases: saved reports and sharing, builder, dashboards, scheduling.
 

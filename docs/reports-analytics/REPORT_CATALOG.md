@@ -2,7 +2,7 @@
 
 Generated from the code by `npm run docs:reports` (apps/api). Do not edit by hand.
 
-**220 reports: 182 available, 38 blocked, 0 planned, 0 unavailable.**
+**220 reports: 193 available, 27 blocked, 0 planned, 0 unavailable.**
 
 *Available* means the report has a query, a metric definition and tests. *Blocked* means the data it needs is not captured in AiHxM; the reason is given, and BLOCKED_REPORTS_DEVELOPMENT_PLAN.md says what to build to unlock it. Nothing here is estimated or invented.
 
@@ -189,7 +189,7 @@ Self-service adoption and service requests.
 | I02 | ESS Login/Usage Trend (only if tracked) | Available | Internal | Administration | line, kpi, table | dateRange, department, location, employmentType |
 | I03 | Employee Self-Service Transaction Volume | Available | Internal | Administration | stackedBar, kpi, table | dateRange, department, location, employmentType |
 | I04 | Manager Self-Service Adoption | Available | Internal | Administration | bar, table | dateRange, department, location, employmentType |
-| I05 | Payslip Access Summary (metadata, not salary exposure) | Blocked: Payslip views and downloads are not recorded anywhere, so there is nothing to count. | Internal | Administration | kpi, table | dateRange |
+| I05 | Payslip Access Summary (metadata, not salary exposure) | Available | Internal | Payroll | line, kpi, table | dateRange |
 | I06 | Leave Request Self-Service Usage | Available | Internal | Administration | stackedBar, kpi, table | dateRange, department, location, employmentType |
 | I07 | Personal Data Change Requests | Blocked: Employees cannot raise personal data change requests as a separate record, so there is no source. | Internal | Administration | table | dateRange |
 | I08 | Employee Service Request Status | Blocked: There is no employee service-request module in the product. | Internal | Administration | table | dateRange |
@@ -253,10 +253,10 @@ Training, skills, certifications and succession.
 |---|---|---|---|---|---|---|
 | L01 | Training Enrollment Summary | Available | Internal | Learning | bar, kpi, table | dateRange, department, location, employmentType |
 | L02 | Training Completion Rate | Available | Internal | Learning | bar, kpi, table | dateRange, department, location, employmentType |
-| L03 | Mandatory Training Compliance | Blocked: Courses carry no mandatory flag, so required training cannot be told apart from optional. | Internal | Learning | table | dateRange |
+| L03 | Mandatory Training Compliance | Available | Internal | Learning | bar, kpi, table | department, location, employmentType |
 | L04 | Training Overdue List | Available | Internal | Learning | kpi, table | department, location, employmentType |
 | L05 | Training Hours by Department | Available | Internal | Learning | bar, kpi, table | dateRange, department, location, employmentType |
-| L06 | Training Cost Summary | Blocked: Course cost is not stored (courses hold title, category and duration only). | Internal | Learning | kpi, table | dateRange |
+| L06 | Training Cost Summary | Available | Internal | Learning | bar, kpi, table | dateRange, department, location, employmentType |
 | L07 | Skills Inventory | Blocked: Employee skills are not captured. Qualifications and a competency list exist, skills do not. | Internal | Learning | table | dateRange |
 | L08 | Skills Gap Analysis | Blocked: Employee skills and required skills per role are not captured. | Internal | Learning | table | dateRange |
 | L09 | Certification Expiry Watchlist | Available | Internal | Learning | kpi, table | dateRange, department, location, employmentType |
@@ -286,7 +286,7 @@ Capacity, vacancies, tenure and movement.
 | M11 | Organisation Change Impact | Available | Internal | Organisation structure | kpi, table | dateRange |
 | M12 | Location Distribution and Capacity | Available | Internal | Employees and organisation | bar, kpi, table | department, location, employmentType |
 | M13 | Employee Type Mix Trend | Available | Internal | Employees and organisation | stackedBar, table | dateRange, department, location |
-| M14 | Workforce Data Quality Trend | Blocked: Quality is not measured over time yet. This needs A14 first, with dated snapshots of its results. | Internal | Employees and organisation | line, table | dateRange |
+| M14 | Workforce Data Quality Trend | Available | Internal | Organisation structure | line, kpi, table | dateRange |
 | M15 | Scenario Comparison (only with explicit assumptions and source data) | Blocked: No scenario or assumption model exists to compare. | Internal | Employees and organisation | table | dateRange |
 
 ## N. Platform operations and tenant administration
@@ -300,7 +300,7 @@ Jobs, exports, integrations and configuration health.
 | N03 | Module Adoption by Tenant | Blocked: Platform-operator view. It reports across companies, so it belongs in the Platform Admin console and is never shown to a company's own users. | Internal | Platform operations | bar, table | dateRange |
 | N04 | API Error/Latency Summary | Blocked: API errors and latency are not stored; they live in the hosting provider's logs. | Internal | Platform operations | kpi, table | dateRange |
 | N05 | Background Job Status | Available | Internal | Administration | bar, kpi, table | dateRange |
-| N06 | Scheduled Report Job Status | Blocked: Report scheduling is not built yet, so there are no scheduled report jobs. | Internal | Administration | table | dateRange |
+| N06 | Scheduled Report Job Status | Available | Internal | Administration | kpi, table | none |
 | N07 | Export Job Status | Available | Internal | Administration | donut, kpi, table | dateRange |
 | N08 | Storage Usage (if measured) | Available | Internal | Administration | donut, kpi, table | none |
 | N09 | Notification Queue Health | Available | Internal | Administration | kpi, table | dateRange |
@@ -322,15 +322,15 @@ How reports are used, and how reliable the data behind them is.
 | O03 | Unused/Low-Usage Reports | Available | Internal | Administration | kpi, table | dateRange |
 | O04 | Report Execution Duration | Available | Internal | Administration | bar, table | dateRange |
 | O05 | Query/Report Failure Rate | Available | Internal | Administration | bar, kpi, table | dateRange |
-| O06 | Saved Report Inventory | Blocked: Saved reports are not built yet, so there is nothing to inventory. | Internal | Administration | table | dateRange |
-| O07 | Shared Report Inventory | Blocked: Sharing is not built yet, so there is nothing to inventory. | Internal | Administration | table | dateRange |
-| O08 | Scheduled Report Inventory | Blocked: Scheduling is not built yet, so there is nothing to inventory. | Internal | Administration | table | dateRange |
-| O09 | Schedule Delivery Success Rate | Blocked: Scheduling is not built yet, so there are no deliveries. | Internal | Administration | kpi, table | dateRange |
+| O06 | Saved Report Inventory | Available | Internal | Administration | kpi, table | none |
+| O07 | Shared Report Inventory | Available | Internal | Administration | kpi, table | none |
+| O08 | Scheduled Report Inventory | Available | Internal | Administration | kpi, table | none |
+| O09 | Schedule Delivery Success Rate | Available | Internal | Administration | bar, kpi, table | dateRange |
 | O10 | Export Volume and Format Mix | Available | Internal | Administration | line, kpi, table | dateRange |
 | O11 | Report Access Denials | Available | Internal | Administration | kpi, table | dateRange |
 | O12 | Data Source/Field Availability | Available | Internal | Administration | donut, kpi, table | none |
-| O13 | Custom Report Field Usage | Blocked: The report builder is not built yet, so there are no custom reports. | Internal | Administration | table | dateRange |
-| O14 | Dashboard Widget Usage | Blocked: The dashboard builder is not built yet, so there are no widgets. | Internal | Administration | table | dateRange |
+| O13 | Custom Report Field Usage | Available | Internal | Administration | bar, table | none |
+| O14 | Dashboard Widget Usage | Available | Internal | Administration | bar, table | none |
 | O15 | Analytics Governance Exceptions | Available | Internal | Administration | kpi, table | dateRange |
 
 ## Domains and the permissions that open them

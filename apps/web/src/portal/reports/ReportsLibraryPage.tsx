@@ -96,7 +96,7 @@ export function ReportsLibraryPage() {
   return (
     <div className="max-w-6xl">
       <PageHeader
-        title="Reports & Analytics"
+        title="Report library"
         subtitle={`${counts.available} reports ready to run. ${counts.blocked} more need data that is not captured yet; each one says what is missing.`}
       />
 

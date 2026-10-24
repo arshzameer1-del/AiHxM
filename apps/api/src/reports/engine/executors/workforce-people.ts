@@ -175,6 +175,18 @@ export const A13 = sqlReport({
   calculation: ["Each measure is a live count of open work as of now; nothing is estimated.", "Employee-level measures count only records for employees in your scope."],
 });
 
+/** The fields A14 checks, as SQL VALUES rows over an `employees` alias `e`. M14 snapshots the same list so a trend and today's figure agree. */
+export const DATA_QUALITY_FIELD_ROWS = `
+        (1, 'Organisation unit', e.org_unit_id IS NOT NULL),
+        (2, 'Position', e.position_id IS NOT NULL),
+        (3, 'Work location', e.location_id IS NOT NULL),
+        (4, 'Reporting manager', EXISTS (SELECT 1 FROM org_relationships r WHERE r.employee_id = e.id AND r.company_id = e.company_id AND r.relationship_type = 'direct' AND r.status = 'active')),
+        (5, 'Email address', COALESCE(e.email, '') <> ''),
+        (6, 'Phone number', COALESCE(e.phone, '') <> ''),
+        (7, 'Date of birth', e.date_of_birth_enc IS NOT NULL OR e.date_of_birth IS NOT NULL),
+        (8, 'National ID (CNIC)', e.cnic_bidx IS NOT NULL OR COALESCE(e.cnic, '') <> ''),
+        (9, 'Address on file', EXISTS (SELECT 1 FROM employee_addresses a WHERE a.employee_id = e.id AND a.company_id = e.company_id AND a.status = 'active'))`;
+
 export const A14 = sqlReport({
   description: "How completely key fields are filled in across current employees, field by field.",
   filters: [DEPT, LOC, ETYPE],
@@ -193,15 +205,7 @@ export const A14 = sqlReport({
            ROUND(COUNT(*) FILTER (WHERE v.ok) * 100.0 / NULLIF(COUNT(*), 0), 1) AS completeness
       FROM employees e
      CROSS JOIN LATERAL (VALUES
-        (1, 'Organisation unit', e.org_unit_id IS NOT NULL),
-        (2, 'Position', e.position_id IS NOT NULL),
-        (3, 'Work location', e.location_id IS NOT NULL),
-        (4, 'Reporting manager', EXISTS (SELECT 1 FROM org_relationships r WHERE r.employee_id = e.id AND r.company_id = e.company_id AND r.relationship_type = 'direct' AND r.status = 'active')),
-        (5, 'Email address', COALESCE(e.email, '') <> ''),
-        (6, 'Phone number', COALESCE(e.phone, '') <> ''),
-        (7, 'Date of birth', e.date_of_birth_enc IS NOT NULL OR e.date_of_birth IS NOT NULL),
-        (8, 'National ID (CNIC)', e.cnic_bidx IS NOT NULL OR COALESCE(e.cnic, '') <> ''),
-        (9, 'Address on file', EXISTS (SELECT 1 FROM employee_addresses a WHERE a.employee_id = e.id AND a.company_id = e.company_id AND a.status = 'active'))
+${DATA_QUALITY_FIELD_ROWS}
      ) AS v(ord, field, ok)
      WHERE ${q.emp()} AND ${q.current()}
      GROUP BY v.ord, v.field ORDER BY v.ord`,
@@ -702,4 +706,44 @@ export const B15 = listReport({
     return barChart({ title: "Exceptions by type", unit: "records", rows: [...m].map(([issue, n]) => ({ issue, n })) as ReportRow[], labelKey: "issue", valueKey: "n", valueLabel: "Records" });
   },
   calculation: ["Runs five fixed checks across all employee records in your scope, including people who have left.", "Duplicate checks compare a blind index of the CNIC and the lower-cased email; the values themselves are never shown."],
+});
+
+export const M14 = sqlReport({
+  description: "Month by month, how complete employee records were: the average across the checked fields and the weakest field. Built from daily snapshots of the A14 checks.",
+  domain: "organization",
+  filters: [],
+  defaultRange: "last12Months",
+  tables: ["data_quality_snapshots"],
+  viz: ["line", "kpi", "table"],
+  tags: ["data quality", "trend"],
+  columns: [
+    { key: "month", label: "Month", type: "text" },
+    { key: "snapshot", label: "Last snapshot", type: "date" },
+    { key: "employees", label: "Employees checked", type: "number" },
+    { key: "completeness", label: "Average completeness (%)", type: "percent" },
+    { key: "weakest", label: "Weakest field", type: "text" },
+    { key: "weakestPct", label: "Weakest field (%)", type: "percent" },
+  ],
+  sql: (q) => `
+    WITH last AS (
+      SELECT DISTINCT ON (date_trunc('month', s.snapshot_date)) date_trunc('month', s.snapshot_date)::date AS ms, s.snapshot_date
+        FROM data_quality_snapshots s WHERE ${q.co("s")} AND s.snapshot_date BETWEEN ${q.from} AND ${q.to}
+       ORDER BY date_trunc('month', s.snapshot_date), s.snapshot_date DESC)
+    SELECT to_char(last.ms, 'YYYY-MM') AS month, last.snapshot_date::text AS snapshot, MAX(s.total)::int AS employees,
+           ROUND(AVG(s.filled * 100.0 / NULLIF(s.total, 0)), 1) AS completeness,
+           (ARRAY_AGG(s.field ORDER BY s.filled * 1.0 / NULLIF(s.total, 0) ASC NULLS LAST, s.field_order))[1] AS weakest,
+           ROUND(MIN(s.filled * 100.0 / NULLIF(s.total, 0)), 1) AS "weakestPct"
+      FROM last JOIN data_quality_snapshots s ON s.snapshot_date = last.snapshot_date AND ${q.co("s")}
+     GROUP BY last.ms, last.snapshot_date ORDER BY last.ms`,
+  chart: ({ rows }) => (rows.length > 1 ? lineChart({ title: "Average completeness of employee records (%)", unit: "percent", rows, xKey: "month", series: [{ key: "completeness", label: "Average completeness (%)" }] }) : null),
+  kpis: ({ rows }) => {
+    const first = rows[0]?.completeness as number | undefined;
+    const last = rows[rows.length - 1]?.completeness as number | undefined;
+    return [percent("latest", "Latest completeness", last ?? null, "Average across the checked fields"), { key: "change", label: "Change since first month", value: rows.length > 1 && first !== undefined && last !== undefined ? round1(last - first) : null, unit: "percent" as const }];
+  },
+  notes: ({ rows }) => (rows.length === 0 ? ["No snapshots in this period yet. A snapshot is taken every night, so the trend builds up from the day this report was introduced."] : []),
+  calculation: [
+    "Every night the system records, for the whole company, how many current employees have each of the A14 fields filled in. This report takes the last snapshot of each month.",
+    "Average completeness is the simple average of the fields. The weakest field is the one with the lowest share filled in. History starts the day snapshots started and is never back-filled.",
+  ],
 });
