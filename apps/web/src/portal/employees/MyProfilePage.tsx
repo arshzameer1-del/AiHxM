@@ -11,6 +11,9 @@ import { StatutoryIdsPanel } from "./StatutoryIdsPanel";
 import { EmployeeDocumentsPanel } from "./EmployeeDocumentsPanel";
 import { ProfileCompletenessCard } from "./ProfileCompletenessCard";
 import { WorkProfilePanel } from "./WorkProfilePanel";
+import { LanguagesPanel } from "./LanguagesPanel";
+import { MedicalInfoPanel } from "./MedicalInfoPanel";
+import { DisciplinaryRecordsPanel } from "./DisciplinaryRecordsPanel";
 import { ProfilePhoto } from "./ProfilePhoto";
 import { MyChangeRequestsPanel } from "./MyChangeRequestsPanel";
 import { MaritalStatusRequest } from "./MaritalStatusRequest";
@@ -209,8 +212,13 @@ export function MyProfilePage() {
           <SubEntityPanel employeeId={employee.id} canManage={false} config={familyMembersConfig([])} requestChange={{ type: "family_member", addLabel: "Ask HR to add" }} />
           <SubEntityPanel employeeId={employee.id} canManage={false} config={educationConfig} />
           <SubEntityPanel employeeId={employee.id} canManage={false} config={qualificationsConfig([])} />
+          <LanguagesPanel employeeId={employee.id} canManage={false} />
         </>
       )}
+
+      {activeTab === "Medical" && <MedicalInfoPanel employeeId={employee.id} />}
+
+      {activeTab === "Disciplinary Records" && <DisciplinaryRecordsPanel employeeId={employee.id} mode="self" />}
 
       {activeTab === "Bank Details" && (
         <SubEntityPanel

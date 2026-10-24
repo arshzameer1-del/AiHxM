@@ -26,6 +26,9 @@ import { EmployeeSchemeAccountsPanel } from "../payroll/PayrollSettlementPanels"
 import { EmployeeAdditionalPaymentsPanel } from "./EmployeeAdditionalPaymentsPanel";
 import { SubEntityPanel } from "./subentities/SubEntityPanel";
 import { StatutoryIdsPanel } from "./StatutoryIdsPanel";
+import { LanguagesPanel } from "./LanguagesPanel";
+import { MedicalInfoPanel } from "./MedicalInfoPanel";
+import { DisciplinaryRecordsPanel } from "./DisciplinaryRecordsPanel";
 import { EmployeeDocumentsPanel } from "./EmployeeDocumentsPanel";
 import { ProfileCompletenessCard } from "./ProfileCompletenessCard";
 import { WorkProfilePanel } from "./WorkProfilePanel";
@@ -72,7 +75,7 @@ function serviceText(joined: string | null | undefined, left: string | null | un
   return [years ? `${years} yr${years === 1 ? "" : "s"}` : "", rest ? `${rest} mo${rest === 1 ? "" : "s"}` : ""].filter(Boolean).join(" ");
 }
 
-const TABS = ["Overview", "Personal Details", "Contact & Address", "Family & Education", "Compensation & Assets", "Documents", "Lifecycle Actions"] as const;
+const TABS = ["Overview", "Personal Details", "Contact & Address", "Family & Education", "Compensation & Assets", "Documents", "Medical & Discipline", "Lifecycle Actions"] as const;
 type Tab = (typeof TABS)[number];
 
 const EMPLOYMENT_TYPES: EmploymentType[] = ["permanent", "contract", "probation", "intern"];
@@ -199,7 +202,7 @@ export function EmployeeDetailPage() {
       )}
 
       <div className="flex gap-1 border-b border-black/10 mb-4 overflow-x-auto">
-        {TABS.map((t) => (
+        {TABS.filter((t) => t !== "Medical & Discipline" || canManage).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -309,6 +312,15 @@ export function EmployeeDetailPage() {
           <SubEntityPanel employeeId={employee.id} canManage={canManage} config={familyMembersConfig(relationshipOptions)} />
           <SubEntityPanel employeeId={employee.id} canManage={canManage} config={educationConfig} />
           <SubEntityPanel employeeId={employee.id} canManage={canManage} config={qualificationsConfig(qualificationTypeOptions)} />
+          <LanguagesPanel employeeId={employee.id} canManage={canManage} />
+        </>
+      )}
+
+      {/* BACKLOG54 - private records: HR Admin only (new permissions), the employee sees their own on My Profile. */}
+      {tab === "Medical & Discipline" && canManage && (
+        <>
+          <MedicalInfoPanel employeeId={employee.id} />
+          <DisciplinaryRecordsPanel employeeId={employee.id} mode="hr" />
         </>
       )}
 

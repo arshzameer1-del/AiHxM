@@ -25,7 +25,7 @@ test("the SAP duplicates are merged away", () => {
 test("tiles without a feature are Coming soon and have no link", () => {
   const soon = flat(ALL).filter((t) => t.comingSoon);
   const names = soon.map((t) => t.title);
-  for (const n of ["Employee Lookup", "My Benefits", "My Medical Information", "My Forms"]) assert.ok(names.includes(n), n);
+  for (const n of ["Employee Lookup", "My Benefits", "My Forms"]) assert.ok(names.includes(n), n);
   for (const t of soon) assert.equal(t.to, undefined);
 });
 

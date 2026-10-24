@@ -43,6 +43,12 @@ import { EmployeeDocumentComplianceService } from "./employee-document-complianc
 import { EmployeeCompletenessController } from "./employee-completeness.controller";
 import { EmployeeCompletenessService } from "./employee-completeness.service";
 import { EmployeeStatutoryIdsController } from "./employee-statutory-ids.controller";
+import { EmployeeLanguagesController } from "./employee-languages.controller";
+import { EmployeeLanguagesService } from "./employee-languages.service";
+import { EmployeeMedicalInfoController } from "./employee-medical-info.controller";
+import { EmployeeMedicalInfoService } from "./employee-medical-info.service";
+import { EmployeeDisciplinaryController } from "./employee-disciplinary.controller";
+import { EmployeeDisciplinaryService } from "./employee-disciplinary.service";
 import { EmployeeStatutoryIdsService } from "./employee-statutory-ids.service";
 import { EmployeeDataConsistencyController } from "./employee-data-consistency.controller";
 import { EmployeeDataConsistencyService } from "./employee-data-consistency.service";
@@ -152,6 +158,9 @@ import { OrgOccupancyModule } from "../organization/occupancy/org-occupancy.modu
     EmployeeAnalyticsController,
     EmployeeDataConsistencyController,
     EmployeeStatutoryIdsController,
+    EmployeeLanguagesController,
+    EmployeeMedicalInfoController,
+    EmployeeDisciplinaryController,
     EmployeeDocumentComplianceController,
     EmployeeCompletenessController,
     EmployeeChangeRequestsController,
@@ -189,6 +198,9 @@ import { OrgOccupancyModule } from "../organization/occupancy/org-occupancy.modu
     EmployeeAnalyticsService,
     EmployeeDataConsistencyService,
     EmployeeStatutoryIdsService,
+    EmployeeLanguagesService,
+    EmployeeMedicalInfoService,
+    EmployeeDisciplinaryService,
     EmployeeDocumentComplianceService,
     EmployeeCompletenessService,
     EmployeeChangeRequestsService,

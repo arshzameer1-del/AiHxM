@@ -494,6 +494,13 @@ import type {
   EmployeeConsistencyReport,
   EmployeeChangeRequestView,
   EmployeeStatutoryIdsView,
+  EmployeeLanguageView,
+  CreateEmployeeLanguageRequest,
+  UpdateEmployeeLanguageRequest,
+  EmployeeMedicalInfoView,
+  UpsertEmployeeMedicalInfoRequest,
+  EmployeeDisciplinaryRecordView,
+  CreateEmployeeDisciplinaryRecordRequest,
   UpsertEmployeeStatutoryIdsRequest,
   EmployeeChangeRequestStatus,
   SubmitEmployeeChangeRequest,
@@ -2398,6 +2405,25 @@ export const api = {
   getNotificationPreferences: () => request<NotificationPreferenceView[]>("/notifications/preferences"),
   saveNotificationPreferences: (preferences: Array<{ category: string; email?: boolean; inApp?: boolean }>) =>
     request<NotificationPreferenceView[]>("/notifications/preferences", { method: "PUT", body: JSON.stringify({ preferences }) }),
+
+  // --- BACKLOG54: languages, medical information, disciplinary records ---
+  listEmployeeLanguages: (employeeId: string) => request<EmployeeLanguageView[]>(`/employees/languages?employeeId=${employeeId}`),
+  createEmployeeLanguage: (input: CreateEmployeeLanguageRequest) =>
+    request<EmployeeLanguageView>("/employees/languages", { method: "POST", body: JSON.stringify(input) }),
+  updateEmployeeLanguage: (id: string, input: UpdateEmployeeLanguageRequest) =>
+    request<EmployeeLanguageView>(`/employees/languages/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+  removeEmployeeLanguage: (id: string) => request<{ removed: true }>(`/employees/languages/${id}`, { method: "DELETE" }),
+  getEmployeeMedicalInfo: (employeeId: string) => request<EmployeeMedicalInfoView>(`/employees/medical?employeeId=${employeeId}`),
+  saveEmployeeMedicalInfo: (input: UpsertEmployeeMedicalInfoRequest) =>
+    request<EmployeeMedicalInfoView>("/employees/medical", { method: "PUT", body: JSON.stringify(input) }),
+  listEmployeeDisciplinaryRecords: (employeeId: string) =>
+    request<EmployeeDisciplinaryRecordView[]>(`/employees/disciplinary?employeeId=${employeeId}`),
+  createEmployeeDisciplinaryRecord: (input: CreateEmployeeDisciplinaryRecordRequest) =>
+    request<EmployeeDisciplinaryRecordView>("/employees/disciplinary", { method: "POST", body: JSON.stringify(input) }),
+  withdrawEmployeeDisciplinaryRecord: (id: string, reason: string) =>
+    request<EmployeeDisciplinaryRecordView>(`/employees/disciplinary/${id}/withdraw`, { method: "POST", body: JSON.stringify({ reason }) }),
+  acknowledgeEmployeeDisciplinaryRecord: (id: string, comment?: string) =>
+    request<EmployeeDisciplinaryRecordView>(`/employees/disciplinary/${id}/acknowledge`, { method: "POST", body: JSON.stringify({ comment }) }),
 
   // --- BACKLOG49: statutory IDs (EOBI, social security, provident fund, CNIC expiry, visa / work permit) ---
   getEmployeeStatutoryIds: (employeeId: string) => request<EmployeeStatutoryIdsView>(`/employees/statutory?employeeId=${employeeId}`),

@@ -9717,3 +9717,79 @@ export type ProfileCompleteness = {
   totalCount: number;
   items: ProfileCompletenessItem[];
 };
+
+// ---- BACKLOG54 - languages, medical information, disciplinary records
+export type LanguageLevel = "basic" | "conversational" | "fluent" | "native";
+
+export type EmployeeLanguageView = {
+  id: string;
+  employeeId: string;
+  language: string;
+  spokenLevel: LanguageLevel;
+  writtenLevel: LanguageLevel;
+  createdAt: string;
+};
+export type CreateEmployeeLanguageRequest = {
+  employeeId: string;
+  language: string;
+  spokenLevel?: LanguageLevel;
+  writtenLevel?: LanguageLevel;
+};
+export type UpdateEmployeeLanguageRequest = {
+  language?: string;
+  spokenLevel?: LanguageLevel;
+  writtenLevel?: LanguageLevel;
+};
+
+export type BloodGroup = "A+" | "A-" | "B+" | "B-" | "AB+" | "AB-" | "O+" | "O-";
+
+export type EmployeeMedicalInfoView = {
+  employeeId: string;
+  bloodGroup: BloodGroup | null;
+  allergies: string | null;
+  chronicConditions: string | null;
+  disabilityNote: string | null;
+  emergencyMedicalNote: string | null;
+  updatedAt: string | null;
+  /** True when this person is looking at their own record. */
+  isOwn: boolean;
+};
+/** A field left out is unchanged; sending null clears it. */
+export type UpsertEmployeeMedicalInfoRequest = {
+  employeeId: string;
+  bloodGroup?: BloodGroup | null;
+  allergies?: string | null;
+  chronicConditions?: string | null;
+  disabilityNote?: string | null;
+  emergencyMedicalNote?: string | null;
+};
+
+export type DisciplinaryRecordType = "verbal_warning" | "written_warning" | "final_warning" | "show_cause" | "suspension" | "other";
+export type DisciplinaryRecordStatus = "active" | "withdrawn";
+
+export type EmployeeDisciplinaryRecordView = {
+  id: string;
+  employeeId: string;
+  recordType: DisciplinaryRecordType;
+  subject: string;
+  description: string;
+  incidentDate: string | null;
+  issuedDate: string;
+  actionTaken: string | null;
+  status: DisciplinaryRecordStatus;
+  withdrawnReason: string | null;
+  withdrawnAt: string | null;
+  issuedByName: string | null;
+  acknowledgedAt: string | null;
+  employeeComment: string | null;
+  createdAt: string;
+};
+export type CreateEmployeeDisciplinaryRecordRequest = {
+  employeeId: string;
+  recordType: DisciplinaryRecordType;
+  subject: string;
+  description: string;
+  incidentDate?: string | null;
+  issuedDate?: string | null;
+  actionTaken?: string | null;
+};

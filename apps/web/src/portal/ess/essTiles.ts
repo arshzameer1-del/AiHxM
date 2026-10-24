@@ -64,7 +64,10 @@ export function buildEssTileGroups(enabledModules: readonly ModuleKey[]): EssTil
     hcm.push({ to: "/app/ess/org-chart", title: "My Org Chart", description: "My manager, my colleagues and my team", icon: Network });
   }
   if (has("leave")) hcm.push({ to: "/app/attendance/timesheet", title: "My Timesheet", description: "Manage working time and time statements", icon: ClipboardList });
-  hcm.push(soon("My Medical Information", "Manage my medical information", HeartPulse));
+  if (has("employee")) {
+    hcm.push({ to: `${PROFILE}?tab=medical`, title: "My Medical Information", description: "Manage my medical information", note: "Private", icon: HeartPulse });
+    hcm.push({ to: `${PROFILE}?tab=disciplinary`, title: "My Disciplinary Records", description: "Read and acknowledge notices from HR", note: "Private", icon: ClipboardList });
+  }
   hcm.push(soon("My External Organizations", "Manage my external organizations", Building2));
   if (has("employee")) {
     hcm.push({ to: "/app/ess/requests?new=loan", title: "Request a Loan or Advance", description: "Ask HR for a loan or a salary advance", icon: Wallet });

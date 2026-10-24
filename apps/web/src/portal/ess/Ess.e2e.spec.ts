@@ -37,7 +37,7 @@ test("home shows the Employee (HCM) tiles once each; unavailable ones are greyed
     await expect(pad.getByText(gone, { exact: true })).toHaveCount(0);
   }
   // Coming soon: shown, flagged, and not clickable.
-  for (const title of ["Employee Lookup", "My Benefits", "My Medical Information", "My Forms"]) {
+  for (const title of ["Employee Lookup", "My Benefits", "My Forms"]) {
     const tile = pad.getByRole("group", { name: new RegExp(title) });
     await expect(tile).toHaveCount(1);
     await expect(tile).toContainText("Coming soon");
