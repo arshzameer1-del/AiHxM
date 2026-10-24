@@ -1,24 +1,23 @@
 import { useCallback, useEffect, useState } from "react";
 
-const PINNED_KEY = "aihxm.sidebarPinned";
+const COLLAPSED_KEY = "aihxm.sidebarCollapsed";
+const NARROW_QUERY = "(max-width: 767px)";
 
-function readPinned(): boolean {
+function readCollapsed(): boolean {
   try {
-    return localStorage.getItem(PINNED_KEY) === "1";
+    return localStorage.getItem(COLLAPSED_KEY) === "1";
   } catch {
     return false;
   }
 }
 
-function writePinned(value: boolean): void {
+function writeCollapsed(value: boolean): void {
   try {
-    localStorage.setItem(PINNED_KEY, value ? "1" : "0");
+    localStorage.setItem(COLLAPSED_KEY, value ? "1" : "0");
   } catch {
-    // storage blocked: the pin just lasts for this visit
+    // storage blocked: the choice just lasts for this visit
   }
 }
-
-const NARROW_QUERY = "(max-width: 767px)";
 
 function readNarrow(): boolean {
   try {
@@ -29,13 +28,13 @@ function readNarrow(): boolean {
 }
 
 /**
- * The side menu is closed until someone opens it. Open and unpinned it floats over the page and closes again after a choice or a click
- * outside; pinned it is docked beside the page and stays open (and is remembered for the next visit).
+ * The side menu works like the one in the Claude app. On a computer it is always there: wide (icon and name) or collapsed to a slim
+ * icon strip, switched with one button and remembered for the next visit. On a phone it is hidden and slides over the page from the
+ * menu button, closing after a choice, on Escape, or on a tap outside.
  */
 export function useSidebar() {
-  const [pinned, setPinned] = useState(readPinned);
-  const [open, setOpen] = useState(false);
-  // On a phone-width screen a docked menu would take too much room, so there it is always a floating menu (no pin).
+  const [collapsed, setCollapsed] = useState(readCollapsed);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [narrow, setNarrow] = useState(readNarrow);
   useEffect(() => {
     let query: MediaQueryList;
@@ -44,39 +43,38 @@ export function useSidebar() {
     } catch {
       return;
     }
-    const onChange = () => setNarrow(query.matches);
+    const onChange = () => {
+      setNarrow(query.matches);
+      setDrawerOpen(false);
+    };
     query.addEventListener("change", onChange);
     return () => query.removeEventListener("change", onChange);
   }, []);
 
-  const docked = pinned && !narrow;
+  const setCollapsedPersisted = useCallback((value: boolean) => {
+    setCollapsed(value);
+    writeCollapsed(value);
+  }, []);
 
-  /** The 3-line button: shows the menu when hidden, hides it (and unpins it) when shown. A pin left over from a wide screen does not count on a phone. */
+  /** The menu button: collapse or widen the menu on a computer, open or close the drawer on a phone. */
   const toggle = useCallback(() => {
-    if (docked || open) {
-      setPinned(false);
-      writePinned(false);
-      setOpen(false);
-    } else {
-      setOpen(true);
-    }
-  }, [docked, open]);
+    if (narrow) setDrawerOpen((o) => !o);
+    else setCollapsedPersisted(!collapsed);
+  }, [narrow, collapsed, setCollapsedPersisted]);
 
-  /** The pin button: pinning docks the menu; unpinning leaves it open as a floating menu. */
-  const togglePin = useCallback(() => {
-    if (pinned) {
-      setPinned(false);
-      writePinned(false);
-      setOpen(true);
-    } else {
-      setPinned(true);
-      writePinned(true);
-      setOpen(false);
-    }
-  }, [pinned]);
+  const expand = useCallback(() => setCollapsedPersisted(false), [setCollapsedPersisted]);
+  const closeDrawer = useCallback(() => setDrawerOpen(false), []);
 
-  /** Closes the floating menu; a pinned menu stays. */
-  const closeFloating = useCallback(() => setOpen(false), []);
-
-  return { pinned, narrow, docked, floating: !docked && open, visible: docked || open, toggle, togglePin, closeFloating };
+  const drawer = narrow && drawerOpen;
+  return {
+    narrow,
+    /** Icon strip only. Never true on a phone: the drawer always shows names. */
+    collapsed: !narrow && collapsed,
+    /** The menu is on screen: always on a computer, only while the drawer is open on a phone. */
+    visible: !narrow || drawer,
+    drawer,
+    toggle,
+    expand,
+    closeDrawer,
+  };
 }

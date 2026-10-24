@@ -1,5 +1,5 @@
 import { hasAnyRoleKey } from "./shared/roles";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   type LucideIcon,
@@ -28,8 +28,8 @@ import { api, doneLoadOnEntry, prefetchRoute, publicTenantBrandingAssetUrl, star
 import { useAuth } from "../auth/AuthContext";
 import { Topbar, type QuickJumpItem } from "../components/shell/Topbar";
 import { hueOf } from "../components/shell/hue";
-import { RAIL_CONTAINER_CLASS, RAIL_GROUP_CHILDREN_CLASS, railChildClass, railLinkClass } from "../components/shell/sidebarTheme";
-import { SidebarToggle } from "../components/shell/SidebarToggle";
+import { RAIL_GROUP_CHILDREN_CLASS, railChildClass, railContainerClass, railLinkClassFor } from "../components/shell/sidebarTheme";
+import { MobileMenuButton, SidebarToggle } from "../components/shell/SidebarToggle";
 import { useSidebar } from "../components/shell/useSidebar";
 
 const ROLE_LABELS: Record<TenantRoleKey, string> = {
@@ -334,27 +334,82 @@ function NavIcon({ icon: Icon, label }: { icon?: LucideIcon; label: string }) {
   );
 }
 
-function NavGroup({ item, onNavigate }: { item: NavItem & { children: NavItem[] }; onNavigate: () => void }) {
-  // A group opens by itself when you are on one of its pages; otherwise it stays folded so the menu stays short.
+/** One flat menu entry. Collapsed, only the icon shows and the name appears as a tooltip. */
+function NavEntry({ item, collapsed, onNavigate }: { item: NavItem; collapsed: boolean; onNavigate: () => void }) {
+  const linkClass = railLinkClassFor(collapsed);
+  return (
+    <NavLink to={item.to} end={item.end} className={linkClass} title={item.label} aria-label={collapsed ? item.label : undefined} onClick={onNavigate} onMouseEnter={() => prefetchRoute(item.to)} onFocus={() => prefetchRoute(item.to)}>
+      <NavIcon icon={item.icon} label={item.label} />
+      {!collapsed && <span className="truncate">{item.label}</span>}
+    </NavLink>
+  );
+}
+
+/**
+ * A menu entry with sub-pages. Wide: the entry with a small arrow, and its sub-pages indented underneath (opened by itself on one of its
+ * pages). Collapsed: the icon alone, and hovering or focusing it shows a small panel with the entry and its sub-pages beside the strip, so
+ * no page is ever out of reach.
+ */
+function NavGroup({ item, collapsed, onNavigate }: { item: NavItem & { children: NavItem[] }; collapsed: boolean; onNavigate: () => void }) {
   const { pathname } = useLocation();
   const inGroup = [item, ...item.children].some((entry) => (entry.end ? pathname === entry.to : pathname === entry.to || pathname.startsWith(`${entry.to}/`)));
   const [manual, setManual] = useState<boolean | null>(null);
   const expanded = manual ?? inGroup;
-  const Icon = item.icon;
+  const [flyTop, setFlyTop] = useState<number | null>(null);
+  const holder = useRef<HTMLDivElement>(null);
+  const closeTimer = useRef<number | undefined>(undefined);
+
+  const openFly = () => {
+    window.clearTimeout(closeTimer.current);
+    const box = holder.current?.getBoundingClientRect();
+    if (box) setFlyTop(Math.max(8, box.top));
+  };
+  const closeFly = () => {
+    window.clearTimeout(closeTimer.current);
+    closeTimer.current = window.setTimeout(() => setFlyTop(null), 120);
+  };
+  useEffect(() => () => window.clearTimeout(closeTimer.current), []);
+  useEffect(() => {
+    if (!collapsed) setFlyTop(null);
+  }, [collapsed]);
+
+  if (collapsed) {
+    return (
+      <div ref={holder} onMouseEnter={openFly} onMouseLeave={closeFly} onFocus={openFly} onBlur={closeFly}>
+        <NavEntry item={item} collapsed onNavigate={onNavigate} />
+        {flyTop !== null && (
+          <div
+            role="group"
+            aria-label={`${item.label} pages`}
+            style={{ top: flyTop, left: 72 }}
+            className="fixed z-50 min-w-[200px] max-w-[260px] rounded-xl border border-sidebar-edge bg-sidebar shadow-xl p-2 flex flex-col gap-0.5"
+            onMouseEnter={openFly}
+            onMouseLeave={closeFly}
+          >
+            <NavLink to={item.to} end={item.end} className={railChildClass} onClick={() => { setFlyTop(null); onNavigate(); }}>
+              <span className="font-semibold">{item.label}</span>
+            </NavLink>
+            {item.children.map((child) => (
+              <NavLink key={child.to} to={child.to} end={child.end} className={railChildClass} onClick={() => { setFlyTop(null); onNavigate(); }} onMouseEnter={() => prefetchRoute(child.to)} onFocus={() => prefetchRoute(child.to)}>
+                {child.label}
+              </NavLink>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div>
       <div className="relative">
-        <NavLink to={item.to} end={item.end} className={railLinkClass} title={item.label} onClick={onNavigate} onMouseEnter={() => prefetchRoute(item.to)} onFocus={() => prefetchRoute(item.to)}>
-          <NavIcon icon={Icon} label={item.label} />
-          <span>{item.label}</span>
-        </NavLink>
+        <NavEntry item={item} collapsed={false} onNavigate={onNavigate} />
         <button
           type="button"
           onClick={() => setManual(!expanded)}
           aria-expanded={expanded}
           aria-label={expanded ? `Collapse ${item.label}` : `Expand ${item.label}`}
-          className="absolute top-0 right-0 w-6 h-6 flex items-center justify-center text-[10px] leading-none text-sidebar-muted hover:text-sidebar-fg-hover rounded-md"
+          className="absolute top-1/2 -translate-y-1/2 right-1.5 w-7 h-7 flex items-center justify-center text-[10px] leading-none text-sidebar-muted hover:text-sidebar-fg-hover rounded-md"
         >
           <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>
         </button>
@@ -516,38 +571,55 @@ export function PortalLayout() {
   }, [identity?.email, navKey, roleKeys.join(","), entryLoading]);
 
   const sidebar = useSidebar();
-  // Escape closes a floating menu.
-  const { floating: menuFloating, closeFloating } = sidebar;
+  // Escape closes the phone drawer; Ctrl/Cmd+B collapses or widens the menu on a computer (not while typing).
+  const { drawer, closeDrawer, toggle: toggleMenu } = sidebar;
   useEffect(() => {
-    if (!menuFloating) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeFloating();
+      if (e.key === "Escape" && drawer) closeDrawer();
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "b") {
+        const el = e.target as HTMLElement | null;
+        if (el && (el.isContentEditable || /^(input|textarea|select)$/i.test(el.tagName))) return;
+        e.preventDefault();
+        toggleMenu();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [menuFloating, closeFloating]);
+  }, [drawer, closeDrawer, toggleMenu]);
 
+  const collapsed = sidebar.collapsed;
+  const navigated = sidebar.closeDrawer;
   const menu = (
-    <aside id="app-sidebar" className={`${RAIL_CONTAINER_CLASS} ${sidebar.floating ? "shadow-xl" : ""}`}>
-      <div className="sticky top-0 max-h-[calc(100dvh-4rem)] overflow-y-auto no-scrollbar px-1.5 py-3">
-        <div className="px-1 mb-4 text-center">
-          <PortalMark companySlug={identity?.companySlug ?? null} companyName={identity?.companyName ?? null} />
-          <div className="text-[10px] text-sidebar-muted truncate mt-1" title={identity?.companyName ?? undefined}>{identity?.companyName ?? "Your company"}</div>
-        </div>
+    <aside id="app-sidebar" aria-label="Menu" className={`${railContainerClass(collapsed)} ${sidebar.drawer ? "shadow-xl" : ""} flex flex-col sticky top-0 z-20 h-dvh`}>
+      <div className={`h-16 shrink-0 border-b border-sidebar-edge flex items-center ${collapsed ? "justify-center" : "justify-between pl-4 pr-2.5"}`}>
+        {!collapsed && (
+          <div className="min-w-0">
+            <PortalMark companySlug={identity?.companySlug ?? null} companyName={identity?.companyName ?? null} />
+          </div>
+        )}
+        {sidebar.narrow ? <MobileMenuButton open onToggle={sidebar.toggle} /> : <SidebarToggle collapsed={collapsed} onToggle={sidebar.toggle} />}
+      </div>
 
+      <div
+        className={`flex-1 min-h-0 overflow-y-auto no-scrollbar py-3 ${collapsed ? "px-2" : "px-3"}`}
+        // Collapsed, a click on the empty part of the strip widens it (as in the Claude app); clicks on an icon do not.
+        onClick={(e) => {
+          if (collapsed && e.target === e.currentTarget) sidebar.expand();
+        }}
+      >
+        {!collapsed && (
+          <div className="px-2.5 mb-3 text-[11px] text-sidebar-muted truncate" title={identity?.companyName ?? undefined}>
+            {identity?.companyName ?? "Your company"}
+          </div>
+        )}
         <nav className="flex flex-col gap-1" aria-label="Main">
-          {navItems.map((item) => {
-            if (item.children) {
-              return <NavGroup key={item.to} item={item as NavItem & { children: NavItem[] }} onNavigate={sidebar.closeFloating} />;
-            }
-            const Icon = item.icon;
-            return (
-              <NavLink key={item.to} to={item.to} end={item.end} className={railLinkClass} title={item.label} onClick={sidebar.closeFloating} onMouseEnter={() => prefetchRoute(item.to)} onFocus={() => prefetchRoute(item.to)}>
-                <NavIcon icon={Icon} label={item.label} />
-                <span>{item.label}</span>
-              </NavLink>
-            );
-          })}
+          {navItems.map((item) =>
+            item.children ? (
+              <NavGroup key={item.to} item={item as NavItem & { children: NavItem[] }} collapsed={collapsed} onNavigate={navigated} />
+            ) : (
+              <NavEntry key={item.to} item={item} collapsed={collapsed} onNavigate={navigated} />
+            ),
+          )}
         </nav>
       </div>
     </aside>
@@ -561,30 +633,27 @@ export function PortalLayout() {
     <div className="min-h-screen flex flex-col">
       {impersonation && <ImpersonationBanner impersonation={impersonation} endImpersonation={endImpersonation} />}
 
-      <div className="flex shrink-0">
-        <SidebarToggle visible={sidebar.visible} pinned={sidebar.pinned} canPin={!sidebar.narrow} onToggle={sidebar.toggle} onTogglePin={sidebar.togglePin} />
-        <div className="flex-1 min-w-0">
+      <div className="relative flex flex-1 min-h-0">
+        {sidebar.visible && !sidebar.narrow && menu}
+        {sidebar.drawer && (
+          <>
+            <div className="fixed inset-0 z-30 bg-black/25" onClick={sidebar.closeDrawer} aria-hidden="true" />
+            <div className="fixed inset-y-0 left-0 z-40 flex">{menu}</div>
+          </>
+        )}
+        <div className="flex-1 min-w-0 flex flex-col">
           <Topbar
             items={flattenNavItems(navItems)}
             userName={identity?.fullName ?? "Account"}
             userEmail={identity?.email ?? ""}
             roleLabel={roleLabel}
             onLogout={logout}
+            leading={sidebar.narrow ? <MobileMenuButton open={sidebar.drawer} onToggle={sidebar.toggle} /> : null}
           />
+          <main className="flex-1 min-w-0 app-main px-4 py-5 sm:px-8 sm:py-8 max-w-5xl overflow-y-auto">
+            <Outlet />
+          </main>
         </div>
-      </div>
-
-      <div className="relative flex flex-1 min-h-0">
-        {sidebar.docked && menu}
-        {sidebar.floating && (
-          <>
-            <div className="fixed inset-0 z-30 bg-black/25" onClick={sidebar.closeFloating} aria-hidden="true" />
-            <div className="absolute inset-y-0 left-0 z-40 flex">{menu}</div>
-          </>
-        )}
-        <main className="flex-1 min-w-0 app-main px-4 py-5 sm:px-8 sm:py-8 max-w-5xl overflow-y-auto">
-          <Outlet />
-        </main>
       </div>
     </div>
   );

@@ -1,25 +1,29 @@
-import { Menu, Pin, PinOff } from "lucide-react";
+import { Menu, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 
-/** The two buttons in the top-left corner: show/hide the side menu, and pin it open. */
-export function SidebarToggle({ visible, pinned, canPin, onToggle, onTogglePin }: { visible: boolean; pinned: boolean; canPin: boolean; onToggle: () => void; onTogglePin: () => void }) {
-  const button = "w-9 h-9 rounded-lg flex items-center justify-center text-label-secondary hover:bg-surface hover:text-label-primary transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/50";
+const BUTTON = "w-9 h-9 shrink-0 rounded-lg flex items-center justify-center text-sidebar-muted hover:bg-sidebar-hover/5 hover:text-sidebar-fg-hover transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/50";
+
+/** The one button that collapses and widens the side menu (inside the menu's own header, as in the Claude app). */
+export function SidebarToggle({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+  const label = collapsed ? "Expand menu" : "Collapse menu";
   return (
-    <div className="h-16 shrink-0 bg-card border-b border-border flex items-center gap-0.5 pl-3 pr-1">
-      <button type="button" onClick={onToggle} aria-label={visible ? "Close menu" : "Open menu"} aria-expanded={visible} aria-controls="app-sidebar" className={button}>
-        <Menu size={20} strokeWidth={1.75} />
-      </button>
-      {canPin && (
-      <button
-        type="button"
-        onClick={onTogglePin}
-        aria-label={pinned ? "Unpin menu" : "Pin menu open"}
-        aria-pressed={pinned}
-        title={pinned ? "Unpin: the menu closes after you pick a page" : "Pin: keep the menu open beside the page"}
-        className={`${button} ${pinned ? "text-accent bg-accent/10 hover:bg-accent/15 hover:text-accent" : ""}`}
-      >
-        {pinned ? <PinOff size={17} strokeWidth={1.75} /> : <Pin size={17} strokeWidth={1.75} />}
-      </button>
-      )}
-    </div>
+    <button type="button" onClick={onToggle} aria-label={label} title={label} aria-expanded={!collapsed} aria-controls="app-sidebar" className={BUTTON}>
+      {collapsed ? <PanelLeftOpen size={19} strokeWidth={1.75} /> : <PanelLeftClose size={19} strokeWidth={1.75} />}
+    </button>
+  );
+}
+
+/** Phone only: sits at the left of the top bar and opens the menu drawer. */
+export function MobileMenuButton({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-label={open ? "Close menu" : "Open menu"}
+      aria-expanded={open}
+      aria-controls="app-sidebar"
+      className="w-10 h-10 shrink-0 rounded-lg flex items-center justify-center text-label-secondary hover:bg-surface hover:text-label-primary transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+    >
+      <Menu size={20} strokeWidth={1.75} />
+    </button>
   );
 }

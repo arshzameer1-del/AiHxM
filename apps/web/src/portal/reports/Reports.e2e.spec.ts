@@ -4,7 +4,7 @@ import { getSharedSession, loginToApp } from "../../e2e-support/real-session";
 /** Reports & Analytics against the real API: library, search, a report run, and the not-yet-available state. */
 test.describe("Reports & Analytics", () => {
   test("HR Admin finds a report in the library and runs it", async ({ page }) => {
-    await loginToApp(page, getSharedSession("hr_admin"), { menuPinned: true });
+    await loginToApp(page, getSharedSession("hr_admin"));
     await page.getByRole("link", { name: "Reports & Analytics" }).first().click();
     await expect(page.getByRole("heading", { name: "Reports & Analytics" })).toBeVisible();
     await page.getByRole("navigation", { name: "Reports & Analytics sections" }).getByRole("link", { name: "Library" }).click();
@@ -22,7 +22,7 @@ test.describe("Reports & Analytics", () => {
   });
 
   test("a report that needs data we do not capture explains what is missing", async ({ page }) => {
-    await loginToApp(page, getSharedSession("hr_admin"), { menuPinned: true });
+    await loginToApp(page, getSharedSession("hr_admin"));
     await page.goto("/app/reports/library");
     await page.getByLabel("Status", { exact: true }).selectOption("blocked");
     const card = page.locator("[data-testid^='report-card-']").first();
@@ -33,7 +33,7 @@ test.describe("Reports & Analytics", () => {
   });
 
   test("every Reports tab opens its page", async ({ page }) => {
-    await loginToApp(page, getSharedSession("hr_admin"), { menuPinned: true });
+    await loginToApp(page, getSharedSession("hr_admin"));
     await page.goto("/app/reports");
     const tabs = page.getByRole("navigation", { name: "Reports & Analytics sections" });
     const pages: [string, string][] = [
@@ -50,13 +50,13 @@ test.describe("Reports & Analytics", () => {
   });
 
   test("an unknown report id says so", async ({ page }) => {
-    await loginToApp(page, getSharedSession("hr_admin"), { menuPinned: true });
+    await loginToApp(page, getSharedSession("hr_admin"));
     await page.goto("/app/reports/Z99");
     await expect(page.getByRole("alert")).toBeVisible();
   });
 
   test("an employee does not get the Reports link", async ({ page }) => {
-    await loginToApp(page, getSharedSession("employee_self_service"), { menuPinned: true });
+    await loginToApp(page, getSharedSession("employee_self_service"));
     await expect(page.getByRole("link", { name: "Reports & Analytics" })).toHaveCount(0);
   });
 });

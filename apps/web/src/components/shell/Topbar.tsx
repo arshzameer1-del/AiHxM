@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { Check, ChevronDown, Download, LogOut, Search } from "lucide-react";
 import { IosInstallHelp, useInstallMode } from "../../pwa/PwaChrome";
@@ -33,6 +33,7 @@ export function Topbar({
   roleLabel,
   contextLabel,
   onLogout,
+  leading,
 }: {
   items: QuickJumpItem[];
   userName: string;
@@ -40,6 +41,8 @@ export function Topbar({
   roleLabel: string;
   contextLabel?: string | null;
   onLogout: () => void;
+  /** Something to show before the search button, e.g. the phone menu button. */
+  leading?: ReactNode;
 }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -116,6 +119,8 @@ export function Topbar({
   return (
     <>
       <header className="app-topbar h-16 shrink-0 bg-card border-b border-border flex items-center justify-between gap-2 sm:gap-4 px-3 sm:px-6">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+        {leading}
         <button
           type="button"
           onClick={() => setPaletteOpen(true)}
@@ -128,6 +133,7 @@ export function Topbar({
             ⌘K
           </kbd>
         </button>
+        </div>
 
         <div className="flex items-center gap-3 min-w-0 flex-1 justify-end sm:flex-none sm:justify-start">
           <StatusPill />

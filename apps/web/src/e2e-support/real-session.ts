@@ -226,17 +226,16 @@ export function getSharedSession(roleKey: TenantRoleKey): string {
  * ordering bug `PortalHomePage.e2e.spec.ts`'s `loginAsRole` documents; the
  * key this writes (`aihxm.platformAdminToken`) is `api/client.ts`'s real
  * `TOKEN_KEY`, not the "authToken" placeholder every spec used before. */
-export async function loginToApp(page: Page, token: string, opts: { menuPinned?: boolean } = {}): Promise<void> {
+export async function loginToApp(page: Page, token: string, opts: { menuCollapsed?: boolean } = {}): Promise<void> {
   await page.goto("/login");
-  // The side menu is closed by default; most specs click links in it, so pin it open unless asked otherwise.
-  const pinned = opts.menuPinned ?? true;
-  await page.evaluate(([t, pin]) => {
+  // The side menu is wide by default; a spec can start with it collapsed to the icon strip.
+  await page.evaluate(([t, collapsed]) => {
     localStorage.setItem("aihxm.platformAdminToken", t);
-    if (pin) localStorage.setItem("aihxm.sidebarPinned", "1");
-    else localStorage.removeItem("aihxm.sidebarPinned");
-  }, [token, pinned ? "1" : ""] as [string, string]);
+    if (collapsed) localStorage.setItem("aihxm.sidebarCollapsed", "1");
+    else localStorage.removeItem("aihxm.sidebarCollapsed");
+  }, [token, opts.menuCollapsed ? "1" : ""] as [string, string]);
   await page.goto("/app");
-  // A pinned menu is docked (its <nav> is on the page) except on phone-width screens, where the menu always floats.
-  const docked = pinned && (page.viewportSize()?.width ?? 1280) >= 768;
-  await page.waitForSelector(docked ? "nav" : 'button[aria-label="Open menu"]', { timeout: 10000 });
+  // On a computer the menu is always on the page; on a phone-width screen it opens from the menu button.
+  const phone = (page.viewportSize()?.width ?? 1280) < 768;
+  await page.waitForSelector(phone ? 'button[aria-label="Open menu"]' : "#app-sidebar nav", { timeout: 10000 });
 }
