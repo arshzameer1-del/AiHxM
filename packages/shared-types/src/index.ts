@@ -1722,6 +1722,10 @@ export type DelegationView = {
   id: string;
   delegatorUserAccountId: string;
   delegateUserAccountId: string;
+  delegatorName?: string | null;
+  delegateName?: string | null;
+  /** Relative to the person asking: I handed over (given), I cover for someone (received), or neither (an admin's company-wide list). */
+  direction?: "given" | "received" | "other";
   scopeObjectKeys: string[] | null;
   validFrom: string;
   validTo: string;
@@ -1730,6 +1734,8 @@ export type DelegationView = {
   createdByUserAccountId: string;
   createdAt: string;
 };
+
+export type DelegateCandidateView = { userAccountId: string; name: string; employeeNumber: string; designation: string | null };
 
 export type CreateDelegationRequest = {
   delegateUserAccountId: string;
@@ -2321,6 +2327,8 @@ export type EmployeeContactView = {
   employeeId: string;
   contactType: EmployeeContactType;
   label: string | null;
+  /** For an emergency contact: who the person is to the employee. */
+  relationship: string | null;
   value: string;
   isPrimary: boolean;
   status: "active" | "ended";
@@ -2333,12 +2341,14 @@ export type CreateEmployeeContactRequest = {
   contactType: EmployeeContactType;
   value: string;
   label?: string;
+  relationship?: string;
   isPrimary?: boolean;
 };
 
 export type UpdateEmployeeContactRequest = {
   value?: string;
   label?: string | null;
+  relationship?: string | null;
   isPrimary?: boolean;
 };
 
@@ -9686,4 +9696,24 @@ export type RequestableLoanTypeView = {
   maxInstallments: number | null;
   requiresGuarantor: boolean;
   description: string | null;
+};
+
+// ---- BACKLOG53 - how complete an employee's record is
+export type ProfileCompletenessItem = {
+  key: string;
+  label: string;
+  /** Where the missing piece is filled in: a My Profile tab for the employee, an employee-page tab for HR. */
+  tab: "personal" | "contact" | "addresses" | "family" | "bank" | "documents";
+  done: boolean;
+  /** What to do, in plain words; empty when done. */
+  hint: string;
+};
+
+export type ProfileCompleteness = {
+  employeeId: string;
+  /** 0 to 100. */
+  score: number;
+  doneCount: number;
+  totalCount: number;
+  items: ProfileCompletenessItem[];
 };

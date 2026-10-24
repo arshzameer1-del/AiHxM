@@ -38,6 +38,7 @@ import { leaveTypeLabel, STATUS_LABELS, STATUS_STYLES } from "./leave/leaveLabel
 import { MyAttendanceCard, MyTimesheetCard } from "./attendance/AttendanceCards";
 import { DAY_KIND_LABELS, minutesText } from "./attendance/attendanceDays";
 import { summariseShift } from "./attendance/scheduleText";
+import { ProfileCompletenessCard } from "./employees/ProfileCompletenessCard";
 import { useMyAttendance, type MyAttendance } from "./attendance/useMyAttendance";
 
 const ROLE_LABELS: Record<string, string> = {
@@ -433,6 +434,7 @@ export function PortalHomePage() {
 
       {hasEssPortalRole(roleKeys) ? (
         <div className="mb-6">
+          {identity.employeeId && <ProfileCompletenessCard compact />}
           <EssTiles />
         </div>
       ) : homeCards.length > 0 && (

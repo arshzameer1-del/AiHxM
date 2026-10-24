@@ -47,17 +47,19 @@ export function contactsConfig(contactTypeOptions: { value: string; label: strin
     createFields: [
       { key: "contactType", label: "Type", type: "select", required: true, options },
       { key: "value", label: "Value", type: "text", required: true, placeholder: "email or phone number" },
-      { key: "label", label: "Label", type: "text", placeholder: "optional" },
+      { key: "label", label: "Label or person's name", type: "text", placeholder: "optional; for an emergency contact, the person's name" },
+      { key: "relationship", label: "Relationship (emergency contact)", type: "text", placeholder: "e.g. spouse, father, friend" },
       { key: "isPrimary", label: "Primary", type: "checkbox" },
     ],
     updateFields: [
       { key: "value", label: "Value", type: "text", required: true },
-      { key: "label", label: "Label", type: "text" },
+      { key: "label", label: "Label or person's name", type: "text" },
+      { key: "relationship", label: "Relationship (emergency contact)", type: "text" },
       { key: "isPrimary", label: "Primary", type: "checkbox" },
     ],
     renderSummary: (item) => ({
       primary: `${options.find((o) => o.value === item.contactType)?.label ?? item.contactType} — ${item.value}${item.isPrimary ? " ★" : ""}`,
-      secondary: item.label ?? undefined,
+      secondary: [item.label, item.relationship].filter(Boolean).join(" · ") || undefined,
     }),
     openStatus: "active",
     closedStatusLabel: "Ended",

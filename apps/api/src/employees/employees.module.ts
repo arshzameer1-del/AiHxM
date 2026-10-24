@@ -40,6 +40,8 @@ import { EmployeeChangeRequestsController } from "./employee-change-requests.con
 import { EmployeeChangeRequestsService } from "./employee-change-requests.service";
 import { EmployeeDocumentComplianceController } from "./employee-document-compliance.controller";
 import { EmployeeDocumentComplianceService } from "./employee-document-compliance.service";
+import { EmployeeCompletenessController } from "./employee-completeness.controller";
+import { EmployeeCompletenessService } from "./employee-completeness.service";
 import { EmployeeStatutoryIdsController } from "./employee-statutory-ids.controller";
 import { EmployeeStatutoryIdsService } from "./employee-statutory-ids.service";
 import { EmployeeDataConsistencyController } from "./employee-data-consistency.controller";
@@ -151,6 +153,7 @@ import { OrgOccupancyModule } from "../organization/occupancy/org-occupancy.modu
     EmployeeDataConsistencyController,
     EmployeeStatutoryIdsController,
     EmployeeDocumentComplianceController,
+    EmployeeCompletenessController,
     EmployeeChangeRequestsController,
     EmployeeCompensationController,
     EmployeeLoansController,
@@ -187,6 +190,7 @@ import { OrgOccupancyModule } from "../organization/occupancy/org-occupancy.modu
     EmployeeDataConsistencyService,
     EmployeeStatutoryIdsService,
     EmployeeDocumentComplianceService,
+    EmployeeCompletenessService,
     EmployeeChangeRequestsService,
     EmployeeCompensationService,
     EmployeeLoansService,

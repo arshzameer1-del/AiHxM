@@ -30,6 +30,7 @@ function rowToView(row: any): EmployeeContactView {
     employeeId: row.employee_id,
     contactType: row.contact_type,
     label: row.label,
+    relationship: row.relationship ?? null,
     value: row.value,
     isPrimary: row.is_primary,
     status: row.status,
@@ -97,8 +98,8 @@ export class EmployeeContactsService {
         [input.employeeId, input.contactType, existing.id]
       );
       const promoted = await client.query(
-        "UPDATE employee_contacts SET is_primary = true, label = COALESCE($2, label), updated_at = now() WHERE id = $1 RETURNING *",
-        [existing.id, input.label ?? null]
+        "UPDATE employee_contacts SET is_primary = true, label = COALESCE($2, label), relationship = COALESCE($3, relationship), updated_at = now() WHERE id = $1 RETURNING *",
+        [existing.id, input.label ?? null, input.relationship ?? null]
       );
       return rowToView(promoted.rows[0]);
     }
@@ -111,9 +112,9 @@ export class EmployeeContactsService {
     }
 
     const inserted = await client.query(
-      `INSERT INTO employee_contacts (company_id, employee_id, contact_type, label, value, is_primary)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [claims.company_id, input.employeeId, input.contactType, input.label ?? null, input.value, input.isPrimary ?? false]
+      `INSERT INTO employee_contacts (company_id, employee_id, contact_type, label, value, is_primary, relationship)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [claims.company_id, input.employeeId, input.contactType, input.label ?? null, input.value, input.isPrimary ?? false, input.relationship?.trim() || null]
     );
     const view = rowToView(inserted.rows[0]);
 
@@ -155,9 +156,10 @@ export class EmployeeContactsService {
            value = COALESCE($2, value),
            label = COALESCE($3, label),
            is_primary = COALESCE($4, is_primary),
+           relationship = COALESCE($5, relationship),
            updated_at = now()
          WHERE id = $1 RETURNING *`,
-        [id, patch.value ?? null, patch.label ?? null, patch.isPrimary ?? null]
+        [id, patch.value ?? null, patch.label ?? null, patch.isPrimary ?? null, patch.relationship?.trim() || null]
       );
 
       await this.audit.record(client, claims, {

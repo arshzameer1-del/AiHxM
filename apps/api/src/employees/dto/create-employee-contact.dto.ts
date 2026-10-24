@@ -25,6 +25,12 @@ export class CreateEmployeeContactDto {
   @MaxLength(255)
   label?: string;
 
+  /** For an emergency contact: who this person is to the employee. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  relationship?: string;
+
   @IsOptional()
   @IsBoolean()
   isPrimary?: boolean;

@@ -9,6 +9,8 @@ import { EmployeeFields } from "./EmployeeFields";
 import { PersonalDataCard } from "./PersonalDataCard";
 import { StatutoryIdsPanel } from "./StatutoryIdsPanel";
 import { EmployeeDocumentsPanel } from "./EmployeeDocumentsPanel";
+import { ProfileCompletenessCard } from "./ProfileCompletenessCard";
+import { WorkProfilePanel } from "./WorkProfilePanel";
 import { ProfilePhoto } from "./ProfilePhoto";
 import { MyChangeRequestsPanel } from "./MyChangeRequestsPanel";
 import { MaritalStatusRequest } from "./MaritalStatusRequest";
@@ -175,6 +177,8 @@ export function MyProfilePage() {
         </section>
       )}
 
+      <ProfileCompletenessCard />
+
       {/* BACKLOG47: the person's own records, read-only. HR keeps the only edit rights (changes come in BACKLOG48). */}
       {activeTab === "Personal Information" && <div className="mt-6"><StatutoryIdsPanel employeeId={employee.id} canManage={false} /></div>}
 
@@ -183,6 +187,7 @@ export function MyProfilePage() {
           <section className="bg-card rounded-card p-5 shadow-sm mb-6">
             <EmployeeFields employee={employee} sections={["job"]} />
           </section>
+          <WorkProfilePanel employeeId={employee.id} canManage={false} />
           <SubEntityPanel employeeId={employee.id} canManage={false} config={importantDatesConfig} />
           <SubEntityPanel employeeId={employee.id} canManage={false} config={assetsConfig} />
         </>

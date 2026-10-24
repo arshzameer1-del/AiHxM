@@ -12,6 +12,11 @@ export class UpdateEmployeeContactDto {
   label?: string;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  relationship?: string;
+
+  @IsOptional()
   @IsBoolean()
   isPrimary?: boolean;
 }

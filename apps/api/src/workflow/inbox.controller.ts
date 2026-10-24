@@ -120,6 +120,11 @@ export class DelegationsController {
     return this.delegations.list(claims, { all: all === "true" });
   }
 
+  @Get("candidates")
+  candidates(@CurrentClaims() claims: RequestClaims, @Query("q") q?: string) {
+    return this.delegations.candidates(claims, q ?? "");
+  }
+
   @Post()
   create(@CurrentClaims() claims: RequestClaims, @Body() dto: CreateDelegationDto) {
     return this.delegations.create(claims, dto);

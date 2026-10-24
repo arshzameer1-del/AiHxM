@@ -7,6 +7,7 @@ import { LoadingNote, PageHeader } from "../shared/PageChrome";
 import { formatDay, formatWeekdayAndDate } from "../shared/dates";
 import { ageText, itemsForTab, KIND_LABELS, tabCount, type ApprovalDetail, type ApprovalItem, type ApprovalKind, type ApprovalTab } from "./approvals";
 import { useApprovals } from "./useApprovals";
+import { DelegationPage } from "./DelegationPage";
 import { Outlet, Route, Routes } from "react-router-dom";
 
 const KIND_ICON: Record<ApprovalKind, typeof Inbox> = { leave: CalendarDays, timesheet: Timer, correction: FileClock };
@@ -213,7 +214,7 @@ export function ApprovalsPanel() {
 
   return (
     <div>
-      <PageHeader title="Approvals" subtitle={canDecide ? "Items waiting for your decision, and the requests you have sent. Approving is one click unless the step asks for a comment; refusing asks for a reason." : "The requests you have sent and where they are."} />
+      <PageHeader actions={<Link to="/app/approvals/delegation" className="text-sm font-semibold text-accent hover:underline">Out of office</Link>} title="Approvals" subtitle={canDecide ? "Items waiting for your decision, and the requests you have sent. Approving is one click unless the step asks for a comment; refusing asks for a reason." : "The requests you have sent and where they are."} />
       <div className="flex flex-wrap gap-2 mb-4" role="tablist" aria-label="Approvals">
         {visible.map((t) => {
           const n = tabCount(t.key, toDecide, mine);
@@ -248,6 +249,7 @@ export function ApprovalsRoutes() {
     <Routes>
       <Route element={<Outlet context={ctx} />}>
         <Route index element={<ApprovalsPanel />} />
+        <Route path="delegation" element={<DelegationPage />} />
       </Route>
     </Routes>
   );

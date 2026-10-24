@@ -451,7 +451,7 @@ function camel(row: any): Record<string, unknown> {
 
 function describe(type: EmployeeChangeRequestType, p: Record<string, unknown>): string {
   const s = (v: unknown) => (v == null || v === "" ? "" : String(v));
-  if (type === "contact") return [s(p.contactType).replace(/_/g, " "), s(p.value), p.label ? `(${s(p.label)})` : ""].filter(Boolean).join(" ");
+  if (type === "contact") return [s(p.contactType).replace(/_/g, " "), s(p.value), p.label ? `(${s(p.label)})` : "", p.relationship ? `- ${s(p.relationship)}` : ""].filter(Boolean).join(" ");
   if (type === "address") return [s(p.addressType), s(p.line1), s(p.city)].filter(Boolean).join(", ");
   if (type === "family_member") return [s(p.fullName), p.relationship ? `(${s(p.relationship)})` : ""].filter(Boolean).join(" ");
   return "";

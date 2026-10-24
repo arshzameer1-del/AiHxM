@@ -72,6 +72,7 @@ export function buildEssTileGroups(enabledModules: readonly ModuleKey[]): EssTil
     hcm.push({ to: "/app/ess/requests", title: "My HR Requests", description: "Follow what you asked HR for", icon: ClipboardList });
     hcm.push({ to: "/app/ess/requests?new=privacy", title: "My Privacy Requests", description: "Ask for a copy, a correction or deletion of your data", icon: IdCard });
   }
+  if (has("employee")) hcm.push({ to: "/app/approvals/delegation", title: "Out of Office", description: "Let a colleague approve for me while I am away", icon: Sun });
   hcm.push(soon("Start Process", "Initiate a process instance", PlayCircle));
   hcm.push(soon("My Forms", "View my HR forms", FileText));
   hcm.push(soon("My Online Selections", "Manage my online selections", ListChecks));

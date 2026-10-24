@@ -534,6 +534,10 @@ import type {
 // Configuration Publish Lifecycle ("then 2" Phase 6, 2026-10-02, gap-table
 // item #13) — own import block, same reason the two blocks above are.
 import type {
+  CreateDelegationRequest,
+  DelegateCandidateView,
+  DelegationView,
+  ProfileCompleteness,
   ApproveEmployeeLoanRequestInput,
   DataSubjectRequestType,
   DataSubjectRequestView,
@@ -2401,6 +2405,14 @@ export const api = {
     request<EmployeeStatutoryIdsView>("/employees/statutory", { method: "PUT", body: JSON.stringify(input) }),
 
   // --- BACKLOG48: change requests (employee asks, HR decides) ---
+  // --- BACKLOG53: profile completeness and approval delegation (out of office) ---
+  getMyCompleteness: () => request<ProfileCompleteness>("/employees/me/completeness"),
+  getEmployeeCompleteness: (employeeId: string) => request<ProfileCompleteness>(`/employees/${employeeId}/completeness`),
+  listMyDelegations: () => request<DelegationView[]>("/delegations"),
+  searchDelegateCandidates: (q: string) => request<DelegateCandidateView[]>(`/delegations/candidates?q=${encodeURIComponent(q)}`),
+  createDelegation: (dto: CreateDelegationRequest) => request<DelegationView>("/delegations", { method: "POST", body: JSON.stringify(dto) }),
+  revokeDelegation: (id: string) => request<DelegationView>(`/delegations/${id}/revoke`, { method: "POST" }),
+
   // --- BACKLOG52: requests to HR (loan / advance / letter) and privacy requests ---
   submitEmployeeServiceRequest: (dto: SubmitEmployeeServiceRequest) =>
     request<EmployeeServiceRequestView>("/employee-requests", { method: "POST", body: JSON.stringify(dto) }),

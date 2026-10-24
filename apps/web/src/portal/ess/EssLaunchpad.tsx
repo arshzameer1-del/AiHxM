@@ -1,6 +1,7 @@
 import { useAuth } from "../../auth/AuthContext";
 import { TileGrid, TileGroup } from "../shared/Tiles";
 import { buildEssTileGroups } from "./essTiles";
+import { ProfileCompletenessCard } from "../employees/ProfileCompletenessCard";
 
 /** The Employee Self Service launchpad: one tile per self-service task. Tiles with no feature behind them yet say so. */
 export function EssTiles() {
@@ -18,10 +19,12 @@ export function EssTiles() {
 }
 
 export function EssLaunchpadPage() {
+  const { identity } = useAuth();
   return (
     <div>
       <h1 className="text-2xl font-bold tracking-tight">Employee Self Service</h1>
       <p className="text-sm text-label-tertiary mt-1 mb-6">Your own data and requests in one place. Greyed tiles are not available yet.</p>
+      {identity?.employeeId && <ProfileCompletenessCard compact />}
       <EssTiles />
     </div>
   );

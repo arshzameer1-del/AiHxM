@@ -27,6 +27,8 @@ import { EmployeeAdditionalPaymentsPanel } from "./EmployeeAdditionalPaymentsPan
 import { SubEntityPanel } from "./subentities/SubEntityPanel";
 import { StatutoryIdsPanel } from "./StatutoryIdsPanel";
 import { EmployeeDocumentsPanel } from "./EmployeeDocumentsPanel";
+import { ProfileCompletenessCard } from "./ProfileCompletenessCard";
+import { WorkProfilePanel } from "./WorkProfilePanel";
 import {
   addressesConfig,
   assetsConfig,
@@ -227,6 +229,9 @@ export function EmployeeDetailPage() {
               <ReportsTo employee={employee} canManage={canManage} onChangeManager={() => setTab("Lifecycle Actions")} />
             </section>
           )}
+
+          {!editing && <ProfileCompletenessCard key={`completeness-${employee.id}`} employeeId={employee.id} hr />}
+          {!editing && <WorkProfilePanel key={`work-profile-${employee.id}`} employeeId={employee.id} canManage={canManage} />}
 
           {canManage && (
             <LoginSection
