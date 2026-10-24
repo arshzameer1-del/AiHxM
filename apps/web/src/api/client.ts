@@ -103,6 +103,15 @@ import type {
   DecideLeaveCancellationRequest,
   LeaveLedgerEntryView,
   LeaveTypeView,
+  LeaveDurationSettingsView,
+  SetLeaveDurationSettingsRequest,
+  LeaveValidationRuleView,
+  SaveLeaveValidationRuleRequest,
+  LeaveValidationTypeInfo,
+  LeaveRuleHistoryEntry,
+  LeaveValidationResult,
+  LeaveRulePreviewRequest,
+  LeaveRulePreviewResponse,
   RequestLeaveCancellationRequest,
   UpdateLeaveTypeRequest,
   AddPayrollAreaScopeLinkRequest,
@@ -1056,6 +1065,9 @@ async function fetchText(path: string, options: RequestInit = {}): Promise<strin
   return res.text();
 }
 
+/** POSTs that only ask a question (nothing is written), so they must not throw away the cached reads. */
+const READ_ONLY_POSTS = /^\/leave-requests\/validate$|^\/leave-validation\/rules\/preview$/;
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const bypass = bypassNextRead;
   bypassNextRead = false;
@@ -1071,7 +1083,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     return text ? (JSON.parse(text) as T) : (undefined as T);
   } finally {
     // A save (or anything that is not a plain read) may have changed what other screens show.
-    if (method !== "GET") swr.invalidateAll();
+    if (method !== "GET" && !READ_ONLY_POSTS.test(path)) swr.invalidateAll();
   }
 }
 
@@ -2957,6 +2969,30 @@ export const api = {
     request<TeamLeaveEntryView[]>(
       `/leave-requests/team-calendar?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}${employeeId ? `&employeeId=${encodeURIComponent(employeeId)}` : ""}`
     ),
+
+  // --- BACKLOG58: short-hours leave and configurable validation rules ---------------------------------
+  /** Asks the server what would happen if this request were submitted (duration, balance, errors, warnings). Writes nothing. */
+  validateLeaveRequest: (input: SubmitLeaveRequestRequest & { excludeRequestId?: string }) =>
+    request<LeaveValidationResult>("/leave-requests/validate", { method: "POST", body: JSON.stringify(input) }),
+  listLeaveDurationSettings: (code: string) => request<LeaveDurationSettingsView[]>(`/leave-types/${encodeURIComponent(code)}/duration-settings`),
+  leaveDurationSettingsHistory: (code: string) => request<LeaveRuleHistoryEntry[]>(`/leave-types/${encodeURIComponent(code)}/duration-settings/history`),
+  setLeaveDurationSettings: (code: string, input: SetLeaveDurationSettingsRequest) =>
+    request<LeaveDurationSettingsView>(`/leave-types/${encodeURIComponent(code)}/duration-settings`, { method: "PUT", body: JSON.stringify(input) }),
+  setPolicyLeaveDurationSettings: (code: string, policyId: string, input: SetLeaveDurationSettingsRequest) =>
+    request<LeaveDurationSettingsView>(`/leave-types/${encodeURIComponent(code)}/duration-settings/policies/${policyId}`, { method: "PUT", body: JSON.stringify(input) }),
+  removePolicyLeaveDurationSettings: (code: string, policyId: string) =>
+    request<void>(`/leave-types/${encodeURIComponent(code)}/duration-settings/policies/${policyId}`, { method: "DELETE" }),
+  leaveValidationCatalog: () => request<LeaveValidationTypeInfo[]>("/leave-validation/catalog"),
+  listLeaveValidationRules: () => request<LeaveValidationRuleView[]>("/leave-validation/rules"),
+  getLeaveValidationRule: (id: string) => request<LeaveValidationRuleView>(`/leave-validation/rules/${id}`),
+  createLeaveValidationRule: (input: SaveLeaveValidationRuleRequest) =>
+    request<LeaveValidationRuleView>("/leave-validation/rules", { method: "POST", body: JSON.stringify(input) }),
+  updateLeaveValidationRule: (id: string, input: SaveLeaveValidationRuleRequest) =>
+    request<LeaveValidationRuleView>(`/leave-validation/rules/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+  deleteLeaveValidationRule: (id: string) => request<void>(`/leave-validation/rules/${id}`, { method: "DELETE" }),
+  leaveValidationRuleHistory: (id: string) => request<LeaveRuleHistoryEntry[]>(`/leave-validation/rules/${id}/history`),
+  previewLeaveValidationRule: (input: LeaveRulePreviewRequest) =>
+    request<LeaveRulePreviewResponse>("/leave-validation/rules/preview", { method: "POST", body: JSON.stringify(input) }),
 
   // --- TLM-01/02/03 -----------------------------------------------------
   listLeaveTypes: (includeInactive = false) =>

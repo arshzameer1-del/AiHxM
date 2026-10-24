@@ -3576,7 +3576,12 @@ export type BuiltInLeaveType = "annual" | "casual" | "sick" | "unpaid";
 
 export type AccrualMethod = "upfront" | "monthly" | "none";
 export type LeaveGenderRestriction = "any" | "male" | "female";
-export type LeaveDayPart = "full" | "first_half" | "second_half";
+/** "hours" = a timed (short-hours) request with a start and end time on one day (BACKLOG58). */
+export type LeaveDayPart = "full" | "first_half" | "second_half" | "hours";
+/** How a request of a leave type is expressed. The three time-based modes take a start and an end time. */
+export type LeaveDurationMode = "full_day" | "half_day" | "short_hours" | "hourly" | "flexible_partial";
+/** The unit a leave type keeps its balance in. Durations are always calculated in minutes first. */
+export type LeaveBalanceUnit = "days" | "hours" | "minutes";
 
 export type LeaveTypeView = {
   id: string;
@@ -3598,6 +3603,9 @@ export type LeaveTypeView = {
   minServiceMonths: number;
   halfDayAllowed: boolean;
   maxConsecutiveDays: number | null;
+  /** BACKLOG58 */
+  durationMode: LeaveDurationMode;
+  balanceUnit: LeaveBalanceUnit;
   isSystem: boolean;
   isActive: boolean;
   sortOrder: number;
@@ -3620,6 +3628,8 @@ export type CreateLeaveTypeRequest = {
   minServiceMonths?: number;
   halfDayAllowed?: boolean;
   maxConsecutiveDays?: number | null;
+  durationMode?: LeaveDurationMode;
+  balanceUnit?: LeaveBalanceUnit;
   isActive?: boolean;
   sortOrder?: number;
 };
@@ -3678,9 +3688,15 @@ export type LeaveBalanceView = {
   leaveType: LeaveType;
   leaveTypeName?: string;
   year: number;
+  /** BACKLOG58: the unit the three figures below are in (days unless the leave type keeps hours or minutes). */
+  unit?: LeaveBalanceUnit;
   entitledDays: number;
   usedDays: number;
   remainingDays: number;
+  /** Pending requests that already hold part of the balance (not yet deducted from `usedDays`). */
+  reservedDays?: number;
+  /** What a new request can still draw on: remaining less reserved. */
+  availableDays?: number;
   /** TLM-02 components of `entitledDays`. */
   openingDays?: number;
   accruedDays?: number;
@@ -3730,6 +3746,19 @@ export type LeaveRequestView = {
   cancellationRequestedAt: string | null;
   /** true when the leave type is unpaid, i.e. payroll deducts for it. */
   payrollImpact: boolean;
+  /** BACKLOG58: timed (short-hours) requests only. Wall-clock times in `timeZone`, the real instants, and the minutes charged. */
+  startTime?: string | null;
+  endTime?: string | null;
+  startAt?: string | null;
+  endAt?: string | null;
+  timeZone?: string | null;
+  durationMinutes?: number | null;
+  breakMinutes?: number | null;
+  /** What this request charges to the balance, in `balanceUnit`. */
+  balanceUnits?: number | null;
+  balanceUnit?: LeaveBalanceUnit | null;
+  /** Warnings the employee confirmed when submitting, and the settings the request was accepted under. */
+  acknowledgedWarnings?: string[];
   createdAt: string;
   updatedAt: string;
   /** LV-UP: display fields so the screen never has to look employees up itself. */
@@ -3769,6 +3798,13 @@ export type UpdateLeaveRequestRequest = {
   reason?: string | null;
   dayPart?: LeaveDayPart;
   delegateEmployeeId?: string | null;
+  /** BACKLOG58: the supporting document; null removes it. */
+  attachmentDocumentId?: string | null;
+  /** BACKLOG58: timed requests. */
+  startTime?: string;
+  endTime?: string;
+  acknowledgedWarnings?: string[];
+  locale?: string;
 };
 
 /** LV-UP: a colleague's leave on the team calendar. Dates and status only; never the type or the reason. */
@@ -3808,6 +3844,13 @@ export type SubmitLeaveRequestRequest = {
   dayPart?: LeaveDayPart;
   attachmentDocumentId?: string;
   delegateEmployeeId?: string;
+  /** BACKLOG58: a timed request (`dayPart: "hours"`) is on `startDate` between these local wall-clock times, "HH:MM". */
+  startTime?: string;
+  endTime?: string;
+  /** Rule codes of the warnings the employee has seen and confirmed. A warning that is not listed here stops the submit. */
+  acknowledgedWarnings?: string[];
+  /** Language of the validation messages ("en" by default; a rule may carry translations). */
+  locale?: string;
 };
 
 export type RequestLeaveCancellationRequest = { reason: string };
@@ -3815,6 +3858,8 @@ export type DecideLeaveCancellationRequest = { decision: "approved" | "declined"
 
 export type SubmitLeaveRequestResponse = {
   request: LeaveRequestView;
+  /** BACKLOG58: warnings and notices that did not stop the submit. */
+  validation?: LeaveValidationResult;
   /** Non-blocking — plan doc Section 7 calls these "overlap notices," not
    * overlap rejections. Empty when nothing on the same team overlaps. */
   overlapWarnings: OverlapWarning[];
@@ -3823,6 +3868,254 @@ export type SubmitLeaveRequestResponse = {
 export type DecideLeaveRequestRequest = {
   decision: "approved" | "rejected";
   comment?: string;
+};
+
+// --- BACKLOG58: short-hours leave and configurable validation rules --------------------------------------
+export type LeaveValidationType =
+  | "balance_insufficient"
+  | "max_duration_exceeded"
+  | "min_duration_not_met"
+  | "invalid_time_range"
+  | "outside_permitted_hours"
+  | "overlaps_existing_request"
+  | "non_working_day"
+  | "public_holiday_conflict"
+  | "insufficient_notice"
+  | "backdated_not_allowed"
+  | "attachment_required"
+  | "reason_required"
+  | "leave_type_unavailable"
+  | "policy_not_assigned"
+  | "limit_exceeded"
+  | "frequency_reached"
+  | "ineligible_employment_category"
+  | "workflow_unresolved"
+  | "balance_unavailable"
+  | "attendance_or_shift_conflict";
+
+export type LeaveValidationSeverity = "block" | "warning" | "info";
+
+export type LeaveSelectionMethod = "employee_selected" | "fixed_window";
+export type LeaveBreakTreatment = "exclude_all" | "exclude_unpaid" | "include";
+export type LeaveSameDayPolicy = "unrestricted" | "same_day_only" | "future_only";
+export type LeaveFrequencyPeriod = "day" | "week" | "month" | "year";
+
+/** The administrator-configured timing rules of one leave type, or of one leave policy's override of them. Nothing here has a built-in default: an empty limit means "no limit". */
+export type LeaveDurationSettingsView = {
+  id: string | null;
+  leaveType: string;
+  /** null = the leave type's own setting; set = the override for that policy. */
+  leavePolicyId: string | null;
+  selectionMethod: LeaveSelectionMethod;
+  earliestStartTime: string | null;
+  latestEndTime: string | null;
+  fixedStartTime: string | null;
+  fixedEndTime: string | null;
+  minDurationMinutes: number | null;
+  maxDurationMinutes: number | null;
+  incrementMinutes: number | null;
+  breakTreatment: LeaveBreakTreatment;
+  validateAgainstSchedule: boolean;
+  allowOvernight: boolean;
+  sameDayPolicy: LeaveSameDayPolicy;
+  minNoticeMinutes: number | null;
+  backdateDaysAllowed: number | null;
+  dailyLimitMinutes: number | null;
+  monthlyLimitMinutes: number | null;
+  frequencyMaxRequests: number | null;
+  frequencyPeriod: LeaveFrequencyPeriod | null;
+  dayEquivalentMinutes: number | null;
+  workflowTemplateKey: string | null;
+  isActive: boolean;
+  version: number;
+  updatedAt: string | null;
+};
+
+export type SetLeaveDurationSettingsRequest = Partial<
+  Omit<LeaveDurationSettingsView, "id" | "leaveType" | "leavePolicyId" | "version" | "updatedAt">
+>;
+
+export type LeaveConditionOperator = "eq" | "neq" | "gt" | "gte" | "lt" | "lte" | "in" | "not_in" | "between";
+export type LeaveConditionField =
+  | "durationMinutes"
+  | "requestedUnits"
+  | "daysRequested"
+  | "balanceAvailable"
+  | "noticeMinutes"
+  | "startMinute"
+  | "endMinute"
+  | "dayOfWeek"
+  | "leaveType"
+  | "employmentType"
+  | "isTimed"
+  | "reasonLength"
+  | "hasAttachment";
+export type LeaveRuleCondition = { field: LeaveConditionField; operator: LeaveConditionOperator; value: string | number | boolean | Array<string | number> };
+export type LeaveRuleConditionGroup = { op: "and" | "or"; children: Array<LeaveRuleCondition | LeaveRuleConditionGroup> };
+
+export type LeaveValidationRuleParams = {
+  /** insufficient_notice */ minNoticeMinutes?: number;
+  /** max_duration_exceeded */ maxMinutes?: number;
+  /** min_duration_not_met */ minMinutes?: number;
+  /** limit_exceeded */ dailyLimitMinutes?: number; monthlyLimitMinutes?: number;
+  /** frequency_reached */ maxRequests?: number; period?: LeaveFrequencyPeriod;
+  /** reason_required */ minReasonLength?: number;
+  /** ineligible_employment_category */ allowedEmploymentTypes?: string[];
+  /** public_holiday_conflict: "no_chargeable_days" (default) only when the holiday leaves nothing to charge; "any_in_range" when the range touches one. */ holidayMode?: "no_chargeable_days" | "any_in_range";
+  /** backdated_not_allowed */ backdateDaysAllowed?: number;
+  /** attachment_required (timed requests) */ requiredAfterMinutes?: number;
+};
+
+export type LeaveValidationRuleView = {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  validationType: LeaveValidationType;
+  /** Empty = applies to every one. */
+  leaveTypes: string[];
+  policyIds: string[];
+  employeeGroupIds: string[];
+  severity: LeaveValidationSeverity;
+  message: string;
+  /** Translations of `message` by locale, e.g. { ur: "..." }. */
+  messages: Record<string, string>;
+  adminExplanation: string | null;
+  priority: number;
+  effectiveFrom: string | null;
+  effectiveTo: string | null;
+  isActive: boolean;
+  allowProceed: boolean;
+  conditions: LeaveRuleConditionGroup | null;
+  params: LeaveValidationRuleParams;
+  isSystem: boolean;
+  /** Types whose severity cannot be lowered or switched off: they protect the integrity of the request itself. */
+  isLocked: boolean;
+  version: number;
+  updatedAt: string;
+};
+
+export type SaveLeaveValidationRuleRequest = {
+  code?: string;
+  name?: string;
+  description?: string | null;
+  validationType?: LeaveValidationType;
+  leaveTypes?: string[];
+  policyIds?: string[];
+  employeeGroupIds?: string[];
+  severity?: LeaveValidationSeverity;
+  message?: string;
+  messages?: Record<string, string>;
+  adminExplanation?: string | null;
+  priority?: number;
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
+  isActive?: boolean;
+  allowProceed?: boolean;
+  conditions?: LeaveRuleConditionGroup | null;
+  params?: LeaveValidationRuleParams;
+};
+
+export type LeaveValidationTypeInfo = {
+  type: LeaveValidationType;
+  /** 1-20, the number the administrator sees. */
+  number: number;
+  label: string;
+  description: string;
+  defaultSeverity: LeaveValidationSeverity;
+  defaultMessage: string;
+  locked: boolean;
+  /** Which `params` this validation understands. */
+  paramKeys: Array<keyof LeaveValidationRuleParams>;
+  /** The placeholders its message may use, as {{name}}. */
+  placeholders: string[];
+};
+
+export type LeaveRuleHistoryEntry = {
+  id: string;
+  entityType: "rule" | "settings";
+  entityId: string;
+  version: number;
+  action: "create" | "update" | "delete";
+  snapshot: Record<string, unknown>;
+  changedByUserAccountId: string | null;
+  changedAt: string;
+};
+
+/** One validation outcome. `code` and `ruleCode` are stable and meant for logic; `message` is configurable and localised. */
+export type LeaveValidationFinding = {
+  code: LeaveValidationType;
+  ruleCode: string;
+  ruleName: string;
+  severity: LeaveValidationSeverity;
+  message: string;
+  adminExplanation?: string | null;
+  /** The form field the message belongs next to: "startDate", "startTime", "endTime", "reason", "attachment", "leaveType" ... */
+  field: string | null;
+  /** Warnings only: false = the employee cannot proceed even after confirming. */
+  allowProceed: boolean;
+};
+
+export type LeaveDurationBreakdown = {
+  timeZone: string;
+  startAt: string | null;
+  endAt: string | null;
+  startDate: string;
+  endDate: string;
+  grossMinutes: number;
+  breakMinutes: number;
+  /** Minutes charged: gross less the breaks the settings exclude. */
+  durationMinutes: number;
+  breaks: Array<{ startTime: string; endTime: string; isPaid: boolean; overlapMinutes: number; excluded: boolean }>;
+  balanceUnit: LeaveBalanceUnit;
+  /** What the request charges to the balance, in `balanceUnit`. */
+  balanceUnits: number;
+  /** Working-day equivalent (shown as "days" on the request). */
+  daysEquivalent: number;
+  scheduleName: string | null;
+  scheduleStartTime: string | null;
+  scheduleEndTime: string | null;
+};
+
+export type LeaveBalanceSnapshot = {
+  unit: LeaveBalanceUnit;
+  entitled: number;
+  used: number;
+  reserved: number;
+  available: number;
+  year: number;
+};
+
+export type LeaveValidationResult = {
+  /** true = no blocking finding and every warning that stops the employee has been confirmed: the request can be submitted. */
+  canSubmit: boolean;
+  blocking: LeaveValidationFinding[];
+  /** Warnings the employee may submit through after confirming them. */
+  warnings: LeaveValidationFinding[];
+  /** Notices only. */
+  info: LeaveValidationFinding[];
+  /** Warnings listed in `acknowledgedWarnings` of the request. */
+  acknowledged: string[];
+  duration: LeaveDurationBreakdown | null;
+  balance: LeaveBalanceSnapshot | null;
+  /** Everything the person approving would see on the leave type: the effective timing rules, for the form's hints. */
+  settings: LeaveDurationSettingsView | null;
+  /** Expected approvers for display. */
+  approvers: LeaveApproverPreviewView[];
+};
+
+export type LeaveRulePreviewRequest = {
+  rule: SaveLeaveValidationRuleRequest;
+  /** The request to try the rule against; the employee defaults to the caller. */
+  request: SubmitLeaveRequestRequest;
+};
+
+export type LeaveRulePreviewResponse = {
+  /** The findings with the rule as drafted. */
+  withDraft: LeaveValidationResult;
+  /** The findings without it (the rules as saved). */
+  withoutDraft: LeaveValidationResult;
+  draftFired: boolean;
 };
 
 // --- Expense Management (Part 2 category 6, UI re-skin build-out 2026-10) ---

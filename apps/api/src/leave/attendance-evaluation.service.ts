@@ -192,13 +192,15 @@ export class AttendanceEvaluationService {
       [employeeId, workDate, DEFAULT_TZ]
     );
     const leave = await client.query(
-      `SELECT id, day_part FROM leave_requests
+      `SELECT id, day_part, start_at, end_at, duration_minutes FROM leave_requests
         WHERE employee_id = $1 AND status = 'approved' AND start_date <= $2::date AND end_date >= $2::date
         ORDER BY (day_part = 'full') DESC, created_at`,
       [employeeId, workDate]
     );
     const fullLeave = leave.rows.find((l) => l.day_part === "full");
-    const halfLeave = leave.rows.find((l) => l.day_part !== "full");
+    const halfLeave = leave.rows.find((l) => l.day_part !== "full" && l.day_part !== "hours");
+    // BACKLOG58: approved short-hours leave covers part of the shift: those minutes are neither expected nor late/early.
+    const timedLeave = leave.rows.filter((l) => l.day_part === "hours" && l.start_at && l.end_at);
     const onDuty = await client.query(
       `SELECT id FROM on_duty_requests WHERE employee_id = $1 AND status = 'approved' AND start_date <= $2::date AND end_date >= $2::date LIMIT 1`,
       [employeeId, workDate]
@@ -223,13 +225,17 @@ export class AttendanceEvaluationService {
       }
     }
 
-    const scheduledMinutes = scheduledMinutesOf(sched);
+    const nominalMinutes = scheduledMinutesOf(sched);
+    const timedLeaveMinutes = Math.min(nominalMinutes, timedLeave.reduce((sum, l) => sum + Number(l.duration_minutes ?? 0), 0));
+    const scheduledMinutes = Math.max(0, nominalMinutes - timedLeaveMinutes);
+    const coveredByTimedLeave = timedLeave.length > 0 && nominalMinutes > 0 && timedLeaveMinutes >= nominalMinutes;
+    if (timedLeave.length > 0) exceptions.push("partial_leave");
     const hasPunches = punches.rows.length > 0;
     let status: AttendanceDailyStatus;
     let late = 0;
     let early = 0;
 
-    if (fullLeave) {
+    if (fullLeave || coveredByTimedLeave) {
       status = "on_leave";
     } else if (!sched.hasSchedule && !hasPunches && !sched.isMandatoryHoliday) {
       status = "no_schedule";
@@ -270,8 +276,17 @@ export class AttendanceEvaluationService {
     } else {
       status = "present";
       if (sched.hasSchedule) {
-        const startM = hhmm(sched.isFlexible ? (sched.coreStartTime ?? sched.flexibleEndTime) : sched.startTime);
-        const endM = hhmm(sched.isFlexible ? sched.coreEndTime : sched.endTime);
+        let startM = hhmm(sched.isFlexible ? (sched.coreStartTime ?? sched.flexibleEndTime) : sched.startTime);
+        let endM = hhmm(sched.isFlexible ? sched.coreEndTime : sched.endTime);
+        // Short-hours leave at the start of the shift moves the expected arrival to its end; at the end of the shift, the expected departure to its start.
+        for (const l of timedLeave) {
+          const from = localParts(new Date(l.start_at), tz);
+          const to = localParts(new Date(l.end_at), tz);
+          const ls = from.date === workDate ? from.minutes : 0;
+          const le = to.date === workDate ? to.minutes : to.date > workDate ? 1440 + to.minutes : 0;
+          if (startM !== null && ls <= startM && le > startM) startM = le;
+          if (endM !== null && le >= endM && ls < endM) endM = ls;
+        }
         if (firstIn && startM !== null) {
           const inLocal = localParts(firstIn, tz);
           const inMinutes = inLocal.date === workDate ? inLocal.minutes : 0;
@@ -304,7 +319,7 @@ export class AttendanceEvaluationService {
        WHERE attendance_daily_results.is_overridden = false`,
       [
         companyId, employeeId, workDate, sched.scheduleId, sched.scheduleName, status, scheduledMinutes, worked, late, early,
-        firstIn, lastOut, punches.rowCount, (fullLeave ?? halfLeave)?.id ?? null, onDuty.rows[0]?.id ?? null, exceptions,
+        firstIn, lastOut, punches.rowCount, (fullLeave ?? halfLeave ?? timedLeave[0])?.id ?? null, onDuty.rows[0]?.id ?? null, exceptions,
       ]
     );
     return true;

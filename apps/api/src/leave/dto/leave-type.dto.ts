@@ -1,5 +1,5 @@
 import { IsBoolean, IsUUID, IsIn, IsInt, IsNumber, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength } from "class-validator";
-import type { AccrualMethod, LeaveGenderRestriction } from "@aihxm/shared-types";
+import type { AccrualMethod, LeaveBalanceUnit, LeaveDurationMode, LeaveGenderRestriction } from "@aihxm/shared-types";
 
 export class CreateLeaveTypeDto {
   @IsString()
@@ -21,6 +21,8 @@ export class CreateLeaveTypeDto {
   @IsOptional() @IsInt() @Min(0) @Max(600) minServiceMonths?: number;
   @IsOptional() @IsBoolean() halfDayAllowed?: boolean;
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0.5) maxConsecutiveDays?: number | null;
+  @IsOptional() @IsIn(["full_day", "half_day", "short_hours", "hourly", "flexible_partial"]) durationMode?: LeaveDurationMode;
+  @IsOptional() @IsIn(["days", "hours", "minutes"]) balanceUnit?: LeaveBalanceUnit;
   @IsOptional() @IsBoolean() isActive?: boolean;
   @IsOptional() @IsInt() @Min(0) @Max(10000) sortOrder?: number;
 }
@@ -42,6 +44,8 @@ export class UpdateLeaveTypeDto {
   @IsOptional() @IsInt() @Min(0) @Max(600) minServiceMonths?: number;
   @IsOptional() @IsBoolean() halfDayAllowed?: boolean;
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0.5) maxConsecutiveDays?: number | null;
+  @IsOptional() @IsIn(["full_day", "half_day", "short_hours", "hourly", "flexible_partial"]) durationMode?: LeaveDurationMode;
+  @IsOptional() @IsIn(["days", "hours", "minutes"]) balanceUnit?: LeaveBalanceUnit;
   @IsOptional() @IsBoolean() isActive?: boolean;
   @IsOptional() @IsInt() @Min(0) @Max(10000) sortOrder?: number;
 }

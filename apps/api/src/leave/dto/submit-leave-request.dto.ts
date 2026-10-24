@@ -1,4 +1,4 @@
-import { IsDateString, IsIn, IsOptional, IsString, IsUUID, Matches } from "class-validator";
+import { ArrayMaxSize, IsArray, IsDateString, IsIn, IsOptional, IsString, IsUUID, Matches } from "class-validator";
 import type { LeaveDayPart, LeaveType } from "@aihxm/shared-types";
 
 export class SubmitLeaveRequestDto {
@@ -21,7 +21,7 @@ export class SubmitLeaveRequestDto {
   reason?: string;
 
   @IsOptional()
-  @IsIn(["full", "first_half", "second_half"])
+  @IsIn(["full", "first_half", "second_half", "hours"])
   dayPart?: LeaveDayPart;
 
   @IsOptional()
@@ -31,4 +31,29 @@ export class SubmitLeaveRequestDto {
   @IsOptional()
   @IsUUID()
   delegateEmployeeId?: string;
+
+  /** BACKLOG58: a request by hours is on `startDate` between these local times. */
+  @IsOptional()
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: "startTime must be HH:MM" })
+  startTime?: string;
+
+  @IsOptional()
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: "endTime must be HH:MM" })
+  endTime?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  acknowledgedWarnings?: string[];
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^[a-z]{2}(-[A-Za-z]{2})?$/)
+  locale?: string;
+
+  /** Validation only: the pending request being edited, so it is not counted against itself. */
+  @IsOptional()
+  @IsUUID()
+  excludeRequestId?: string;
 }

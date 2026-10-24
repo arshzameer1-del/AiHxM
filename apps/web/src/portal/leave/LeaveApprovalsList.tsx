@@ -8,6 +8,7 @@ import { describeError } from "../shared/describeError";
 import { leaveTypeLabel, STATUS_LABELS, STATUS_STYLES } from "./leaveLabels";
 import { formatDay, formatPeriod } from "../shared/dates";
 import { DetailLoader } from "./LeaveOverview";
+import { chargedText, timedRangeText } from "./leaveUnits";
 
 /** The approver's balance line for the request: what the employee has left of this leave type this year, and what is left if it is approved. */
 function BalanceLine({ request }: { request: LeaveRequestView }) {
@@ -29,10 +30,12 @@ function BalanceLine({ request }: { request: LeaveRequestView }) {
   }, [request.employeeId, request.leaveType, request.startDate]);
   if (balance === undefined) return <p className="text-xs text-label-tertiary">Reading the leave balance…</p>;
   if (balance === null) return <p className="text-xs text-label-tertiary" data-testid="leave-balance-line">No yearly balance is kept for this leave type.</p>;
-  const after = request.status === "pending" ? balance.remainingDays - request.daysRequested : null;
+  const charge = request.dayPart === "hours" && request.balanceUnits != null ? request.balanceUnits : request.daysRequested;
+  const after = request.status === "pending" ? Math.round((balance.remainingDays - charge) * 100) / 100 : null;
+  const unit = balance.unit ?? "days";
   return (
     <p className="text-xs text-label-secondary tabular-nums" data-testid="leave-balance-line">
-      {balance.leaveTypeName ?? leaveTypeLabel(balance.leaveType)} {balance.year}: {balance.entitledDays} entitled, {balance.usedDays} used, <b>{balance.remainingDays} left</b>
+      {balance.leaveTypeName ?? leaveTypeLabel(balance.leaveType)} {balance.year}: {balance.entitledDays} entitled, {balance.usedDays} used, <b>{balance.remainingDays} left</b>{unit !== "days" ? ` (${unit})` : ""}
       {after !== null && (
         <>
           {" "}· {after >= 0 ? `${after} left after this request` : <span className="text-danger font-semibold">{Math.abs(after)} over the balance if approved</span>}
@@ -148,10 +151,11 @@ function RequestRow({
             {request.isOnBehalf && <span className="text-xs text-label-tertiary ml-1.5">(on behalf)</span>}
           </div>
           <div className="text-sm text-label-secondary mt-0.5">
-            {request.leaveTypeName ?? leaveTypeLabel(request.leaveType)} · {formatPeriod(request.startDate, request.endDate)} · {request.daysRequested}{" "}
-            day{request.daysRequested === 1 ? "" : "s"}
+            {request.leaveTypeName ?? leaveTypeLabel(request.leaveType)} · {formatPeriod(request.startDate, request.endDate)} ·{" "}
+            {request.dayPart === "hours" ? chargedText(request) : <>{request.daysRequested} day{request.daysRequested === 1 ? "" : "s"}</>}
           </div>
-          {request.dayPart !== "full" && (
+          {request.dayPart === "hours" && <div className="text-xs text-label-tertiary mt-1 tabular-nums" data-testid="leave-approval-times">{timedRangeText(request)}</div>}
+          {request.dayPart !== "full" && request.dayPart !== "hours" && (
             <div className="text-xs text-label-tertiary mt-1">{request.dayPart === "first_half" ? "First half of the day" : "Second half of the day"}</div>
           )}
           {request.reason && <div className="text-xs text-label-tertiary mt-1">&ldquo;{request.reason}&rdquo;</div>}

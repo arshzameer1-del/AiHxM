@@ -9,6 +9,8 @@ import type { CreateLeaveTypeRequest, LeaveTypeView, UpdateLeaveTypeRequest } fr
 
 const MODULE_KEY = "leave" as const;
 const CODE_RE = /^[a-z][a-z0-9_]{1,39}$/;
+/** Duration modes under which a type may also be taken as a half day. */
+const HALF_DAY_MODES = new Set(["half_day", "flexible_partial"]);
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function rowToLeaveType(row: any): LeaveTypeView {
@@ -31,6 +33,8 @@ export function rowToLeaveType(row: any): LeaveTypeView {
     minServiceMonths: row.min_service_months,
     halfDayAllowed: row.half_day_allowed,
     maxConsecutiveDays: num(row.max_consecutive_days),
+    durationMode: row.duration_mode,
+    balanceUnit: row.balance_unit,
     isSystem: row.is_system,
     isActive: row.is_active,
     sortOrder: row.sort_order,
@@ -54,6 +58,8 @@ const COLUMNS: Array<[keyof CreateLeaveTypeRequest, string]> = [
   ["minServiceMonths", "min_service_months"],
   ["halfDayAllowed", "half_day_allowed"],
   ["maxConsecutiveDays", "max_consecutive_days"],
+  ["durationMode", "duration_mode"],
+  ["balanceUnit", "balance_unit"],
   ["isActive", "is_active"],
   ["sortOrder", "sort_order"],
 ];
@@ -103,10 +109,12 @@ export class LeaveTypesService {
       if ((dup.rowCount ?? 0) > 0) throw new ConflictException(`A leave type with code "${code}" already exists`);
       const cols: string[] = ["company_id", "code"];
       const vals: unknown[] = [claims.company_id, code];
+      const createInput: CreateLeaveTypeRequest = { ...input };
+      if (createInput.durationMode && createInput.halfDayAllowed === undefined) createInput.halfDayAllowed = HALF_DAY_MODES.has(createInput.durationMode);
       for (const [key, column] of COLUMNS) {
-        if ((input as Record<string, unknown>)[key] !== undefined) {
+        if ((createInput as Record<string, unknown>)[key] !== undefined) {
           cols.push(column);
-          vals.push((input as Record<string, unknown>)[key]);
+          vals.push((createInput as Record<string, unknown>)[key]);
         }
       }
       const r = await client.query(
@@ -136,11 +144,20 @@ export class LeaveTypesService {
       if (row.is_system && patch.tracksBalance !== undefined && patch.tracksBalance !== row.tracks_balance) {
         throw new BadRequestException("Whether a built-in leave type keeps a balance cannot be changed");
       }
+      if (patch.balanceUnit !== undefined && patch.balanceUnit !== row.balance_unit) {
+        // The ledger and the policy entitlements hold figures in the current unit; re-labelling them would silently change what they mean.
+        const used = await client.query("SELECT 1 FROM leave_ledger WHERE company_id = $1 AND leave_type = $2 LIMIT 1", [row.company_id, row.code]);
+        if ((used.rowCount ?? 0) > 0) {
+          throw new BadRequestException(`${row.name} already has balance history in ${row.balance_unit}, so its balance unit can no longer be changed`);
+        }
+      }
+      const effectivePatch: UpdateLeaveTypeRequest = { ...patch };
+      if (effectivePatch.durationMode && effectivePatch.halfDayAllowed === undefined) effectivePatch.halfDayAllowed = HALF_DAY_MODES.has(effectivePatch.durationMode);
       const sets: string[] = [];
       const vals: unknown[] = [id];
       for (const [key, column] of COLUMNS) {
-        if ((patch as Record<string, unknown>)[key] !== undefined) {
-          vals.push((patch as Record<string, unknown>)[key]);
+        if ((effectivePatch as Record<string, unknown>)[key] !== undefined) {
+          vals.push((effectivePatch as Record<string, unknown>)[key]);
           sets.push(`${column} = $${vals.length}`);
         }
       }

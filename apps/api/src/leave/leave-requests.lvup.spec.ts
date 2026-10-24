@@ -177,7 +177,8 @@ describe("LeaveRequestsService LV-UP: edit, approvals, team calendar", () => {
     // criterion, already proven in employee-groups.service.spec.ts).
     await groups.createLeavePolicy(hrAdminClaims, {
       name: "Default Policy",
-      annualLeaveDays: 14,
+      // Pending requests now hold their days against the balance, so this policy is generous enough for the many requests the tests leave pending.
+      annualLeaveDays: 120,
       casualLeaveDays: 10,
       sickLeaveDays: 8,
       isDefault: true,
@@ -304,7 +305,7 @@ describe("LeaveRequestsService LV-UP: edit, approvals, team calendar", () => {
       const created = await submitFor(staffClaims, staffEmployeeId, "2027-05-03", "2027-05-03");
       await expect(leaveRequests.update(staffClaims, created.id, { startDate: "2027-05-05", endDate: "2027-05-04" })).rejects.toBeInstanceOf(BadRequestException);
       await expect(leaveRequests.update(staffClaims, created.id, { leaveType: "no_such_type" })).rejects.toBeInstanceOf(BadRequestException);
-      await expect(leaveRequests.update(staffClaims, created.id, { startDate: "2027-06-01", endDate: "2027-06-30" })).rejects.toThrow(/Insufficient/);
+      await expect(leaveRequests.update(staffClaims, created.id, { startDate: "2027-06-01", endDate: "2027-12-31" })).rejects.toThrow(/Insufficient/);
       const unchanged = await leaveRequests.getRequest(staffClaims, created.id);
       expect(unchanged.startDate).toBe("2027-05-03");
     });

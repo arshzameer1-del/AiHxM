@@ -10,17 +10,23 @@ import { WorkflowService } from "../workflow/workflow.service";
 import { WorkScheduleResolutionService } from "../shifts/work-schedule-resolution.service";
 import { LeaveTypesService } from "./leave-types.service";
 import { LeaveLedgerService } from "./leave-ledger.service";
+import { LeaveDurationSettingsService } from "./leave-duration-settings.service";
+import { LeaveValidationRulesService, rowToRule } from "./leave-validation-rules.service";
+import { LeaveRequestValidationService, leaveValidationError, type PricedRequest, type ValidationInput } from "./leave-request-validation.service";
 import { resolveEntitlement } from "./leave-entitlements.repo";
 import type {
-  AccrualMethod,
   DecideLeaveCancellationRequest,
   LeaveApprovalLineView,
   LeaveBalanceView,
   LeaveColleagueView,
   LeaveApproverPreviewView,
   LeaveRequestView,
+  LeaveRulePreviewRequest,
+  LeaveRulePreviewResponse,
   LeaveType,
-  LeaveTypeView,
+  LeaveValidationResult,
+  LeaveValidationRuleView,
+  LeaveBalanceUnit,
   OverlapWarning,
   SubmitLeaveRequestRequest,
   SubmitLeaveRequestResponse,
@@ -60,7 +66,7 @@ function toIsoDate(value: unknown): string {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function rowToBalance(row: any): LeaveBalanceView {
+function rowToBalance(row: any, unit: LeaveBalanceUnit = "days", reserved = 0): LeaveBalanceView {
   const entitled = Number(row.entitled_days);
   const used = Number(row.used_days);
   return {
@@ -68,9 +74,12 @@ function rowToBalance(row: any): LeaveBalanceView {
     employeeId: row.employee_id,
     leaveType: row.leave_type,
     year: row.year,
+    unit,
     entitledDays: entitled,
     usedDays: used,
-    remainingDays: entitled - used,
+    remainingDays: Math.round((entitled - used) * 10000) / 10000,
+    reservedDays: reserved,
+    availableDays: Math.round((entitled - used - reserved) * 10000) / 10000,
     openingDays: Number(row.opening_days ?? 0),
     accruedDays: Number(row.accrued_days ?? 0),
     carriedForwardDays: Number(row.carried_forward_days ?? 0),
@@ -107,6 +116,20 @@ function rowToLeaveRequest(row: any, employeeUserAccountId: string | null, appro
     cancellationReason: row.cancellation_reason ?? null,
     cancellationRequestedAt: row.cancellation_requested_at ? toIso(row.cancellation_requested_at) : null,
     payrollImpact: row.payroll_impact ?? false,
+    ...(row.day_part === "hours"
+      ? {
+          startTime: row.start_time ? String(row.start_time).slice(0, 5) : null,
+          endTime: row.end_time ? String(row.end_time).slice(0, 5) : null,
+          startAt: row.start_at ? toIso(row.start_at) : null,
+          endAt: row.end_at ? toIso(row.end_at) : null,
+          timeZone: row.time_zone ?? null,
+          durationMinutes: row.duration_minutes ?? null,
+          breakMinutes: row.break_minutes ?? null,
+        }
+      : {}),
+    balanceUnits: row.balance_units === null || row.balance_units === undefined ? null : Number(row.balance_units),
+    balanceUnit: row.balance_unit ?? null,
+    ...(Array.isArray(row.rules_snapshot?.acknowledgedWarnings) && row.rules_snapshot.acknowledgedWarnings.length > 0 ? { acknowledgedWarnings: row.rules_snapshot.acknowledgedWarnings as string[] } : {}),
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
     // LV-UP display fields. They come from joins the list/get queries add, so a view built from a bare
@@ -153,40 +176,6 @@ function addOneDayIso(dateIso: string): string {
 }
 
 /**
- * Holiday- AND weekly-pattern-aware day count. The holiday half shipped
- * first (mandatory company holidays only — see
- * `HolidaysService.countMandatoryHolidaysInRange`'s own doc comment for
- * why optional holidays deliberately aren't subtracted); the "NOT
- * business-day/weekend aware" half that comment used to name as a
- * separately-tracked gap (KNOWN_ISSUES.md, "no work-week/weekend concept
- * exists anywhere in this schema") is closed here, now that the Work
- * Schedule & Employee Schedule Assignment Architecture gives every
- * employee a real, configurable weekly pattern to check against.
- *
- * Deliberately walks day-by-day (rather than one aggregate query) and
- * asks `WorkScheduleResolutionService.isWorkingDay()` per day: that
- * method already returns `true` for every day when the employee has no
- * schedule configured at all (see its own doc comment), so a tenant that
- * hasn't set up Work Schedule/Shift Management yet gets EXACTLY today's
- * calendar-days-minus-mandatory-holidays behavior, unchanged — the
- * weekend/off-day exclusion only engages once a tenant has actually
- * configured a weekly pattern with a day marked off.
- */
-async function countLeaveDays(
-  client: PoolClient,
-  workSchedule: WorkScheduleResolutionService,
-  employeeId: string,
-  startDate: string,
-  endDate: string
-): Promise<number> {
-  let count = 0;
-  for (let cursor = startDate; cursor <= endDate; cursor = addOneDayIso(cursor)) {
-    if (await workSchedule.isWorkingDay(client, employeeId, cursor)) count++;
-  }
-  return count;
-}
-
-/**
  * Phase 9 (plan doc Section 7): "the real go/no-go checkpoint." The first
  * genuine end-to-end wiring of Phase 4's RBAC, Phase 5's entitlements,
  * Phase 6's workflow engine (including this phase's own
@@ -222,7 +211,15 @@ export class LeaveRequestsService {
     private readonly workflow: WorkflowService,
     private readonly workSchedule: WorkScheduleResolutionService,
     private readonly leaveTypes: LeaveTypesService = new LeaveTypesService(db, rbac, entitlements, audit),
-    private readonly ledger: LeaveLedgerService = new LeaveLedgerService(db, rbac, entitlements, audit)
+    private readonly ledger: LeaveLedgerService = new LeaveLedgerService(db, rbac, entitlements, audit),
+    private readonly rules: LeaveValidationRulesService = new LeaveValidationRulesService(db, rbac, entitlements, audit),
+    private readonly validation: LeaveRequestValidationService = new LeaveRequestValidationService(
+      workSchedule,
+      ledger,
+      new LeaveDurationSettingsService(db, rbac, entitlements, audit),
+      rules,
+      workflow
+    )
   ) {
     this.workflow?.adapters?.register({
       objectKey: WORKFLOW_OBJECT_KEY,
@@ -238,87 +235,44 @@ export class LeaveRequestsService {
       throw new BadRequestException("endDate cannot be before startDate");
     }
 
-    const employee = await this.db.withClaims(claims, async (client) => this.loadEmployee(client, input.employeeId));
-    if (!employee) throw new NotFoundException("Employee not found");
-    if (!employee.user_account_id) {
-      // A leave request is routed through a workflow instance keyed on a
-      // real user_account_id (both `subjectUserAccountId` and
-      // `manager_of_submitter` resolution need one) — an employee record
-      // with no login can never be the subject of one. Rather than
-      // silently skipping approval routing for such employees, this is
-      // surfaced as a clear, actionable error.
-      throw new BadRequestException(
-        "This employee has no user account and cannot have leave requests routed for approval — assign them a login first"
-      );
-    }
-
+    const { employee, leaveType, policyId } = await this.loadSubmission(claims, input.employeeId, input.leaveType, true);
     const isOnBehalf = employee.user_account_id !== claims.sub;
-    const [canSelf, canManageAll] = await Promise.all([
-      !isOnBehalf
-        ? this.rbac.can(claims, "leave_request.create.self", { ownerId: employee.user_account_id })
-        : Promise.resolve(false),
-      this.rbac.can(claims, "leave_request.manage.all"),
-    ]);
-    if (!canSelf && !canManageAll) {
-      throw new ForbiddenException("Not permitted to submit a leave request for this employee");
-    }
-
-    // TLM-01: the leave type is a tenant-configured catalogue row. A type that
-    // does not track a balance (unpaid) has no entitlement, no policy to resolve
-    // and nothing to decrement - an employee can always request it (a manager
-    // still approves it, and PayrollService turns an approved request into a
-    // deduction by reading these rows). Every other type draws on the policy.
-    const leaveType = await this.db.withClaims(claims, (client) => this.leaveTypes.getByCode(client, employee.company_id, input.leaveType));
-    if (!leaveType || !leaveType.isActive) {
-      throw new BadRequestException(`Leave type "${input.leaveType}" is not available - ask HR to enable it`);
-    }
-    this.assertTypeEligibility(leaveType, employee, input.startDate);
     const dayPart = input.dayPart ?? "full";
-    if (dayPart !== "full") {
-      if (!leaveType.halfDayAllowed) throw new BadRequestException(`${leaveType.name} cannot be taken as a half day`);
-      if (input.startDate !== input.endDate) throw new BadRequestException("A half-day leave request must start and end on the same date");
-    }
 
-    const resolved = leaveType.tracksBalance
-      ? await this.employeeGroups.resolvePolicyInternal(claims, input.employeeId, "leave")
-      : null;
-    if (leaveType.tracksBalance && !resolved?.policyId) {
-      throw new BadRequestException(
-        "No leave policy is configured for this employee — assign a tenant-wide default leave policy or an employee group policy first"
-      );
-    }
-
-    // Balance year = the request's start date's year - a documented
-    // simplification for a request that spans a year boundary (e.g.
-    // Dec 30 - Jan 3): the whole request draws against the START year's
-    // balance rather than being split proportionally across two years'
-    // entitlements. See KNOWN_ISSUES.md.
-    const year = new Date(input.startDate).getUTCFullYear();
-
+    // BACKLOG58: the checks, the duration and the balance reservation are decided in one transaction under the
+    // employee's lock, by the same pipeline the preview uses; nothing is written unless every blocking rule passes.
     const result = await this.db.withClaims(claims, async (client) => {
-      const { daysRequested, returnDate, overlapWarnings } = await this.priceAndValidate(client, employee, leaveType, resolved?.policyId ?? null, year, {
-        startDate: input.startDate,
-        endDate: input.endDate,
-        dayPart,
-        attachmentDocumentId: input.attachmentDocumentId ?? null,
-        delegateEmployeeId: input.delegateEmployeeId ?? null,
+      const evaluated = await this.validation.evaluate(client, claims, {
+        employee,
+        leaveType,
+        policyId,
+        lock: true,
+        input: this.validationInput(input, dayPart),
       });
+      if (!evaluated.priced) throw leaveValidationError(evaluated.result);
+      const priced = evaluated.priced;
+      const timed = priced.timed;
+      const startDate = input.startDate;
+      const endDate = timed ? timed.endDate : input.endDate;
+      const returnDate = timed ? timed.endDate : await this.computeReturnDate(client, employee.id, input.endDate, dayPart, input.startDate);
+      const overlapWarnings = await this.findOverlapWarnings(client, employee, startDate, endDate);
 
       let insertResult;
       try {
         insertResult = await client.query(
           `INSERT INTO leave_requests
              (company_id, employee_id, leave_type, start_date, end_date, days_requested, reason, status, submitted_by_user_account_id,
-              day_part, attachment_document_id, delegate_employee_id, return_date, payroll_impact)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9, $10, $11, $12, $13)
+              day_part, attachment_document_id, delegate_employee_id, return_date, payroll_impact,
+              start_time, end_time, start_at, end_at, time_zone, duration_minutes, break_minutes, balance_units, balance_unit, policy_id, rules_snapshot)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24::jsonb)
            RETURNING *`,
           [
             employee.company_id,
             employee.id,
             leaveType.code,
-            input.startDate,
-            input.endDate,
-            daysRequested,
+            startDate,
+            endDate,
+            priced.daysRequested,
             input.reason ?? null,
             claims.sub,
             dayPart,
@@ -326,12 +280,17 @@ export class LeaveRequestsService {
             input.delegateEmployeeId ?? null,
             returnDate,
             !leaveType.isPaid,
+            ...this.timedColumns(priced, input),
+            priced.balanceUnits,
+            priced.balanceUnit,
+            priced.policyId,
+            JSON.stringify(priced.snapshot),
           ]
         );
       } catch (err) {
-        // 23P01 = the overlap exclusion constraint (a concurrent request won the race).
+        // 23P01 = an overlap exclusion constraint (a concurrent request won the race).
         if ((err as { code?: string }).code === "23P01") {
-          throw new ConflictException("This employee already has pending or approved leave overlapping these dates");
+          throw new ConflictException("This employee already has pending or approved leave overlapping these dates or times");
         }
         throw err;
       }
@@ -341,10 +300,17 @@ export class LeaveRequestsService {
         companyId: employee.company_id,
         action: "leave_request.submit",
         target: leaveRequestRow.id,
-        metadata: { leaveType: leaveType.code, daysRequested, isOnBehalf, dayPart },
+        metadata: {
+          leaveType: leaveType.code,
+          daysRequested: priced.daysRequested,
+          isOnBehalf,
+          dayPart,
+          ...(timed ? { durationMinutes: timed.netMinutes, startAt: timed.startAt, endAt: timed.endAt } : {}),
+          acknowledgedWarnings: evaluated.result.acknowledged,
+        },
       });
 
-      return { leaveRequestRow, overlapWarnings, daysRequested };
+      return { leaveRequestRow, overlapWarnings, priced, validation: evaluated.result };
     });
 
     // A separate transaction — see this class's own doc comment on the
@@ -352,12 +318,19 @@ export class LeaveRequestsService {
     let instance;
     try {
       instance = await this.workflow.submitForApproval(claims, {
-        templateKey: WORKFLOW_TEMPLATE_KEY,
+        templateKey: result.priced.templateKey,
         objectKey: WORKFLOW_OBJECT_KEY,
         recordId: result.leaveRequestRow.id,
         // ORG-05: `orgUnitId` is the canonical dimension; `department` text stays for existing start conditions.
-        record: { leaveType: input.leaveType, daysRequested: result.daysRequested, department: employee.department, orgUnitId: employee.org_unit_id ?? null },
-        subjectUserAccountId: employee.user_account_id,
+        record: this.validation.workflowRecord(
+          leaveType,
+          employee,
+          { ...this.validationInput(input, dayPart) },
+          result.priced.daysRequested,
+          result.priced.timed?.netMinutes ?? null,
+          result.priced.balanceUnits
+        ),
+        subjectUserAccountId: employee.user_account_id!,
       });
     } catch (err) {
       // No approval route (or nobody to route to): the request was never really submitted, so it must not
@@ -379,7 +352,112 @@ export class LeaveRequestsService {
     return {
       request: rowToLeaveRequest(updatedRow, employee.user_account_id),
       overlapWarnings: result.overlapWarnings,
+      validation: result.validation,
     };
+  }
+
+  /** Loads the employee and leave type for a new request and checks the caller may act for that employee. */
+  private async loadSubmission(claims: RequestClaims, employeeId: string, leaveTypeCode: string, requirePolicy: boolean) {
+    const employee = await this.db.withClaims(claims, async (client) => this.loadEmployee(client, employeeId));
+    if (!employee) throw new NotFoundException("Employee not found");
+    if (!employee.user_account_id) {
+      // A leave request is routed through a workflow instance keyed on a
+      // real user_account_id (both `subjectUserAccountId` and
+      // `manager_of_submitter` resolution need one) — an employee record
+      // with no login can never be the subject of one. Rather than
+      // silently skipping approval routing for such employees, this is
+      // surfaced as a clear, actionable error.
+      throw new BadRequestException(
+        "This employee has no user account and cannot have leave requests routed for approval — assign them a login first"
+      );
+    }
+    await this.assertMayActFor(claims, employee);
+
+    // TLM-01: the leave type is a tenant-configured catalogue row. A type that
+    // does not track a balance (unpaid) has no entitlement, no policy to resolve
+    // and nothing to decrement - an employee can always request it (a manager
+    // still approves it, and PayrollService turns an approved request into a
+    // deduction by reading these rows). Every other type draws on the policy.
+    const leaveType = await this.db.withClaims(claims, (client) => this.leaveTypes.getByCode(client, employee.company_id, leaveTypeCode));
+    if (!leaveType) throw new BadRequestException(`Leave type "${leaveTypeCode}" is not available - ask HR to enable it`);
+    const resolved = requirePolicy && leaveType.tracksBalance ? await this.employeeGroups.resolvePolicyInternal(claims, employeeId, "leave") : null;
+    return { employee, leaveType, policyId: resolved?.policyId ?? null };
+  }
+
+  private async assertMayActFor(claims: RequestClaims, employee: { user_account_id: string | null }): Promise<void> {
+    const isOnBehalf = employee.user_account_id !== claims.sub;
+    const [canSelf, canManageAll] = await Promise.all([
+      !isOnBehalf
+        ? this.rbac.can(claims, "leave_request.create.self", { ownerId: employee.user_account_id })
+        : Promise.resolve(false),
+      this.rbac.can(claims, "leave_request.manage.all"),
+    ]);
+    if (!canSelf && !canManageAll) {
+      throw new ForbiddenException("Not permitted to submit a leave request for this employee");
+    }
+  }
+
+  private validationInput(
+    input: { startDate: string; endDate: string; reason?: string | null; startTime?: string | null; endTime?: string | null; attachmentDocumentId?: string | null; delegateEmployeeId?: string | null; acknowledgedWarnings?: string[]; locale?: string },
+    dayPart: "full" | "first_half" | "second_half" | "hours"
+  ): ValidationInput {
+    return {
+      startDate: input.startDate,
+      endDate: input.endDate,
+      dayPart,
+      startTime: input.startTime ?? null,
+      endTime: input.endTime ?? null,
+      reason: input.reason ?? null,
+      attachmentDocumentId: input.attachmentDocumentId ?? null,
+      delegateEmployeeId: input.delegateEmployeeId ?? null,
+      acknowledgedWarnings: input.acknowledgedWarnings ?? [],
+      locale: input.locale,
+    };
+  }
+
+  /** start_time, end_time, start_at, end_at, time_zone, duration_minutes, break_minutes - all null for a request in days. */
+  private timedColumns(priced: PricedRequest, input: { startTime?: string | null; endTime?: string | null }): unknown[] {
+    const t = priced.timed;
+    if (!t || !t.ok) return [null, null, null, null, null, null, null];
+    return [input.startTime ?? null, input.endTime ?? null, t.startAt, t.endAt, t.timeZone, t.netMinutes, t.breakMinutes];
+  }
+
+  /**
+   * BACKLOG58: "what would happen if I submitted this?" - the duration, the balance, every blocking error, warning and
+   * notice, and who would approve, without writing anything. Same pipeline and same rules as `submit`.
+   */
+  async validate(claims: RequestClaims, input: SubmitLeaveRequestRequest, excludeRequestId?: string): Promise<LeaveValidationResult> {
+    await this.requireLeaveModule(claims);
+    const { employee, leaveType, policyId } = await this.loadSubmission(claims, input.employeeId, input.leaveType, true);
+    const dayPart = input.dayPart ?? "full";
+    const evaluated = await this.db.withClaims(claims, (client) =>
+      this.validation.evaluate(client, claims, { employee, leaveType, policyId, input: this.validationInput(input, dayPart), excludeRequestId })
+    );
+    const approvers = await this.approverPreview(claims, input.employeeId).catch(() => []);
+    return { ...evaluated.result, approvers };
+  }
+
+  /** BACKLOG58: tries an unsaved (or edited) rule against a sample request, next to the outcome with the rules as saved. */
+  async previewRule(claims: RequestClaims, dto: LeaveRulePreviewRequest): Promise<LeaveRulePreviewResponse> {
+    await this.requireLeaveModule(claims);
+    if (!(await this.rbac.can(claims, "leave_policy.manage"))) throw new ForbiddenException("Not permitted to manage leave rules");
+    const input = dto.request;
+    const { employee, leaveType, policyId } = await this.loadSubmission(claims, input.employeeId, input.leaveType, true);
+    const dayPart = input.dayPart ?? "full";
+    return this.db.withClaims(claims, async (client) => {
+      let base: LeaveValidationRuleView | null = null;
+      if (dto.rule.code) {
+        const found = await client.query("SELECT * FROM leave_validation_rules WHERE company_id = $1 AND code = $2", [employee.company_id, dto.rule.code.trim().toLowerCase()]);
+        if (found.rowCount) base = rowToRule(found.rows[0]);
+      }
+      const draft = this.rules.normalise({ ...dto.rule, code: dto.rule.code ?? base?.code ?? "draft_rule", name: dto.rule.name ?? base?.name ?? "Draft rule", message: dto.rule.message ?? base?.message ?? "Draft" }, base);
+      await this.rules.validate(client, employee.company_id, draft);
+      const common = { employee, leaveType, policyId, input: this.validationInput(input, dayPart) };
+      const withDraft = await this.validation.evaluate(client, claims, { ...common, draftRule: draft });
+      const withoutDraft = await this.validation.evaluate(client, claims, common);
+      const all = [...withDraft.result.blocking, ...withDraft.result.warnings, ...withDraft.result.info];
+      return { withDraft: withDraft.result, withoutDraft: withoutDraft.result, draftFired: all.some((f) => f.ruleCode === draft.code) };
+    });
   }
 
   async decide(claims: RequestClaims, leaveRequestId: string, dto: { decision: "approved" | "rejected"; comment?: string }): Promise<LeaveRequestView> {
@@ -430,7 +508,7 @@ export class LeaveRequestsService {
             employeeId: leaveRequestRow.employee_id,
             leaveType: leaveRequestRow.leave_type,
             year,
-            days: Number(leaveRequestRow.days_requested),
+            days: Number(leaveRequestRow.balance_units ?? leaveRequestRow.days_requested),
             leaveRequestId,
             createdBy: claims.sub,
           });
@@ -638,6 +716,13 @@ export class LeaveRequestsService {
       const types = (await this.leaveTypes.listActive(client, employee.company_id)).filter((t) => t.tracksBalance);
       const gender = (employee.gender ?? "").toLowerCase();
       const balances: LeaveBalanceView[] = [];
+      // Pending requests already hold part of the balance (in the leave type's own unit).
+      const held = await client.query(
+        `SELECT leave_type, COALESCE(SUM(COALESCE(balance_units, days_requested)), 0) AS held FROM leave_requests
+          WHERE employee_id = $1 AND status = 'pending' AND EXTRACT(YEAR FROM start_date) = $2 GROUP BY leave_type`,
+        [employeeId, year]
+      );
+      const heldByType = new Map<string, number>(held.rows.map((r) => [r.leave_type as string, Number(r.held)]));
       for (const type of types) {
         const entitlement = resolved.policyId ? await resolveEntitlement(client, resolved.policyId, type.code) : null;
         const existing = await client.query("SELECT 1 FROM leave_balances WHERE employee_id = $1 AND leave_type = $2 AND year = $3", [employeeId, type.code, year]);
@@ -649,7 +734,7 @@ export class LeaveRequestsService {
           days: entitlement?.days ?? 0,
           method: entitlement?.accrualMethod ?? type.accrualMethod,
         });
-        balances.push({ ...rowToBalance(row), leaveTypeName: type.name });
+        balances.push({ ...rowToBalance(row, type.balanceUnit, heldByType.get(type.code) ?? 0), leaveTypeName: type.name });
       }
       return balances;
     });
@@ -688,7 +773,7 @@ export class LeaveRequestsService {
     // TLM-01: "unpaid" is now "a leave type with is_paid = false" (the built-in unpaid
     // type plus any tenant-defined unpaid type).
     const result = await client.query(
-      `SELECT lr.id, lr.start_date, lr.end_date, lr.day_part
+      `SELECT lr.id, lr.start_date, lr.end_date, lr.day_part, lr.days_requested
          FROM leave_requests lr
          JOIN leave_types t ON t.company_id = lr.company_id AND t.code = lr.leave_type
         WHERE lr.employee_id = $1 AND t.is_paid = false AND lr.status = 'approved'
@@ -703,7 +788,7 @@ export class LeaveRequestsService {
       const startDate = leaveStart > rangeStart ? leaveStart : rangeStart;
       const endDate = leaveEnd < rangeEnd ? leaveEnd : rangeEnd;
       if (endDate < startDate) continue;
-      segments.push({ leaveRequestId: leave.id, startDate, endDate, days: leave.day_part && leave.day_part !== "full" ? 0.5 : inclusiveDayCount(startDate, endDate) });
+      segments.push({ leaveRequestId: leave.id, startDate, endDate, days: leave.day_part === "hours" ? Number(leave.days_requested) : leave.day_part && leave.day_part !== "full" ? 0.5 : inclusiveDayCount(startDate, endDate) });
     }
     return { totalDays: segments.reduce((sum, s) => sum + s.days, 0), segments };
   }
@@ -748,59 +833,70 @@ export class LeaveRequestsService {
       if ((acted.rowCount ?? 0) > 0) throw new ConflictException("An approver has already acted on this request, so it can no longer be edited - cancel it and submit a new one");
     }
 
-    const startDate = dto.startDate ?? toIsoDate(row.start_date);
-    const endDate = dto.endDate ?? toIsoDate(row.end_date);
-    if (new Date(endDate) < new Date(startDate)) throw new BadRequestException("endDate cannot be before startDate");
     const dayPart = dto.dayPart ?? row.day_part ?? "full";
+    const timedRow = row.day_part === "hours";
+    const startDate = dto.startDate ?? toIsoDate(row.start_date);
+    const endDate = dayPart === "hours" ? (dto.endDate ?? dto.startDate ?? startDate) : (dto.endDate ?? (timedRow ? startDate : toIsoDate(row.end_date)));
+    if (new Date(endDate) < new Date(startDate)) throw new BadRequestException("endDate cannot be before startDate");
     const typeCode = dto.leaveType ?? row.leave_type;
     const delegateEmployeeId = dto.delegateEmployeeId === undefined ? (row.delegate_employee_id ?? null) : dto.delegateEmployeeId;
+    const startTime = dto.startTime ?? (dayPart === "hours" && row.start_time ? String(row.start_time).slice(0, 5) : null);
+    const endTime = dto.endTime ?? (dayPart === "hours" && row.end_time ? String(row.end_time).slice(0, 5) : null);
+    const reason = dto.reason === undefined ? row.reason : dto.reason;
 
     const leaveType = await this.db.withClaims(claims, (client) => this.leaveTypes.getByCode(client, employee.company_id, typeCode));
-    if (!leaveType || !leaveType.isActive) throw new BadRequestException(`Leave type "${typeCode}" is not available - ask HR to enable it`);
-    this.assertTypeEligibility(leaveType, employee, startDate);
-    if (dayPart !== "full") {
-      if (!leaveType.halfDayAllowed) throw new BadRequestException(`${leaveType.name} cannot be taken as a half day`);
-      if (startDate !== endDate) throw new BadRequestException("A half-day leave request must start and end on the same date");
-    }
+    if (!leaveType) throw new BadRequestException(`Leave type "${typeCode}" is not available - ask HR to enable it`);
     const resolved = leaveType.tracksBalance ? await this.employeeGroups.resolvePolicyInternal(claims, employee.id, "leave") : null;
-    if (leaveType.tracksBalance && !resolved?.policyId) {
-      throw new BadRequestException("No leave policy is configured for this employee — assign a tenant-wide default leave policy or an employee group policy first");
-    }
-    const year = new Date(startDate).getUTCFullYear();
+    const policyId = resolved?.policyId ?? null;
+    const attachmentDocumentId = dto.attachmentDocumentId === undefined ? (row.attachment_document_id ?? null) : dto.attachmentDocumentId;
+    const input = { startDate, endDate, reason, startTime, endTime, attachmentDocumentId, delegateEmployeeId, acknowledgedWarnings: dto.acknowledgedWarnings, locale: dto.locale };
 
     const result = await this.db.withClaims(claims, async (client) => {
-      const { daysRequested, returnDate, overlapWarnings } = await this.priceAndValidate(
-        client,
+      const evaluated = await this.validation.evaluate(client, claims, {
         employee,
         leaveType,
-        resolved?.policyId ?? null,
-        year,
-        { startDate, endDate, dayPart, attachmentDocumentId: row.attachment_document_id ?? null, delegateEmployeeId },
-        leaveRequestId
-      );
+        policyId,
+        lock: true,
+        excludeRequestId: leaveRequestId,
+        input: this.validationInput(input, dayPart),
+      });
+      if (!evaluated.priced) throw leaveValidationError(evaluated.result);
+      const priced = evaluated.priced;
+      const timed = priced.timed;
+      const finalEnd = timed ? timed.endDate : endDate;
+      const returnDate = timed ? timed.endDate : await this.computeReturnDate(client, employee.id, endDate, dayPart, startDate);
+      const overlapWarnings = await this.findOverlapWarnings(client, employee, startDate, finalEnd);
       let updated;
       try {
         updated = await client.query(
           `UPDATE leave_requests
               SET leave_type = $2, start_date = $3, end_date = $4, days_requested = $5, reason = $6, day_part = $7,
-                  delegate_employee_id = $8, return_date = $9, payroll_impact = $10, updated_at = now()
+                  delegate_employee_id = $8, return_date = $9, payroll_impact = $10,
+                  start_time = $11, end_time = $12, start_at = $13, end_at = $14, time_zone = $15, duration_minutes = $16, break_minutes = $17,
+                  balance_units = $18, balance_unit = $19, policy_id = $20, rules_snapshot = $21::jsonb, attachment_document_id = $22, updated_at = now()
             WHERE id = $1 RETURNING *`,
           [
             leaveRequestId,
             leaveType.code,
             startDate,
-            endDate,
-            daysRequested,
-            dto.reason === undefined ? row.reason : dto.reason,
+            finalEnd,
+            priced.daysRequested,
+            reason,
             dayPart,
             delegateEmployeeId,
             returnDate,
             !leaveType.isPaid,
+            ...this.timedColumns(priced, input),
+            priced.balanceUnits,
+            priced.balanceUnit,
+            priced.policyId,
+            JSON.stringify(priced.snapshot),
+            attachmentDocumentId,
           ]
         );
       } catch (err) {
         if ((err as { code?: string }).code === "23P01") {
-          throw new ConflictException("This employee already has pending or approved leave overlapping these dates");
+          throw new ConflictException("This employee already has pending or approved leave overlapping these dates or times");
         }
         throw err;
       }
@@ -809,14 +905,14 @@ export class LeaveRequestsService {
         action: "leave_request.update",
         target: leaveRequestId,
         metadata: {
-          before: { leaveType: row.leave_type, startDate: toIsoDate(row.start_date), endDate: toIsoDate(row.end_date), dayPart: row.day_part, daysRequested: Number(row.days_requested) },
-          after: { leaveType: leaveType.code, startDate, endDate, dayPart, daysRequested },
+          before: { leaveType: row.leave_type, startDate: toIsoDate(row.start_date), endDate: toIsoDate(row.end_date), dayPart: row.day_part, daysRequested: Number(row.days_requested), durationMinutes: row.duration_minutes ?? null },
+          after: { leaveType: leaveType.code, startDate, endDate: finalEnd, dayPart, daysRequested: priced.daysRequested, durationMinutes: timed?.netMinutes ?? null },
         },
       });
-      return { updatedRow: updated.rows[0], overlapWarnings };
+      return { updatedRow: updated.rows[0], overlapWarnings, validation: evaluated.result };
     });
 
-    return { request: rowToLeaveRequest(result.updatedRow, employee.user_account_id), overlapWarnings: result.overlapWarnings };
+    return { request: rowToLeaveRequest(result.updatedRow, employee.user_account_id), overlapWarnings: result.overlapWarnings, validation: result.validation };
   }
 
   /**
@@ -967,69 +1063,6 @@ export class LeaveRequestsService {
     return byInstance;
   }
 
-  /**
-   * The checks and arithmetic every new or edited request goes through: working days, the per-type limits,
-   * supporting document, relief person, balance, overlap, return date. `excludeRequestId` lets an edit ignore
-   * its own row when looking for overlapping leave.
-   */
-  private async priceAndValidate(
-    client: PoolClient,
-    employee: EmployeeRow,
-    leaveType: LeaveTypeView,
-    policyId: string | null,
-    year: number,
-    input: { startDate: string; endDate: string; dayPart: string; attachmentDocumentId: string | null; delegateEmployeeId: string | null },
-    excludeRequestId?: string
-  ): Promise<{ daysRequested: number; returnDate: string; overlapWarnings: OverlapWarning[] }> {
-    // Needs a `client` to read the company's holiday calendar / weekly pattern.
-    const daysRequested =
-      input.dayPart === "full"
-        ? await countLeaveDays(client, this.workSchedule, employee.id, input.startDate, input.endDate)
-        : (await this.workSchedule.isWorkingDay(client, employee.id, input.startDate))
-          ? 0.5
-          : 0;
-    if (daysRequested <= 0) {
-      throw new BadRequestException("A leave request must span at least one day that isn't a company holiday");
-    }
-    if (leaveType.maxConsecutiveDays !== null && daysRequested > leaveType.maxConsecutiveDays) {
-      throw new BadRequestException(`${leaveType.name} is limited to ${leaveType.maxConsecutiveDays} consecutive day(s) per request`);
-    }
-
-    // TLM-03: supporting document, delegate.
-    if (leaveType.documentRequired && daysRequested > leaveType.documentRequiredAfterDays && !input.attachmentDocumentId) {
-      throw new BadRequestException(`${leaveType.name} of ${daysRequested} day(s) needs a supporting document`);
-    }
-    if (input.attachmentDocumentId) {
-      const doc = await client.query("SELECT 1 FROM employee_documents WHERE id = $1 AND employee_id = $2", [input.attachmentDocumentId, employee.id]);
-      if (doc.rowCount === 0) throw new BadRequestException("The attached document does not belong to this employee");
-    }
-    if (input.delegateEmployeeId) {
-      if (input.delegateEmployeeId === employee.id) throw new BadRequestException("An employee cannot delegate to themselves");
-      const delegate = await client.query("SELECT 1 FROM employees WHERE id = $1 AND company_id = $2", [input.delegateEmployeeId, employee.company_id]);
-      if (delegate.rowCount === 0) throw new BadRequestException("Delegate employee not found");
-    }
-
-    if (leaveType.tracksBalance) {
-      // Reads the CURRENT version's entitlement (effective_to IS NULL) - live
-      // decision paths deliberately keep reading "current" only.
-      const entitlement = await resolveEntitlement(client, policyId!, leaveType.code);
-      if (!entitlement) throw new NotFoundException("Resolved leave policy no longer exists");
-      const method: AccrualMethod = entitlement.accrualMethod ?? leaveType.accrualMethod;
-      const balance = await this.ledger.ensureBalance(client, employee.company_id, employee.id, leaveType.code, year, { days: entitlement.days, method });
-      const remaining = Number(balance.entitled_days) - Number(balance.used_days);
-      if (daysRequested > remaining) {
-        throw new BadRequestException(
-          `Insufficient ${leaveType.code} leave balance: requested ${daysRequested} day(s), ${remaining} remaining for ${year}`
-        );
-      }
-    }
-
-    await this.assertNoOverlap(client, employee.id, input.startDate, input.endDate, input.dayPart, excludeRequestId);
-    const overlapWarnings = await this.findOverlapWarnings(client, employee, input.startDate, input.endDate);
-    const returnDate = await this.computeReturnDate(client, employee.id, input.endDate, input.dayPart, input.startDate);
-    return { daysRequested, returnDate, overlapWarnings };
-  }
-
   // -----------------------------------------------------------------
   // Internals
   // -----------------------------------------------------------------
@@ -1062,41 +1095,6 @@ export class LeaveRequestsService {
     );
     if (result.rowCount === 0) return null;
     return result.rows[0];
-  }
-
-  private assertTypeEligibility(type: LeaveTypeView, employee: EmployeeRow, startDate: string): void {
-    if (type.genderRestriction !== "any") {
-      const gender = (employee.gender ?? "").toLowerCase();
-      if (gender !== type.genderRestriction) {
-        throw new BadRequestException(`${type.name} is only available to ${type.genderRestriction} employees`);
-      }
-    }
-    if (type.minServiceMonths > 0) {
-      const joined = employee.date_of_joining ? toIsoDate(employee.date_of_joining) : null;
-      if (!joined) throw new BadRequestException(`${type.name} needs ${type.minServiceMonths} month(s) of service, but this employee has no joining date`);
-      const [jy, jm, jd] = joined.split("-").map(Number);
-      const [sy, sm, sd] = startDate.split("-").map(Number);
-      const months = (sy - jy) * 12 + (sm - jm) - (sd < jd ? 1 : 0);
-      if (months < type.minServiceMonths) {
-        throw new BadRequestException(`${type.name} needs ${type.minServiceMonths} month(s) of service`);
-      }
-    }
-  }
-
-  /** TLM-03 overlap protection: opposite halves of one day may coexist; everything else may not. */
-  private async assertNoOverlap(client: PoolClient, employeeId: string, startDate: string, endDate: string, dayPart: string, excludeRequestId?: string): Promise<void> {
-    const clash = await client.query(
-      `SELECT id FROM leave_requests
-        WHERE employee_id = $1 AND status IN ('pending', 'approved')
-          AND start_date <= $3 AND end_date >= $2
-          AND (day_part = 'full' OR $4 = 'full' OR day_part = $4)
-          AND ($5::uuid IS NULL OR id <> $5)
-        LIMIT 1`,
-      [employeeId, startDate, endDate, dayPart, excludeRequestId ?? null]
-    );
-    if ((clash.rowCount ?? 0) > 0) {
-      throw new ConflictException("This employee already has pending or approved leave overlapping these dates");
-    }
   }
 
   /** First day the employee is expected back: the next working day after the leave (a first-half leave returns the same day). */

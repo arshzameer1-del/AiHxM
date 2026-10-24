@@ -21,6 +21,7 @@ import { approverStepLabel, approverSummary } from "./leaveApprovals";
 import { TeamCalendar } from "./TeamCalendar";
 import { SapSection } from "../shared/FormSections";
 import { formatDateTime, todayIso } from "../shared/dates";
+import { chargedText, formatMinutes, timedRangeText, unitWord } from "./leaveUnits";
 
 /**
  * "My Leave Request" overview, laid out like the SAP Fiori screen the product owner asked us to match:
@@ -80,11 +81,11 @@ export function EntitlementTable({ balances, requests }: { balances: LeaveBalanc
                     {formatDisplayRange(`${b.year}-01-01`, `${b.year}-12-31`)}
                   </td>
                   <td className="py-2.5 pr-3 text-right tabular-nums">
-                    <span className="font-semibold">{b.remainingDays}</span> <span className="text-label-tertiary">Days</span>
+                    <span className="font-semibold">{b.availableDays ?? b.remainingDays}</span> <span className="text-label-tertiary">{unitWord(b.unit)}</span>
                   </td>
-                  <td className="py-2.5 pr-3 text-right tabular-nums text-label-secondary">{planned} Days</td>
-                  <td className="py-2.5 pr-3 text-right tabular-nums text-label-secondary">{b.usedDays} Days</td>
-                  <td className="py-2.5 text-right tabular-nums text-label-secondary">{b.entitledDays} Days</td>
+                  <td className="py-2.5 pr-3 text-right tabular-nums text-label-secondary">{b.reservedDays ?? planned} {unitWord(b.unit)}</td>
+                  <td className="py-2.5 pr-3 text-right tabular-nums text-label-secondary">{b.usedDays} {unitWord(b.unit)}</td>
+                  <td className="py-2.5 text-right tabular-nums text-label-secondary">{b.entitledDays} {unitWord(b.unit)}</td>
                 </tr>
               );
             })}
@@ -248,7 +249,17 @@ export function RequestDetail({
           <dt className="text-label-tertiary">Relief person</dt>
           <dd className="font-medium">{request.delegateEmployeeName ?? "—"}</dd>
         </div>
-        {request.dayPart !== "full" && (
+        {request.dayPart === "hours" && (
+          <div data-testid="leave-detail-times">
+            <dt className="text-label-tertiary">Time</dt>
+            <dd className="font-medium tabular-nums">
+              {timedRangeText(request)}
+              {request.breakMinutes ? <span className="block text-label-secondary font-normal">{formatMinutes(request.breakMinutes)} break not counted</span> : null}
+              {request.timeZone ? <span className="block text-label-tertiary font-normal">{request.timeZone}</span> : null}
+            </dd>
+          </div>
+        )}
+        {request.dayPart !== "full" && request.dayPart !== "hours" && (
           <div>
             <dt className="text-label-tertiary">Duration</dt>
             <dd className="font-medium">{request.dayPart === "first_half" ? "First half of the day" : "Second half of the day"}</dd>
@@ -386,14 +397,23 @@ function ItemsTable({
             return (
               <tr key={r.id} className="border-b border-black/5 hover:bg-black/[0.02]">
                   <td className="py-2.5 pr-3 font-semibold">{r.leaveTypeName ?? leaveTypeLabel(r.leaveType)}</td>
-                  <td className="py-2.5 pr-3 text-label-secondary tabular-nums">{formatDisplayRange(r.startDate, r.endDate)}</td>
+                  <td className="py-2.5 pr-3 text-label-secondary tabular-nums">
+                    {formatDisplayRange(r.startDate, r.endDate)}
+                    {timedRangeText(r) && <span className="block text-xs">{timedRangeText(r)}</span>}
+                  </td>
                   <td className={`py-2.5 pr-3 font-medium ${STATUS_TEXT[r.status]}`}>
                     {STATUS_LABELS[r.status]}
                     {cancellationRequested && <span className="block text-xs font-normal text-label-tertiary">Cancellation requested</span>}
                   </td>
                   <td className="py-2.5 pr-3 text-label-secondary">{approverSummary(r.status, r.approvals) ?? ""}</td>
                   <td className="py-2.5 pr-3 text-right tabular-nums">
-                    <span className="font-semibold">{r.daysRequested}</span> <span className="text-label-tertiary">{r.daysRequested === 1 ? "Day" : "Days"}</span>
+                    {r.dayPart === "hours" ? (
+                      <span className="font-semibold">{chargedText(r)}</span>
+                    ) : (
+                      <>
+                        <span className="font-semibold">{r.daysRequested}</span> <span className="text-label-tertiary">{r.daysRequested === 1 ? "Day" : "Days"}</span>
+                      </>
+                    )}
                   </td>
                   <td className="py-2.5 text-right whitespace-nowrap">
                     {onEdit && r.status === "pending" && (

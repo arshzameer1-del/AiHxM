@@ -134,11 +134,11 @@ function PolicyForm({
 
       {otherTypes.length > 0 && (
         <div>
-          <div className="text-sm font-medium mb-1">Other leave types (days per year)</div>
+          <div className="text-sm font-medium mb-1">Other leave types (per year, in each type's own unit)</div>
           <div className="grid grid-cols-3 gap-4">
             {otherTypes.map((t) => (
               <div key={t.code}>
-                <label htmlFor={`ent-${t.code}`} className="block text-xs text-label-secondary mb-1">{t.name}</label>
+                <label htmlFor={`ent-${t.code}`} className="block text-xs text-label-secondary mb-1">{t.name}{t.balanceUnit && t.balanceUnit !== "days" ? ` (${t.balanceUnit})` : " (days)"}</label>
                 <input
                   id={`ent-${t.code}`}
                   type="number"

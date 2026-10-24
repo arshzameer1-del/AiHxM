@@ -177,7 +177,7 @@ function PersonRow({
         const half = hit && hit.dayPart !== "full";
         let tone = off ? "bg-black/[0.06]" : "";
         if (hit) tone = hit.status === "approved" ? "bg-green-300" : "bg-amber-300";
-        const title = hit ? `${person.name}: ${formatDisplayDate(hit.startDate)}${hit.startDate === hit.endDate ? "" : ` – ${formatDisplayDate(hit.endDate)}`}, ${hit.status === "approved" ? "Approved" : "Pending"}${half ? " (half day)" : ""}` : undefined;
+        const title = hit ? `${person.name}: ${formatDisplayDate(hit.startDate)}${hit.startDate === hit.endDate ? "" : ` – ${formatDisplayDate(hit.endDate)}`}, ${hit.status === "approved" ? "Approved" : "Pending"}${half ? (hit.dayPart === "hours" ? " (part of the day)" : " (half day)") : ""}` : undefined;
         return (
           <div key={d} className="border-t border-black/5 py-1" title={title}>
             <div className={`h-5 mx-px rounded-sm ${tone} ${half ? "opacity-60" : ""}`} aria-label={title} />

@@ -128,14 +128,14 @@ export function LeaveBalancesPage() {
             <thead>
               <tr className="text-left text-xs text-label-secondary border-b border-black/10">
                 <th className="py-1.5 pr-3 font-semibold">Leave type</th><th className="py-1.5 pr-3 font-semibold">Year</th>
-                <th className="py-1.5 pr-3 font-semibold text-right">Entitled</th><th className="py-1.5 pr-3 font-semibold text-right">Used</th><th className="py-1.5 font-semibold text-right">Remaining</th>
+                <th className="py-1.5 pr-3 font-semibold text-right">Entitled</th><th className="py-1.5 pr-3 font-semibold text-right">Used</th><th className="py-1.5 pr-3 font-semibold text-right">Remaining</th><th className="py-1.5 font-semibold">Unit</th>
               </tr>
             </thead>
             <tbody>
               {balances.map((b) => (
                 <tr key={b.id} className="border-b border-black/5 tabular-nums">
                   <td className="py-1.5 pr-3">{b.leaveTypeName ?? nameOf(b.leaveType)}</td><td className="py-1.5 pr-3">{b.year}</td>
-                  <td className="py-1.5 pr-3 text-right">{fmt(b.entitledDays)}</td><td className="py-1.5 pr-3 text-right">{fmt(b.usedDays)}</td><td className="py-1.5 text-right font-semibold">{fmt(b.remainingDays)}</td>
+                  <td className="py-1.5 pr-3 text-right">{fmt(b.entitledDays)}</td><td className="py-1.5 pr-3 text-right">{fmt(b.usedDays)}</td><td className="py-1.5 pr-3 text-right font-semibold">{fmt(b.remainingDays)}</td><td className="py-1.5 text-label-secondary">{(b.unit ?? "days")}</td>
                 </tr>
               ))}
             </tbody>

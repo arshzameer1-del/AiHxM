@@ -550,7 +550,46 @@ export class WorkflowService {
   async simulate(claims: RequestClaims, key: string, input: { subjectUserAccountId: string; record: Record<string, unknown> }): Promise<WorkflowSimulationResult> {
     if (!claims.company_id) throw new ForbiddenException();
     if (!(await this.rbac.can(claims, MANAGE_PERMISSION))) throw new ForbiddenException("Not permitted to manage workflow templates");
-    return this.db.withClaims(claims, async (client) => {
+    return this.db.withClaims(claims, (client) => this.simulateInTx(client, claims, key, input));
+  }
+
+  /**
+   * BACKLOG58 - "could this request be sent for approval right now?", for the module that owns the record (no workflow
+   * management permission needed: the answer is only yes/no plus a reason). Reads only; never creates an instance.
+   */
+  async checkRoutable(
+    client: PoolClient,
+    claims: RequestClaims,
+    key: string,
+    objectKey: string,
+    input: { subjectUserAccountId: string; record: Record<string, unknown> }
+  ): Promise<{ routable: boolean; detail: string | null }> {
+    const t = await client.query<{ object_key: string; is_active: boolean; start_condition: WorkflowFieldCondition | null }>(
+      `SELECT object_key, is_active, start_condition FROM workflow_templates WHERE company_id = $1 AND key = $2`,
+      [claims.company_id, key]
+    );
+    if (t.rowCount === 0 || !t.rows[0].is_active) return { routable: false, detail: `No active approval route ("${key}") is set up for this company.` };
+    if (t.rows[0].object_key !== objectKey) return { routable: false, detail: "The approval route is not set up for this kind of request." };
+    if (!conditionMatches(t.rows[0].start_condition, input.record)) return { routable: false, detail: "This request does not meet the approval route's start condition." };
+    await client.query("SAVEPOINT check_routable");
+    try {
+      const sim = await this.simulateInTx(client, claims, key, input);
+      await client.query("RELEASE SAVEPOINT check_routable");
+      if (sim.blocked) {
+        const note = sim.steps.flatMap((s) => s.approvers).find((a) => a.outcome === "blocked")?.note ?? null;
+        return { routable: false, detail: note };
+      }
+      return { routable: true, detail: null };
+    } catch (err) {
+      await client.query("ROLLBACK TO SAVEPOINT check_routable");
+      await client.query("RELEASE SAVEPOINT check_routable");
+      if (err instanceof BadRequestException || err instanceof NotFoundException) return { routable: false, detail: err.message };
+      throw err;
+    }
+  }
+
+  private async simulateInTx(client: PoolClient, claims: RequestClaims, key: string, input: { subjectUserAccountId: string; record: Record<string, unknown> }): Promise<WorkflowSimulationResult> {
+    {
       const found = await client.query<{ id: string; name: string; start_condition: WorkflowFieldCondition | null; current_version_no: number }>(
         `SELECT id, name, start_condition, current_version_no FROM workflow_templates WHERE company_id = $1 AND key = $2`,
         [claims.company_id, key]
@@ -629,7 +668,7 @@ export class WorkflowService {
         result.steps.push(row);
       }
       return result;
-    });
+    }
   }
 
   async getTemplateByKey(claims: RequestClaims, key: string): Promise<WorkflowTemplate | null> {

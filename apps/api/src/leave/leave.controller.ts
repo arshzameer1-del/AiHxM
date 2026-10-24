@@ -5,6 +5,9 @@ import type { RequestClaims } from "../database/tenant-context";
 import { LeaveRequestsService } from "./leave-requests.service";
 import { LeaveTypesService } from "./leave-types.service";
 import { LeaveLedgerService } from "./leave-ledger.service";
+import { LeaveDurationSettingsService } from "./leave-duration-settings.service";
+import { LeaveValidationRulesService } from "./leave-validation-rules.service";
+import { LeaveRulePreviewDto, SaveLeaveValidationRuleDto, SetLeaveDurationSettingsDto } from "./dto/leave-rules.dto";
 import { AdjustLeaveBalanceDto, CreateLeaveTypeDto, DecideLeaveCancellationDto, RequestLeaveCancellationDto, UpdateLeaveTypeDto } from "./dto/leave-type.dto";
 import { AttendanceService } from "./attendance.service";
 import { AttendanceCorrectionsService } from "./attendance-corrections.service";
@@ -43,7 +46,9 @@ export class LeaveController {
     private readonly workProfiles: WorkProfileService,
     private readonly onDuty: OnDutyService,
     private readonly leaveTypes: LeaveTypesService,
-    private readonly ledger: LeaveLedgerService
+    private readonly ledger: LeaveLedgerService,
+    private readonly durationSettings: LeaveDurationSettingsService,
+    private readonly validationRules: LeaveValidationRulesService
   ) {}
 
   // --- TLM-01: leave type catalogue --------------------------------------
@@ -60,6 +65,88 @@ export class LeaveController {
   @Patch("leave-types/:id")
   updateLeaveType(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: UpdateLeaveTypeDto) {
     return this.leaveTypes.update(claims, id, dto);
+  }
+
+  // --- BACKLOG58: timing rules per leave type / policy, and the configurable validation rules ---------
+  @Get("leave-types/:code/duration-settings")
+  listDurationSettings(@CurrentClaims() claims: RequestClaims, @Param("code") code: string) {
+    return this.durationSettings.list(claims, code);
+  }
+
+  @Get("leave-types/:code/duration-settings/history")
+  durationSettingsHistory(@CurrentClaims() claims: RequestClaims, @Param("code") code: string) {
+    return this.durationSettings.history(claims, code);
+  }
+
+  @Put("leave-types/:code/duration-settings")
+  setDurationSettings(@CurrentClaims() claims: RequestClaims, @Param("code") code: string, @Body() dto: SetLeaveDurationSettingsDto) {
+    return this.durationSettings.set(claims, code, null, dto);
+  }
+
+  @Put("leave-types/:code/duration-settings/policies/:policyId")
+  setPolicyDurationSettings(
+    @CurrentClaims() claims: RequestClaims,
+    @Param("code") code: string,
+    @Param("policyId") policyId: string,
+    @Body() dto: SetLeaveDurationSettingsDto
+  ) {
+    return this.durationSettings.set(claims, code, policyId, dto);
+  }
+
+  @Delete("leave-types/:code/duration-settings/policies/:policyId")
+  @HttpCode(204)
+  async removePolicyDurationSettings(@CurrentClaims() claims: RequestClaims, @Param("code") code: string, @Param("policyId") policyId: string) {
+    await this.durationSettings.removeOverride(claims, code, policyId);
+  }
+
+  @Get("leave-validation/catalog")
+  validationCatalog() {
+    return this.validationRules.catalog();
+  }
+
+  @Get("leave-validation/rules")
+  listValidationRules(@CurrentClaims() claims: RequestClaims) {
+    return this.validationRules.list(claims);
+  }
+
+  @Post("leave-validation/rules")
+  createValidationRule(@CurrentClaims() claims: RequestClaims, @Body() dto: SaveLeaveValidationRuleDto) {
+    return this.validationRules.create(claims, dto);
+  }
+
+  /** Declared before `rules/:id` so "preview" is not read as an id. */
+  @Post("leave-validation/rules/preview")
+  previewValidationRule(@CurrentClaims() claims: RequestClaims, @Body() dto: LeaveRulePreviewDto) {
+    return this.leaveRequests.previewRule(claims, dto);
+  }
+
+  @Get("leave-validation/rules/:id")
+  getValidationRule(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.validationRules.get(claims, id);
+  }
+
+  @Patch("leave-validation/rules/:id")
+  updateValidationRule(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: SaveLeaveValidationRuleDto) {
+    return this.validationRules.update(claims, id, dto);
+  }
+
+  @Delete("leave-validation/rules/:id")
+  @HttpCode(204)
+  async deleteValidationRule(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    await this.validationRules.remove(claims, id);
+  }
+
+  @Get("leave-validation/rules/:id/history")
+  validationRuleHistory(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
+    return this.validationRules.history(claims, id);
+  }
+
+  /** What would happen if this request were submitted: duration, balance, errors, warnings, approvers. Writes nothing. */
+  @Post("leave-requests/validate")
+  @HttpCode(200)
+  validateLeaveRequest(@CurrentClaims() claims: RequestClaims, @Body() dto: SubmitLeaveRequestDto) {
+    const { excludeRequestId, ...request } = dto;
+    return this.leaveRequests.validate(claims, request, excludeRequestId);
   }
 
   // --- TLM-02: ledger ----------------------------------------------------
