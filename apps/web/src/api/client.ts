@@ -434,6 +434,7 @@ import type {
   VerticalPosition,
   WorkflowInstanceView,
   WorkflowApproverOptions,
+  WorkflowSimulationResult,
   WorkflowTemplate,
   WorkScheduleAssignmentRuleView,
   WorkScheduleDayView,
@@ -927,6 +928,14 @@ export function consumeSessionExpiredNotice(): boolean {
     return false;
   }
 }
+
+/** One stored version of a workflow route (BACKLOG58). */
+export type WorkflowTemplateVersion = {
+  versionNo: number;
+  contentHash: string;
+  createdAt: string;
+  definition: { triggerEvent: string | null; startCondition: import("@aihxm/shared-types").WorkflowFieldCondition | null; steps: Array<{ name: string } & Record<string, unknown>> };
+};
 
 export class ApiError extends Error {
   constructor(
@@ -3313,6 +3322,10 @@ export const api = {
   listWorkflowTemplates: () => request<WorkflowTemplate[]>("/workflow/templates"),
   // BACKLOG56 - approver pickers for the template editor, gated by workflow_template.manage.all alone.
   getWorkflowApproverOptions: () => request<WorkflowApproverOptions>("/workflow/approver-options"),
+  // BACKLOG58 - earlier versions of a route, and "who would approve this?".
+  listWorkflowTemplateVersions: (key: string) => request<WorkflowTemplateVersion[]>(`/workflow/templates/${encodeURIComponent(key)}/versions`),
+  simulateWorkflow: (key: string, input: { subjectUserAccountId: string; record: Record<string, unknown> }) =>
+    request<WorkflowSimulationResult>(`/workflow/templates/${encodeURIComponent(key)}/simulate`, { method: "POST", body: JSON.stringify(input) }),
 
   // Backs the workflow timeline on an Expense Management claim's detail
   // view (Part 2: "Expense detail includes... workflow timeline") — any

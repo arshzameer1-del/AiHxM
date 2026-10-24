@@ -73,12 +73,26 @@ async function warmFieldKeys(client: PoolClient, claims: RequestClaims): Promise
   }
 }
 
+const afterCommitQueues = new WeakMap<PoolClient, Array<() => Promise<void> | void>>();
+
+/**
+ * Runs `fn` once the transaction that owns `client` has COMMITTED (and never if it rolls back). For side effects that must not
+ * happen for work that was rolled back - notifications, e-mails. A client that is not inside runInTenantContext (a hand-made
+ * connection in a spec) runs it straight away. A failing `fn` is logged, never thrown: the work it follows is already saved.
+ */
+export function afterCommit(client: PoolClient, fn: () => Promise<void> | void): void {
+  const queue = afterCommitQueues.get(client);
+  if (queue) queue.push(fn);
+  else void Promise.resolve().then(fn).catch(() => undefined);
+}
+
 export async function runInTenantContext<T>(
   pool: Pool,
   claims: RequestClaims,
   fn: (client: PoolClient) => Promise<T>
 ): Promise<T> {
   const client = await pool.connect();
+  afterCommitQueues.set(client, []);
   try {
     // One round trip, not two: BEGIN and the claims go to the server together (simple-query protocol runs both).
     // The database is often a continent away from the API, so every round trip saved is felt on every request.
@@ -86,11 +100,22 @@ export async function runInTenantContext<T>(
     await warmFieldKeys(client, claims);
     const result = await fn(client);
     await client.query("COMMIT");
+    const queued = afterCommitQueues.get(client) ?? [];
+    afterCommitQueues.delete(client);
+    for (const job of queued) {
+      try {
+        await job();
+      } catch {
+        /* the work is committed; a failing side effect must not turn it into an error */
+      }
+    }
     return result;
   } catch (err) {
+    afterCommitQueues.delete(client);
     await client.query("ROLLBACK").catch(() => undefined);
     throw err;
   } finally {
+    afterCommitQueues.delete(client);
     client.release();
   }
 }

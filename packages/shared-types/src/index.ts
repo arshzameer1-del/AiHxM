@@ -1480,13 +1480,22 @@ export type ApproverType =
   | "role"
   | "specific_user"
   | "manager_of_submitter"
+  /** BACKLOG57: the submitter's manager's manager. */
+  | "manager_of_manager"
   // WFL-04
   | "org_unit_head"
   | "dotted_line_manager"
   | "position"
   | "group";
 
-export type EscalationApproverType = "role" | "specific_user";
+/** `manager_of_approver` (BACKLOG57): the manager of whoever currently holds the line (the submitter's manager when the line is held by a role). */
+export type EscalationApproverType = "role" | "specific_user" | "manager_of_approver";
+
+/** BACKLOG57: what to do when the person an approver type points at cannot be found (no manager on file, no login). */
+export type WorkflowFallbackType = "skip" | "role" | "specific_user" | "submitter_manager";
+
+/** BACKLOG57: decide automatically once a line has been escalated for `escalationActionHours` without an answer. */
+export type WorkflowEscalationAction = "auto_approve" | "auto_reject";
 
 export type WorkflowApproverConfig = {
   approverType: ApproverType;
@@ -1501,6 +1510,13 @@ export type WorkflowApproverConfig = {
   escalationApproverType?: EscalationApproverType;
   escalationRoleId?: string;
   escalationUserAccountId?: string;
+  /** BACKLOG57: used when this approver type finds nobody. Omit to refuse the submission (the old behaviour). */
+  fallbackType?: WorkflowFallbackType;
+  fallbackRoleId?: string;
+  fallbackUserAccountId?: string;
+  /** BACKLOG57: after being escalated for this many hours with no answer, approve / reject on the approver's behalf. */
+  escalationAction?: WorkflowEscalationAction;
+  escalationActionHours?: number;
 };
 
 /**
@@ -5324,6 +5340,40 @@ export type RatingDistributionView = {
 export type WorkflowApproverOptions = {
   roles: Role[];
   people: Array<{ userAccountId: string; fullName: string; employeeNumber: string }>;
+  /** BACKLOG58: what the other approver types need to be pointed at. */
+  positions: Array<{ id: string; title: string; code: string | null }>;
+  groups: Array<{ id: string; name: string }>;
+  orgUnits: Array<{ id: string; name: string }>;
+};
+
+/** BACKLOG58 - "who would approve this?": what a template would do for a given requester and record, without submitting anything. */
+export type WorkflowSimulationApprover = {
+  /** How the approver is described in the template, e.g. "The requester's manager". */
+  label: string;
+  outcome: "person" | "role" | "group" | "skipped" | "blocked";
+  /** The people who would be asked (a few names for a role or group). */
+  names: string[];
+  note: string | null;
+};
+export type WorkflowSimulationStep = {
+  stepOrder: number;
+  name: string;
+  /** will_run, or skipped because the step's condition does not match this record. */
+  status: "will_run" | "skipped_condition" | "skipped_nobody";
+  approvalMode: WorkflowApprovalMode;
+  quorumCount: number | null;
+  parallelGroup: string | null;
+  slaHours: number | null;
+  approvers: WorkflowSimulationApprover[];
+};
+export type WorkflowSimulationResult = {
+  templateKey: string;
+  templateName: string;
+  /** false = the template's start condition does not match this record, so the request would not use this route. */
+  startConditionMatched: boolean;
+  /** true = a required approver cannot be found and the submission would be refused. */
+  blocked: boolean;
+  steps: WorkflowSimulationStep[];
 };
 
 export type AssignableUserView = {
@@ -9616,7 +9666,7 @@ export type AccountSessionView = {
   current: boolean;
 };
 
-export type NotificationCategoryKey = "request_decisions" | "hr_inbox" | "payslip";
+export type NotificationCategoryKey = "request_decisions" | "hr_inbox" | "payslip" | "approval_requests" | "request_progress";
 
 export type NotificationPreferenceView = {
   category: NotificationCategoryKey;

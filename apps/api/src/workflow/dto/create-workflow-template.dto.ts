@@ -13,9 +13,9 @@ import {
   MinLength,
   ValidateNested,
 } from "class-validator";
-import type { ApproverType, WorkflowApprovalMode, WorkflowFieldCondition } from "@aihxm/shared-types";
+import type { ApproverType, EscalationApproverType, WorkflowApprovalMode, WorkflowEscalationAction, WorkflowFallbackType, WorkflowFieldCondition } from "@aihxm/shared-types";
 
-const APPROVER_TYPES: ApproverType[] = ["role", "specific_user", "manager_of_submitter", "org_unit_head", "dotted_line_manager", "position", "group"];
+const APPROVER_TYPES: ApproverType[] = ["role", "specific_user", "manager_of_submitter", "manager_of_manager", "org_unit_head", "dotted_line_manager", "position", "group"];
 
 export class WorkflowApproverConfigDto {
   @IsIn(APPROVER_TYPES)
@@ -41,10 +41,10 @@ export class WorkflowApproverConfigDto {
   @IsUUID()
   orgUnitId?: string;
 
-  // An escalation target is always a fixed role or a specific person.
+  // An escalation target is a fixed role, a specific person, or the manager of whoever holds the line.
   @IsOptional()
-  @IsIn(["role", "specific_user"])
-  escalationApproverType?: "role" | "specific_user";
+  @IsIn(["role", "specific_user", "manager_of_approver"])
+  escalationApproverType?: EscalationApproverType;
 
   @IsOptional()
   @IsUUID()
@@ -53,6 +53,27 @@ export class WorkflowApproverConfigDto {
   @IsOptional()
   @IsUUID()
   escalationUserAccountId?: string;
+
+  @IsOptional()
+  @IsIn(["skip", "role", "specific_user", "submitter_manager"])
+  fallbackType?: WorkflowFallbackType;
+
+  @IsOptional()
+  @IsUUID()
+  fallbackRoleId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  fallbackUserAccountId?: string;
+
+  @IsOptional()
+  @IsIn(["auto_approve", "auto_reject"])
+  escalationAction?: WorkflowEscalationAction;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  escalationActionHours?: number;
 }
 
 export class WorkflowStepConfigDto {

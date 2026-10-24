@@ -26,6 +26,20 @@ export const NOTIFICATION_CATEGORIES: Array<{
     defaults: { email: false, inApp: true },
   },
   {
+    key: "approval_requests",
+    label: "Approvals waiting for me",
+    description: "When a request needs your approval, when it is still waiting, and when it was escalated to you.",
+    channels: ["in_app", "email"],
+    defaults: { email: true, inApp: true },
+  },
+  {
+    key: "request_progress",
+    label: "Progress of my requests",
+    description: "When a request you submitted is approved, rejected, sent back or decided automatically.",
+    channels: ["in_app", "email"],
+    defaults: { email: true, inApp: true },
+  },
+  {
     key: "payslip",
     label: "Payslip is ready",
     description: "The email that tells you a new payslip is available. The email never contains amounts.",

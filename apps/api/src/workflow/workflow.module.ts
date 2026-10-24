@@ -10,6 +10,7 @@ import { DelegationsService } from "./delegations.service";
 import { RbacModule } from "../rbac/rbac.module";
 import { AuditModule } from "../audit/audit.module";
 import { FileStorageModule } from "../file-storage/file-storage.module";
+import { NotificationsModule } from "../notifications/notifications.module";
 
 /**
  * Wraps the SLA sweeps in recurring triggers. Plain @nestjs/schedule cron rather
@@ -33,7 +34,7 @@ class WorkflowEscalationScheduler {
 }
 
 @Module({
-  imports: [RbacModule, AuditModule, FileStorageModule],
+  imports: [RbacModule, AuditModule, FileStorageModule, NotificationsModule],
   controllers: [WorkflowController, InboxController, DelegationsController],
   providers: [WorkflowAdapterRegistry, WorkflowService, InboxService, DelegationsService, WorkflowEscalationScheduler],
   exports: [WorkflowService, WorkflowAdapterRegistry, InboxService, DelegationsService],

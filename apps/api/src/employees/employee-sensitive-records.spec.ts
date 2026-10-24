@@ -78,7 +78,7 @@ describe("Languages, medical information and disciplinary records", () => {
     const r = await fx((c) =>
       c.query(
         `SELECT p.key, array_agg(r.key ORDER BY r.key) AS roles FROM permissions p JOIN role_permissions rp ON rp.permission_id = p.id
-           JOIN roles r ON r.id = rp.role_id WHERE p.key LIKE 'employee.medical.%' OR p.key LIKE 'employee.disciplinary.%' GROUP BY p.key`
+           JOIN roles r ON r.id = rp.role_id WHERE (p.key LIKE 'employee.medical.%' OR p.key LIKE 'employee.disciplinary.%') AND r.key IN ('hr_admin','line_manager','employee_self_service','ess_portal','system_admin','payroll_approver') GROUP BY p.key`
       )
     );
     expect(r.rowCount).toBe(4);

@@ -1,8 +1,9 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, Optional } from "@nestjs/common";
 import { createHash } from "crypto";
 import type { PoolClient } from "pg";
 import { DatabaseService } from "../database/database.service";
-import type { RequestClaims } from "../database/tenant-context";
+import { afterCommit, type RequestClaims } from "../database/tenant-context";
+import { UserNotificationsService } from "../notifications/user-notifications.service";
 import { AuditService } from "../audit/audit.service";
 import { RbacService } from "../rbac/rbac.service";
 import { WorkflowAdapterRegistry, type WorkflowOutcomeEvent } from "./workflow-adapter.registry";
@@ -11,12 +12,15 @@ import type {
   ApproverType,
   EscalationApproverType,
   WorkflowApprovalMode,
+  WorkflowEscalationAction,
+  WorkflowFallbackType,
   WorkflowCommentKind,
   WorkflowCommentView,
   WorkflowFieldCondition,
   WorkflowInstanceView,
   WorkflowPriority,
   WorkflowApproverOptions,
+  WorkflowSimulationResult,
   WorkflowStepApprovalView,
   WorkflowStepInstanceView,
   WorkflowTemplate,
@@ -25,6 +29,26 @@ import type {
 const MANAGE_PERMISSION = "workflow_template.manage.all";
 // The built-in roles a workflow step can point at (same list System Admin can grant); a company's own active custom roles are added on top.
 const APPROVER_ROLE_KEYS = ["hr_admin", "line_manager", "employee_self_service", "ess_portal", "system_admin", "payroll_approver"];
+const APPROVER_LABELS: Record<string, string> = {
+  manager_of_submitter: "manager",
+  manager_of_manager: "manager's manager",
+  dotted_line_manager: "dotted-line manager",
+  position: "position holder",
+  org_unit_head: "unit head",
+};
+function approverLabel(a: ApproverDef): string {
+  const named: Record<string, string> = {
+    role: "Anyone holding a role",
+    specific_user: "A specific person",
+    manager_of_submitter: "The requester's manager",
+    manager_of_manager: "The requester's manager's manager",
+    dotted_line_manager: "The requester's dotted-line manager",
+    org_unit_head: "The head of the requester's unit",
+    position: "Whoever holds a position",
+    group: "A member of an employee group",
+  };
+  return named[a.approverType] ?? a.approverType;
+}
 const PRIORITIES: WorkflowPriority[] = ["low", "normal", "high", "urgent"];
 
 // ---------------------------------------------------------------------------
@@ -41,6 +65,11 @@ export type ApproverDef = {
   escalationApproverType?: EscalationApproverType | null;
   escalationRoleId?: string | null;
   escalationUserAccountId?: string | null;
+  fallbackType?: WorkflowFallbackType | null;
+  fallbackRoleId?: string | null;
+  fallbackUserAccountId?: string | null;
+  escalationAction?: WorkflowEscalationAction | null;
+  escalationActionHours?: number | null;
 };
 export type StepDef = {
   stepOrder: number;
@@ -89,6 +118,11 @@ export type CreateTemplateInput = {
       escalationApproverType?: EscalationApproverType;
       escalationRoleId?: string;
       escalationUserAccountId?: string;
+      fallbackType?: WorkflowFallbackType;
+      fallbackRoleId?: string;
+      fallbackUserAccountId?: string;
+      escalationAction?: WorkflowEscalationAction;
+      escalationActionHours?: number;
     }>;
   }>;
 };
@@ -117,6 +151,7 @@ type InstanceRow = {
   submitted_by_user_account_id: string;
   subject_user_account_id: string;
   record_snapshot: Record<string, unknown>;
+  title?: string | null;
 };
 
 type LineRow = {
@@ -160,8 +195,11 @@ export class WorkflowService {
     private readonly db: DatabaseService,
     private readonly rbac: RbacService,
     private readonly audit: AuditService,
-    readonly adapters: WorkflowAdapterRegistry = new WorkflowAdapterRegistry()
+    readonly adapters: WorkflowAdapterRegistry = new WorkflowAdapterRegistry(),
+    @Optional() private readonly notifications?: UserNotificationsService
   ) {}
+
+  private readonly logger = new Logger(WorkflowService.name);
 
   // =========================================================================
   // Templates
@@ -195,6 +233,11 @@ export class WorkflowService {
             escalationApproverType: a.escalationApproverType ?? null,
             escalationRoleId: a.escalationRoleId ?? null,
             escalationUserAccountId: a.escalationUserAccountId ?? null,
+            fallbackType: a.fallbackType ?? null,
+            fallbackRoleId: a.fallbackType === "role" ? (a.fallbackRoleId ?? null) : null,
+            fallbackUserAccountId: a.fallbackType === "specific_user" ? (a.fallbackUserAccountId ?? null) : null,
+            escalationAction: a.escalationAction ?? null,
+            escalationActionHours: a.escalationAction ? (a.escalationActionHours ?? null) : null,
           })),
         })),
     };
@@ -233,6 +276,22 @@ export class WorkflowService {
         if (t === "specific_user" && !a.userAccountId) throw new BadRequestException(`Step ${s.stepOrder}: specific_user approver needs userAccountId`);
         if (t === "position" && !a.positionId) throw new BadRequestException(`Step ${s.stepOrder}: position approver needs positionId`);
         if (t === "group" && !a.employeeGroupId) throw new BadRequestException(`Step ${s.stepOrder}: group approver needs employeeGroupId`);
+        if (a.fallbackType === "role" && !a.fallbackRoleId) throw new BadRequestException(`Step ${s.stepOrder}: a role fallback needs fallbackRoleId`);
+        if (a.fallbackType === "specific_user" && !a.fallbackUserAccountId) throw new BadRequestException(`Step ${s.stepOrder}: a specific person fallback needs fallbackUserAccountId`);
+        if (a.fallbackType && !["manager_of_submitter", "manager_of_manager", "dotted_line_manager", "position", "org_unit_head"].includes(t)) {
+          throw new BadRequestException(`Step ${s.stepOrder}: a fallback only applies to approvers that are found from the organisation (manager, manager's manager, dotted-line manager, position, unit head)`);
+        }
+        if (a.fallbackType === "submitter_manager" && t === "manager_of_submitter") {
+          throw new BadRequestException(`Step ${s.stepOrder}: "the manager" cannot be the fallback for the manager`);
+        }
+        if (a.escalationAction && !(a.escalationActionHours && a.escalationActionHours >= 1)) {
+          throw new BadRequestException(`Step ${s.stepOrder}: an automatic action after escalation needs the number of hours to wait`);
+        }
+        if (a.escalationAction && !s.slaHours) {
+          throw new BadRequestException(`Step ${s.stepOrder}: an automatic action after escalation needs an SLA (the step must be able to become overdue)`);
+        }
+        if (a.escalationApproverType === "role" && !a.escalationRoleId) throw new BadRequestException(`Step ${s.stepOrder}: a role escalation needs escalationRoleId`);
+        if (a.escalationApproverType === "specific_user" && !a.escalationUserAccountId) throw new BadRequestException(`Step ${s.stepOrder}: a person escalation needs escalationUserAccountId`);
         if (a.positionId) {
           const r = await client.query("SELECT 1 FROM positions WHERE id = $1 AND company_id = $2", [a.positionId, companyId]);
           if (!r.rowCount) throw new BadRequestException(`Step ${s.stepOrder}: position not found in this company`);
@@ -273,8 +332,9 @@ export class WorkflowService {
         const ins = await client.query<{ id: string }>(
           `INSERT INTO workflow_template_step_approvers
              (step_id, approver_type, role_id, user_account_id, position_id, employee_group_id, org_unit_id,
-              escalation_approver_type, escalation_role_id, escalation_user_account_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+              escalation_approver_type, escalation_role_id, escalation_user_account_id,
+              fallback_type, fallback_role_id, fallback_user_account_id, escalation_action, escalation_action_hours)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id`,
           [
             stepResult.rows[0].id,
             a.approverType,
@@ -286,6 +346,11 @@ export class WorkflowService {
             a.escalationApproverType,
             a.escalationRoleId,
             a.escalationUserAccountId,
+            a.fallbackType ?? null,
+            a.fallbackRoleId ?? null,
+            a.fallbackUserAccountId ?? null,
+            a.escalationAction ?? null,
+            a.escalationActionHours ?? null,
           ]
         );
         a.id = ins.rows[0].id;
@@ -462,12 +527,108 @@ export class WorkflowService {
           WHERE company_id = $1 AND user_account_id IS NOT NULL ORDER BY first_name ASC, last_name ASC`,
         [claims.company_id]
       );
+      const positions = await client.query(`SELECT id, position_title, position_code FROM positions WHERE company_id = $1 ORDER BY position_title ASC LIMIT 500`, [claims.company_id]);
+      const groups = await client.query(`SELECT id, name FROM employee_groups WHERE company_id = $1 ORDER BY name ASC LIMIT 200`, [claims.company_id]);
+      const orgUnits = await client.query(`SELECT id, name FROM org_units WHERE company_id = $1 AND status = 'active' ORDER BY name ASC LIMIT 500`, [claims.company_id]);
       return {
+        positions: positions.rows.map((r) => ({ id: r.id as string, title: r.position_title as string, code: (r.position_code as string | null) ?? null })),
+        groups: groups.rows.map((r) => ({ id: r.id as string, name: r.name as string })),
+        orgUnits: orgUnits.rows.map((r) => ({ id: r.id as string, name: r.name as string })),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         roles: roles.rows.map((r: any) => ({ id: r.id, key: r.key, name: r.name, description: r.description ?? null })),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         people: people.rows.map((e: any) => ({ userAccountId: e.user_account_id, fullName: `${e.first_name} ${e.last_name}`, employeeNumber: e.employee_number })),
       };
+    });
+  }
+
+  /**
+   * BACKLOG58 - "who would approve this?". Walks the template exactly as a submission would (start condition, step
+   * conditions, every approver type, fallbacks) for a given requester and record, and reports who would be asked at each step.
+   * Nothing is created or sent; the check runs in a transaction that is rolled back.
+   */
+  async simulate(claims: RequestClaims, key: string, input: { subjectUserAccountId: string; record: Record<string, unknown> }): Promise<WorkflowSimulationResult> {
+    if (!claims.company_id) throw new ForbiddenException();
+    if (!(await this.rbac.can(claims, MANAGE_PERMISSION))) throw new ForbiddenException("Not permitted to manage workflow templates");
+    return this.db.withClaims(claims, async (client) => {
+      const found = await client.query<{ id: string; name: string; start_condition: WorkflowFieldCondition | null; current_version_no: number }>(
+        `SELECT id, name, start_condition, current_version_no FROM workflow_templates WHERE company_id = $1 AND key = $2`,
+        [claims.company_id, key]
+      );
+      if (!found.rowCount) throw new NotFoundException("Workflow template not found");
+      const template = found.rows[0];
+      const version = await client.query<{ definition: TemplateDefinition }>(
+        `SELECT definition FROM workflow_template_versions WHERE template_id = $1 AND version_no = $2`,
+        [template.id, template.current_version_no]
+      );
+      const steps = version.rows[0]?.definition.steps ?? [];
+      const subject = await client.query(`SELECT 1 FROM employees WHERE user_account_id = $1 AND company_id = $2`, [input.subjectUserAccountId, claims.company_id]);
+      if (!subject.rowCount) throw new BadRequestException("Choose a person who has a login in this company");
+
+      const nameOf = async (userId: string | null): Promise<string> => {
+        if (!userId) return "Nobody";
+        const r = await client.query(`SELECT first_name || ' ' || last_name AS n FROM employees WHERE user_account_id = $1 LIMIT 1`, [userId]);
+        return r.rows[0]?.n ?? "A user without an employee record";
+      };
+      const result: WorkflowSimulationResult = {
+        templateKey: key,
+        templateName: template.name,
+        startConditionMatched: conditionMatches(template.start_condition, input.record),
+        blocked: false,
+        steps: [],
+      };
+      for (const step of steps) {
+        const row: WorkflowSimulationResult["steps"][number] = {
+          stepOrder: step.stepOrder,
+          name: step.name,
+          status: "will_run",
+          approvalMode: step.approvalMode,
+          quorumCount: step.quorumCount,
+          parallelGroup: step.parallelGroup,
+          slaHours: step.slaHours,
+          approvers: [],
+        };
+        if (!conditionMatches(step.condition, input.record)) {
+          row.status = "skipped_condition";
+          result.steps.push(row);
+          continue;
+        }
+        for (const approver of step.approvers) {
+          const label = approverLabel(approver);
+          // a savepoint keeps one unresolvable approver from poisoning the rest of the check
+          await client.query("SAVEPOINT simulate_line");
+          try {
+            const line = await this.resolveLine(client, approver, input.subjectUserAccountId);
+            await client.query("RELEASE SAVEPOINT simulate_line");
+            if (line.skip) {
+              row.approvers.push({ label, outcome: "skipped", names: [], note: line.note });
+            } else if (line.userId) {
+              row.approvers.push({ label, outcome: "person", names: [await nameOf(line.userId)], note: line.note });
+            } else if (line.roleId) {
+              const role = await client.query(`SELECT name FROM roles WHERE id = $1`, [line.roleId]);
+              const holders = await this.lineRecipients(client, claims.company_id!, { userId: null, roleId: line.roleId, groupId: null });
+              const names = await Promise.all(holders.slice(0, 5).map(nameOf));
+              row.approvers.push({ label, outcome: "role", names, note: [`Anyone holding ${role.rows[0]?.name ?? "the role"}${holders.length > 5 ? ` (${holders.length} people)` : ""}`, line.note].filter(Boolean).join(". ") });
+            } else if (approver.employeeGroupId) {
+              const holders = await this.lineRecipients(client, claims.company_id!, { userId: null, roleId: null, groupId: approver.employeeGroupId });
+              const names = await Promise.all(holders.slice(0, 5).map(nameOf));
+              row.approvers.push({ label, outcome: "group", names, note: holders.length === 0 ? "The group has no current members with a login" : null });
+            } else {
+              row.approvers.push({ label, outcome: "blocked", names: [], note: "Nobody could be found" });
+              result.blocked = true;
+            }
+          } catch (err) {
+            await client.query("ROLLBACK TO SAVEPOINT simulate_line");
+            await client.query("RELEASE SAVEPOINT simulate_line");
+            if (!(err instanceof BadRequestException)) throw err;
+            row.approvers.push({ label, outcome: "blocked", names: [], note: `${err.message.replace(/^Cannot route to [a-z_]+: /, "")}. Without a fallback this request could not be submitted.` });
+            result.blocked = true;
+          }
+        }
+        if (row.approvers.length > 0 && row.approvers.every((a) => a.outcome === "skipped")) row.status = "skipped_nobody";
+        result.steps.push(row);
+      }
+      return result;
     });
   }
 
@@ -564,6 +725,11 @@ export class WorkflowService {
             escalationApproverType: a.escalation_approver_type ?? undefined,
             escalationRoleId: a.escalation_role_id ?? undefined,
             escalationUserAccountId: a.escalation_user_account_id ?? undefined,
+            fallbackType: a.fallback_type ?? undefined,
+            fallbackRoleId: a.fallback_role_id ?? undefined,
+            fallbackUserAccountId: a.fallback_user_account_id ?? undefined,
+            escalationAction: a.escalation_action ?? undefined,
+            escalationActionHours: a.escalation_action_hours ?? undefined,
           })),
       })),
     };
@@ -745,7 +911,11 @@ export class WorkflowService {
     return this.db.withClaims(claims, (client) => this.decideInTx(client, claims, stepInstanceId, dto));
   }
 
-  async decideInTx(client: PoolClient, claims: RequestClaims, stepInstanceId: string, dto: DecideInput): Promise<WorkflowInstanceView> {
+  /**
+   * `opts.system` is the automatic decision after an escalation went unanswered (BACKLOG57): it names the line to decide, skips
+   * the "are you an approver" check and records no deciding person.
+   */
+  async decideInTx(client: PoolClient, claims: RequestClaims, stepInstanceId: string, dto: DecideInput, opts: { system?: boolean; lineId?: string } = {}): Promise<WorkflowInstanceView> {
     if (!claims.company_id) throw new ForbiddenException();
     const stepResult = await client.query(`SELECT * FROM workflow_step_instances WHERE id = $1`, [stepInstanceId]);
     if (stepResult.rowCount === 0) throw new NotFoundException("Workflow step not found");
@@ -769,17 +939,22 @@ export class WorkflowService {
 
     const lines = await this.loadLines(client, stepInstanceId);
     let acted: { line: LineRow; actingFor: string | null; delegationId: string | null } | null = null;
-    for (const line of lines) {
-      const actor = await this.resolveActor(client, claims.sub, instance, line);
-      if (actor) {
-        acted = { line, ...actor };
-        break;
+    if (opts.system) {
+      const line = lines.find((l) => l.id === opts.lineId);
+      if (line) acted = { line, actingFor: null, delegationId: null };
+    } else {
+      for (const line of lines) {
+        const actor = await this.resolveActor(client, claims.sub, instance, line);
+        if (actor) {
+          acted = { line, ...actor };
+          break;
+        }
       }
     }
     if (!acted) throw new ForbiddenException("You are not an approver on this step");
 
     // LIVE-03/14: segregation of duties. The tenant's "Approval Controls" policy can forbid approving one's own request.
-    if (dto.decision === "approved" && (claims.sub === instance.submitted_by_user_account_id || claims.sub === instance.subject_user_account_id)) {
+    if (!opts.system && dto.decision === "approved" && (claims.sub === instance.submitted_by_user_account_id || claims.sub === instance.subject_user_account_id)) {
       if (await this.blocksSelfApproval(client, instance.company_id)) {
         throw new ForbiddenException(
           "You cannot approve your own request. Your company's approval controls require another approver; ask HR to route it to someone else."
@@ -794,7 +969,7 @@ export class WorkflowService {
               delegated_from_user_account_id = COALESCE($5, delegated_from_user_account_id),
               delegation_id = COALESCE($6, delegation_id)
         WHERE id = $4`,
-      [lineStatus, claims.sub, dto.comment ?? null, acted.line.id, acted.actingFor, acted.delegationId, dto.decision]
+      [lineStatus, opts.system ? null : claims.sub, dto.comment ?? null, acted.line.id, acted.actingFor, acted.delegationId, dto.decision]
     );
     if (dto.comment?.trim()) {
       await this.addCommentInTx(client, claims, instance, dto.comment.trim(), dto.decision === "send_back" ? "send_back" : "decision", stepInstanceId, "participants");
@@ -816,6 +991,7 @@ export class WorkflowService {
       }
       await client.query(`UPDATE workflow_instances SET status = 'returned', returned_at = now(), updated_at = now() WHERE id = $1`, [instance.id]);
       await this.fireOutcome(client, claims, instance.id, "returned", dto.comment ?? null);
+      this.notifyRequester(client, instance, `Sent back: ${await this.titleOf(client, instance.id)}`, "An approver asked for changes. Open the request, update it and send it again.");
       return (await this.loadInstance(client, instance.id))!;
     }
 
@@ -833,6 +1009,12 @@ export class WorkflowService {
         await this.terminateStage(client, stageSteps, step.id, "rejected");
         await client.query(`UPDATE workflow_instances SET status = 'rejected', completed_at = now(), updated_at = now() WHERE id = $1`, [instance.id]);
         await this.fireOutcome(client, claims, instance.id, "rejected", dto.comment ?? null);
+        this.notifyRequester(
+          client,
+          instance,
+          `Rejected: ${await this.titleOf(client, instance.id)}`,
+          opts.system ? "It was rejected automatically because nobody answered in time." : (dto.comment?.trim() || "Your request was rejected.")
+        );
       }
       return (await this.loadInstance(client, instance.id))!;
     }
@@ -852,8 +1034,21 @@ export class WorkflowService {
     await this.activateStage(client, instance.id, def.steps, lastIndexInStage + 1, record, instance.subject_user_account_id, claims);
 
     const done = await client.query<{ status: string }>("SELECT status FROM workflow_instances WHERE id = $1", [instance.id]);
-    if (done.rows[0].status === "approved") await this.fireOutcome(client, claims, instance.id, "approved", dto.comment ?? null);
+    if (done.rows[0].status === "approved") {
+      await this.fireOutcome(client, claims, instance.id, "approved", dto.comment ?? null);
+      this.notifyRequester(
+        client,
+        instance,
+        `Approved: ${await this.titleOf(client, instance.id)}`,
+        opts.system ? "It was approved automatically because nobody answered in time." : "Your request was approved."
+      );
+    }
     return (await this.loadInstance(client, instance.id))!;
+  }
+
+  private async titleOf(client: PoolClient, instanceId: string): Promise<string> {
+    if (!this.notifications) return "";
+    return (await this.requestLabel(client, instanceId)).title;
   }
 
   private async blocksSelfApproval(client: PoolClient, companyId: string): Promise<boolean> {
@@ -1114,26 +1309,33 @@ export class WorkflowService {
   // SLA sweeps
   // =========================================================================
 
-  /** Escalates overdue approval lines of instances that are actively waiting (on-hold requests are paused). */
+  /**
+   * Escalates overdue approval lines of instances that are actively waiting (on-hold requests are paused), tells the new
+   * target, and then carries out the automatic action (approve / reject) of lines that stayed escalated too long.
+   */
   async escalateOverdue(): Promise<number> {
     const serviceClaims: RequestClaims = { is_platform_admin: false, company_id: null, sub: "system", is_service: true };
-    return this.db.withClaims(serviceClaims, async (client) => {
+    const escalatedCount = await this.db.withClaims(serviceClaims, async (client) => {
       const overdue = await client.query<{
         id: string;
         company_id: string;
+        instance_id: string;
+        subject: string;
+        holder: string | null;
         template_approver_id: string | null;
         escalation_approver_type: EscalationApproverType | null;
         escalation_role_id: string | null;
         escalation_user_account_id: string | null;
       }>(
-        `SELECT a.id, wi.company_id, a.template_approver_id, a.escalation_approver_type, a.escalation_role_id, a.escalation_user_account_id
+        `SELECT a.id, wi.company_id, wi.id AS instance_id, wi.subject_user_account_id AS subject, COALESCE(a.delegated_to_user_account_id, a.user_account_id) AS holder,
+                a.template_approver_id, a.escalation_approver_type, a.escalation_role_id, a.escalation_user_account_id
            FROM workflow_step_approvals a
            JOIN workflow_step_instances si ON si.id = a.step_instance_id
            JOIN workflow_instances wi ON wi.id = si.workflow_instance_id
           WHERE a.status = 'pending' AND a.due_at IS NOT NULL AND a.due_at < now() AND wi.status = 'in_progress'`
       );
 
-      let escalatedCount = 0;
+      let count = 0;
       for (const approval of overdue.rows) {
         let type = approval.escalation_approver_type;
         let roleId = approval.escalation_role_id;
@@ -1159,23 +1361,89 @@ export class WorkflowService {
             [roleId, approval.company_id]
           );
           escalationTarget = holder.rows[0]?.user_account_id ?? null;
+        } else if (type === "manager_of_approver") {
+          // the manager of whoever holds the line; for a role / group line, the requester's manager
+          escalationTarget = (approval.holder ? await this.managerOfUser(client, approval.holder) : null) ?? (await this.resolveManagerOfSubmitter(client, approval.subject));
         }
         await client.query(
           `UPDATE workflow_step_approvals SET status = 'escalated', escalated_at = now(), escalated_to_user_account_id = $1 WHERE id = $2`,
           [escalationTarget, approval.id]
         );
-        escalatedCount++;
+        count++;
+        if (this.notifications) {
+          const info = await this.requestLabel(client, approval.instance_id);
+          this.notifyAfterCommit(client, {
+            companyId: approval.company_id,
+            userAccountIds: [escalationTarget],
+            category: "approval_requests",
+            title: `Escalated to you: ${info.title}`,
+            body: `${info.submitter}'s request was not answered in time and now needs your decision.`,
+            link: "/app/approvals",
+          });
+          this.notifyAfterCommit(client, {
+            companyId: approval.company_id,
+            userAccountIds: [approval.holder],
+            category: "approval_requests",
+            title: `Overdue: ${info.title}`,
+            body: escalationTarget ? "This approval passed its deadline and was escalated." : "This approval passed its deadline. Please decide as soon as you can.",
+            link: "/app/approvals",
+          });
+        }
       }
-      return escalatedCount;
+      return count;
     });
+    await this.applyAutomaticActions();
+    return escalatedCount;
   }
 
-  /** Writes a reminder note for lines pending longer than the step's reminder interval (delivery is the notification layer's job). */
+  /** BACKLOG57 - lines escalated for longer than their "then decide automatically after N hours" setting get that decision. */
+  async applyAutomaticActions(): Promise<number> {
+    const serviceClaims: RequestClaims = { is_platform_admin: false, company_id: null, sub: "system", is_service: true };
+    const due = await this.db.withClaims(serviceClaims, async (client) =>
+      (
+        await client.query<{ id: string; step_instance_id: string; company_id: string; action: WorkflowEscalationAction; hours: number }>(
+          `SELECT a.id, a.step_instance_id, wi.company_id, a.escalation_action AS action, a.escalation_action_hours AS hours
+             FROM workflow_step_approvals a
+             JOIN workflow_step_instances si ON si.id = a.step_instance_id
+             JOIN workflow_instances wi ON wi.id = si.workflow_instance_id
+            WHERE a.status = 'escalated' AND a.escalation_action IS NOT NULL AND a.escalated_at IS NOT NULL
+              AND a.escalated_at + (a.escalation_action_hours || ' hours')::interval < now() AND wi.status = 'in_progress'`
+        )
+      ).rows
+    );
+    let done = 0;
+    for (const line of due) {
+      const claims: RequestClaims = { is_platform_admin: false, is_service: true, sub: "system", company_id: line.company_id };
+      try {
+        await this.db.withClaims(claims, (client) =>
+          this.decideInTx(
+            client,
+            claims,
+            line.step_instance_id,
+            {
+              decision: line.action === "auto_approve" ? "approved" : "rejected",
+              comment: `${line.action === "auto_approve" ? "Approved" : "Rejected"} automatically: no answer ${line.hours} hour(s) after escalation.`,
+            },
+            { system: true, lineId: line.id }
+          )
+        );
+        done++;
+      } catch (err) {
+        this.logger.warn(`Automatic workflow action failed for line ${line.id}: ${(err as Error).message}`);
+      }
+    }
+    return done;
+  }
+
+  /** Reminds the people behind pending lines older than the step's reminder interval: a note on the request and a notification. */
   async remindDue(): Promise<number> {
     const serviceClaims: RequestClaims = { is_platform_admin: false, company_id: null, sub: "system", is_service: true };
     return this.db.withClaims(serviceClaims, async (client) => {
       const due = await client.query(
-        `SELECT a.id, a.step_instance_id, si.workflow_instance_id, wi.company_id
+        `SELECT a.id, a.step_instance_id, si.workflow_instance_id, wi.company_id,
+                COALESCE(a.delegated_to_user_account_id, a.escalated_to_user_account_id, a.user_account_id) AS holder,
+                CASE WHEN COALESCE(a.delegated_to_user_account_id, a.escalated_to_user_account_id, a.user_account_id) IS NULL THEN a.role_id END AS role_id,
+                CASE WHEN COALESCE(a.delegated_to_user_account_id, a.escalated_to_user_account_id, a.user_account_id) IS NULL THEN a.employee_group_id END AS group_id
            FROM workflow_step_approvals a
            JOIN workflow_step_instances si ON si.id = a.step_instance_id AND si.status = 'pending' AND si.reminder_hours IS NOT NULL
            JOIN workflow_instances wi ON wi.id = si.workflow_instance_id AND wi.status = 'in_progress'
@@ -1189,6 +1457,18 @@ export class WorkflowService {
            VALUES ($1, $2, $3, 'reminder', 'Approval reminder', 'approvers')`,
           [row.company_id, row.workflow_instance_id, row.step_instance_id]
         );
+        if (this.notifications) {
+          const info = await this.requestLabel(client, row.workflow_instance_id);
+          const people = await this.lineRecipients(client, row.company_id, { userId: row.holder, roleId: row.role_id, groupId: row.group_id });
+          this.notifyAfterCommit(client, {
+            companyId: row.company_id,
+            userAccountIds: people,
+            category: "approval_requests",
+            title: `Reminder: ${info.title}`,
+            body: `${info.submitter} is still waiting for a decision.`,
+            link: "/app/approvals",
+          });
+        }
       }
       return due.rowCount ?? 0;
     });
@@ -1291,19 +1571,26 @@ export class WorkflowService {
       const stepInstanceId = await upsert("pending");
       activated++;
       const dueAt = step.slaHours ? new Date(Date.now() + step.slaHours * 3_600_000) : null;
+      let linesCreated = 0;
+      const newcomers: Array<{ userId: string | null; roleId: string | null; groupId: string | null }> = [];
       for (const approver of step.approvers) {
-        const resolved = await this.resolveApprover(client, approver, subjectUserAccountId);
+        const found = await this.resolveLine(client, approver, subjectUserAccountId);
+        if (found.skip) {
+          await this.systemNote(client, instanceId, stepInstanceId, found.note ?? "No approver found; this approver was skipped");
+          continue;
+        }
+        if (found.note) await this.systemNote(client, instanceId, stepInstanceId, found.note);
         await client.query(
           `INSERT INTO workflow_step_approvals
              (step_instance_id, template_approver_id, approver_type, role_id, user_account_id, position_id, employee_group_id, due_at,
-              escalation_approver_type, escalation_role_id, escalation_user_account_id, org_unit_id)
-           VALUES ($1, (SELECT id FROM workflow_template_step_approvers WHERE id = $2), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+              escalation_approver_type, escalation_role_id, escalation_user_account_id, org_unit_id, escalation_action, escalation_action_hours)
+           VALUES ($1, (SELECT id FROM workflow_template_step_approvers WHERE id = $2), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
           [
             stepInstanceId,
             approver.id ?? null,
-            approver.approverType,
-            approver.roleId ?? null,
-            resolved,
+            found.approverType,
+            found.roleId,
+            found.userId,
             approver.positionId ?? null,
             approver.employeeGroupId ?? null,
             dueAt,
@@ -1311,9 +1598,20 @@ export class WorkflowService {
             approver.escalationRoleId ?? null,
             approver.escalationUserAccountId ?? null,
             approver.orgUnitId ?? null,
+            approver.escalationAction ?? null,
+            approver.escalationActionHours ?? null,
           ]
         );
+        linesCreated++;
+        newcomers.push({ userId: found.userId, roleId: found.roleId, groupId: found.approverType === "group" ? (approver.employeeGroupId ?? null) : null });
       }
+      if (linesCreated === 0) {
+        // every approver of this step was skipped (nobody to ask): the step is skipped and the request moves on
+        await client.query(`UPDATE workflow_step_instances SET status = 'skipped', updated_at = now() WHERE id = $1`, [stepInstanceId]);
+        activated--;
+        continue;
+      }
+      await this.notifyNewApprovals(client, instanceId, newcomers);
     }
     if (activated === 0) {
       return this.activateStage(client, instanceId, steps, end + 1, record, subjectUserAccountId, claims);
@@ -1333,6 +1631,47 @@ export class WorkflowService {
     );
   }
 
+  /**
+   * BACKLOG57 - turns one configured approver into the approval line to create. When a person-resolved type finds nobody
+   * (no manager on file, no login) the approver's fallback decides: skip the line, ask a role or a named person, or ask the
+   * direct manager. Without a fallback the submission is refused with the original message, as before.
+   */
+  private async resolveLine(
+    client: PoolClient,
+    approver: ApproverDef,
+    subjectUserAccountId: string
+  ): Promise<{ skip: boolean; approverType: ApproverType; roleId: string | null; userId: string | null; note: string | null }> {
+    try {
+      const userId = await this.resolveApprover(client, approver, subjectUserAccountId);
+      return { skip: false, approverType: approver.approverType, roleId: approver.roleId ?? null, userId, note: null };
+    } catch (err) {
+      if (!(err instanceof BadRequestException) || !approver.fallbackType) throw err;
+      const label = APPROVER_LABELS[approver.approverType] ?? approver.approverType;
+      if (approver.fallbackType === "skip") {
+        return { skip: true, approverType: approver.approverType, roleId: null, userId: null, note: `No ${label} was found for the requester, so this approval was skipped.` };
+      }
+      if (approver.fallbackType === "role" && approver.fallbackRoleId) {
+        return { skip: false, approverType: "role", roleId: approver.fallbackRoleId, userId: null, note: `No ${label} was found for the requester; the approval was sent to the fallback role instead.` };
+      }
+      if (approver.fallbackType === "specific_user" && approver.fallbackUserAccountId) {
+        return { skip: false, approverType: "specific_user", roleId: null, userId: approver.fallbackUserAccountId, note: `No ${label} was found for the requester; the approval was sent to the fallback person instead.` };
+      }
+      if (approver.fallbackType === "submitter_manager") {
+        const manager = await this.resolveManagerOfSubmitter(client, subjectUserAccountId);
+        if (manager) return { skip: false, approverType: "manager_of_submitter", roleId: null, userId: manager, note: `No ${label} was found for the requester; the approval was sent to the direct manager instead.` };
+      }
+      throw err;
+    }
+  }
+
+  private async systemNote(client: PoolClient, instanceId: string, stepInstanceId: string | null, body: string): Promise<void> {
+    await client.query(
+      `INSERT INTO workflow_comments (company_id, workflow_instance_id, step_instance_id, kind, body, visibility)
+       SELECT company_id, id, $2, 'system', $3, 'participants' FROM workflow_instances WHERE id = $1`,
+      [instanceId, stepInstanceId, body]
+    );
+  }
+
   /** Resolves the person behind a person-resolved approver type at activation; role / group stay symbolic. */
   private async resolveApprover(client: PoolClient, approver: ApproverDef, subjectUserAccountId: string): Promise<string | null> {
     const t = approver.approverType;
@@ -1345,6 +1684,11 @@ export class WorkflowService {
         throw new BadRequestException(
           "Cannot route to manager_of_submitter: the subject has no employee record, no manager on file, or their manager has no login"
         );
+      }
+    } else if (t === "manager_of_manager") {
+      userId = await this.resolveManagerOfManager(client, subjectUserAccountId);
+      if (!userId) {
+        throw new BadRequestException("Cannot route to manager_of_manager: the subject's manager has no manager on file, or that person has no login");
       }
     } else if (t === "dotted_line_manager") {
       const r = await client.query<{ uid: string | null }>(
@@ -1393,7 +1737,7 @@ export class WorkflowService {
          JOIN workflow_step_instances si ON si.id = a.step_instance_id AND si.status = 'pending'
          JOIN workflow_instances wi ON wi.id = si.workflow_instance_id AND wi.status IN ('in_progress', 'on_hold')
         WHERE wi.company_id = $1 AND a.status = 'pending' AND a.delegated_to_user_account_id IS NULL
-          AND a.approver_type IN ('manager_of_submitter', 'dotted_line_manager', 'position', 'org_unit_head')
+          AND a.approver_type IN ('manager_of_submitter', 'manager_of_manager', 'dotted_line_manager', 'position', 'org_unit_head')
           AND wi.subject_user_account_id IS NOT NULL
         FOR UPDATE OF a`,
       [companyId]
@@ -1466,6 +1810,97 @@ export class WorkflowService {
       [subjectUserAccountId]
     );
     return result.rows[0]?.manager_user_account_id ?? null;
+  }
+
+  /** The manager's manager: two steps up the reporting line; null when either step is missing or has no login. */
+  private async resolveManagerOfManager(client: PoolClient, subjectUserAccountId: string): Promise<string | null> {
+    const result = await client.query<{ uid: string | null }>(
+      `SELECT mm.user_account_id AS uid
+         FROM employees e JOIN employees m ON m.id = e.manager_id JOIN employees mm ON mm.id = m.manager_id
+        WHERE e.user_account_id = $1`,
+      [subjectUserAccountId]
+    );
+    return result.rows[0]?.uid ?? null;
+  }
+
+  /** The manager of a given login (used by the "manager of the approver" escalation). */
+  private async managerOfUser(client: PoolClient, userAccountId: string): Promise<string | null> {
+    const result = await client.query<{ uid: string | null }>(
+      `SELECT m.user_account_id AS uid FROM employees e JOIN employees m ON m.id = e.manager_id WHERE e.user_account_id = $1`,
+      [userAccountId]
+    );
+    return result.rows[0]?.uid ?? null;
+  }
+
+  // ---- notifications (BACKLOG57) ---------------------------------------------------------------------------------
+
+  /** Sends after the surrounding transaction commits, so nobody is told about work that was rolled back. */
+  private notifyAfterCommit(client: PoolClient, input: Parameters<UserNotificationsService["notify"]>[0]): void {
+    const service = this.notifications;
+    if (!service || input.userAccountIds.filter(Boolean).length === 0) return;
+    afterCommit(client, () => service.notify(input));
+  }
+
+  /** Who is asked by an approval line: the resolved person, every holder of the role, or the members of the group. */
+  private async lineRecipients(client: PoolClient, companyId: string, line: { userId: string | null; roleId: string | null; groupId: string | null }): Promise<string[]> {
+    if (line.userId) return [line.userId];
+    if (line.roleId) {
+      const r = await client.query<{ user_account_id: string }>(
+        `SELECT DISTINCT user_account_id FROM user_role_assignments WHERE role_id = $1 AND company_id = $2
+            AND (effective_from IS NULL OR effective_from <= CURRENT_DATE) AND (effective_to IS NULL OR effective_to >= CURRENT_DATE) LIMIT 50`,
+        [line.roleId, companyId]
+      );
+      return r.rows.map((x) => x.user_account_id);
+    }
+    if (line.groupId) {
+      const r = await client.query<{ uid: string }>(
+        `SELECT DISTINCT e.user_account_id AS uid FROM employee_group_memberships m JOIN employees e ON e.id = m.employee_id
+          WHERE m.group_id = $1 AND e.user_account_id IS NOT NULL
+            AND m.effective_from <= CURRENT_DATE AND (m.effective_to IS NULL OR m.effective_to >= CURRENT_DATE) LIMIT 50`,
+        [line.groupId]
+      );
+      return r.rows.map((x) => x.uid);
+    }
+    return [];
+  }
+
+  private async requestLabel(client: PoolClient, instanceId: string): Promise<{ companyId: string; title: string; submitter: string; people: string[] }> {
+    const r = await client.query(
+      `SELECT wi.company_id, COALESCE(wi.title, t.name) AS title, wi.submitted_by_user_account_id AS sb, wi.subject_user_account_id AS sj,
+              (SELECT e.first_name || ' ' || e.last_name FROM employees e WHERE e.user_account_id = wi.subject_user_account_id LIMIT 1) AS subject_name
+         FROM workflow_instances wi JOIN workflow_templates t ON t.id = wi.template_id WHERE wi.id = $1`,
+      [instanceId]
+    );
+    const row = r.rows[0];
+    return { companyId: row.company_id, title: row.title, submitter: row.subject_name ?? "A colleague", people: [row.sb, row.sj] };
+  }
+
+  /** "Approval needed" for the people behind the lines an activated step just opened. */
+  private async notifyNewApprovals(client: PoolClient, instanceId: string, lines: Array<{ userId: string | null; roleId: string | null; groupId: string | null }>): Promise<void> {
+    if (!this.notifications) return;
+    const info = await this.requestLabel(client, instanceId);
+    const ids = new Set<string>();
+    for (const line of lines) for (const id of await this.lineRecipients(client, info.companyId, line)) ids.add(id);
+    for (const p of info.people) ids.delete(p); // never "approval needed" to the person who asked, even if they also hold the role
+    this.notifyAfterCommit(client, {
+      companyId: info.companyId,
+      userAccountIds: [...ids],
+      category: "approval_requests",
+      title: `Approval needed: ${info.title}`,
+      body: `${info.submitter} is waiting for your decision.`,
+      link: "/app/approvals",
+    });
+  }
+
+  private notifyRequester(client: PoolClient, instance: Pick<InstanceRow, "company_id" | "submitted_by_user_account_id" | "subject_user_account_id">, title: string, body: string): void {
+    this.notifyAfterCommit(client, {
+      companyId: instance.company_id,
+      userAccountIds: [instance.submitted_by_user_account_id, instance.subject_user_account_id],
+      category: "request_progress",
+      title,
+      body,
+      link: "/app/approvals",
+    });
   }
 
   private async fireOutcome(client: PoolClient, claims: RequestClaims, instanceId: string, event: WorkflowOutcomeEvent, comment: string | null): Promise<void> {

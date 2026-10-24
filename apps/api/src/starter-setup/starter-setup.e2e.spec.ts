@@ -121,13 +121,14 @@ describe("Starter setup (e2e)", () => {
     expect(await sql("SELECT 1 FROM expense_claims WHERE company_id = $1", [companyId])).toHaveLength(0);
   });
 
-  it("a failed data-subject request leaves no request behind", async () => {
+  it("a privacy request without a route still reaches HR (BACKLOG52) - nothing is lost", async () => {
     const res = await request(app.getHttpServer())
       .post("/data-subject-requests")
       .set("Authorization", `Bearer ${staffToken}`)
       .send({ employeeId: staffEmployeeId, requestType: "access", description: "Copy of my data" });
-    expect(res.status).toBe(404);
-    expect(await sql("SELECT 1 FROM data_subject_requests WHERE company_id = $1", [companyId])).toHaveLength(0);
+    expect(res.status).toBe(201);
+    expect(await sql("SELECT 1 FROM data_subject_requests WHERE company_id = $1 AND workflow_instance_id IS NULL", [companyId])).toHaveLength(1);
+    await sql("DELETE FROM data_subject_requests WHERE company_id = $1", [companyId]);
   });
 
   it("applying adds the routes, holidays, leave policy (kept if one exists) and shift, and reports what it did", async () => {

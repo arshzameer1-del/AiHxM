@@ -5,6 +5,7 @@ import type { RequestClaims } from "../database/tenant-context";
 import { WorkflowService } from "./workflow.service";
 import { InboxService } from "./inbox.service";
 import { CreateWorkflowTemplateDto, UpdateWorkflowTemplateDto } from "./dto/create-workflow-template.dto";
+import { SimulateWorkflowDto } from "./dto/simulate-workflow.dto";
 import { CancelWorkflowDto, ResubmitDto, SetTemplateActiveDto, WorkflowCommentDto } from "./dto/inbox.dto";
 import { ApprovalDecisionDto, SubmitForApprovalDto } from "./dto/submit-for-approval.dto";
 
@@ -34,6 +35,12 @@ export class WorkflowController {
   @Get("approver-options")
   approverOptions(@CurrentClaims() claims: RequestClaims) {
     return this.workflow.listApproverOptions(claims);
+  }
+
+  // BACKLOG58 - "who would approve this?" for a requester and record; creates nothing.
+  @Post("templates/:key/simulate")
+  simulate(@CurrentClaims() claims: RequestClaims, @Param("key") key: string, @Body() dto: SimulateWorkflowDto) {
+    return this.workflow.simulate(claims, key, { subjectUserAccountId: dto.subjectUserAccountId, record: dto.record ?? {} });
   }
 
   @Get("templates/:key/versions")

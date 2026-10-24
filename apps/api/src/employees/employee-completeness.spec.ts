@@ -113,6 +113,8 @@ describe("Profile completeness", () => {
   });
 
   it("an approved photo counts, a pending one does not", async () => {
+    // BACKLOG55: employee photos show at once unless the company asks for HR approval first
+    await fx((c) => c.query("INSERT INTO company_appearance (company_id, photo_needs_hr_approval) VALUES ($1, true) ON CONFLICT (company_id) DO UPDATE SET photo_needs_hr_approval = true", [a]));
     const pending = await employees.addOwnDocument(ess, me, "photograph", { ...pdf, originalname: "me.png", mimetype: "image/png" });
     expect((await state(ess)).photo).toBe(false);
     await compliance.review(hr, pending.id, "approved");

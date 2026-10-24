@@ -75,6 +75,7 @@ describe("WorkflowService approver options (permission based)", () => {
     expect(names).toEqual(expect.arrayContaining(["Helper Tester", "Hira Tester"]));
     expect(names).not.toContain("Outsider Tester");
     expect(options.people.every((p) => p.userAccountId)).toBe(true);
+    expect(Array.isArray(options.positions) && Array.isArray(options.groups) && Array.isArray(options.orgUnits)).toBe(true);
   });
 
   it("the same holder can create a template pointing at the custom role", async () => {

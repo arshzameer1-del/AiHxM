@@ -136,7 +136,7 @@ describe("In-app notifications and preferences", () => {
 
   it("preferences start at the defaults, can be changed, and are checked", async () => {
     const start = await inbox.getPreferences(ess);
-    expect(start.map((p) => p.category)).toEqual(["request_decisions", "hr_inbox", "payslip"]);
+    expect(start.map((p) => p.category)).toEqual(["request_decisions", "hr_inbox", "approval_requests", "request_progress", "payslip"]);
     expect(start.find((p) => p.category === "request_decisions")).toMatchObject({ email: true, inApp: true });
     expect(start.find((p) => p.category === "payslip")).toMatchObject({ email: true, inApp: false, channels: ["email"] });
 
