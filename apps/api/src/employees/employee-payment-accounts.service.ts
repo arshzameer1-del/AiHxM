@@ -12,6 +12,7 @@ import type {
   EmployeePaymentAccountView,
   UpdateEmployeePaymentAccountRequest,
 } from "@aihxm/shared-types";
+import { maskTail, requireViewOrSelf } from "./employee-self-read";
 
 const MODULE_KEY = "employee" as const;
 const MANAGE_PERMISSION = "employee.manage.all";
@@ -185,7 +186,7 @@ export class EmployeePaymentAccountsService {
   }
 
   async list(claims: RequestClaims, employeeId: string, includeHistory = false): Promise<EmployeePaymentAccountView[]> {
-    await this.requireView(claims);
+    const door = await requireViewOrSelf(this.db, this.rbac, claims, employeeId, () => this.requireView(claims));
     return this.db.withClaims(claims, async (client) => {
       const result = await client.query(
         `SELECT * FROM employee_payment_accounts
@@ -194,7 +195,9 @@ export class EmployeePaymentAccountsService {
           ORDER BY (status = 'active') DESC, (approval_status = 'pending') ASC, priority, created_at`,
         [employeeId, includeHistory]
       );
-      return result.rows.map(rowToView);
+      const views = result.rows.map(rowToView);
+      // The person's own view shows only the last four characters of the account number and IBAN.
+      return door === "self" ? views.map((v) => ({ ...v, accountNumber: maskTail(v.accountNumber), iban: maskTail(v.iban) })) : views;
     });
   }
 

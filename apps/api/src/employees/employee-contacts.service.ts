@@ -7,6 +7,7 @@ import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
 import { HrReferenceCatalogService } from "../hr-administration/hr-reference-catalog.service";
 import type { CreateEmployeeContactRequest, EmployeeContactView, UpdateEmployeeContactRequest } from "@aihxm/shared-types";
+import { requireViewOrSelf } from "./employee-self-read";
 
 // Reuses the employee record's own permission keys rather than inventing
 // new ones — a contact method is a sub-fact of the employee record, the
@@ -127,7 +128,7 @@ export class EmployeeContactsService {
   }
 
   async list(claims: RequestClaims, employeeId: string): Promise<EmployeeContactView[]> {
-    await this.requireView(claims);
+    await requireViewOrSelf(this.db, this.rbac, claims, employeeId, () => this.requireView(claims));
     return this.db.withClaims(claims, async (client) => {
       const result = await client.query(
         "SELECT * FROM employee_contacts WHERE employee_id = $1 AND status = 'active' ORDER BY created_at",

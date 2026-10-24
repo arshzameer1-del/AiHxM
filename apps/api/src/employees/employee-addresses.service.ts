@@ -7,6 +7,7 @@ import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
 import { HrReferenceCatalogService } from "../hr-administration/hr-reference-catalog.service";
 import type { CreateEmployeeAddressRequest, EmployeeAddressView, UpdateEmployeeAddressRequest } from "@aihxm/shared-types";
+import { requireViewOrSelf } from "./employee-self-read";
 
 const MODULE_KEY = "employee" as const;
 const MANAGE_PERMISSION = "employee.manage.all";
@@ -113,7 +114,7 @@ export class EmployeeAddressesService {
   }
 
   async list(claims: RequestClaims, employeeId: string): Promise<EmployeeAddressView[]> {
-    await this.requireView(claims);
+    await requireViewOrSelf(this.db, this.rbac, claims, employeeId, () => this.requireView(claims));
     return this.db.withClaims(claims, async (client) => {
       const result = await client.query(
         "SELECT * FROM employee_addresses WHERE employee_id = $1 AND status = 'active' ORDER BY address_type",

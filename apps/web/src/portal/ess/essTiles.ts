@@ -52,10 +52,12 @@ export function buildEssTileGroups(enabledModules: readonly ModuleKey[]): EssTil
   hcm.push(soon("My Benefits", "Display and enroll in benefit plans", Gift));
   if (has("employee")) {
     hcm.push({ to: `${PROFILE}?tab=personal`, title: "My Personal Data", description: "View my personal data", icon: IdCard });
-    hcm.push({ to: `${PROFILE}?tab=contact`, title: "My Bank Details", description: "View my bank details", icon: Landmark });
+    hcm.push({ to: `${PROFILE}?tab=bank`, title: "My Bank Details", description: "View my bank details", icon: Landmark });
   }
-  hcm.push(soon("My Addresses", "Manage my addresses", MapPin));
-  hcm.push(soon("My Family Members", "Manage my family members", Users));
+  if (has("employee")) {
+    hcm.push({ to: `${PROFILE}?tab=addresses`, title: "My Addresses", description: "View my addresses", icon: MapPin });
+    hcm.push({ to: `${PROFILE}?tab=family`, title: "My Family Members", description: "View my family, education and qualifications", icon: Users });
+  }
   if (has("employee")) {
     hcm.push({ to: `${PROFILE}?tab=contact`, title: "My Communication Data", description: "View my contact details", icon: Phone });
     hcm.push({ to: `${PROFILE}?tab=job`, title: "My Internal Data", description: "View my job and internal data", icon: Network });

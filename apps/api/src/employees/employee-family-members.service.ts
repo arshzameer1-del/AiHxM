@@ -13,6 +13,7 @@ import type {
   EmployeeFamilyMemberView,
   UpdateEmployeeFamilyMemberRequest,
 } from "@aihxm/shared-types";
+import { requireViewOrSelf } from "./employee-self-read";
 
 const MODULE_KEY = "employee" as const;
 const MANAGE_PERMISSION = "employee.manage.all";
@@ -109,7 +110,7 @@ export class EmployeeFamilyMembersService {
   }
 
   async list(claims: RequestClaims, employeeId: string): Promise<EmployeeFamilyMemberView[]> {
-    await this.requireView(claims);
+    await requireViewOrSelf(this.db, this.rbac, claims, employeeId, () => this.requireView(claims));
     return this.db.withClaims(claims, async (client) => {
       const result = await client.query(
         "SELECT * FROM employee_family_members WHERE employee_id = $1 AND status = 'active' ORDER BY created_at",

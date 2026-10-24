@@ -6,14 +6,13 @@ import { buildEssTileGroups } from "./essTiles";
 const ALL = ["employee", "leave", "payroll", "performance", "expense", "learning"] as ModuleKey[];
 const flat = (m: ModuleKey[]) => buildEssTileGroups(m).flatMap((g) => g.tiles);
 
-test("no tile title appears twice; only the two Contact-tab tiles share a link", () => {
+test("no tile title appears twice and no two tiles share a link", () => {
   const tiles = flat(ALL);
   const titles = tiles.map((t) => t.title);
   assert.equal(new Set(titles).size, titles.length);
-  // Bank details and communication data are two questions answered by the same Contact tab; nothing else shares a link.
   const links = tiles.filter((t) => t.to).map((t) => t.to as string);
   const repeated = links.filter((l, i) => links.indexOf(l) !== i);
-  assert.deepEqual(repeated, ["/app/profile?tab=contact"]);
+  assert.deepEqual(repeated, []);
 });
 
 test("the SAP duplicates are merged away", () => {
@@ -26,7 +25,7 @@ test("the SAP duplicates are merged away", () => {
 test("tiles without a feature are Coming soon and have no link", () => {
   const soon = flat(ALL).filter((t) => t.comingSoon);
   const names = soon.map((t) => t.title);
-  for (const n of ["Employee Lookup", "My Benefits", "My Family Members", "My Forms"]) assert.ok(names.includes(n), n);
+  for (const n of ["Employee Lookup", "My Benefits", "My Medical Information", "My Forms"]) assert.ok(names.includes(n), n);
   for (const t of soon) assert.equal(t.to, undefined);
 });
 

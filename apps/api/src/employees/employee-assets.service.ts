@@ -6,6 +6,7 @@ import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
 import type { CreateEmployeeAssetRequest, EmployeeAssetView, UpdateEmployeeAssetRequest } from "@aihxm/shared-types";
+import { requireViewOrSelf } from "./employee-self-read";
 
 const MODULE_KEY = "employee" as const;
 const MANAGE_PERMISSION = "employee.manage.all";
@@ -85,7 +86,7 @@ export class EmployeeAssetsService {
   }
 
   async list(claims: RequestClaims, employeeId: string): Promise<EmployeeAssetView[]> {
-    await this.requireView(claims);
+    await requireViewOrSelf(this.db, this.rbac, claims, employeeId, () => this.requireView(claims));
     return this.db.withClaims(claims, async (client) => {
       const result = await client.query(
         "SELECT * FROM employee_assets WHERE employee_id = $1 ORDER BY assigned_date DESC, created_at DESC",

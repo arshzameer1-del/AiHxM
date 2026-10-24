@@ -29,7 +29,7 @@ test("home shows the Employee (HCM) tiles once each; unavailable ones are greyed
   await expect(pad).toBeVisible();
   await expect(pad.getByText("Employee (HCM)")).toBeVisible();
 
-  for (const title of ["My Paystubs", "My Time Events", "My Leave Requests", "My Profile", "My Personal Data", "My Bank Details", "My Communication Data", "My Internal Data", "My Timesheet"]) {
+  for (const title of ["My Paystubs", "My Time Events", "My Leave Requests", "My Profile", "My Personal Data", "My Bank Details", "My Addresses", "My Family Members", "My Communication Data", "My Internal Data", "My Timesheet"]) {
     await expect(pad.getByRole("link", { name: new RegExp(title) })).toHaveCount(1);
   }
   // Merged away: these would only repeat another tile.
@@ -37,7 +37,7 @@ test("home shows the Employee (HCM) tiles once each; unavailable ones are greyed
     await expect(pad.getByText(gone, { exact: true })).toHaveCount(0);
   }
   // Coming soon: shown, flagged, and not clickable.
-  for (const title of ["Employee Lookup", "My Benefits", "My Addresses", "My Family Members", "My Medical Information", "My Forms"]) {
+  for (const title of ["Employee Lookup", "My Benefits", "My Medical Information", "My Forms"]) {
     const tile = pad.getByRole("group", { name: new RegExp(title) });
     await expect(tile).toHaveCount(1);
     await expect(tile).toContainText("Coming soon");
@@ -55,8 +55,8 @@ test("the sidebar has Employee Self Service and a tile opens the matching page",
   await expect(page.getByRole("heading", { name: "Employee Self Service" })).toBeVisible();
 
   await page.getByTestId("ess-launchpad").getByRole("link", { name: /My Bank Details/ }).click();
-  await expect(page).toHaveURL(/\/app\/profile\?tab=contact/);
-  await expect(page.getByText("Bank account", { exact: true })).toBeVisible(); // the Contact tab is open
+  await expect(page).toHaveURL(/\/app\/profile\?tab=bank/);
+  await expect(page.getByRole("heading", { name: /payment \/ bank accounts/i })).toBeVisible(); // the Bank Details tab is open
 });
 
 test("the role label shows and the user keeps own-data access (profile, leave) but no HR admin pages", async ({ page }) => {

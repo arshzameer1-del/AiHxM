@@ -7,6 +7,17 @@ import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { EmployeeFields } from "./EmployeeFields";
 import { PersonalDataCard } from "./PersonalDataCard";
+import { SubEntityPanel } from "./subentities/SubEntityPanel";
+import {
+  addressesConfig,
+  assetsConfig,
+  contactsConfig,
+  educationConfig,
+  familyMembersConfig,
+  importantDatesConfig,
+  paymentAccountsConfig,
+  qualificationsConfig,
+} from "./subentities/subEntityConfigs";
 import { PROFILE_TABS, profileTabFromParam, type ProfileTab } from "./profileTabs";
 import { OnboardingOffboardingSection } from "../onboarding-offboarding/OnboardingOffboardingSection";
 import { formatDay, localDayKey } from "../shared/dates";
@@ -226,17 +237,37 @@ export function MyProfilePage() {
         </section>
       )}
 
+      {/* BACKLOG47: the person's own records, read-only. HR keeps the only edit rights (changes come in BACKLOG48). */}
       {activeTab === "Job Details" && (
-        <section className="bg-card rounded-card p-5 shadow-sm">
-          <EmployeeFields employee={employee} sections={["job"]} />
-        </section>
+        <>
+          <section className="bg-card rounded-card p-5 shadow-sm mb-6">
+            <EmployeeFields employee={employee} sections={["job"]} />
+          </section>
+          <SubEntityPanel employeeId={employee.id} canManage={false} config={importantDatesConfig} />
+          <SubEntityPanel employeeId={employee.id} canManage={false} config={assetsConfig} />
+        </>
       )}
 
       {activeTab === "Contact" && (
-        <section className="bg-card rounded-card p-5 shadow-sm">
-          <EmployeeFields employee={employee} sections={["contact"]} />
-        </section>
+        <>
+          <section className="bg-card rounded-card p-5 shadow-sm mb-6">
+            <EmployeeFields employee={employee} sections={["contact"]} />
+          </section>
+          <SubEntityPanel employeeId={employee.id} canManage={false} config={contactsConfig([])} />
+        </>
       )}
+
+      {activeTab === "Addresses" && <SubEntityPanel employeeId={employee.id} canManage={false} config={addressesConfig([])} />}
+
+      {activeTab === "Family & Education" && (
+        <>
+          <SubEntityPanel employeeId={employee.id} canManage={false} config={familyMembersConfig([])} />
+          <SubEntityPanel employeeId={employee.id} canManage={false} config={educationConfig} />
+          <SubEntityPanel employeeId={employee.id} canManage={false} config={qualificationsConfig([])} />
+        </>
+      )}
+
+      {activeTab === "Bank Details" && <SubEntityPanel employeeId={employee.id} canManage={false} config={paymentAccountsConfig} />}
 
       {activeTab === "Employment History" && (
         <section className="bg-card rounded-card p-5 shadow-sm">
