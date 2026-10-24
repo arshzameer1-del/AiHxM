@@ -12,6 +12,7 @@ import * as recruitment from "./recruitment";
 import * as attendance from "./attendance";
 import * as leaveReports from "./leave-reports";
 import * as payrollReports from "./payroll-reports";
+import * as payrollStatements from "./payroll-statements";
 import * as performance from "./performance";
 import * as workflow from "./workflow";
 import * as essService from "./ess-service";
@@ -29,12 +30,12 @@ import * as platformOps from "./platform-ops";
  * report-catalog.spec.ts keeps "available" and "has an executor" in step in both directions.
  */
 type Declared = { run: ReportExecutor; meta: ReportMeta };
-const MODULES: Array<Record<string, unknown>> = [workforcePeople, masterData, workforcePlanning, recruitment, attendance, leaveReports, payrollReports, performance, workflow, essService, auditSecurity, learning, governance, platformOps];
+const MODULES: Array<Record<string, unknown>> = [workforcePeople, masterData, workforcePlanning, recruitment, attendance, leaveReports, payrollReports, payrollStatements, performance, workflow, essService, auditSecurity, learning, governance, platformOps];
 
 const declared = new Map<string, Declared>();
 for (const mod of MODULES) {
   for (const [key, value] of Object.entries(mod)) {
-    if (!/^([A-O](0[1-9]|1[0-5])|B(1[6-9]|20))$/.test(key)) continue;
+    if (!/^([A-O](0[1-9]|1[0-5])|B(1[6-9]|20)|F(1[1-9]|2[0-9]|30))$/.test(key)) continue;
     if (declared.has(key)) throw new Error(`Report ${key} is defined twice`);
     declared.set(key, value as Declared);
   }

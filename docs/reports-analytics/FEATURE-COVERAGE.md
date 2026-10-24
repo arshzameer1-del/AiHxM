@@ -6,10 +6,10 @@ Honest status of each requirement. *Done* means built, tested and in the product
 
 | Requirement | Status |
 |---|---|
-| 225 report definitions with stable ids A01 to O15 plus B16 to B20 | Done. All 225 are in the catalog (REPORT_CATALOG.md). B16 to B20 are the employee master data reports. |
-| Reports that run against real data | **198 of 225 available**, each with a query, calculation text and tests. |
+| 245 report definitions with stable ids A01 to O15 plus B16 to B20 and F11 to F30 | Done. All 245 are in the catalog (REPORT_CATALOG.md). B16 to B20 are the employee master data reports; F11 to F30 are the pay statement reports (salary information, month-wise tax, EOBI, bank payments, loans, final settlements). |
+| Reports that run against real data | **218 of 245 available**, each with a query, calculation text and tests. |
 | Reports whose data does not exist | **27 blocked**, each with the reason shown to the user and a plan to unlock it (BLOCKED_REPORTS_DEVELOPMENT_PLAN.md). None is estimated. |
-| "All 225 implemented" | **Not claimed.** 27 cannot be honestly produced yet. |
+| "All 245 implemented" | **Not claimed.** 27 cannot be honestly produced yet. |
 
 By category (available of total): A 14/15, B 15/15, C 15/15, D 15/15, E 14/15, F 9/10, G 14/15, H 15/15, I 10/15, J 13/15, K 14/15, L 10/15, M 11/15, N 9/15, O 15/15. (REPORT_CATALOG.md is the source of truth.)
 

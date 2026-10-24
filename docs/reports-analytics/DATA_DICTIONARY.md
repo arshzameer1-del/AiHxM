@@ -2,7 +2,7 @@
 
 Generated from the code by `npm run docs:reports` (apps/api). Do not edit by hand.
 
-Which source tables the 198 available reports read. Every table is protected by row-level security on the company, and every report query is limited to the caller's company by the framework (a query that is not is refused at run time).
+Which source tables the 218 available reports read. Every table is protected by row-level security on the company, and every report query is limited to the caller's company by the framework (a query that is not is refused at run time).
 
 | Table | Read by |
 |---|---|
@@ -13,10 +13,15 @@ Which source tables the 198 available reports read. Every table is protected by 
 | `attendance_records` | D06 |
 | `audit_log` | J03, J04, J05, J07, J08, J09, J11, J12, O10 |
 | `background_jobs` | H11, N05, N07 |
+| `bank_file_formats` | F24 |
+| `benefit_contributions` | F22 |
+| `benefit_enrolments` | F22 |
+| `benefit_plans` | F22 |
 | `candidate_documents` | N08 |
 | `candidates` | C04, C13 |
 | `companies` | N01, N12 |
 | `company_config` | J13, N12 |
+| `compensation_components` | F11, F13 |
 | `competencies` | G13 |
 | `cost_centers` | B10, F07, K03, K13, N12 |
 | `course_enrollments` | L01, L02, L03, L04, L05, L06 |
@@ -30,7 +35,8 @@ Which source tables the 198 available reports read. Every table is protected by 
 | `development_plans` | G14, L10, L15 |
 | `employee_addresses` | A14, B03, B16, B18, I10 |
 | `employee_assets` | B16, B20 |
-| `employee_compensation` | B19 |
+| `employee_compensation` | B19, F11, F12, F14, F15 |
+| `employee_compensation_components` | F11, F13 |
 | `employee_contacts` | B16, B18, I10 |
 | `employee_cost_allocations` | B10, B17, K03, K13 |
 | `employee_documents` | B16, B20, N08 |
@@ -39,16 +45,17 @@ Which source tables the 198 available reports read. Every table is protected by 
 | `employee_important_dates` | A13, B11, B12, B14, M08 |
 | `employee_job_history` | L13, M06 |
 | `employee_lifecycle_events` | A12, A13 |
+| `employee_loans` | F26, F27, F28 |
 | `employee_offboarding` | A13, I14 |
 | `employee_offboarding_items` | I14 |
 | `employee_onboarding` | A13, C14, C15, I14 |
 | `employee_onboarding_items` | C14, C15, I14 |
 | `employee_payment_accounts` | B16, B19, I10 |
 | `employee_qualifications` | B14, B16, B20, L09 |
-| `employee_tax_profiles` | B19 |
+| `employee_tax_profiles` | B19, F17, F19, F20 |
 | `employee_versions` | B02, J09 |
 | `employee_work_profiles` | B17, M02, M03, M12 |
-| `employees` | A01, A03, A04, A05, A06, A07, A08, A09, A10, A11, A12, A14, A15, B01, B02, B03, B04, B07, B08, B09, B10, B11, B12, B13, B14, B15, B16, B17, B18, B19, B20, C02, C11, C12, C14, C15, D01, D02, D03, D04, D05, D06, D07, D08, D09, D10, D11, D12, D13, D14, D15, E01, E02, E03, E04, E05, E06, E08, E09, E10, E11, E12, E13, E14, E15, F02, F08, G01, G02, G03, G04, G05, G06, G07, G08, G09, G10, G11, G13, G14, G15, H09, H10, H14, I01, I02, I04, I06, I10, I14, J01, K02, K03, K04, K05, K12, K13, L01, L02, L03, L04, L05, L06, L09, L10, L13, L15, M02, M03, M06, M07, M08, M10, M12, M13 |
+| `employees` | A01, A03, A04, A05, A06, A07, A08, A09, A10, A11, A12, A14, A15, B01, B02, B03, B04, B07, B08, B09, B10, B11, B12, B13, B14, B15, B16, B17, B18, B19, B20, C02, C11, C12, C14, C15, D01, D02, D03, D04, D05, D06, D07, D08, D09, D10, D11, D12, D13, D14, D15, E01, E02, E03, E04, E05, E06, E08, E09, E10, E11, E12, E13, E14, E15, F02, F08, F11, F12, F13, F14, F15, F16, F17, F19, F20, F23, F25, F26, F27, F28, F29, F30, G01, G02, G03, G04, G05, G06, G07, G08, G09, G10, G11, G13, G14, G15, H09, H10, H14, I01, I02, I04, I06, I10, I14, J01, K02, K03, K04, K05, K12, K13, L01, L02, L03, L04, L05, L06, L09, L10, L13, L15, M02, M03, M06, M07, M08, M10, M12, M13 |
 | `expense_claim_receipts` | N08 |
 | `expense_claims` | I03 |
 | `feedback_requests` | G11 |
@@ -64,6 +71,8 @@ Which source tables the 198 available reports read. Every table is protected by 
 | `leave_ledger` | E08, E10 |
 | `leave_requests` | E02, E03, E04, E05, E06, E11, E12, E13, E14, E15, I03, I06 |
 | `leave_types` | E01, E02, E03, E08, E15, N12 |
+| `loan_schedules` | F26, F27, F28 |
+| `loan_types` | F26, F28 |
 | `locations` | A01, A03, A04, A05, A06, A07, A08, A09, A15, B01, B17, D11, D12, E12, E13, K04, M02, M03, M12, N12 |
 | `notification_log` | I12, I13, N09 |
 | `offers` | C06, C07, C08, C09, C13 |
@@ -71,20 +80,24 @@ Which source tables the 198 available reports read. Every table is protected by 
 | `org_change_items` | M11 |
 | `org_changes` | A13, M11 |
 | `org_relationships` | A10, A14, B03, B08, G09, I04, M10 |
-| `org_units` | A01, A03, A04, A05, A06, A07, A08, A09, A15, B01, B04, B05, B06, B07, B17, C02, D03, D04, D05, D10, D11, D12, E05, E09, E12, E13, F08, G02, G05, H09, K02, K05, L05, M02, M03, M04, M06, M12, N12 |
+| `org_units` | A01, A03, A04, A05, A06, A07, A08, A09, A15, B01, B04, B05, B06, B07, B17, C02, D03, D04, D05, D10, D11, D12, E05, E09, E12, E13, F08, F14, G02, G05, H09, K02, K05, L05, M02, M03, M04, M06, M12, N12 |
 | `overtime_records` | D08, D09, I03 |
 | `payroll_areas` | F03, N12 |
 | `payroll_component_results` | F01, F04, F08, K07, K08, K09, K10, K11 |
 | `payroll_costing_results` | F07 |
 | `payroll_exceptions` | F10 |
+| `payroll_final_settlement_lines` | F29 |
+| `payroll_final_settlements` | F29 |
 | `payroll_journals` | K14, K15 |
 | `payroll_overrides` | J10 |
+| `payroll_payment_batches` | F23, F24, F25 |
+| `payroll_payment_items` | F23, F24, F25 |
 | `payroll_reconciliations` | F06, K15 |
 | `payroll_run_events` | J10 |
 | `payroll_run_partitions` | F10 |
-| `payroll_runs` | F01, F02, F03, F04, F05, F06, F07, F08, F10, I05, J10, K01, K02, K03, K04, K05, K07, K08, K09, K10, K11, K12, K14, K15 |
+| `payroll_runs` | F01, F02, F03, F04, F05, F06, F07, F08, F10, F16, F17, F18, F20, F21, F22, F23, F24, F25, F30, I05, J10, K01, K02, K03, K04, K05, K07, K08, K09, K10, K11, K12, K14, K15 |
 | `payslip_access_log` | I05 |
-| `payslips` | F01, F02, F05, I05, K02, K03, K04, K05, K12 |
+| `payslips` | F01, F02, F05, F16, F17, F18, F20, F21, F25, F30, I05, K02, K03, K04, K05, K12 |
 | `performance_reviews` | G01, G02, G03, G07, G08, G09, G10, G13, G15 |
 | `permissions` | J02 |
 | `persons` | B14, B16, B17, B19, I10 |
@@ -104,7 +117,7 @@ Which source tables the 198 available reports read. Every table is protected by 
 | `saved_reports` | O06, O07, O13, O14 |
 | `shift_assignments` | D10 |
 | `shifts` | N12 |
-| `tax_profiles` | N12 |
+| `tax_profiles` | F19, N12 |
 | `tenant_configuration` | J13 |
 | `tenant_daily_usage_counter` | N01 |
 | `tenant_data_exports` | N07, N11 |

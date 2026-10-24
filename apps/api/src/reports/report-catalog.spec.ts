@@ -6,20 +6,20 @@ import { REPORT_BY_ID, REPORT_CATALOG, REPORT_ID_PATTERN } from "./catalog/repor
 const NO_AMOUNTS = new Set(["F01", "F10", "K13"]);
 
 describe("report catalog", () => {
-  it("contains exactly the 225 stable ids (A01-O15 plus the master data reports B16-B20), each once", () => {
-    expect(REPORT_CATALOG).toHaveLength(225);
-    expect(new Set(REPORT_CATALOG.map((d) => d.id)).size).toBe(225);
+  it("contains exactly the 245 stable ids (A01-O15 plus the master data reports B16-B20), each once", () => {
+    expect(REPORT_CATALOG).toHaveLength(245);
+    expect(new Set(REPORT_CATALOG.map((d) => d.id)).size).toBe(245);
     const expected: string[] = [];
-    // 14 categories of 15 reports, Payroll and compensation (F) with 10, and the five master data reports added to Employee and organisation (B): 14 x 15 + 10 + 5 = 225
-    for (const c of "ABCDEFGHIJKLMNO") for (let n = 1; n <= (c === "F" ? 10 : c === "B" ? 20 : 15); n++) expected.push(`${c}${String(n).padStart(2, "0")}`);
+    // 14 categories of 15 reports, Payroll and compensation (F) with 30, and the five master data reports added to Employee and organisation (B): 14 x 15 + 30 + 5 = 245
+    for (const c of "ABCDEFGHIJKLMNO") for (let n = 1; n <= (c === "F" ? 30 : c === "B" ? 20 : 15); n++) expected.push(`${c}${String(n).padStart(2, "0")}`);
     expect(REPORT_CATALOG.map((d) => d.id).sort()).toEqual(expected.sort());
     for (const d of REPORT_CATALOG) expect(REPORT_ID_PATTERN.test(d.id)).toBe(true);
-    expect(REPORT_BY_ID.size).toBe(225);
+    expect(REPORT_BY_ID.size).toBe(245);
   });
 
-  it("every id sits in the category its letter names, and every category has 15 reports (Payroll has 10, Employee and organisation has 20)", () => {
+  it("every id sits in the category its letter names, and every category has 15 reports (Payroll has 30, Employee and organisation has 20)", () => {
     for (const d of REPORT_CATALOG) expect(d.id[0]).toBe(d.categoryKey);
-    for (const c of CATEGORIES) expect(REPORT_CATALOG.filter((d) => d.categoryKey === c.key)).toHaveLength(c.key === "F" ? 10 : c.key === "B" ? 20 : 15);
+    for (const c of CATEGORIES) expect(REPORT_CATALOG.filter((d) => d.categoryKey === c.key)).toHaveLength(c.key === "F" ? 30 : c.key === "B" ? 20 : 15);
   });
 
   it("every definition has the metadata the contract requires", () => {

@@ -222,7 +222,7 @@ describe("Report depth: hand-counted figures in the extra tables", () => {
   it("O12 describes the catalog without reading any table", async () => {
     const r = await reports.run(hr, "O12", {});
     const status = section(r, "catalog-by-status");
-    expect(sum(status, "reports")).toBe(225);
+    expect(sum(status, "reports")).toBe(245);
     expect(section(r, "not-yet-available").rows.every((x) => x.status !== "Available")).toBe(true);
   });
 

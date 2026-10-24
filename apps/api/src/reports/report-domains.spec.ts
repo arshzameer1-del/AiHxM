@@ -437,7 +437,7 @@ describe("workflow, learning, service, audit and governance reports (hand-comput
 
     it("O12 counts the whole catalog and agrees with the catalog's own statuses", async () => {
       const r = await run(all, "O12");
-      expect(kpi(r, "total")).toBe(225);
+      expect(kpi(r, "total")).toBe(245);
       const cat = await reports.catalog(all);
       expect(Number(r.rows.reduce((s, x) => s + Number(x.available), 0))).toBe(cat.counts.available);
     });

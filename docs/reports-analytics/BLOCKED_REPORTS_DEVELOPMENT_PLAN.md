@@ -1,7 +1,7 @@
 # Blocked reports: what to build to unlock each one
 
 Status: written with the first release of the Reports & Analytics Intelligence Center.
-Catalog today: **225 reports, 198 available, 27 blocked, 0 planned.** (The five employee master data reports B16 to B20 were added on top of the original 220 and are all available.) Reports v2 (October 2026) unlocked 11 reports: **L03, L06, I05, M14** (Wave 1) and **O06, O07, O08, O09, O13, O14, N06** (Wave 4, because saved reports, sharing, schedules, the builder and dashboards now exist). Their rows below are kept for the record and marked *Done*. Open: Wave 1 (7), Wave 2 (7), Wave 3 (9), Wave 4 (4).
+Catalog today: **245 reports, 218 available, 27 blocked, 0 planned.** (The five employee master data reports B16 to B20 and the twenty pay statement reports F11 to F30 were added on top of the original 220 and are all available.) Reports v2 (October 2026) unlocked 11 reports: **L03, L06, I05, M14** (Wave 1) and **O06, O07, O08, O09, O13, O14, N06** (Wave 4, because saved reports, sharing, schedules, the builder and dashboards now exist). Their rows below are kept for the record and marked *Done*. Open: Wave 1 (7), Wave 2 (7), Wave 3 (9), Wave 4 (4).
 A report is *blocked* when the data it needs does not exist in AiHxM. We do not estimate, sample or invent that data. Each report below names the missing data, the module or table to build, the screen that captures it, what the report can show once it exists, and a rough effort.
 
 Effort is engineer-days for one developer including migration, API, screen, tests and the report itself (S = 1 to 2, M = 3 to 5, L = 6 to 12, XL = more than 12). They are planning estimates, not commitments.

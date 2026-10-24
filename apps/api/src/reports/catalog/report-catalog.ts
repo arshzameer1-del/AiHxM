@@ -3,7 +3,7 @@ import type { ReportDefinition, ReportDomain } from "./report-catalog.types";
 import { REPORT_META } from "../engine/executors";
 
 /**
- * The authoritative catalog: 225 stable ids (A01 to O15, plus the employee master data reports B16 to B20), each mapped to the tables it would read, the permission domain
+ * The authoritative catalog: 245 stable ids (A01 to O15, plus the employee master data reports B16 to B20 and the pay statement reports F11 to F30), each mapped to the tables it would read, the permission domain
  * that opens its data, a sensitivity class and an honest status.
  *
  *   available - has a query in report-executors.ts, is authorised, tested, and returns real data.
@@ -197,6 +197,26 @@ cat("F", [
   ["F08", "Overtime Pay Analysis", { tables: ["payroll_component_results", "overtime_records"] }],
   ["F09", "Tax Withholding Summary (only validated against current rules)", blocked("Tax figures can be offered only after they are validated against the statutory rules in force for each period. That validation has not been done for reporting.", { sens: "restricted", tables: ["payroll_component_results", "tax_profiles"] })],
   ["F10", "Payroll Exceptions and Failed Calculations", { tables: ["payroll_exceptions", "payroll_run_partitions"] }],
+  ["F11", "Salary Information", { sens: "restricted" }],
+  ["F12", "Salary Revision History", { sens: "restricted" }],
+  ["F13", "Salary Components per Employee", { sens: "restricted" }],
+  ["F14", "Salary Distribution by Organisation Unit"],
+  ["F15", "Salary Increments by Month"],
+  ["F16", "Income Tax Month-wise per Employee", { sens: "restricted" }],
+  ["F17", "Annual Tax Statement per Employee", { sens: "restricted" }],
+  ["F18", "Tax Withheld by Month"],
+  ["F19", "Tax Profiles and Exemptions", { sens: "restricted" }],
+  ["F20", "EOBI and Social Security per Employee", { sens: "restricted" }],
+  ["F21", "EOBI and Social Security by Month"],
+  ["F22", "Benefit Plan Contributions"],
+  ["F23", "Bank Payment Advice", { sens: "restricted" }],
+  ["F24", "Payment Batches"],
+  ["F25", "Payment Exceptions", { sens: "restricted" }],
+  ["F26", "Loan Register", { sens: "restricted" }],
+  ["F27", "Loan Instalments and Recoveries", { sens: "restricted" }],
+  ["F28", "Outstanding Loans Summary"],
+  ["F29", "Final Settlement Register", { sens: "restricted" }],
+  ["F30", "Arrears, Retro and Off-cycle Payments", { sens: "restricted" }],
 ]);
 
 // ---------------------------------------------------------------- G. Performance and goals
@@ -398,4 +418,4 @@ const finalDefs: ReportDefinition[] = defs.map((d) => {
 
 export const REPORT_CATALOG: readonly ReportDefinition[] = Object.freeze(finalDefs);
 export const REPORT_BY_ID: ReadonlyMap<string, ReportDefinition> = new Map(finalDefs.map((d) => [d.id, d]));
-export const REPORT_ID_PATTERN = /^([A-O](0[1-9]|1[0-5])|B(1[6-9]|20))$/;
+export const REPORT_ID_PATTERN = /^([A-O](0[1-9]|1[0-5])|B(1[6-9]|20)|F(1[1-9]|2[0-9]|30))$/;

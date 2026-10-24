@@ -2,7 +2,7 @@
 
 Generated from the code by `npm run docs:reports` (apps/api). Do not edit by hand.
 
-**225 reports: 198 available, 27 blocked, 0 planned, 0 unavailable.**
+**245 reports: 218 available, 27 blocked, 0 planned, 0 unavailable.**
 
 *Available* means the report has a query, a metric definition and tests. *Blocked* means the data it needs is not captured in AiHxM; the reason is given, and BLOCKED_REPORTS_DEVELOPMENT_PLAN.md says what to build to unlock it. Nothing here is estimated or invented.
 
@@ -139,6 +139,26 @@ Payroll runs, registers, variances and exceptions.
 | F08 | Overtime Pay Analysis | Available | Sensitive | Payroll | bar, table | dateRange, department, location |
 | F09 | Tax Withholding Summary (only validated against current rules) | Blocked: Tax figures can be offered only after they are validated against the statutory rules in force for each period. That validation has not been done for reporting. | Restricted | Payroll | kpi, table | dateRange |
 | F10 | Payroll Exceptions and Failed Calculations | Available | Internal | Payroll | bar, kpi, table | dateRange, runStatus |
+| F11 | Salary Information | Available | Restricted | Payroll | kpi, table | department, location, employmentType |
+| F12 | Salary Revision History | Available | Restricted | Payroll | kpi, table | dateRange, department, location, employmentType |
+| F13 | Salary Components per Employee | Available | Restricted | Payroll | kpi, table | department, location, employmentType |
+| F14 | Salary Distribution by Organisation Unit | Available | Sensitive | Payroll | bar, kpi, table | department, location, employmentType |
+| F15 | Salary Increments by Month | Available | Sensitive | Payroll | line, kpi, table | dateRange, department, location, employmentType |
+| F16 | Income Tax Month-wise per Employee | Available | Restricted | Payroll | kpi, table | dateRange, department, location, employmentType |
+| F17 | Annual Tax Statement per Employee | Available | Restricted | Payroll | kpi, table | dateRange, department, location, employmentType |
+| F18 | Tax Withheld by Month | Available | Sensitive | Payroll | line, kpi, table | dateRange, department, location, employmentType |
+| F19 | Tax Profiles and Exemptions | Available | Restricted | Payroll | kpi, table | department, location, employmentType |
+| F20 | EOBI and Social Security per Employee | Available | Restricted | Payroll | kpi, table | dateRange, department, location, employmentType |
+| F21 | EOBI and Social Security by Month | Available | Sensitive | Payroll | line, kpi, table | dateRange, department, location, employmentType |
+| F22 | Benefit Plan Contributions | Available | Sensitive | Payroll | bar, kpi, table | dateRange |
+| F23 | Bank Payment Advice | Available | Restricted | Payroll | kpi, table | dateRange, department, location, employmentType |
+| F24 | Payment Batches | Available | Sensitive | Payroll | bar, kpi, table | dateRange |
+| F25 | Payment Exceptions | Available | Restricted | Payroll | kpi, table | dateRange, department, location, employmentType |
+| F26 | Loan Register | Available | Restricted | Payroll | kpi, table | department, location, employmentType |
+| F27 | Loan Instalments and Recoveries | Available | Restricted | Payroll | kpi, table | dateRange, department, location, employmentType |
+| F28 | Outstanding Loans Summary | Available | Sensitive | Payroll | bar, kpi, table | department, location, employmentType |
+| F29 | Final Settlement Register | Available | Restricted | Payroll | kpi, table | dateRange, department, location, employmentType |
+| F30 | Arrears, Retro and Off-cycle Payments | Available | Restricted | Payroll | kpi, table | dateRange, department, location, employmentType |
 
 ## G. Performance and goals
 

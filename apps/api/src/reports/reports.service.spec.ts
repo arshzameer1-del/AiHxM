@@ -169,7 +169,7 @@ describe("ReportsService (real database)", () => {
   describe("catalog and access", () => {
     it("HR Admin sees the available reports; counts add up", async () => {
       const cat = await reports.catalog(hr);
-      expect(cat.catalogTotal).toBe(225);
+      expect(cat.catalogTotal).toBe(245);
       const available = cat.entries.filter((e) => e.status === "available").map((e) => e.id).sort();
       // "available" means a query exists: every available entry has an executor, and the first ten reports built are all there.
       expect(available.every((id) => id in EXECUTORS)).toBe(true);

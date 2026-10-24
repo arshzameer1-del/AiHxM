@@ -3,6 +3,7 @@ import { ESS_AUDIT_DEPTH } from "./ess-audit";
 import { PLATFORM_GOVERNANCE_DEPTH } from "./platform-governance";
 import { PERFORMANCE_DEPTH } from "./performance";
 import { PAYROLL_DEPTH } from "./payroll";
+import { PAYROLL_STATEMENTS_DEPTH } from "./payroll-statements";
 import { TALENT_DEPTH } from "./talent";
 import { TIME_LEAVE_DEPTH } from "./time-leave";
 import { WORKFLOW_DEPTH } from "./workflow";
@@ -18,6 +19,7 @@ export const DEPTH_SECTIONS: Readonly<Record<string, readonly ReportSectionSpec[
   ...TALENT_DEPTH,
   ...TIME_LEAVE_DEPTH,
   ...PAYROLL_DEPTH,
+  ...PAYROLL_STATEMENTS_DEPTH,
   ...PERFORMANCE_DEPTH,
   ...WORKFLOW_DEPTH,
   ...ESS_AUDIT_DEPTH,
