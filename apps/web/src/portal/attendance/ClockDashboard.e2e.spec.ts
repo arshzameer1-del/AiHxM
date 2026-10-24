@@ -38,7 +38,14 @@ test("Clock in shows running time and the punch; clock out fills check-out and w
   await page.goto("/app/attendance/clock");
   // The top-bar pill follows the punches without a page reload.
   await expect(page.getByTestId("status-pill")).toContainText("Not checked in");
+  // Two buttons: before the day starts only Clock in is available.
+  await expect(page.getByTestId("clock-in-button")).toBeEnabled();
+  await expect(page.getByTestId("clock-out-button")).toBeDisabled();
   await page.getByRole("button", { name: "Clock in", exact: true }).click();
+  // After the clock-in, Clock in switches off, Clock out switches on, and the time is shown under Clock in.
+  await expect(page.getByTestId("clock-in-button")).toBeDisabled();
+  await expect(page.getByTestId("clock-out-button")).toBeEnabled();
+  await expect(page.getByTestId("clock-in-time")).toContainText(/In at \d{1,2}:\d{2} (AM|PM)/);
   await expect(page.getByTestId("status-pill")).toContainText(/^In \d{1,2}:\d{2} (AM|PM)/);
   await expect(page.getByTestId("running-time")).toBeVisible();
   await expect(page.getByTestId("today-punches").locator("li")).toHaveCount(1);
@@ -46,9 +53,10 @@ test("Clock in shows running time and the punch; clock out fills check-out and w
 
   await page.getByRole("button", { name: "Clock out", exact: true }).click();
   await expect(page.getByTestId("status-pill")).toContainText(/Out · in \d{1,2}:\d{2} (AM|PM)/);
-  // One clock-in and one clock-out per day: the button now says so and cannot start a second shift.
-  await expect(page.getByTestId("clock-button")).toHaveText("Done for today");
-  await expect(page.getByTestId("clock-button")).toBeDisabled();
+  // One clock-in and one clock-out per day: both buttons are off, each with its time, until the next day.
+  await expect(page.getByTestId("clock-in-button")).toBeDisabled();
+  await expect(page.getByTestId("clock-out-button")).toBeDisabled();
+  await expect(page.getByTestId("clock-out-time")).toContainText(/Out at \d{1,2}:\d{2} (AM|PM)/);
   await expect(page.getByTestId("done-for-today")).toContainText("one per day");
   await expect(page.getByTestId("running-time")).toHaveCount(0);
   await expect(page.getByTestId("today-summary")).not.toContainText("Working…");

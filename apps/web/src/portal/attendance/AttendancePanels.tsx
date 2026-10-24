@@ -74,12 +74,12 @@ export function ClockPanel({ employeeId, refreshKey, onChanged }: { employeeId: 
   const shift = summariseShift(data.schedule);
   const staleHours = clockedIn && latest ? staleClockInHours(latest.clockInAt) : null;
 
-  async function handleClock() {
+  async function punch(kind: "in" | "out") {
     if (!employee) return;
     setBusy(true);
     setClockError(null);
     try {
-      if (clockedIn) await api.clockOut({ employeeNumber: employee.employeeNumber });
+      if (kind === "out") await api.clockOut({ employeeNumber: employee.employeeNumber });
       else await api.clockIn({ employeeNumber: employee.employeeNumber, source: "manual" });
       data.reload();
       onChanged();
@@ -89,6 +89,12 @@ export function ClockPanel({ employeeId, refreshKey, onChanged }: { employeeId: 
       setBusy(false);
     }
   }
+
+  // Two buttons, each used once a day: Clock in switches off after the clock-in, Clock out after the clock-out. The next day starts both fresh.
+  const canClockIn = !clockedIn && !doneForToday;
+  const canClockOut = clockedIn;
+  const inTime = todayRow?.firstIn ? formatTime(todayRow.firstIn) : null;
+  const outTime = !clockedIn && todayRow?.lastOut ? formatTime(todayRow.lastOut) : null;
 
   if (employeeError) return <div className="bg-white rounded-md p-5 shadow-sm text-sm text-label-secondary">{employeeError}</div>;
 
@@ -109,16 +115,33 @@ export function ClockPanel({ employeeId, refreshKey, onChanged }: { employeeId: 
             {shift.detail && <div className="text-xs text-label-secondary mt-0.5">{shift.detail}</div>}
           </div>
 
+          <div className="grid grid-cols-2 gap-3" data-testid="clock-buttons">
+            <div className="flex flex-col items-stretch gap-1.5">
+              <button
+                type="button"
+                onClick={() => punch("in")}
+                disabled={busy || !employee || data.loading || !canClockIn}
+                data-testid="clock-in-button"
+                className="text-sm font-semibold rounded-lg px-4 py-2.5 bg-accent text-white disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {busy && canClockIn ? "…" : "Clock in"}
+              </button>
+              <p className="text-xs text-center tabular-nums text-label-secondary" data-testid="clock-in-time">{inTime ? `In at ${inTime}` : "Not clocked in yet"}</p>
+            </div>
+            <div className="flex flex-col items-stretch gap-1.5">
+              <button
+                type="button"
+                onClick={() => punch("out")}
+                disabled={busy || !employee || data.loading || !canClockOut}
+                data-testid="clock-out-button"
+                className="text-sm font-semibold rounded-lg px-4 py-2.5 bg-danger/10 text-danger disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {busy && canClockOut ? "…" : "Clock out"}
+              </button>
+              <p className="text-xs text-center tabular-nums text-label-secondary" data-testid="clock-out-time">{outTime ? `Out at ${outTime}` : clockedIn ? "Still working" : "—"}</p>
+            </div>
+          </div>
           <div className="flex items-center gap-4 flex-wrap">
-            <button
-              type="button"
-              onClick={handleClock}
-              disabled={busy || !employee || data.loading || doneForToday}
-              data-testid="clock-button"
-              className={`text-sm font-semibold rounded-lg px-6 py-2.5 disabled:opacity-50 ${clockedIn ? "bg-danger/10 text-danger" : "bg-accent text-white"}`}
-            >
-              {busy ? "…" : clockedIn ? "Clock out" : doneForToday ? "Done for today" : "Clock in"}
-            </button>
             <div className="min-w-0">
               {data.loading ? (
                 <p className="text-xs text-label-secondary">Checking your attendance…</p>

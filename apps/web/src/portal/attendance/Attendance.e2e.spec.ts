@@ -27,11 +27,9 @@ test.describe("Time & Attendance Portal", () => {
     await page.getByTestId("tile-clock").click();
     await expect(page).toHaveURL(/\/app\/attendance\/clock/);
 
-    // The Clock in/out button is the stable signal that the clock page rendered.
-    const clockButton = page
-      .locator("button")
-      .filter({ hasText: /clock in|clock out|done for today/i });
-    await expect(clockButton).toBeVisible();
+    // The two Clock in / Clock out buttons are the stable signal that the clock page rendered.
+    await expect(page.getByTestId("clock-in-button")).toBeVisible();
+    await expect(page.getByTestId("clock-out-button")).toBeVisible();
   });
 
   test("Employee can view daily attendance summary", async ({ page }) => {
