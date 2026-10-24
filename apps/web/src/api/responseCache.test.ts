@@ -130,6 +130,8 @@ test("only safe paths are cacheable", () => {
   assert.equal(isCacheablePath("/payroll/runs/1/disbursement"), true);
   assert.equal(isCacheablePath("/platform/companies/1/exports/2/download"), false);
   assert.equal(isCacheablePath("/platform/companies/1/backups"), false);
+  assert.equal(isCacheablePath("/notifications/inbox"), false); // the bell must always be current
+  assert.equal(isCacheablePath("/notifications/preferences"), false);
 });
 
 test("a page reload keeps only very recent answers", async () => {

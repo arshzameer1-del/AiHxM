@@ -58,6 +58,7 @@ import { EmployeeImportWorker } from "./import/employee-import.worker";
 import { RbacModule } from "../rbac/rbac.module";
 import { EntitlementsModule } from "../entitlements/entitlements.module";
 import { AuditModule } from "../audit/audit.module";
+import { NotificationsModule } from "../notifications/notifications.module";
 import { FileStorageModule } from "../file-storage/file-storage.module";
 import { WebhooksModule } from "../webhooks/webhooks.module";
 import { ShiftsModule } from "../shifts/shifts.module";
@@ -108,6 +109,7 @@ import { OrgOccupancyModule } from "../organization/occupancy/org-occupancy.modu
     EntitlementsModule,
     AuditModule,
     FileStorageModule,
+    NotificationsModule,
     WebhooksModule,
     ShiftsModule,
     EffectiveDatingModule,

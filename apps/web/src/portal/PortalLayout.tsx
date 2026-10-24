@@ -650,6 +650,7 @@ export function PortalLayout() {
             userEmail={identity?.email ?? ""}
             roleLabel={roleLabel}
             onLogout={logout}
+            accountPath="/app/account"
             leading={sidebar.narrow ? <MobileMenuButton open={sidebar.drawer} onToggle={sidebar.toggle} /> : null}
           />
           <main className="flex-1 min-w-0 app-main px-4 py-5 sm:px-8 sm:py-8 max-w-5xl overflow-y-auto">

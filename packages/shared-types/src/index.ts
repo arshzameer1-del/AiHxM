@@ -6267,6 +6267,8 @@ export type PayrollPayslipNoticeResult = {
   noEmail: string[];
   /** employee numbers whose email could not be delivered */
   failed: string[];
+  /** BACKLOG51 - people who switched payslip emails off in their notification preferences */
+  optedOut?: number;
 };
 
 export type PayrollStatutoryReportKind = "income_tax" | "eobi" | "social_security";
@@ -9565,3 +9567,57 @@ export type ReportsOverview = {
   dashboards: number;
   schedules: number;
 };
+
+// --- BACKLOG51: account security (change password, authenticator, sessions) and in-app notifications ---
+
+export type AccountSecurityStatus = {
+  authProvider: "local" | "sso";
+  /** false for a single-sign-on account: its password is managed by the organisation's identity provider */
+  canChangePassword: boolean;
+  mfaEnabled: boolean;
+  mfaRequired: boolean;
+  recoveryCodesRemaining: number;
+  passwordChangedAt: string | null;
+};
+
+export type ChangePasswordRequest = { currentPassword: string; newPassword: string };
+export type ChangePasswordResult = { message: string; signedOutOtherSessions: number };
+
+export type MfaFactorRequest = { password: string; code?: string };
+export type MfaReenrollStartResult = { otpauthUrl: string; secretForManualEntry: string };
+export type MfaReenrollConfirmResult = { recoveryCodes: string[]; signedOutOtherSessions: number };
+export type MfaRecoveryCodesResult = { recoveryCodes: string[] };
+
+export type AccountSessionView = {
+  id: string;
+  deviceLabel: string | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  createdAt: string;
+  lastSeenAt: string;
+  current: boolean;
+};
+
+export type NotificationCategoryKey = "request_decisions" | "hr_inbox" | "payslip";
+
+export type NotificationPreferenceView = {
+  category: NotificationCategoryKey;
+  label: string;
+  description: string;
+  email: boolean;
+  inApp: boolean;
+  /** which channels this category can use at all (payslip notices are email only) */
+  channels: Array<"email" | "in_app">;
+};
+
+export type UserNotificationView = {
+  id: string;
+  category: NotificationCategoryKey;
+  title: string;
+  body: string | null;
+  link: string | null;
+  createdAt: string;
+  readAt: string | null;
+};
+
+export type UserNotificationInbox = { items: UserNotificationView[]; unreadCount: number };

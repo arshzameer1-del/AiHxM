@@ -207,6 +207,7 @@ export function PayrollRunControlPanel({
                 const parts = [`${r.sent} emailed`];
                 if (r.alreadySent) parts.push(`${r.alreadySent} already told`);
                 if (r.notPublished) parts.push(`${r.notPublished} not published yet`);
+                if (r.optedOut) parts.push(`${r.optedOut} turned payslip emails off`);
                 if (r.noEmail.length) parts.push(`no email address: ${r.noEmail.join(", ")}`);
                 if (r.failed.length) parts.push(`could not be delivered: ${r.failed.join(", ")}`);
                 setNoticeResult(parts.join(" · "));

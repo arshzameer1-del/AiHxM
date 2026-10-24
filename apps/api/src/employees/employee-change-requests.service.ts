@@ -16,6 +16,7 @@ import { EntitlementsService } from "../entitlements/entitlements.service";
 import { HrReferenceCatalogService } from "../hr-administration/hr-reference-catalog.service";
 import { RbacService } from "../rbac/rbac.service";
 import { sensitive } from "../crypto/sensitive-fields";
+import { UserNotificationsService } from "../notifications/user-notifications.service";
 import { CreateEmployeeAddressDto } from "./dto/create-employee-address.dto";
 import { CreateEmployeeContactDto } from "./dto/create-employee-contact.dto";
 import { CreateEmployeeFamilyMemberDto } from "./dto/create-employee-family-member.dto";
@@ -106,7 +107,9 @@ export class EmployeeChangeRequestsService {
     private readonly addresses: EmployeeAddressesService,
     private readonly family: EmployeeFamilyMembersService,
     private readonly bank: EmployeePaymentAccountsService,
-    private readonly employees: EmployeesService
+    private readonly employees: EmployeesService,
+    // BACKLOG51 - optional so every existing hand-built spec keeps working; Nest always supplies the real one.
+    private readonly inbox?: UserNotificationsService
   ) {}
 
   // ---------------------------------------------------------------- employee side
@@ -120,7 +123,7 @@ export class EmployeeChangeRequestsService {
     }
     // Marital status and bank account are not "records you edit": store them as a change (marital) or an addition (bank).
     const action: EmployeeChangeRequestAction = dto.requestType === "marital_status" ? "update" : dto.requestType === "bank_account" ? "add" : dto.action;
-    return this.db.withClaims(claims, async (client) => {
+    const submitted = await this.db.withClaims(claims, async (client) => {
       const me = await this.myEmployee(client, claims);
       const open = await client.query("SELECT count(*)::int AS n FROM employee_change_requests WHERE employee_id = $1 AND status = 'pending'", [me.id]);
       if (open.rows[0].n >= MAX_OPEN_PER_EMPLOYEE) throw new BadRequestException("You have too many open requests. Wait for HR to answer some of them.");
@@ -186,6 +189,18 @@ export class EmployeeChangeRequestsService {
       });
       return toView({ ...inserted.rows[0], payload: sealPayload(claims.company_id!, dto.requestType, payload), employee_number: me.employee_number, first_name: me.first_name, last_name: me.last_name });
     });
+    if (this.inbox && claims.company_id) {
+      const hr = await this.inbox.hrAdminUserIds(claims.company_id);
+      await this.inbox.notify({
+        companyId: claims.company_id,
+        userAccountIds: hr,
+        category: "hr_inbox",
+        title: `${submitted.employeeName} sent a change request`,
+        body: submitted.summary,
+        link: "/app/employees/change-requests",
+      });
+    }
+    return submitted;
   }
 
   async listMine(claims: RequestClaims): Promise<EmployeeChangeRequestView[]> {
@@ -268,7 +283,7 @@ export class EmployeeChangeRequestsService {
       );
       throw err;
     }
-    return this.db.withClaims(claims, async (client) => {
+    const approved = await this.db.withClaims(claims, async (client) => {
       await this.audit.record(client, claims, {
         companyId: claims.company_id ?? null,
         action: "employee_change_request.approve",
@@ -277,12 +292,14 @@ export class EmployeeChangeRequestsService {
       });
       return this.one(client, id);
     });
+    await this.tellEmployee(claims, approved, true);
+    return approved;
   }
 
   async reject(claims: RequestClaims, id: string, note: string): Promise<EmployeeChangeRequestView> {
     await this.requireManage(claims);
     if (!note || !note.trim()) throw new BadRequestException("Give the employee a reason");
-    return this.db.withClaims(claims, async (client) => {
+    const rejected = await this.db.withClaims(claims, async (client) => {
       const r = await client.query(
         `UPDATE employee_change_requests SET status = 'rejected', decided_by_user_account_id = $2, decided_at = now(), decision_note = $3, updated_at = now()
           WHERE id = $1 AND status = 'pending' RETURNING *`,
@@ -298,6 +315,22 @@ export class EmployeeChangeRequestsService {
         metadata: { employeeId: r.rows[0].employee_id, requestType: r.rows[0].request_type },
       });
       return this.one(client, id);
+    });
+    await this.tellEmployee(claims, rejected, false);
+    return rejected;
+  }
+
+  /** BACKLOG51 - the employee hears HR's decision in their bell (and by email if they want it). */
+  private async tellEmployee(claims: RequestClaims, view: EmployeeChangeRequestView, approved: boolean): Promise<void> {
+    if (!this.inbox || !claims.company_id) return;
+    const owner = await this.db.withClaims(claims, (client) => client.query("SELECT user_account_id FROM employees WHERE id = $1", [view.employeeId]));
+    await this.inbox.notify({
+      companyId: claims.company_id,
+      userAccountIds: [owner.rows[0]?.user_account_id],
+      category: "request_decisions",
+      title: approved ? "HR approved your request" : "HR did not approve your request",
+      body: `${view.summary}${view.decisionNote ? ` - ${view.decisionNote}` : ""}`,
+      link: "/app/profile",
     });
   }
 

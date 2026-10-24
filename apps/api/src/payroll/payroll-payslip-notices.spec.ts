@@ -5,6 +5,7 @@ import { MailerService } from "../mailer/mailer.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { PayrollDocumentsService } from "./payroll-documents.service";
 import { TestSmtpCatcher } from "../mailer/test-smtp-catcher";
+import { UserNotificationsService } from "../notifications/user-notifications.service";
 
 /** Emailing employees that their payslip is ready: once each, no amounts, only when published, only for a finalised run. */
 describe("Payslip notices", () => {
@@ -19,7 +20,7 @@ describe("Payslip notices", () => {
 
   const build = (fx: PayrollFixture) => {
     const mailer = new MailerService();
-    return new PayrollPayslipNoticesService(fx.db, fx.rbac, fx.entitlements, fx.audit, mailer, new NotificationsService(fx.db, mailer));
+    return new PayrollPayslipNoticesService(fx.db, fx.rbac, fx.entitlements, fx.audit, mailer, new NotificationsService(fx.db, mailer), new UserNotificationsService(fx.db, mailer));
   };
 
   beforeAll(async () => {
@@ -91,6 +92,20 @@ describe("Payslip notices", () => {
     expect(res.notPublished).toBeGreaterThanOrEqual(2);
     expect(catcher.all()).toHaveLength(0);
     await documents.updateSettings(f.hr, { requirePublication: false });
+  });
+
+  it("leaves out people who switched payslip emails off in their notification preferences", async () => {
+    configure();
+    const optOut = await f.makeUser("optout", ["employee_self_service"]);
+    const person = await f.createEmployee({ monthlySalary: 70000, userAccountId: optOut.uid });
+    await f.sql("UPDATE employees SET email = 'optout@example.test' WHERE id = $1", [person.id]);
+    await f.sql("INSERT INTO user_notification_preferences (user_account_id, category, email, in_app) VALUES ($1, 'payslip', false, false)", [optOut.uid]);
+    const run = await f.finalizedRun("2072-06-01", "2072-06-30");
+    catcher.clear();
+    const res = await notices.notifyRun(f.hr, run);
+    expect(res.optedOut).toBe(1);
+    expect(catcher.all().some((m) => m.to.includes("optout@example.test"))).toBe(false);
+    expect(catcher.all().some((m) => m.to.includes("amina@example.test"))).toBe(true);
   });
 
   it("is refused for a run that is not finalised, for a login without payroll rights, and across tenants", async () => {

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { Check, ChevronDown, Download, LogOut, Search } from "lucide-react";
+import { Check, ChevronDown, Download, LogOut, Search, ShieldCheck } from "lucide-react";
+import { NotificationBell } from "./NotificationBell";
 import { IosInstallHelp, useInstallMode } from "../../pwa/PwaChrome";
 import { promptInstall } from "../../pwa/install";
 import { StatusPill } from "./StatusPill";
@@ -15,6 +16,9 @@ export type QuickJumpItem = { to: string; label: string; group?: string };
  * Enterprise UI Design System Master Instruction, Section 6.3 ("Topbar"):
  * "global search/AI command field, notifications, help, context switcher
  * where required, profile menu."
+ *
+ * BACKLOG51 adds the notifications bell (in-app inbox) and an "Account & security" entry
+ * to the profile menu, for the tenant portal.
  *
  * This ships the two pieces that have a real implementation behind them —
  * a quick-jump search over this shell's own nav items (click, or ⌘K/Ctrl+K
@@ -34,6 +38,7 @@ export function Topbar({
   contextLabel,
   onLogout,
   leading,
+  accountPath,
 }: {
   items: QuickJumpItem[];
   userName: string;
@@ -43,6 +48,8 @@ export function Topbar({
   onLogout: () => void;
   /** Something to show before the search button, e.g. the phone menu button. */
   leading?: ReactNode;
+  /** BACKLOG51 - where "Account & security" lives. When given, the bell and the menu entry are shown. */
+  accountPath?: string;
 }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -141,6 +148,8 @@ export function Topbar({
           {contextLabel && <div className="hidden md:block text-sm text-label-secondary truncate">{contextLabel}</div>}
         </div>
 
+        {accountPath && <NotificationBell accountPath={accountPath} />}
+
         <div className="relative shrink-0" ref={profileRef}>
           <button
             type="button"
@@ -184,6 +193,20 @@ export function Topbar({
                   </button>
                 ))}
               </div>
+              {accountPath && (
+                <button
+                  type="button"
+                  data-testid="menu-account"
+                  onClick={() => {
+                    setProfileOpen(false);
+                    navigate(accountPath);
+                  }}
+                  className="w-full flex items-center gap-2 px-3.5 py-2 text-sm text-label-primary hover:bg-surface transition-colors border-b border-border"
+                >
+                  <ShieldCheck size={15} strokeWidth={1.75} />
+                  Account &amp; security
+                </button>
+              )}
               {(installMode === "prompt" || installMode === "ios" || installMode === "ios-other-browser") && (
                 <button
                   type="button"

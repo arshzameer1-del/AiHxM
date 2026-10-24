@@ -1,9 +1,11 @@
-import { Body, Controller, Get, NotFoundException, Param, Post, Put, Res, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, NotFoundException, Param, Post, Put, Res, UploadedFile, UseGuards, UseInterceptors } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
 import { ArrayMaxSize, IsArray, IsIn, IsOptional, IsString, MaxLength } from "class-validator";
 import type { Response } from "express";
 import { SessionGuard } from "../auth/session.guard";
 import { CurrentClaims } from "../auth/current-claims.decorator";
 import type { RequestClaims } from "../database/tenant-context";
+import { UploadEmployeeDocumentDto } from "./dto/record-job-history.dto";
 import { EMPLOYEE_ID } from "./employee-id-route";
 import { EmployeeDocumentComplianceService } from "./employee-document-compliance.service";
 
@@ -29,6 +31,18 @@ class ReviewDocumentDto {
 @UseGuards(SessionGuard)
 export class EmployeeDocumentComplianceController {
   constructor(private readonly compliance: EmployeeDocumentComplianceService) {}
+
+  /** An employee's own upload; waits as 'pending' until HR approves it. */
+  @Post(`${EMPLOYEE_ID}/documents/own`)
+  @UseInterceptors(FileInterceptor("file", { limits: { fileSize: 10 * 1024 * 1024 } }))
+  uploadOwn(
+    @CurrentClaims() claims: RequestClaims,
+    @Param("id") id: string,
+    @Body() dto: UploadEmployeeDocumentDto,
+    @UploadedFile() file: Express.Multer.File
+  ) {
+    return this.compliance.uploadOwn(claims, id, dto.documentType, file, { expiryDate: dto.expiryDate, note: dto.note });
+  }
 
   @Get("documents/pending")
   pending(@CurrentClaims() claims: RequestClaims) {

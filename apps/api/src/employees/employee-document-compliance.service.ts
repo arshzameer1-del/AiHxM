@@ -13,6 +13,7 @@ import type { RequestClaims } from "../database/tenant-context";
 import { EntitlementsService } from "../entitlements/entitlements.service";
 import { HrReferenceCatalogService } from "../hr-administration/hr-reference-catalog.service";
 import { HrBusinessPolicyService } from "../hr-administration/hr-business-policy.service";
+import { UserNotificationsService } from "../notifications/user-notifications.service";
 import { RbacService } from "../rbac/rbac.service";
 import { EmployeesService, rowToDocument } from "./employees.service";
 
@@ -34,7 +35,8 @@ export class EmployeeDocumentComplianceService {
     private readonly audit: AuditService,
     private readonly employees: EmployeesService,
     private readonly hrCatalog?: HrReferenceCatalogService,
-    private readonly businessPolicy?: HrBusinessPolicyService
+    private readonly businessPolicy?: HrBusinessPolicyService,
+    private readonly inbox?: UserNotificationsService
   ) {}
 
   // ---- review inbox ---------------------------------------------------------------------------------------------
@@ -56,7 +58,7 @@ export class EmployeeDocumentComplianceService {
     await this.requireManage(claims);
     const reviewNote = note ? String(note).trim().slice(0, 1000) || null : null;
     if (decision === "rejected" && !reviewNote) throw new BadRequestException("Tell the employee why the document was rejected");
-    return this.db.withClaims(claims, async (client) => {
+    const reviewed = await this.db.withClaims(claims, async (client) => {
       const r = await client.query(
         `UPDATE employee_documents
             SET review_status = $2, review_note = $3, reviewed_at = now(), reviewed_by_user_account_id = $4
@@ -77,6 +79,41 @@ export class EmployeeDocumentComplianceService {
       });
       return rowToDocument(r.rows[0]);
     });
+    if (this.inbox && claims.company_id) {
+      const owner = await this.db.withClaims(claims, (client) => client.query("SELECT user_account_id FROM employees WHERE id = $1", [reviewed.employeeId]));
+      await this.inbox.notify({
+        companyId: claims.company_id,
+        userAccountIds: [owner.rows[0]?.user_account_id],
+        category: "request_decisions",
+        title: decision === "approved" ? "HR approved your document" : "HR did not approve your document",
+        body: `${reviewed.fileName}${reviewed.reviewNote ? ` - ${reviewed.reviewNote}` : ""}`,
+        link: "/app/profile?tab=documents",
+      });
+    }
+    return reviewed;
+  }
+
+  /** An employee's own upload (waits for HR) - HR Admins are told there is something to review. */
+  async uploadOwn(
+    claims: RequestClaims,
+    employeeId: string,
+    documentType: string,
+    file: { originalname: string; mimetype: string; buffer: Buffer; size: number },
+    extra: { expiryDate?: string | null; note?: string | null } = {}
+  ): Promise<EmployeeDocumentView> {
+    const doc = await this.employees.addOwnDocument(claims, employeeId, documentType, file, extra);
+    if (this.inbox && claims.company_id) {
+      const hr = await this.inbox.hrAdminUserIds(claims.company_id);
+      await this.inbox.notify({
+        companyId: claims.company_id,
+        userAccountIds: hr,
+        category: "hr_inbox",
+        title: "A document is waiting for your review",
+        body: `${doc.fileName} (${doc.documentType.replace(/_/g, " ")})`,
+        link: "/app/employees/change-requests",
+      });
+    }
+    return doc;
   }
 
   // ---- mandatory document types -----------------------------------------------------------------------------------

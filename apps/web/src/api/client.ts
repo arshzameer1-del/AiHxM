@@ -211,6 +211,16 @@ import type {
   DecideExpenseClaimRequest,
   DecideLeaveRequestRequest,
   DecideOfferResponse,
+  AccountSecurityStatus,
+  AccountSessionView,
+  ChangePasswordRequest,
+  ChangePasswordResult,
+  MfaFactorRequest,
+  MfaReenrollStartResult,
+  MfaReenrollConfirmResult,
+  MfaRecoveryCodesResult,
+  NotificationPreferenceView,
+  UserNotificationInbox,
   EmployeeDocumentChecklist,
   EmployeeDocumentView,
   PendingEmployeeDocumentView,
@@ -2359,6 +2369,21 @@ export const api = {
     request<CsvImportResult<EmployeeView>>("/employees/bulk-import", { method: "POST", body: JSON.stringify({ csv }) }),
 
   getWorkforceAnalyticsSummary: () => request<EmployeeAnalyticsSummary>("/employees/analytics/summary"),
+
+  // --- BACKLOG51: account security (own password, authenticator, sessions) and notifications ---
+  getAccountSecurity: () => request<AccountSecurityStatus>("/auth/account/security"),
+  changeMyPassword: (dto: ChangePasswordRequest) => request<ChangePasswordResult>("/auth/account/password", { method: "POST", body: JSON.stringify(dto) }),
+  startMfaReenroll: (dto: MfaFactorRequest) => request<MfaReenrollStartResult>("/auth/account/mfa/start", { method: "POST", body: JSON.stringify(dto) }),
+  confirmMfaReenroll: (code: string) => request<MfaReenrollConfirmResult>("/auth/account/mfa/confirm", { method: "POST", body: JSON.stringify({ code }) }),
+  regenerateRecoveryCodes: (dto: MfaFactorRequest) => request<MfaRecoveryCodesResult>("/auth/account/mfa/recovery-codes", { method: "POST", body: JSON.stringify(dto) }),
+  listMySessions: () => request<AccountSessionView[]>("/auth/account/sessions"),
+  signOutMySession: (id: string) => request<{ message: string }>(`/auth/account/sessions/${id}`, { method: "DELETE" }),
+  signOutOtherSessions: () => request<{ signedOut: number }>("/auth/account/sessions/sign-out-others", { method: "POST" }),
+  getNotificationInbox: () => request<UserNotificationInbox>("/notifications/inbox"),
+  markNotificationsRead: (ids?: string[]) => request<{ unreadCount: number }>("/notifications/inbox/read", { method: "POST", body: JSON.stringify({ ids }) }),
+  getNotificationPreferences: () => request<NotificationPreferenceView[]>("/notifications/preferences"),
+  saveNotificationPreferences: (preferences: Array<{ category: string; email?: boolean; inApp?: boolean }>) =>
+    request<NotificationPreferenceView[]>("/notifications/preferences", { method: "PUT", body: JSON.stringify({ preferences }) }),
 
   // --- BACKLOG49: statutory IDs (EOBI, social security, provident fund, CNIC expiry, visa / work permit) ---
   getEmployeeStatutoryIds: (employeeId: string) => request<EmployeeStatutoryIdsView>(`/employees/statutory?employeeId=${employeeId}`),

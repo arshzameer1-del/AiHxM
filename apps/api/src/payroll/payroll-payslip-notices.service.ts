@@ -6,6 +6,7 @@ import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
 import { MailerService } from "../mailer/mailer.service";
 import { NotificationsService } from "../notifications/notifications.service";
+import { UserNotificationsService } from "../notifications/user-notifications.service";
 import { isPayrollAreaInScope, resolvePayrollAreaAccess } from "./payroll-area-access";
 import { payslipsHiddenFromSelf } from "./payroll-payslip-publication";
 import type { PayrollPayslipNoticeResult } from "@aihxm/shared-types";
@@ -31,7 +32,9 @@ export class PayrollPayslipNoticesService {
     private readonly entitlements: EntitlementsService,
     private readonly audit: AuditService,
     private readonly mailer: MailerService,
-    private readonly notifications: NotificationsService
+    private readonly notifications: NotificationsService,
+    // BACKLOG51 - people can switch payslip emails off in their notification preferences.
+    private readonly userNotifications?: UserNotificationsService
   ) {}
 
   async notifyRun(claims: RequestClaims, runId: string): Promise<PayrollPayslipNoticeResult> {
@@ -49,7 +52,7 @@ export class PayrollPayslipNoticesService {
       }
       if (row.is_simulation || !FINAL_STATUSES.includes(row.status)) throw new BadRequestException("Payslip notices can only be sent for a finalised run");
       const slips = await client.query(
-        `SELECT p.id, p.employee_number, e.first_name, e.last_name, e.email
+        `SELECT p.id, p.employee_number, e.first_name, e.last_name, e.email, e.user_account_id
            FROM payslips p JOIN employees e ON e.id = p.employee_id
           WHERE p.payroll_run_id = $1 ORDER BY p.employee_number`,
         [runId]
@@ -70,13 +73,16 @@ export class PayrollPayslipNoticesService {
     const period = `${pretty(day(data.run.period_start))} to ${pretty(day(data.run.period_end))}`;
     const base = process.env.APP_BASE_URL ?? "http://localhost:5173";
     const loginUrl = data.slug ? `${base}/${data.slug}/login` : base;
-    const result: PayrollPayslipNoticeResult = { payrollRunId: runId, sent: 0, alreadySent: 0, notPublished: 0, noEmail: [], failed: [] };
+    const result: PayrollPayslipNoticeResult = { payrollRunId: runId, sent: 0, alreadySent: 0, notPublished: 0, noEmail: [], failed: [], optedOut: 0 };
+    const optedOut = this.userNotifications ? await this.userNotifications.emailOptedOut(data.slips.map((s) => s.user_account_id), "payslip") : new Set<string>();
 
     for (const s of data.slips) {
       if (data.told.has(s.id)) {
         result.alreadySent += 1;
       } else if (data.hidden.has(s.id)) {
         result.notPublished += 1;
+      } else if (s.user_account_id && optedOut.has(s.user_account_id as string)) {
+        result.optedOut = (result.optedOut ?? 0) + 1;
       } else if (!s.email || !String(s.email).includes("@")) {
         result.noEmail.push(s.employee_number);
       } else {
@@ -96,7 +102,7 @@ export class PayrollPayslipNoticesService {
         companyId: claims.company_id ?? null,
         action: "payroll_run.notify_payslips",
         target: runId,
-        metadata: { sent: result.sent, alreadySent: result.alreadySent, notPublished: result.notPublished, noEmail: result.noEmail.length, failed: result.failed.length },
+        metadata: { sent: result.sent, alreadySent: result.alreadySent, notPublished: result.notPublished, noEmail: result.noEmail.length, failed: result.failed.length, optedOut: result.optedOut },
       })
     );
     return result;
