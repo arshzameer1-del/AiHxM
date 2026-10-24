@@ -81,6 +81,27 @@ export class EmployeeContactsService {
     // UpdateEmployeeContactRequest's own Omit).
     await this.hrCatalog.validateActiveCode(client, claims.company_id!, "contact_type", input.contactType);
 
+    // BACKLOG46 — the same value saved twice used to make two rows (and two "primary" candidates). Reuse the
+    // active contact that already holds this value instead of adding a duplicate.
+    const duplicate = await client.query(
+      `SELECT * FROM employee_contacts WHERE employee_id = $1 AND contact_type = $2 AND status = 'active'
+         AND lower(btrim(value)) = lower(btrim($3)) LIMIT 1`,
+      [input.employeeId, input.contactType, input.value]
+    );
+    if (duplicate.rows[0]) {
+      const existing = duplicate.rows[0];
+      if (!input.isPrimary || existing.is_primary) return rowToView(existing);
+      await client.query(
+        "UPDATE employee_contacts SET is_primary = false, updated_at = now() WHERE employee_id = $1 AND contact_type = $2 AND status = 'active' AND id <> $3",
+        [input.employeeId, input.contactType, existing.id]
+      );
+      const promoted = await client.query(
+        "UPDATE employee_contacts SET is_primary = true, label = COALESCE($2, label), updated_at = now() WHERE id = $1 RETURNING *",
+        [existing.id, input.label ?? null]
+      );
+      return rowToView(promoted.rows[0]);
+    }
+
     if (input.isPrimary) {
       await client.query(
         "UPDATE employee_contacts SET is_primary = false, updated_at = now() WHERE employee_id = $1 AND contact_type = $2 AND status = 'active'",

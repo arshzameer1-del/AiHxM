@@ -323,20 +323,13 @@ describe("OrgUnitsService", () => {
       expect(updated.department).toBe("Compliance");
     });
 
-    it("renaming an org unit does not retroactively change already-synced employees until they're re-saved", async () => {
-      // This is a deliberate, documented Phase 1 scope limit — see this
-      // service's own summary notes: a live "rename cascades to every
-      // linked employee's department text" propagation is not built in
-      // this phase (employees.department is a point-in-time sync, not a
-      // live view of org_units.name).
+    it("renaming an org unit updates every linked employee's department straight away", async () => {
+      // BACKLOG46: employees.department used to be a point-in-time copy that went stale on rename. A database
+      // trigger now keeps it equal to the unit's name in the same transaction.
       const created = await employees.create(hrAdminClaims, { firstName: "Stale", lastName: "Text", orgUnitId: engineeringId });
       await orgUnits.update(hrAdminClaims, engineeringId, { name: "Engineering (Renamed)" });
       const fetched = await employees.get(hrAdminClaims, created.id);
-      expect(fetched.department).toBe("Engineering");
-
-      // But the NEXT save re-derives it from the (now renamed) unit.
-      const resaved = await employees.update(hrAdminClaims, created.id, { orgUnitId: engineeringId });
-      expect(resaved.department).toBe("Engineering (Renamed)");
+      expect(fetched.department).toBe("Engineering (Renamed)");
     });
 
     it("rejects linking an employee to a nonexistent org unit", async () => {

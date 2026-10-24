@@ -3194,6 +3194,31 @@ export type EmployeeHeadcountBreakdown = {
   count: number;
 };
 
+/** BACKLOG46 — one "does the employee record agree with the place that owns the value" check and what it found. */
+export type EmployeeConsistencyCheckResult = {
+  id: string;
+  label: string;
+  explanation: string;
+  severity: "high" | "medium" | "low";
+  /** True when "Fix automatically" corrects this kind of mismatch. */
+  fixable: boolean;
+  count: number;
+  samples: Array<{ employeeId: string; employeeNumber: string; name: string; detail: string }>;
+};
+
+export type EmployeeConsistencyReport = {
+  generatedAt: string;
+  employeesChecked: number;
+  totalIssues: number;
+  fixableIssues: number;
+  checks: EmployeeConsistencyCheckResult[];
+};
+
+export type EmployeeConsistencyRepairResult = {
+  repaired: Record<string, number>;
+  report: EmployeeConsistencyReport;
+};
+
 export type EmployeeAnalyticsSummary = {
   generatedAt: string;
   totalActiveEmployees: number;

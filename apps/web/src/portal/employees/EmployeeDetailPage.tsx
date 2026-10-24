@@ -502,8 +502,9 @@ function EditForm({
             className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
           />
         </Field>
-        <Field label="Designation">
+        <Field label="Designation" hint={employee.positionId ? "Comes from the position's title. Change the position to change it." : undefined}>
           <input
+            disabled={!!employee.positionId}
             list={`${listId}-job`}
             value={designation}
             onChange={(e) => setDesignation(e.target.value)}

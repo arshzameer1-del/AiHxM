@@ -22,6 +22,7 @@ import { join, relative } from "path";
  */
 const MANAGER_ID_READERS: Record<string, "writer" | "decision" | "display"> = {
   "database/seed-pilot-company.ts": "display",
+  "employees/employee-data-consistency.checks.ts": "display",
   "employees/employee-lifecycle.service.ts": "writer",
   "employees/employees.service.ts": "writer",
   "employees/hiring/hiring-process.service.ts": "writer",
@@ -48,6 +49,10 @@ const MANAGER_ID_READERS: Record<string, "writer" | "decision" | "display"> = {
   "performance/performance-depth.service.ts": "decision",
   "performance/performance.service.ts": "decision",
   "recruitment/recruitment.service.ts": "decision",
+  "reports/engine/depth/common.ts": "display",
+  "reports/engine/depth/platform-governance.ts": "display",
+  "reports/engine/depth/workforce.ts": "display",
+  "reports/engine/executors/master-data.ts": "display",
   "shifts/shifts.service.ts": "decision",
   "workflow/workflow.service.ts": "decision",
 };
@@ -55,6 +60,7 @@ const MANAGER_ID_READERS: Record<string, "writer" | "decision" | "display"> = {
 const DEPARTMENT_READERS: Record<string, "writer" | "decision" | "display"> = {
   "employee-groups/employee-groups.service.ts": "decision",
   "employees/employee-analytics.service.ts": "display",
+  "employees/employee-data-consistency.checks.ts": "display",
   "employees/employee-lifecycle.service.ts": "writer",
   "employees/employees.service.ts": "writer",
   "employees/my-org-chart.service.ts": "display",
@@ -67,6 +73,7 @@ const DEPARTMENT_READERS: Record<string, "writer" | "decision" | "display"> = {
   "organization/positions.service.ts": "writer",
   "recruitment/recruitment-pipeline.service.ts": "display",
   "recruitment/recruitment.service.ts": "writer",
+  "reports/engine/executors/master-data.ts": "display",
   "shifts/shifts.service.ts": "decision",
 };
 

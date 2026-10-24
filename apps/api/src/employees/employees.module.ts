@@ -36,6 +36,8 @@ import { EmployeeLifecycleService } from "./employee-lifecycle.service";
 import { EmployeeLifecycleScheduler } from "./employee-lifecycle.scheduler";
 import { EmployeeAnalyticsController } from "./employee-analytics.controller";
 import { EmployeeAnalyticsService } from "./employee-analytics.service";
+import { EmployeeDataConsistencyController } from "./employee-data-consistency.controller";
+import { EmployeeDataConsistencyService } from "./employee-data-consistency.service";
 import { EmployeeCompensationController } from "./employee-compensation.controller";
 import { EmployeeCompensationService } from "./employee-compensation.service";
 import { EmployeeLoansController } from "./employee-loans.controller";
@@ -138,6 +140,7 @@ import { OrgOccupancyModule } from "../organization/occupancy/org-occupancy.modu
     EmployeeAssetsController,
     EmployeeLifecycleController,
     EmployeeAnalyticsController,
+    EmployeeDataConsistencyController,
     EmployeeCompensationController,
     EmployeeLoansController,
     EmployeeAdditionalPaymentsController,
@@ -170,6 +173,7 @@ import { OrgOccupancyModule } from "../organization/occupancy/org-occupancy.modu
     EmployeeLifecycleService,
     EmployeeLifecycleScheduler,
     EmployeeAnalyticsService,
+    EmployeeDataConsistencyService,
     EmployeeCompensationService,
     EmployeeLoansService,
     EmployeeAdditionalPaymentsService,

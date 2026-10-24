@@ -478,6 +478,8 @@ import type {
   CardDefinitionView,
   UpdateCardDefinitionRequest,
   EmployeeAnalyticsSummary,
+  EmployeeConsistencyReport,
+  EmployeeConsistencyRepairResult,
   CsvImportResult,
 } from "@aihxm/shared-types";
 
@@ -2305,6 +2307,11 @@ export const api = {
     request<CsvImportResult<EmployeeView>>("/employees/bulk-import", { method: "POST", body: JSON.stringify({ csv }) }),
 
   getWorkforceAnalyticsSummary: () => request<EmployeeAnalyticsSummary>("/employees/analytics/summary"),
+
+  // --- BACKLOG46: employee data consistency ---
+  getEmployeeDataConsistency: () => request<EmployeeConsistencyReport>("/employees/data-consistency"),
+  repairEmployeeDataConsistency: () =>
+    request<EmployeeConsistencyRepairResult>("/employees/data-consistency/repair", { method: "POST" }),
 
   // --- Reports & Analytics Intelligence Center ------------------------------
   getReportCatalog: () => request<ReportCatalogResponse>("/reports/catalog"),

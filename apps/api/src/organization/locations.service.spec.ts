@@ -290,15 +290,12 @@ describe("LocationsService", () => {
       expect(updated.location).toBe("Fully Remote");
     });
 
-    it("renaming a location does not retroactively change already-synced employees until they're re-saved", async () => {
+    it("renaming a location updates every linked employee's location straight away", async () => {
+      // BACKLOG46: a database trigger keeps employees.location equal to the location's name.
       const created = await employees.create(hrAdminClaims, { firstName: "Stale", lastName: "Text", locationId: karachiId });
       await locations.update(hrAdminClaims, karachiId, { name: "Karachi (Renamed)" });
       const fetched = await employees.get(hrAdminClaims, created.id);
-      expect(fetched.location).toBe("Karachi");
-
-      // But the NEXT save re-derives it from the (now renamed) location.
-      const resaved = await employees.update(hrAdminClaims, created.id, { locationId: karachiId });
-      expect(resaved.location).toBe("Karachi (Renamed)");
+      expect(fetched.location).toBe("Karachi (Renamed)");
     });
 
     it("rejects linking an employee to a nonexistent location", async () => {

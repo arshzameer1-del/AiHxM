@@ -52,8 +52,9 @@ export class EmployeeAnalyticsService {
           [companyId]
         ),
         () => client.query<{ key: string; n: string }>(
-          `SELECT COALESCE(NULLIF(department, ''), 'Unassigned') AS key, COUNT(*) AS n
-           FROM employees WHERE company_id = $1 AND employment_status <> 'terminated'
+          `SELECT COALESCE(ou.name, NULLIF(e.department, ''), 'Unassigned') AS key, COUNT(*) AS n
+           FROM employees e LEFT JOIN org_units ou ON ou.id = e.org_unit_id
+           WHERE e.company_id = $1 AND e.employment_status <> 'terminated'
            GROUP BY key ORDER BY n DESC, key ASC`,
           [companyId]
         ),
