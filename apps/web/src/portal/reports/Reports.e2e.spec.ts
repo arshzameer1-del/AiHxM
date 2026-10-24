@@ -21,6 +21,18 @@ test.describe("Reports & Analytics", () => {
     await expect(page.getByTestId("report-error")).toHaveCount(0);
   });
 
+  test("a master data report shows its extra tables as tabs", async ({ page }) => {
+    await loginToApp(page, getSharedSession("hr_admin"));
+    await page.goto("/app/reports/B20");
+    await expect(page.getByTestId("report-tabs")).toBeVisible();
+    await expect(page.getByTestId("report-tab-detail")).toHaveAttribute("aria-selected", "true");
+    await page.getByTestId("report-tab-family").click();
+    await expect(page.getByTestId("report-tab-family")).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("heading", { name: /Family members/ })).toBeVisible();
+    await page.getByTestId("report-tab-assets-by-type").click();
+    await expect(page.getByRole("heading", { name: /Assets by type/ })).toBeVisible();
+  });
+
   test("a report that needs data we do not capture explains what is missing", async ({ page }) => {
     await loginToApp(page, getSharedSession("hr_admin"));
     await page.goto("/app/reports/library");

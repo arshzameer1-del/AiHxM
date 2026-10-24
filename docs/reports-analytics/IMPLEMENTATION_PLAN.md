@@ -10,7 +10,7 @@
 
 ## 2. Design decisions
 
-1. **Reports are code, the catalog is code.** 220 stable ids live in `apps/api/src/reports/catalog`, versioned with the queries they describe. A report moves from blocked to available only in the change that adds its query and tests; a spec fails if the two disagree.
+1. **Reports are code, the catalog is code.** 225 stable ids live in `apps/api/src/reports/catalog`, versioned with the queries they describe. A report moves from blocked to available only in the change that adds its query and tests; a spec fails if the two disagree.
 2. **A declarative framework, not 220 hand-written endpoints.** `sqlReport`, `groupedReport` and `listReport` take columns, a query built from scope helpers, chart and KPI helpers and calculation text. The framework applies tenant limit, team or area scope and the chosen filters, and refuses a query that skips any of them.
 3. **Reuse permissions.** Four new `reports.*` keys; data access comes from the permissions the product already has.
 4. **No estimates.** A report whose data does not exist is blocked, with the reason on screen and a plan to unlock it.

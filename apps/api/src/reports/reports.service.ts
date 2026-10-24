@@ -21,7 +21,7 @@ import { CATEGORIES, DOMAIN_POLICIES } from "./catalog/categories";
 import { REPORT_BY_ID, REPORT_CATALOG } from "./catalog/report-catalog";
 import type { ReportDefinition } from "./catalog/report-catalog.types";
 import { allPermissionKeysForCatalog, decideAccess, type ReportAccess } from "./report-access";
-import { toCsv } from "./engine/csv";
+import { toCsvWithSections } from "./engine/csv";
 import { normalizeFilters } from "./engine/filters";
 import { previousRange, resolvePreset } from "./engine/presets";
 import { DEFAULT_RANGES, EXECUTORS } from "./engine/executors";
@@ -250,8 +250,9 @@ export class ReportsService {
           const me = await client.query<{ id: string }>("SELECT id FROM employees WHERE user_account_id = $1 AND company_id = $2 LIMIT 1", [claims.sub, claims.company_id]);
           callerEmployeeId = me.rows[0]?.id ?? null;
         }
-        const runFor = (values: typeof filters.values, range: typeof filters.range): Promise<ExecutorOutput> =>
+        const runFor = (values: typeof filters.values, range: typeof filters.range, skipSections = false): Promise<ExecutorOutput> =>
           executor({
+            skipSections,
             client,
             companyId: claims.company_id as string,
             scope: access.scope,
@@ -267,7 +268,7 @@ export class ReportsService {
         let comparison: { from: string; to: string } | null = null;
         if (opts.compare && filters.range) {
           comparison = previousRange(filters.range);
-          const prev = await runFor({ ...filters.values, dateFrom: comparison.from, dateTo: comparison.to }, comparison);
+          const prev = await runFor({ ...filters.values, dateFrom: comparison.from, dateTo: comparison.to }, comparison, true);
           out.kpis = applyComparison(out.kpis, prev.kpis);
         }
         const asOf = new Date().toISOString();
@@ -328,7 +329,7 @@ export class ReportsService {
       ...(result.truncated ? [`Partial: only the first ${EXPORT_ROWS} of ${result.totalRows} rows are included`] : []),
       ...result.notes.map((n) => `Note: ${n}`),
     ];
-    return { filename: `${result.reportId}-${result.asOf.slice(0, 10)}.csv`, csv: toCsv(result.columns, result.rows, meta) };
+    return { filename: `${result.reportId}-${result.asOf.slice(0, 10)}.csv`, csv: toCsvWithSections(result.columns, result.rows, meta, result.sections ?? []) };
   }
 
   // ------------------------------------------------------------------ filter options

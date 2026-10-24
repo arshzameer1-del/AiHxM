@@ -2,7 +2,7 @@
 
 Generated from the code by `npm run docs:reports` (apps/api). Do not edit by hand.
 
-**220 reports: 193 available, 27 blocked, 0 planned, 0 unavailable.**
+**225 reports: 198 available, 27 blocked, 0 planned, 0 unavailable.**
 
 *Available* means the report has a query, a metric definition and tests. *Blocked* means the data it needs is not captured in AiHxM; the reason is given, and BLOCKED_REPORTS_DEVELOPMENT_PLAN.md says what to build to unlock it. Nothing here is estimated or invented.
 
@@ -51,6 +51,11 @@ Who works where, in which role, and how complete the records are.
 | B13 | Employee Anniversary List | Available | Internal | Employees and organisation | kpi, table | dateRange, department, location, employmentType |
 | B14 | Employee Document Expiry Watchlist | Available | Sensitive | Employees and organisation | kpi, table | dateRange, department, location, employmentType |
 | B15 | Employee Data Duplicate/Quality Exceptions | Available | Sensitive | Employees and organisation | kpi, bar, table | department, location, employmentType |
+| B16 | Employee Master Data (Consolidated) | Available | Sensitive | Administration | kpi, table | department, location, employmentType |
+| B17 | Master Data: Personal, Employment and Organisation | Available | Sensitive | Employees and organisation | kpi, table | department, location, employmentType |
+| B18 | Master Data: Contact, Address and Emergency | Available | Sensitive | Employees and organisation | kpi, table | department, location, employmentType |
+| B19 | Master Data: Identity, Bank, Tax and Pay | Available | Restricted | Payroll | kpi, table | department, location, employmentType |
+| B20 | Master Data: Family, Education, Qualifications, Documents and Assets | Available | Sensitive | Employees and organisation | kpi, table | department, location, employmentType |
 
 ## C. Recruitment and onboarding
 

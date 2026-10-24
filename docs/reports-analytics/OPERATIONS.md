@@ -55,6 +55,12 @@ None of them changes or removes an existing object. Rolling back drops only repo
 - Email needs SMTP settings; without them scheduled reports are stored and downloadable in the app, and the schedule list says so.
 - Disk: scheduled files live in the database (`report_deliveries.file_bytes`) for 14 days. Watch the table size if many large schedules are created.
 
+## Extra tables ("sections") and the master data reports
+
+- A report may carry extra tables under its main one: breakdowns, trends and the individual records behind the figures. On screen they are tabs; in Excel each is its own worksheet (names cut to 31 characters and made unique); CSV puts each after the main table under a `# Section:` line; PDF prints each as a heading and table.
+- A section is held to exactly the same rules as its report (company limit, team or payroll-area scope, filters) and the same row limits. A section may never show more than its report's sensitivity allows.
+- B16 to B20 are the employee master data reports: B16 consolidated, B17 personal/employment/organisation, B18 contact/address/emergency, B19 identity/bank/tax/pay (payroll rights, restricted), B20 family/education/qualifications/documents/assets. CNIC, date of birth, bank account number, IBAN, NTN and passport number are stored encrypted and are only reported as "on file".
+
 ## Watching it in production
 
 - `report_run_log` (company, report, kind, status, duration, rows) is the usage and failure record. O01 to O05, O10, O11 and O15 are built on it, so an administrator sees the same in the product.

@@ -3,7 +3,7 @@ import type { ReportDefinition, ReportDomain } from "./report-catalog.types";
 import { REPORT_META } from "../engine/executors";
 
 /**
- * The authoritative catalog: 220 stable ids (A01 to O15), each mapped to the tables it would read, the permission domain
+ * The authoritative catalog: 225 stable ids (A01 to O15, plus the employee master data reports B16 to B20), each mapped to the tables it would read, the permission domain
  * that opens its data, a sensitivity class and an honest status.
  *
  *   available - has a query in report-executors.ts, is authorised, tested, and returns real data.
@@ -120,6 +120,12 @@ cat("B", [
   ["B13", "Employee Anniversary List", { tables: ["employees"] }],
   ["B14", "Employee Document Expiry Watchlist", { tables: ["persons", "employee_qualifications"], reason: "Passport and qualification expiry dates exist. Documents in the vault carry no expiry date, so the report would cover those two only." }],
   ["B15", "Employee Data Duplicate/Quality Exceptions", { tables: ["employees", "persons"] }],
+  // Employee master data: one consolidated report and one per group of fields. Encrypted values (CNIC, date of birth, bank account) are never shown.
+  ["B16", "Employee Master Data (Consolidated)", { domain: "governance", sens: "sensitive", viz: ["table"] }],
+  ["B17", "Master Data: Personal, Employment and Organisation", { sens: "sensitive", viz: ["table"] }],
+  ["B18", "Master Data: Contact, Address and Emergency", { sens: "sensitive", viz: ["table"] }],
+  ["B19", "Master Data: Identity, Bank, Tax and Pay", { domain: "payroll", sens: "restricted", viz: ["table"] }],
+  ["B20", "Master Data: Family, Education, Qualifications, Documents and Assets", { sens: "sensitive", viz: ["table"] }],
 ]);
 
 // ---------------------------------------------------------------- C. Recruitment and onboarding
@@ -392,4 +398,4 @@ const finalDefs: ReportDefinition[] = defs.map((d) => {
 
 export const REPORT_CATALOG: readonly ReportDefinition[] = Object.freeze(finalDefs);
 export const REPORT_BY_ID: ReadonlyMap<string, ReportDefinition> = new Map(finalDefs.map((d) => [d.id, d]));
-export const REPORT_ID_PATTERN = /^[A-O](0[1-9]|1[0-5])$/;
+export const REPORT_ID_PATTERN = /^([A-O](0[1-9]|1[0-5])|B(1[6-9]|20))$/;

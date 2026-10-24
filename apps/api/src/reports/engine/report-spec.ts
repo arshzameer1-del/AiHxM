@@ -1,5 +1,5 @@
 import type { ReportDomain } from "../catalog/report-catalog.types";
-import type { ReportChartSpec, ReportColumn, ReportFilterKey, ReportKpi, ReportRow, ReportSensitivity, ReportVisualization } from "@aihxm/shared-types";
+import type { ReportChartSpec, ReportColumn, ReportFilterKey, ReportKpi, ReportRow, ReportSection, ReportSensitivity, ReportVisualization } from "@aihxm/shared-types";
 import type { DefaultRange } from "./filters";
 import { CURRENT_HEADCOUNT, Params, UNASSIGNED, employeeConditions } from "./sql";
 import type { ExecutorContext, ExecutorOutput, ReportExecutor } from "./executors/types";
@@ -58,6 +58,19 @@ export type ReportMeta = {
 
 export type ReportOverrides = Pick<ReportMeta, "domain" | "sensitivity" | "needs" | "tables">;
 
+/**
+ * An extra table under a report: a breakdown, a trend or the records behind the headline figures. It is held to exactly the
+ * same rules as the report's own query (company limit, reporting line, payroll area, filters, date range), and it may never show
+ * more than the report's sensitivity allows: a report that is not Restricted must not list pay here.
+ */
+export type ReportSectionSpec = {
+  key: string;
+  title: string;
+  description?: string;
+  columns: ReportColumn[];
+  sql: (q: Q) => string;
+};
+
 export type SqlReportSpec = ReportOverrides & {
   description: string;
   /** Filters this report understands. Date range is implied by `defaultRange`. */
@@ -76,6 +89,8 @@ export type SqlReportSpec = ReportOverrides & {
   kpis?: (info: RowsInfo) => ReportKpi[];
   calculation: string[];
   notes?: (info: RowsInfo) => string[];
+  /** Extra tables shown under the figures (tabs on the report page, extra sheets in an Excel export). */
+  sections?: ReportSectionSpec[];
 };
 
 const CHART_ROW_CAP = 2000;
@@ -162,6 +177,39 @@ function makeQ(ctx: ExecutorContext): { q: Q; p: Params; used: Set<string> } {
   return { q, p, used };
 }
 
+/** Runs each extra table with its own parameter list, the same guards and the same row limit as the report's own table. */
+async function runSections(specs: readonly ReportSectionSpec[], ctx: ExecutorContext, staticData: boolean): Promise<ReportSection[]> {
+  const out: ReportSection[] = [];
+  for (const sec of specs) {
+    const { q, p } = makeQ(ctx);
+    const inner = sec.sql(q);
+    guardScope(inner, ctx, staticData);
+    const res = await ctx.client.query(`SELECT * FROM (${inner}) AS section_rows LIMIT ${ctx.rowLimit + 1}`, p.values);
+    const truncated = res.rows.length > ctx.rowLimit;
+    const rows = res.rows.slice(0, ctx.rowLimit).map((r) => normalise(sec.columns, r));
+    let total = rows.length;
+    if (truncated) {
+      const c = await ctx.client.query<{ n: number }>(`SELECT COUNT(*)::int AS n FROM (${inner}) AS section_rows`, p.values);
+      total = c.rows[0]?.n ?? rows.length;
+    }
+    out.push({ key: sec.key, title: sec.title, ...(sec.description ? { description: sec.description } : {}), columns: sec.columns, rows, totalRows: total, truncated });
+  }
+  return out;
+}
+
+/** Refuses a query that ignores the caller's scope. A missing limit is an error, never a wider answer. */
+function guardScope(inner: string, ctx: ExecutorContext, staticData: boolean): void {
+    if (ctx.scope === "team" && !inner.includes("org_relationships")) throw new Error("Team-scoped report query ignored the reporting line");
+    if (ctx.payrollAccess && !ctx.payrollAccess.unrestricted && !inner.includes("payroll_area_id = ANY")) throw new Error("Area-scoped report query ignored the payroll area limit");
+    // Either the query limits its tables to the company itself, or it reads only through the app.report_company_*() functions,
+    // which return nothing but the current company's rows by construction (migrations 0165 and 0166).
+    if (staticData) {
+      if (/\b(FROM|JOIN)\s+(?!unnest\(|\()[a-z_]/i.test(inner)) throw new Error("A static-data report may read only values passed to unnest(), never a table");
+    } else if (!/company_id\s*=\s*\$\d+/.test(inner) && !/\bapp\.report_company_\w+\(\)/.test(inner)) {
+      throw new Error("Report query is not limited to the caller's company");
+    }
+}
+
 /**
  * Turns a declarative spec into an executor. The framework, not the author, adds the row limit, binds every value,
  * and refuses to run a query that ignores the caller's scope: team scope must go through the reporting line and
@@ -178,15 +226,7 @@ export function sqlReport(spec: SqlReportSpec): { run: ReportExecutor; meta: Rep
     }
     if (spec.defaultRange && !used.has("dateRange")) throw new Error("Report declares a date range but its query never applies it");
 
-    if (ctx.scope === "team" && !inner.includes("org_relationships")) throw new Error("Team-scoped report query ignored the reporting line");
-    if (ctx.payrollAccess && !ctx.payrollAccess.unrestricted && !inner.includes("payroll_area_id = ANY")) throw new Error("Area-scoped report query ignored the payroll area limit");
-    // Either the query limits its tables to the company itself, or it reads only through the app.report_company_*() functions,
-    // which return nothing but the current company's rows by construction (migrations 0165 and 0166).
-    if (spec.staticData) {
-      if (/\b(FROM|JOIN)\s+(?!unnest\(|\()[a-z_]/i.test(inner)) throw new Error("A static-data report may read only values passed to unnest(), never a table");
-    } else if (!/company_id\s*=\s*\$\d+/.test(inner) && !/\bapp\.report_company_\w+\(\)/.test(inner)) {
-      throw new Error("Report query is not limited to the caller's company");
-    }
+    guardScope(inner, ctx, spec.staticData === true);
 
     const cap = Math.max(ctx.rowLimit, CHART_ROW_CAP);
     const res = await ctx.client.query(`SELECT * FROM (${inner}) AS report_rows LIMIT ${cap + 1}`, p.values);
@@ -206,7 +246,9 @@ export function sqlReport(spec: SqlReportSpec): { run: ReportExecutor; meta: Rep
     const charts = spec.chart?.(info);
     const notes = [...(spec.notes?.(info) ?? [])];
     if (capped) notes.push(`Summary figures and charts cover the first ${cap} rows of ${total}. Narrow the filters to see the rest.`);
+    const sections = spec.sections && !ctx.skipSections ? await runSections(spec.sections, ctx, spec.staticData === true) : undefined;
     const out: ExecutorOutput = {
+      ...(sections && sections.length ? { sections } : {}),
       kpis: spec.kpis?.(info) ?? [],
       charts: charts ? (Array.isArray(charts) ? charts : [charts]) : [],
       columns: spec.columns,
@@ -292,6 +334,7 @@ type GroupedOptions = ReportOverrides & {
   showShare?: boolean;
   calculation: string[];
   notes?: (info: RowsInfo) => string[];
+  sections?: ReportSectionSpec[];
 };
 
 /** A two-column "label, number" report with a share column, one chart, and total + group-count tiles. */
@@ -329,6 +372,7 @@ export function groupedReport(o: GroupedOptions): { run: ReportExecutor; meta: R
     },
     calculation: o.calculation,
     notes: o.notes,
+    sections: o.sections,
   });
   return inner;
 }

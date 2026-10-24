@@ -1,7 +1,7 @@
 import ExcelJS from "exceljs";
 import PDFDocument from "pdfkit";
-import type { ReportColumn, ReportExportFormat, ReportResult } from "@aihxm/shared-types";
-import { toCsv } from "../engine/csv";
+import type { ReportColumn, ReportExportFormat, ReportResult, ReportRow } from "@aihxm/shared-types";
+import { toCsvWithSections } from "../engine/csv";
 
 export const FORMAT_INFO: Record<ReportExportFormat, { ext: string; mime: string }> = {
   csv: { ext: "csv", mime: "text/csv; charset=utf-8" },
@@ -34,28 +34,7 @@ export async function buildXlsx(result: ReportResult, exportRows: number): Promi
   ws.addRow([meta[0]]).font = { bold: true, size: 14 };
   for (const line of meta.slice(1)) ws.addRow([line]).font = { color: { argb: "FF555555" }, size: 10 };
   ws.addRow([]);
-  const headerRow = ws.addRow(result.columns.map((c) => c.label));
-  headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
-  headerRow.eachCell((cell) => {
-    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F3A5F" } };
-    cell.alignment = { vertical: "middle", wrapText: true };
-  });
-  const headerIndex = headerRow.number;
-  ws.views = [{ state: "frozen", ySplit: headerIndex }];
-  for (const r of result.rows) {
-    const row = ws.addRow(result.columns.map((c) => cellValue(c, r[c.key] ?? null)));
-    result.columns.forEach((c, i) => {
-      const cell = row.getCell(i + 1);
-      if (c.type === "number") cell.numFmt = "#,##0.##";
-      else if (c.type === "percent") cell.numFmt = '0.0"%"';
-      else if (c.type === "date") cell.numFmt = "yyyy-mm-dd";
-    });
-  }
-  result.columns.forEach((c, i) => {
-    const longest = Math.max(c.label.length, ...result.rows.slice(0, 200).map((r) => String(r[c.key] ?? "").length));
-    ws.getColumn(i + 1).width = Math.min(Math.max(10, longest + 2), 48);
-  });
-  if (result.rows.length && result.columns.length) ws.autoFilter = { from: { row: headerIndex, column: 1 }, to: { row: headerIndex, column: result.columns.length } };
+  writeTable(ws, result.columns, result.rows);
 
   if (result.kpis.length || result.calculation.length) {
     const ds = wb.addWorksheet("About this report");
@@ -70,7 +49,55 @@ export async function buildXlsx(result: ReportResult, exportRows: number): Promi
     ds.addRow(["How it is calculated"]).font = { bold: true };
     for (const line of result.calculation) ds.addRow([line]);
   }
+  const usedNames = new Set<string>(["Report", "About this report"]);
+  for (const sec of result.sections ?? []) {
+    const sw = wb.addWorksheet(uniqueSheetName(sec.title, usedNames));
+    sw.addRow([sec.title]).font = { bold: true, size: 14 };
+    if (sec.description) sw.addRow([sec.description]).font = { color: { argb: "FF555555" }, size: 10 };
+    sw.addRow([sec.truncated ? `Partial: first ${sec.rows.length} of ${sec.totalRows} rows` : `${sec.totalRows} rows`]).font = { color: { argb: "FF555555" }, size: 10 };
+    sw.addRow([]);
+    writeTable(sw, sec.columns, sec.rows);
+  }
   return Buffer.from(await wb.xlsx.writeBuffer());
+}
+
+/** Writes a styled header and the rows; returns the header row number. */
+function writeTable(ws: ExcelJS.Worksheet, columns: ReportColumn[], rows: ReportRow[]): number {
+  const headerRow = ws.addRow(columns.map((c) => c.label));
+  headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  headerRow.eachCell((cell) => {
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F3A5F" } };
+    cell.alignment = { vertical: "middle", wrapText: true };
+  });
+  const headerIndex = headerRow.number;
+  ws.views = [{ state: "frozen", ySplit: headerIndex }];
+  for (const r of rows) {
+    const row = ws.addRow(columns.map((c) => cellValue(c, r[c.key] ?? null)));
+    columns.forEach((c, i) => {
+      const cell = row.getCell(i + 1);
+      if (c.type === "number") cell.numFmt = "#,##0.##";
+      else if (c.type === "percent") cell.numFmt = '0.0"%"';
+      else if (c.type === "date") cell.numFmt = "yyyy-mm-dd";
+    });
+  }
+  columns.forEach((c, i) => {
+    const longest = Math.max(c.label.length, ...rows.slice(0, 200).map((r) => String(r[c.key] ?? "").length));
+    ws.getColumn(i + 1).width = Math.min(Math.max(10, longest + 2), 48);
+  });
+  if (rows.length && columns.length) ws.autoFilter = { from: { row: headerIndex, column: 1 }, to: { row: headerIndex, column: columns.length } };
+  return headerIndex;
+}
+
+/** Excel sheet names: at most 31 characters, none of []:*?/\, and unique in the workbook. */
+function uniqueSheetName(title: string, used: Set<string>): string {
+  const base = (title.replace(/[[\]:*?/\\]/g, " ").replace(/\s+/g, " ").trim() || "Section").slice(0, 31);
+  let name = base;
+  for (let n = 2; [...used].some((u) => u.toLowerCase() === name.toLowerCase()); n++) {
+    const suffix = ` ${n}`;
+    name = base.slice(0, 31 - suffix.length) + suffix;
+  }
+  used.add(name);
+  return name;
 }
 
 function cellValue(c: ReportColumn, v: string | number | null): string | number | Date | null {
@@ -110,52 +137,64 @@ export function buildPdf(result: ReportResult, exportRows: number): Promise<Buff
       doc.moveDown(0.6);
     }
 
-    const cols = result.columns;
-    if (cols.length) {
-      const weights = cols.map((c) => Math.min(Math.max(c.label.length, ...result.rows.slice(0, 100).map((r) => String(r[c.key] ?? "").length), 6), 40));
-      const total = weights.reduce((s, w) => s + w, 0);
-      const widths = weights.map((w) => (w / total) * width);
-      const rows = result.rows.slice(0, PDF_ROW_CAP);
-      const rowH = 14;
-      const drawHeader = () => {
-        const y = doc.y;
-        doc.rect(left, y, width, rowH + 2).fill("#1F3A5F");
-        let x = left;
-        doc.font("Helvetica-Bold").fontSize(8).fillColor("#FFFFFF");
-        cols.forEach((c, i) => {
-          doc.text(latin(c.label), x + 3, y + 4, { width: (widths[i] as number) - 6, height: rowH, ellipsis: true, lineBreak: false });
-          x += widths[i] as number;
-        });
-        doc.y = y + rowH + 4;
-      };
-      drawHeader();
-      rows.forEach((r, ri) => {
-        if (doc.y + rowH > doc.page.height - doc.page.margins.bottom) {
-          doc.addPage();
-          drawHeader();
-        }
-        const y = doc.y;
-        if (ri % 2 === 1) doc.rect(left, y - 1, width, rowH).fill("#F2F5F9");
-        let x = left;
-        doc.font("Helvetica").fontSize(8).fillColor("#222222");
-        cols.forEach((c, i) => {
-          const v = r[c.key];
-          const text = v === null || v === undefined ? "" : typeof v === "number" ? (c.type === "percent" ? `${v}%` : v.toLocaleString("en-US", { maximumFractionDigits: 2 })) : String(v);
-          doc.text(latin(text), x + 3, y + 2, { width: (widths[i] as number) - 6, height: rowH - 2, ellipsis: true, lineBreak: false, align: c.type === "number" || c.type === "percent" ? "right" : "left" });
-          x += widths[i] as number;
-        });
-        doc.y = y + rowH;
-      });
-      if (result.rows.length > PDF_ROW_CAP) {
-        doc.moveDown(0.5).font("Helvetica-Oblique").fontSize(8).fillColor("#555555").text(`The PDF shows the first ${PDF_ROW_CAP} of ${result.rows.length} rows. Use Excel or CSV for the full list.`, left, doc.y);
-      }
+    drawTable(doc, left, width, result.columns, result.rows);
+    for (const sec of result.sections ?? []) {
+      if (doc.y + 60 > doc.page.height - doc.page.margins.bottom) doc.addPage();
+      doc.moveDown(1);
+      doc.font("Helvetica-Bold").fontSize(12).fillColor("#1F3A5F").text(latin(sec.title), left, doc.y, { width });
+      doc.font("Helvetica").fontSize(8).fillColor("#555555");
+      if (sec.description) doc.text(latin(sec.description), { width });
+      doc.text(sec.truncated ? `First ${sec.rows.length} of ${sec.totalRows} rows` : `${sec.totalRows} rows`, { width });
+      doc.moveDown(0.4);
+      drawTable(doc, left, width, sec.columns, sec.rows);
     }
     doc.end();
   });
 }
 
+function drawTable(doc: PDFKit.PDFDocument, left: number, width: number, cols: ReportColumn[], allRows: ReportRow[]): void {
+  if (!cols.length) return;
+  const weights = cols.map((c) => Math.min(Math.max(c.label.length, ...allRows.slice(0, 100).map((r) => String(r[c.key] ?? "").length), 6), 40));
+  const total = weights.reduce((s, w) => s + w, 0);
+  const widths = weights.map((w) => (w / total) * width);
+  const rows = allRows.slice(0, PDF_ROW_CAP);
+  const rowH = 14;
+  const drawHeader = () => {
+    const y = doc.y;
+    doc.rect(left, y, width, rowH + 2).fill("#1F3A5F");
+    let x = left;
+    doc.font("Helvetica-Bold").fontSize(8).fillColor("#FFFFFF");
+    cols.forEach((c, i) => {
+      doc.text(latin(c.label), x + 3, y + 4, { width: (widths[i] as number) - 6, height: rowH, ellipsis: true, lineBreak: false });
+      x += widths[i] as number;
+    });
+    doc.y = y + rowH + 4;
+  };
+  drawHeader();
+  rows.forEach((r, ri) => {
+    if (doc.y + rowH > doc.page.height - doc.page.margins.bottom) {
+      doc.addPage();
+      drawHeader();
+    }
+    const y = doc.y;
+    if (ri % 2 === 1) doc.rect(left, y - 1, width, rowH).fill("#F2F5F9");
+    let x = left;
+    doc.font("Helvetica").fontSize(8).fillColor("#222222");
+    cols.forEach((c, i) => {
+      const v = r[c.key];
+      const text = v === null || v === undefined ? "" : typeof v === "number" ? (c.type === "percent" ? `${v}%` : v.toLocaleString("en-US", { maximumFractionDigits: 2 })) : String(v);
+      doc.text(latin(text), x + 3, y + 2, { width: (widths[i] as number) - 6, height: rowH - 2, ellipsis: true, lineBreak: false, align: c.type === "number" || c.type === "percent" ? "right" : "left" });
+      x += widths[i] as number;
+    });
+    doc.y = y + rowH;
+  });
+  if (allRows.length > PDF_ROW_CAP) {
+    doc.moveDown(0.5).font("Helvetica-Oblique").fontSize(8).fillColor("#555555").text(`The PDF shows the first ${PDF_ROW_CAP} of ${allRows.length} rows. Use Excel or CSV for the full list.`, left, doc.y);
+  }
+}
+
 export async function buildFile(result: ReportResult, format: ReportExportFormat, exportRows: number): Promise<Buffer> {
   if (format === "xlsx") return buildXlsx(result, exportRows);
   if (format === "pdf") return buildPdf(result, exportRows);
-  return Buffer.from(toCsv(result.columns, result.rows, metaLines(result, exportRows)), "utf8");
+  return Buffer.from(toCsvWithSections(result.columns, result.rows, metaLines(result, exportRows), result.sections ?? []), "utf8");
 }

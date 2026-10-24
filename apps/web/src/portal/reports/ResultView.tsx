@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Info } from "lucide-react";
-import type { ReportKpi, ReportResult } from "@aihxm/shared-types";
+import type { ReportColumn, ReportDrill, ReportKpi, ReportResult, ReportRow } from "@aihxm/shared-types";
 import { formatDateTime, formatDay } from "../shared/dates";
 import { ReportChart } from "./charts";
 import { formatCell, formatKpiDelta, formatKpiValue, formatNumber } from "./reportFormat";
@@ -34,42 +34,45 @@ export function KpiCard({ kpi, to }: { kpi: ReportKpi; to?: string }) {
   );
 }
 
-export function ResultTable({ result }: { result: ReportResult }) {
+type TableData = { columns: ReportColumn[]; rows: ReportRow[]; totalRows: number; truncated: boolean };
+
+/** A sortable, pageable table. Used for the report's own rows and for each extra table (section) under it. */
+export function DataTable({ data, title, description, drill, headingId, emptyTestId }: { data: TableData; title: string; description?: string; drill?: ReportDrill | null; headingId: string; emptyTestId?: string }) {
   const [sort, setSort] = useState<{ key: string; dir: 1 | -1 } | null>(null);
   const [limit, setLimit] = useState(PAGE_SIZE);
   const rows = useMemo(() => {
-    if (!sort) return result.rows;
-    const col = result.columns.find((c) => c.key === sort.key);
+    if (!sort) return data.rows;
+    const col = data.columns.find((c) => c.key === sort.key);
     const numeric = col?.type === "number" || col?.type === "percent";
-    return [...result.rows].sort((a, b) => {
+    return [...data.rows].sort((a, b) => {
       const x = a[sort.key];
       const y = b[sort.key];
       if (x === null || x === undefined) return 1; // missing values always last
       if (y === null || y === undefined) return -1;
       return (numeric ? Number(x) - Number(y) : String(x).localeCompare(String(y))) * sort.dir;
     });
-  }, [result, sort]);
+  }, [data, sort]);
 
-  if (result.columns.length === 0) return null;
-  const drill = result.drill ?? null;
+  if (data.columns.length === 0) return null;
   return (
-    <section className="bg-card rounded-card p-5 shadow-sm" aria-labelledby="rows-h">
-      <h2 id="rows-h" className="text-sm font-semibold mb-3">
-        Detail <span className="font-normal text-label-tertiary">({result.totalRows.toLocaleString("en-US")} {result.totalRows === 1 ? "row" : "rows"})</span>
+    <section className="bg-card rounded-card p-5 shadow-sm" aria-labelledby={headingId}>
+      <h2 id={headingId} className="text-sm font-semibold mb-1">
+        {title} <span className="font-normal text-label-tertiary">({data.totalRows.toLocaleString("en-US")} {data.totalRows === 1 ? "row" : "rows"})</span>
       </h2>
+      {description && <p className="text-xs text-label-tertiary mb-2">{description}</p>}
       {drill && <p className="text-xs text-label-tertiary mb-2">Select a name to see the people behind the number.</p>}
-      {result.rows.length === 0 ? (
-        <p className="text-sm text-label-secondary" data-testid="report-empty">No records match these filters.</p>
+      {data.rows.length === 0 ? (
+        <p className="text-sm text-label-secondary" data-testid={emptyTestId}>No records match these filters.</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase tracking-wide text-label-tertiary">
-                {result.columns.map((c) => {
+                {data.columns.map((c) => {
                   const active = sort?.key === c.key;
                   const numeric = c.type === "number" || c.type === "percent";
                   return (
-                    <th key={c.key} scope="col" aria-sort={active ? (sort!.dir === 1 ? "ascending" : "descending") : "none"} className={`py-1.5 pr-4 font-semibold ${numeric ? "text-right" : ""}`}>
+                    <th key={c.key} scope="col" aria-sort={active ? (sort!.dir === 1 ? "ascending" : "descending") : "none"} className={`py-1.5 pr-4 font-semibold whitespace-nowrap ${numeric ? "text-right" : ""}`}>
                       <button type="button" className="uppercase tracking-wide hover:underline" onClick={() => setSort(active && sort!.dir === 1 ? { key: c.key, dir: -1 } : { key: c.key, dir: 1 })}>
                         {c.label}
                         {active ? (sort!.dir === 1 ? " ▲" : " ▼") : ""}
@@ -85,7 +88,7 @@ export function ResultTable({ result }: { result: ReportResult }) {
                 const href = drill && key !== undefined && key !== null && key !== "" ? `/app/reports/${drill.reportId}?${drill.filter}=${encodeURIComponent(String(key))}` : null;
                 return (
                   <tr key={i} className="border-t border-border">
-                    {result.columns.map((c, ci) => (
+                    {data.columns.map((c, ci) => (
                       <td key={c.key} className={`py-1.5 pr-4 ${c.type === "number" || c.type === "percent" ? "text-right tabular-nums" : ""}`}>
                         {ci === 0 && href ? (
                           <Link to={href} className="text-accent font-semibold hover:underline" title={drill?.label}>
@@ -108,12 +111,56 @@ export function ResultTable({ result }: { result: ReportResult }) {
           Show {Math.min(PAGE_SIZE, rows.length - limit)} more
         </button>
       )}
-      {result.truncated && (
+      {data.truncated && (
         <p className="mt-3 text-xs text-warning" role="note">
-          Only the first {result.rows.length.toLocaleString("en-US")} of {result.totalRows.toLocaleString("en-US")} rows are shown. Narrow the filters to see the rest.
+          Only the first {data.rows.length.toLocaleString("en-US")} of {data.totalRows.toLocaleString("en-US")} rows are shown. Narrow the filters to see the rest.
         </p>
       )}
     </section>
+  );
+}
+
+export function ResultTable({ result }: { result: ReportResult }) {
+  return <DataTable data={result} title="Detail" drill={result.drill ?? null} headingId="rows-h" emptyTestId="report-empty" />;
+}
+
+/** The report's own table plus its extra tables (breakdowns, trends, the records behind the figures), one tab each. */
+export function ResultTabs({ result }: { result: ReportResult }) {
+  const sections = result.sections ?? [];
+  const [active, setActive] = useState("detail");
+  if (sections.length === 0) return <ResultTable result={result} />;
+  const tabs = [{ key: "detail", label: "Detail", count: result.totalRows }, ...sections.map((s) => ({ key: s.key, label: s.title, count: s.totalRows }))];
+  const current = sections.find((s) => s.key === active);
+  return (
+    <div className="space-y-3" data-testid="report-tabs">
+      <div role="tablist" aria-label="Report tables" className="flex flex-wrap gap-1.5">
+        {tabs.map((t) => {
+          const on = (current ? current.key : "detail") === t.key;
+          return (
+            <button
+              key={t.key}
+              type="button"
+              role="tab"
+              id={`report-tab-${t.key}`}
+              aria-selected={on}
+              aria-controls="report-tabpanel"
+              data-testid={`report-tab-${t.key}`}
+              onClick={() => setActive(t.key)}
+              className={`rounded-full px-3 py-1 text-xs font-semibold outline-none focus-visible:ring-2 focus-visible:ring-accent ${on ? "bg-accent text-white" : "bg-black/5 text-label-secondary hover:bg-black/10"}`}
+            >
+              {t.label} <span className={on ? "opacity-80" : "text-label-tertiary"}>({t.count.toLocaleString("en-US")})</span>
+            </button>
+          );
+        })}
+      </div>
+      <div role="tabpanel" id="report-tabpanel" aria-labelledby={`report-tab-${current ? current.key : "detail"}`}>
+        {current ? (
+          <DataTable key={current.key} data={current} title={current.title} description={current.description} headingId={`section-h-${current.key}`} />
+        ) : (
+          <ResultTable result={result} />
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -153,7 +200,7 @@ export function ResultView({ result, chips = [], sourceNote }: { result: ReportR
 
       {noChartData && result.rows.length === 0 && <p className="text-sm text-label-secondary">There is nothing to show for these filters.</p>}
 
-      <ResultTable result={result} />
+      <ResultTabs result={result} />
 
       {result.notes.length > 0 && (
         <aside className="rounded-card border border-warning/40 bg-warning/5 p-4 text-sm" aria-label="Data notes">

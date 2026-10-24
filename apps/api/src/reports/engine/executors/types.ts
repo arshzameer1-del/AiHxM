@@ -18,11 +18,13 @@ export type ExecutorContext = {
   payrollAccess: PayrollAreaAccess | null;
   /** The report catalog as plain facts (id, title, category, domain, status), for the reports about the reports themselves. */
   catalog: readonly CatalogFact[];
+  /** Leave the extra tables out (the earlier period of a comparison only needs the figures). */
+  skipSections?: boolean;
 };
 
 export type CatalogFact = { id: string; title: string; category: string; categoryLabel: string; domain: string; status: string };
 
-export type ExecutorOutput = Pick<ReportResult, "kpis" | "charts" | "columns" | "rows" | "totalRows" | "truncated" | "calculation" | "notes">;
+export type ExecutorOutput = Pick<ReportResult, "kpis" | "charts" | "columns" | "rows" | "totalRows" | "truncated" | "calculation" | "notes" | "sections">;
 export type ReportExecutor = (ctx: ExecutorContext) => Promise<ExecutorOutput>;
 
 export const share = (n: number, total: number): number | null => (total > 0 ? Math.round((n / total) * 1000) / 10 : null);

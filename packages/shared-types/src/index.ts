@@ -9249,6 +9249,19 @@ export type ReportResult = {
   comparison?: { from: string; to: string } | null;
   /** Rows can open another report filtered to that row (for example a department row opens the employee directory). */
   drill?: ReportDrill | null;
+  /** Extra tables behind the headline figures: breakdowns, trends and the records themselves. Same scope, filters and range as the report. */
+  sections?: ReportSection[];
+};
+
+/** One extra table of a report (a breakdown, a trend or the underlying records). */
+export type ReportSection = {
+  key: string;
+  title: string;
+  description?: string;
+  columns: ReportColumn[];
+  rows: ReportRow[];
+  totalRows: number;
+  truncated: boolean;
 };
 
 /** A row's `rowKey` value becomes the `filter` of the target report. */
