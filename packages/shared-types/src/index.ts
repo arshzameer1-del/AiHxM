@@ -9621,3 +9621,69 @@ export type UserNotificationView = {
 };
 
 export type UserNotificationInbox = { items: UserNotificationView[]; unreadCount: number };
+
+// ---- BACKLOG52 - what an employee can ask HR for (loan / salary advance / letter or certificate)
+export type EmployeeServiceRequestKind = "loan" | "salary_advance" | "letter";
+export type EmployeeServiceRequestStatus = "pending" | "fulfilled" | "rejected" | "cancelled";
+export type EmployeeLetterType = "salary_certificate" | "employment_letter" | "experience_letter" | "noc" | "address_proof" | "other";
+
+export type EmployeeServiceRequestView = {
+  id: string;
+  employeeId: string;
+  employeeNumber: string;
+  employeeName: string;
+  kind: EmployeeServiceRequestKind;
+  status: EmployeeServiceRequestStatus;
+  purpose: string;
+  neededBy: string | null;
+  amount: number | null;
+  installmentsCount: number | null;
+  loanTypeId: string | null;
+  loanTypeName: string | null;
+  letterType: EmployeeLetterType | null;
+  addressedTo: string | null;
+  decisionNote: string | null;
+  decidedAt: string | null;
+  /** The loan HR created from this request. */
+  loanId: string | null;
+  /** The salary certificate HR generated (open it from My Payroll documents). */
+  generatedDocumentId: string | null;
+  /** The letter HR uploaded to the employee's documents. */
+  employeeDocumentId: string | null;
+  createdAt: string;
+};
+
+export type SubmitEmployeeServiceRequest = {
+  kind: EmployeeServiceRequestKind;
+  purpose: string;
+  neededBy?: string;
+  amount?: number;
+  installmentsCount?: number;
+  loanTypeId?: string;
+  letterType?: EmployeeLetterType;
+  addressedTo?: string;
+};
+
+/** What HR may change while approving a loan or advance. Anything left out is taken from the request. */
+export type ApproveEmployeeLoanRequestInput = {
+  principalAmount?: number;
+  installmentsCount?: number;
+  loanTypeId?: string;
+  issuedDate?: string;
+  deductionStartDate?: string;
+  guarantorEmployeeId?: string;
+  note?: string;
+};
+
+export type RejectEmployeeServiceRequestInput = { note: string };
+export type IssueSalaryCertificateInput = { note?: string };
+
+/** Loan types an employee can pick from (active ones only, with the limits that apply). */
+export type RequestableLoanTypeView = {
+  id: string;
+  name: string;
+  kind: "loan" | "salary_advance";
+  maxInstallments: number | null;
+  requiresGuarantor: boolean;
+  description: string | null;
+};

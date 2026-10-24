@@ -8,6 +8,7 @@ import { AuditService } from "../audit/audit.service";
 import { EmployeesService } from "../employees/employees.service";
 import { LocalFileStorageService } from "../file-storage/local-file-storage.service";
 import { WorkflowService } from "../workflow/workflow.service";
+import { UserNotificationsService } from "../notifications/user-notifications.service";
 import { DataSubjectRequestsService } from "./data-subject-requests.service";
 
 const FIXTURE_CLAIMS: RequestClaims = { is_platform_admin: true, company_id: null, sub: "dsr-fixtures" };
@@ -48,7 +49,7 @@ describe("DataSubjectRequestsService", () => {
     audit = new AuditService();
     employees = new EmployeesService(db, rbac, entitlements, audit, new LocalFileStorageService());
     workflow = new WorkflowService(db, rbac, audit);
-    dsr = new DataSubjectRequestsService(db, rbac, entitlements, audit, workflow);
+    dsr = new DataSubjectRequestsService(db, rbac, entitlements, audit, workflow, new UserNotificationsService(db, { isConfigured: () => false } as never));
 
     const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     companyId = await db.withClaims(FIXTURE_CLAIMS, async (client) => {
@@ -211,6 +212,17 @@ describe("DataSubjectRequestsService", () => {
       expect(fulfilled.fulfilledByUserAccountId).toBe(hrAdminClaims.sub);
       expect(fulfilled.fulfilledAt).not.toBeNull();
       expect(fulfilled.fulfillmentNote).toContain("Exported");
+    });
+
+    it("tells HR when it is sent and the employee when it is approved and completed", async () => {
+      const titles = async (userId: string) =>
+        (await db.withClaims(FIXTURE_CLAIMS, (c) => c.query("SELECT title, category, link FROM user_notifications WHERE user_account_id = $1 ORDER BY created_at", [userId]))).rows;
+      expect((await titles(hrAdminClaims.sub as string)).some((n) => n.category === "hr_inbox" && /privacy request \(access\)/.test(n.title))).toBe(true);
+      const mine = await titles(staffClaims.sub as string);
+      expect(mine.map((n) => n.title)).toEqual(
+        expect.arrayContaining(["Your access privacy request was approved", "Your access privacy request was completed"])
+      );
+      expect(mine.every((n) => n.category === "request_decisions" && n.link === "/app/ess/requests")).toBe(true);
     });
 
     it("refuses to fulfill an already-fulfilled request", async () => {

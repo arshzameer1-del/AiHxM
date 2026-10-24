@@ -131,6 +131,8 @@ test("only safe paths are cacheable", () => {
   assert.equal(isCacheablePath("/platform/companies/1/exports/2/download"), false);
   assert.equal(isCacheablePath("/platform/companies/1/backups"), false);
   assert.equal(isCacheablePath("/notifications/inbox"), false); // the bell must always be current
+  assert.equal(isCacheablePath("/employee-requests/mine"), false); // an answer from HR must show at once
+  assert.equal(isCacheablePath("/data-subject-requests?status=pending"), false);
   assert.equal(isCacheablePath("/notifications/preferences"), false);
 });
 

@@ -66,6 +66,12 @@ export function buildEssTileGroups(enabledModules: readonly ModuleKey[]): EssTil
   if (has("leave")) hcm.push({ to: "/app/attendance/timesheet", title: "My Timesheet", description: "Manage working time and time statements", icon: ClipboardList });
   hcm.push(soon("My Medical Information", "Manage my medical information", HeartPulse));
   hcm.push(soon("My External Organizations", "Manage my external organizations", Building2));
+  if (has("employee")) {
+    hcm.push({ to: "/app/ess/requests?new=loan", title: "Request a Loan or Advance", description: "Ask HR for a loan or a salary advance", icon: Wallet });
+    hcm.push({ to: "/app/ess/requests?new=letter", title: "Request a Letter", description: "Salary certificate, employment letter, NOC", icon: FileText });
+    hcm.push({ to: "/app/ess/requests", title: "My HR Requests", description: "Follow what you asked HR for", icon: ClipboardList });
+    hcm.push({ to: "/app/ess/requests?new=privacy", title: "My Privacy Requests", description: "Ask for a copy, a correction or deletion of your data", icon: IdCard });
+  }
   hcm.push(soon("Start Process", "Initiate a process instance", PlayCircle));
   hcm.push(soon("My Forms", "View my HR forms", FileText));
   hcm.push(soon("My Online Selections", "Manage my online selections", ListChecks));

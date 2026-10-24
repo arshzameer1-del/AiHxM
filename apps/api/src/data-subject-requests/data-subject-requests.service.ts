@@ -6,6 +6,7 @@ import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
 import { WorkflowService } from "../workflow/workflow.service";
+import { UserNotificationsService } from "../notifications/user-notifications.service";
 import type {
   DataSubjectRequestView,
   DecideDataSubjectRequestRequest,
@@ -84,7 +85,9 @@ export class DataSubjectRequestsService {
     private readonly rbac: RbacService,
     private readonly entitlements: EntitlementsService,
     private readonly audit: AuditService,
-    private readonly workflow: WorkflowService
+    private readonly workflow: WorkflowService,
+    // BACKLOG52: optional + appended so positional spec constructions keep working.
+    private readonly inbox?: UserNotificationsService
   ) {
     this.workflow?.adapters?.register({
       objectKey: WORKFLOW_OBJECT_KEY,
@@ -145,35 +148,71 @@ export class DataSubjectRequestsService {
     // A separate transaction — see this class's own doc comment on the
     // deliberate non-atomicity this introduces (same tradeoff
     // LeaveRequestsService.submit() already accepts).
-    let instance;
-    try {
-      instance = await this.workflow.submitForApproval(claims, {
-        templateKey: WORKFLOW_TEMPLATE_KEY,
-        objectKey: WORKFLOW_OBJECT_KEY,
-        recordId: insertedRow.id,
-        record: { requestType: input.requestType },
-        subjectUserAccountId: employee.user_account_id,
-      });
-    } catch (err) {
-      // Never submitted: do not leave a request behind that no approver will see.
-      await this.db.withClaims(claims, (client) =>
-        client.query("DELETE FROM data_subject_requests WHERE id = $1 AND workflow_instance_id IS NULL", [insertedRow.id])
-      );
-      throw err;
+    // BACKLOG52: a company that has not set up an approval route for privacy requests still has to be able to receive them.
+    // Without a route the request waits for HR (employee.manage.all), who decides it directly.
+    const hasRoute = await this.db.withClaims(claims, async (client) => {
+      const r = await client.query("SELECT 1 FROM workflow_templates WHERE company_id = $1 AND key = $2 AND is_active = true", [
+        employee.company_id,
+        WORKFLOW_TEMPLATE_KEY,
+      ]);
+      return (r.rowCount ?? 0) > 0;
+    });
+    let instance: { id: string } | null = null;
+    if (hasRoute) {
+      try {
+        instance = await this.workflow.submitForApproval(claims, {
+          templateKey: WORKFLOW_TEMPLATE_KEY,
+          objectKey: WORKFLOW_OBJECT_KEY,
+          recordId: insertedRow.id,
+          record: { requestType: input.requestType },
+          subjectUserAccountId: employee.user_account_id,
+        });
+      } catch (err) {
+        // Never submitted: do not leave a request behind that no approver will see.
+        await this.db.withClaims(claims, (client) =>
+          client.query("DELETE FROM data_subject_requests WHERE id = $1 AND workflow_instance_id IS NULL", [insertedRow.id])
+        );
+        throw err;
+      }
     }
 
-    const updatedRow = await this.db.withClaims(claims, async (client) => {
-      const updateResult = await client.query(
-        `UPDATE data_subject_requests SET workflow_instance_id = $2, updated_at = now() WHERE id = $1 RETURNING *`,
-        [insertedRow.id, instance.id]
-      );
-      return updateResult.rows[0];
-    });
+    const updatedRow = instance
+      ? await this.db.withClaims(claims, async (client) => {
+          const updateResult = await client.query(
+            `UPDATE data_subject_requests SET workflow_instance_id = $2, updated_at = now() WHERE id = $1 RETURNING *`,
+            [insertedRow.id, instance!.id]
+          );
+          return updateResult.rows[0];
+        })
+      : insertedRow;
 
-    return rowToView(
+    const submitted = rowToView(
       { ...updatedRow, employee_number: employee.employee_number, first_name: employee.first_name, last_name: employee.last_name },
       employee.user_account_id
     );
+    if (this.inbox && employee.company_id) {
+      await this.inbox.notify({
+        companyId: employee.company_id,
+        userAccountIds: await this.inbox.hrAdminUserIds(employee.company_id),
+        category: "hr_inbox",
+        title: `${submitted.employeeName} sent a privacy request (${input.requestType})`,
+        body: input.description.slice(0, 200),
+        link: "/app/employees/requests?tab=privacy",
+      });
+    }
+    return submitted;
+  }
+
+  private async tellEmployee(row: { company_id: string; employee_user_account_id: string | null; request_type: string }, title: string, body: string): Promise<void> {
+    if (!this.inbox || !row.employee_user_account_id) return;
+    await this.inbox.notify({
+      companyId: row.company_id,
+      userAccountIds: [row.employee_user_account_id],
+      category: "request_decisions",
+      title,
+      body,
+      link: "/app/ess/requests",
+    });
   }
 
   /**
@@ -239,7 +278,32 @@ export class DataSubjectRequestsService {
       throw new ConflictException(`This request is already ${row.status}`);
     }
     if (!row.workflow_instance_id) {
-      throw new BadRequestException("Data subject request has no workflow instance to decide on");
+      // No approval route was set up when this was sent: HR decides it directly.
+      if (!(await this.rbac.can(claims, "employee.manage.all"))) {
+        throw new ForbiddenException("Not permitted to decide data subject requests");
+      }
+      if (input.decision === "rejected" && !input.comment?.trim()) {
+        throw new BadRequestException("Tell the employee why this was not approved");
+      }
+      const direct = await this.db.withClaims(claims, async (client) => {
+        await client.query(
+          `UPDATE data_subject_requests SET status = $2, decision_comment = $3, updated_at = now() WHERE id = $1 AND status = 'pending'`,
+          [id, input.decision, input.comment ?? null]
+        );
+        await this.audit.record(client, claims, {
+          companyId: row.company_id,
+          action: "data_subject_request.decide",
+          target: id,
+          metadata: { decision: input.decision, workflowStatus: "direct" },
+        });
+        return this.loadRequestRow(client, id);
+      });
+      await this.tellEmployee(
+        direct,
+        direct.status === "approved" ? `Your ${direct.request_type} privacy request was approved` : `Your ${direct.request_type} privacy request was not approved`,
+        input.comment ?? ""
+      );
+      return rowToView(direct, direct.employee_user_account_id);
     }
 
     // Same "the workflow IS the authorization mechanism" idiom as
@@ -278,6 +342,13 @@ export class DataSubjectRequestsService {
       return this.loadRequestRow(client, id);
     });
 
+    if (finalRow.status === "approved" || finalRow.status === "rejected") {
+      await this.tellEmployee(
+        finalRow,
+        finalRow.status === "approved" ? `Your ${finalRow.request_type} privacy request was approved` : `Your ${finalRow.request_type} privacy request was not approved`,
+        input.comment ?? ""
+      );
+    }
     return rowToView(finalRow, finalRow.employee_user_account_id);
   }
 
@@ -321,6 +392,7 @@ export class DataSubjectRequestsService {
       return this.loadRequestRow(client, id);
     });
 
+    await this.tellEmployee(finalRow, `Your ${finalRow.request_type} privacy request was completed`, input.fulfillmentNote);
     return rowToView(finalRow, finalRow.employee_user_account_id);
   }
 

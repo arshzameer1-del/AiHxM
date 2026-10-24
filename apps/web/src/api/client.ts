@@ -533,6 +533,16 @@ import type {
 
 // Configuration Publish Lifecycle ("then 2" Phase 6, 2026-10-02, gap-table
 // item #13) — own import block, same reason the two blocks above are.
+import type {
+  ApproveEmployeeLoanRequestInput,
+  DataSubjectRequestType,
+  DataSubjectRequestView,
+  EmployeeServiceRequestKind,
+  EmployeeServiceRequestStatus,
+  EmployeeServiceRequestView,
+  RequestableLoanTypeView,
+  SubmitEmployeeServiceRequest,
+} from "@aihxm/shared-types";
 import type { ConfigurationChangeRequestView, CreateConfigurationChangeRequestRequest, PayslipPrintDesign, PayslipPrintDesignView } from "@aihxm/shared-types";
 
 // Hiring Card Field Configuration (2026-09-27) — kumail's own request, one
@@ -2391,6 +2401,56 @@ export const api = {
     request<EmployeeStatutoryIdsView>("/employees/statutory", { method: "PUT", body: JSON.stringify(input) }),
 
   // --- BACKLOG48: change requests (employee asks, HR decides) ---
+  // --- BACKLOG52: requests to HR (loan / advance / letter) and privacy requests ---
+  submitEmployeeServiceRequest: (dto: SubmitEmployeeServiceRequest) =>
+    request<EmployeeServiceRequestView>("/employee-requests", { method: "POST", body: JSON.stringify(dto) }),
+  listMyServiceRequests: () => request<EmployeeServiceRequestView[]>("/employee-requests/mine"),
+  listRequestableLoanTypes: () => request<RequestableLoanTypeView[]>("/employee-requests/loan-types"),
+  cancelEmployeeServiceRequest: (id: string) => request<EmployeeServiceRequestView>(`/employee-requests/${id}/cancel`, { method: "POST" }),
+  listEmployeeServiceRequests: (status?: EmployeeServiceRequestStatus | "all", kind?: EmployeeServiceRequestKind) => {
+    const qs = new URLSearchParams();
+    if (status && status !== "all") qs.set("status", status);
+    if (kind) qs.set("kind", kind);
+    return request<EmployeeServiceRequestView[]>(`/employee-requests${qs.toString() ? `?${qs}` : ""}`);
+  },
+  rejectEmployeeServiceRequest: (id: string, note: string) =>
+    request<EmployeeServiceRequestView>(`/employee-requests/${id}/reject`, { method: "POST", body: JSON.stringify({ note }) }),
+  approveEmployeeLoanRequest: (id: string, input: ApproveEmployeeLoanRequestInput) =>
+    request<EmployeeServiceRequestView>(`/employee-requests/${id}/approve-loan`, { method: "POST", body: JSON.stringify(input) }),
+  issueSalaryCertificateForRequest: (id: string, note?: string) =>
+    request<EmployeeServiceRequestView>(`/employee-requests/${id}/issue-salary-certificate`, { method: "POST", body: JSON.stringify({ note }) }),
+  async issueLetterForRequest(id: string, file: File, note?: string): Promise<EmployeeServiceRequestView> {
+    const token = getToken();
+    const formData = new FormData();
+    if (note) formData.append("note", note);
+    formData.append("file", file);
+    const res = await fetch(`${API_PREFIX}/employee-requests/${id}/issue-letter`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    });
+    invalidateResponseCache();
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = await res.json();
+        message = Array.isArray(body.message) ? body.message.join(", ") : (body.message ?? message);
+      } catch {
+        // not JSON - keep the generic message
+      }
+      throw new ApiError(res.status, message);
+    }
+    return res.json();
+  },
+  submitDataSubjectRequest: (dto: { employeeId: string; requestType: DataSubjectRequestType; description: string }) =>
+    request<DataSubjectRequestView>("/data-subject-requests", { method: "POST", body: JSON.stringify(dto) }),
+  listMyDataSubjectRequests: () => request<DataSubjectRequestView[]>("/data-subject-requests/mine"),
+  listDataSubjectRequests: (status?: string) => request<DataSubjectRequestView[]>(`/data-subject-requests${status && status !== "all" ? `?status=${status}` : ""}`),
+  decideDataSubjectRequest: (id: string, decision: "approved" | "rejected", comment?: string) =>
+    request<DataSubjectRequestView>(`/data-subject-requests/${id}/decide`, { method: "POST", body: JSON.stringify({ decision, comment }) }),
+  fulfillDataSubjectRequest: (id: string, fulfillmentNote: string) =>
+    request<DataSubjectRequestView>(`/data-subject-requests/${id}/fulfill`, { method: "POST", body: JSON.stringify({ fulfillmentNote }) }),
+
   submitEmployeeChangeRequest: (dto: SubmitEmployeeChangeRequest) =>
     request<EmployeeChangeRequestView>("/employees/change-requests", { method: "POST", body: JSON.stringify(dto) }),
   listMyChangeRequests: () => request<EmployeeChangeRequestView[]>("/employees/change-requests/mine"),

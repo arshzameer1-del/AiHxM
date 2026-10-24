@@ -170,7 +170,7 @@ export function PayrollDocumentsPanel({ canIssue }: { canIssue: boolean }) {
   );
 }
 
-function DocumentViewer({ doc, onClose }: { doc: GeneratedDocumentView; onClose: () => void }) {
+export function DocumentViewer({ doc, onClose }: { doc: GeneratedDocumentView; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={doc.title}>
       <div className="bg-card rounded-card shadow-lg w-full max-w-2xl max-h-[85vh] flex flex-col">

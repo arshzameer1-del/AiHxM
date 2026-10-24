@@ -48,6 +48,7 @@ import { UsageTrackingInterceptor } from "./tenant-management/usage-tracking.int
 import { PublicBrandingModule } from "./public-branding/public-branding.module";
 import { PlatformBrandingModule } from "./platform-branding/platform-branding.module";
 import { DataSubjectRequestsModule } from "./data-subject-requests/data-subject-requests.module";
+import { EmployeeRequestsModule } from "./employee-requests/employee-requests.module";
 import { SsoModule } from "./sso/sso.module";
 import { ScimModule } from "./scim/scim.module";
 import { HrAdministrationModule } from "./hr-administration/hr-administration.module";
@@ -108,6 +109,7 @@ import { HrAdministrationModule } from "./hr-administration/hr-administration.mo
     ExpensesModule,
     LearningModule,
     DataSubjectRequestsModule,
+    EmployeeRequestsModule,
     SsoModule,
     ScimModule,
     RecruitmentModule,
