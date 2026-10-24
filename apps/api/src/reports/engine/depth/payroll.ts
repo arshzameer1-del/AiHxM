@@ -7,7 +7,7 @@ import { LABEL, NAME, col } from "./common";
  * Rules that hold for every table here: the query starts from payroll_runs and applies the company and payroll-area
  * limit through RUN(q) (the framework refuses a query that does not); only real, non-simulation runs are read; money
  * comes only from approved and finalised runs or beyond; and a table shows pay per person only under F02, the
- * restricted register. Everywhere else groups with fewer than 3 people are merged into "Other" so no one person's pay
+ * restricted register. Everywhere else, for callers who see only part of the company, groups with fewer than 3 people are merged into "Other" so no one person's pay
  * can be read from an average or a total.
  */
 
@@ -114,7 +114,7 @@ const componentByUnit = (key: string, title: string, description: string, where:
   description,
   columns: [col("label", "Organisation unit"), col("component", "Component"), n("people", "People"), n("amount", "Amount")],
   sql: (q) => `
-    SELECT CASE WHEN g.people < 3 AND g.label NOT LIKE 'No %' THEN '${OTHER}' ELSE g.label END AS label, g.component, SUM(g.people)::int AS people, ROUND(SUM(g.amount), 2) AS amount
+    SELECT CASE WHEN g.people < ${q.minGroup} AND g.label NOT LIKE 'No %' THEN '${OTHER}' ELSE g.label END AS label, g.component, SUM(g.people)::int AS people, ROUND(SUM(g.amount), 2) AS amount
       FROM (SELECT COALESCE(ou.name, 'No organisation unit set') AS label, cr.label AS component, COUNT(DISTINCT cr.employee_id) AS people,
                    CASE WHEN cr.category IN ${DEDUCTIONS} THEN -SUM(cr.amount) ELSE SUM(cr.amount) END AS amount
               FROM payroll_component_results cr JOIN payroll_runs pr ON pr.id = cr.payroll_run_id JOIN employees e ON e.id = cr.employee_id LEFT JOIN org_units ou ON ou.id = e.org_unit_id
@@ -167,7 +167,7 @@ function costGroup(key: string, title: string, description: string, dimLabel: st
     description,
     columns: [...(m ? [col("month", "Month")] : []), col("label", dimLabel), n("people", "People paid"), n("payslips", "Payslips"), n("gross", "Gross pay"), n("tax", "Income tax"), n("net", "Net pay"), n("cost", "Employer cost"), n("perPerson", "Employer cost per person paid")],
     sql: (q) => `
-      SELECT ${m ? "g.month, " : ""}CASE WHEN g.people < 3 AND g.label NOT LIKE 'No %' THEN '${OTHER}' ELSE g.label END AS label, SUM(g.people)::int AS people, SUM(g.slips)::int AS payslips, ROUND(SUM(g.gross), 2) AS gross,
+      SELECT ${m ? "g.month, " : ""}CASE WHEN g.people < ${q.minGroup} AND g.label NOT LIKE 'No %' THEN '${OTHER}' ELSE g.label END AS label, SUM(g.people)::int AS people, SUM(g.slips)::int AS payslips, ROUND(SUM(g.gross), 2) AS gross,
              ROUND(SUM(g.tax), 2) AS tax, ROUND(SUM(g.net), 2) AS net, ROUND(SUM(g.cost), 2) AS cost, ROUND(SUM(g.cost) / NULLIF(SUM(g.people), 0), 2) AS "perPerson"
         FROM (SELECT ${m ? `${MONTH} AS month, ` : ""}${labelExpr} AS label, COUNT(DISTINCT ps.employee_id) AS people, COUNT(*) AS slips, SUM(ps.gross_pay * ${w}) AS gross, SUM(ps.income_tax_monthly * ${w}) AS tax,
                      SUM(ps.net_pay * ${w}) AS net, SUM(ps.employer_cost * ${w}) AS cost
@@ -186,19 +186,19 @@ const CC_LABEL = "COALESCE(cc.code || ' - ' || cc.name, 'No cost centre allocate
 const CC_JOIN = "LEFT JOIN employee_cost_allocations a ON a.employee_id = e.id AND a.status = 'active' LEFT JOIN cost_centers cc ON cc.id = a.cost_center_id";
 const CC_WEIGHT = "(COALESCE(a.allocation_percentage, 100) / 100.0)";
 
-const BY_UNIT = costGroup("by-unit", "By organisation unit", "Finalised pay for each unit, where each employee sits today. Groups under 3 people are combined.", "Organisation unit", UNIT_LABEL, UNIT_JOIN);
-const BY_UNIT_MONTH = costGroup("by-unit-month", "Organisation unit by month", "Finalised pay for each unit in each month. Groups under 3 people in a month are combined.", "Organisation unit", UNIT_LABEL, UNIT_JOIN, { monthly: true });
-const BY_LOCATION = costGroup("by-location", "By location", "Finalised pay for each work location. Groups under 3 people are combined.", "Location", LOC_LABEL, LOC_JOIN);
-const BY_LOCATION_MONTH = costGroup("by-location-month", "Location by month", "Finalised pay for each location in each month. Groups under 3 people in a month are combined.", "Location", LOC_LABEL, LOC_JOIN, { monthly: true });
+const BY_UNIT = costGroup("by-unit", "By organisation unit", "Finalised pay for each unit, where each employee sits today. Small groups are merged into Other only for users who see part of the company; HR admin sees every group.", "Organisation unit", UNIT_LABEL, UNIT_JOIN);
+const BY_UNIT_MONTH = costGroup("by-unit-month", "Organisation unit by month", "Finalised pay for each unit in each month. Small groups are merged into Other only for users who see part of the company; HR admin sees every group.", "Organisation unit", UNIT_LABEL, UNIT_JOIN, { monthly: true });
+const BY_LOCATION = costGroup("by-location", "By location", "Finalised pay for each work location. Small groups are merged into Other only for users who see part of the company; HR admin sees every group.", "Location", LOC_LABEL, LOC_JOIN);
+const BY_LOCATION_MONTH = costGroup("by-location-month", "Location by month", "Finalised pay for each location in each month. Small groups are merged into Other only for users who see part of the company; HR admin sees every group.", "Location", LOC_LABEL, LOC_JOIN, { monthly: true });
 const BY_COST_CENTRE = costGroup("by-cost-centre", "By cost centre (current allocation)", "Pay spread across cost centres by each employee's current allocation. An estimate from today's allocations.", "Cost centre", CC_LABEL, CC_JOIN, { weight: CC_WEIGHT });
 const BY_UNIT_REGULAR = costGroup("by-unit-regular", "Regular runs by organisation unit", "Regular runs only, so one-off payments do not distort the unit's usual cost.", "Organisation unit", UNIT_LABEL, UNIT_JOIN, { onlyRegular: true });
 const BY_GRADE_BAND: ReportSectionSpec = {
   key: "by-employment-type",
   title: "By employment type",
-  description: "Finalised pay by employment type. Groups under 3 people are combined.",
+  description: "Finalised pay by employment type. Small groups are merged into Other only for users who see part of the company; HR admin sees every group.",
   columns: [col("label", "Employment type"), n("people", "People paid"), n("payslips", "Payslips"), n("gross", "Gross pay"), n("cost", "Employer cost"), n("perPerson", "Employer cost per person paid")],
   sql: (q) => `
-    SELECT CASE WHEN g.people < 3 AND g.label NOT LIKE 'No %' THEN '${OTHER}' ELSE g.label END AS label, SUM(g.people)::int AS people, SUM(g.slips)::int AS payslips, ROUND(SUM(g.gross), 2) AS gross, ROUND(SUM(g.cost), 2) AS cost,
+    SELECT CASE WHEN g.people < ${q.minGroup} AND g.label NOT LIKE 'No %' THEN '${OTHER}' ELSE g.label END AS label, SUM(g.people)::int AS people, SUM(g.slips)::int AS payslips, ROUND(SUM(g.gross), 2) AS gross, ROUND(SUM(g.cost), 2) AS cost,
            ROUND(SUM(g.cost) / NULLIF(SUM(g.people), 0), 2) AS "perPerson"
       FROM (SELECT COALESCE(NULLIF(INITCAP(REPLACE(e.employment_type, '_', ' ')), ''), 'No employment type set') AS label, COUNT(DISTINCT ps.employee_id) AS people, COUNT(*) AS slips, SUM(ps.gross_pay) AS gross, SUM(ps.employer_cost) AS cost
               FROM ${SLIP_FROM} JOIN employees e ON e.id = ps.employee_id
@@ -375,10 +375,10 @@ const F03_COMPONENT_MOVE: ReportSectionSpec = {
 const F05_BY_UNIT: ReportSectionSpec = {
   key: "net-by-unit",
   title: "Net pay by organisation unit",
-  description: "Average net pay per payslip and the share paid nothing or less, for each unit. Groups under 3 people are combined.",
+  description: "Average net pay per payslip and the share paid nothing or less, for each unit. Small groups are merged into Other only for users who see part of the company; HR admin sees every group.",
   columns: [col("label", "Organisation unit"), n("people", "People paid"), n("payslips", "Payslips"), n("total", "Total net pay"), n("avg", "Average net pay"), n("zero", "Net pay of zero or less")],
   sql: (q) => `
-    SELECT CASE WHEN g.people < 3 AND g.label NOT LIKE 'No %' THEN '${OTHER}' ELSE g.label END AS label, SUM(g.people)::int AS people, SUM(g.slips)::int AS payslips, ROUND(SUM(g.total), 2) AS total,
+    SELECT CASE WHEN g.people < ${q.minGroup} AND g.label NOT LIKE 'No %' THEN '${OTHER}' ELSE g.label END AS label, SUM(g.people)::int AS people, SUM(g.slips)::int AS payslips, ROUND(SUM(g.total), 2) AS total,
            ROUND(SUM(g.total) / NULLIF(SUM(g.slips), 0), 2) AS avg, SUM(g.zero)::int AS zero
       FROM (SELECT ${UNIT_LABEL} AS label, COUNT(DISTINCT ps.employee_id) AS people, COUNT(*) AS slips, SUM(ps.net_pay) AS total, COUNT(*) FILTER (WHERE ps.net_pay <= 0) AS zero
               FROM ${SLIP_FROM} JOIN employees e ON e.id = ps.employee_id ${UNIT_JOIN} WHERE ${RUN(q)} AND ${FINAL} AND ${SLIP_OK} AND ${PERIOD(q)} GROUP BY ou.id, ou.name) g
@@ -533,7 +533,7 @@ const OT_BANDS: ReportSectionSpec = {
               FROM (SELECT cr.payslip_id, COALESCE(SUM(cr.quantity) FILTER (WHERE cr.unit IN ('hours', 'hour')), 0) AS h
                       FROM ${OT_FROM} WHERE ${RUN(q)} AND ${FINAL} AND ${PERIOD(q)} AND ${OT} GROUP BY cr.payslip_id) x) b GROUP BY b.band ORDER BY b.band`,
 };
-const OT_UNIT: ReportSectionSpec = componentByUnit("overtime-by-unit-component", "Overtime pay by unit and component", "Overtime pay for each unit and component. Groups under 3 people are combined.", OT);
+const OT_UNIT: ReportSectionSpec = componentByUnit("overtime-by-unit-component", "Overtime pay by unit and component", "Overtime pay for each unit and component. Small groups are merged into Other only for users who see part of the company; HR admin sees every group.", OT);
 
 // ---------------------------------------------------------------- F10 exceptions
 
@@ -793,7 +793,7 @@ const I05_NEVER: ReportSectionSpec = {
   description: "Where employees have not looked at their payslip. Counts only; no names and no amounts.",
   columns: [col("label", "Organisation unit"), n("payslips", "Finalised payslips"), n("neverOpened", "Never opened"), col("share", "Never opened (%)", "percent")],
   sql: (q) => `
-    SELECT CASE WHEN g.payslips < 3 AND g.label NOT LIKE 'No %' THEN '${OTHER}' ELSE g.label END AS label, SUM(g.payslips)::int AS payslips, SUM(g.never)::int AS "neverOpened", ROUND(SUM(g.never) * 100.0 / NULLIF(SUM(g.payslips), 0), 1) AS share
+    SELECT CASE WHEN g.payslips < ${q.minGroup} AND g.label NOT LIKE 'No %' THEN '${OTHER}' ELSE g.label END AS label, SUM(g.payslips)::int AS payslips, SUM(g.never)::int AS "neverOpened", ROUND(SUM(g.never) * 100.0 / NULLIF(SUM(g.payslips), 0), 1) AS share
       FROM (SELECT ${UNIT_LABEL} AS label, COUNT(*) AS payslips,
                    COUNT(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM payslip_access_log l WHERE l.payslip_id = ps.id AND l.company_id = ps.company_id)) AS never
               FROM ${SLIP_FROM} JOIN employees e ON e.id = ps.employee_id ${UNIT_JOIN} WHERE ${RUN(q)} AND ${FINAL} AND ${SLIP_OK} AND ${PERIOD(q)} GROUP BY ou.id, ou.name) g
@@ -839,25 +839,25 @@ export const PAYROLL_DEPTH: Record<string, ReportSectionSpec[]> = {
   F01: [F01_BY_STATUS, F01_BY_AREA, F01_BY_MONTH, F01_TIMELINE, F01_PROBLEMS],
   F02: [REG_BY_RUN, REG_BY_UNIT, REG_COMPONENTS, REG_ATTENDANCE_EFFECT, REG_CHANGE, REG_LOW_NET, REG_BANK_READY, NET_BANDS],
   F03: [RUN_LIST, F03_MOVEMENT, F03_COMPONENT_MOVE, CATEGORY_MONTHLY, RUNS_BY_TYPE, RUNS_BY_AREA],
-  F04: [CATEGORY_MONTHLY, componentMonthly("component-by-month", "Components by month", "Each earning, deduction, tax and contribution component for each month.", "TRUE"), componentByRun("component-by-run", "Components by run", "Each component's total in each run.", "TRUE"), componentByUnit("component-by-unit", "Components by organisation unit", "Each component's total for each unit. Groups under 3 people are combined.", "TRUE"), STATUTORY_MONTHLY],
+  F04: [CATEGORY_MONTHLY, componentMonthly("component-by-month", "Components by month", "Each earning, deduction, tax and contribution component for each month.", "TRUE"), componentByRun("component-by-run", "Components by run", "Each component's total in each run.", "TRUE"), componentByUnit("component-by-unit", "Components by organisation unit", "Each component's total for each unit. Small groups are merged into Other only for users who see part of the company; HR admin sees every group.", "TRUE"), STATUTORY_MONTHLY],
   F05: [F05_BY_MONTH, F05_GROSS_TO_NET, NET_BANDS, F05_BY_UNIT, PAYSLIP_FLAGS, RUN_LIST],
   F06: [F06_BY_KIND, F06_BY_RUN, F06_OPEN_AGE, F06_RESOLVED],
   F07: [F07_BY_MONTH, F07_BY_RUN, F07_STATUS, F07_SOURCE, BY_COST_CENTRE],
   F08: [OT_BY_MONTH, OT_BY_COMPONENT, OT_BY_RUN, OT_BANDS, OT_UNIT],
   F10: [F10_BY_RUN, F10_LIST, F10_AGE, F10_BATCHES],
   K01: [...BASE_MONEY, CATEGORY_MONTHLY, STATUTORY_MONTHLY, RUNS_BY_TYPE],
-  K02: [BY_UNIT_MONTH, BY_UNIT_REGULAR, BY_UNIT, BY_GRADE_BAND, componentByUnit("category-by-unit", "Pay components by organisation unit", "Each component's total for each unit. Groups under 3 people are combined.", "TRUE")],
+  K02: [BY_UNIT_MONTH, BY_UNIT_REGULAR, BY_UNIT, BY_GRADE_BAND, componentByUnit("category-by-unit", "Pay components by organisation unit", "Each component's total for each unit. Small groups are merged into Other only for users who see part of the company; HR admin sees every group.", "TRUE")],
   K03: [BY_COST_CENTRE, F07_BY_MONTH, F07_SOURCE, F07_STATUS],
   K04: [BY_LOCATION_MONTH, BY_LOCATION, BY_UNIT, BY_GRADE_BAND],
   K05: [K05_BY_MONTH, K05_BANDS, BY_UNIT_REGULAR, BY_GRADE_BAND, BY_LOCATION],
   K07: [OT_BY_MONTH, OT_BY_COMPONENT, OT_BY_RUN, OT_BANDS, OT_UNIT],
   K08: [componentMonthly("contributions-by-month", "Employer contributions by month", "Each employer contribution component for each month.", "cr.category = 'employer_contribution'"), componentByRun("contributions-by-run", "Employer contributions by run", "Employer contributions in each run.", "cr.category = 'employer_contribution'"),
-        componentByUnit("contributions-by-unit", "Employer contributions by organisation unit", "Employer contributions for each unit. Groups under 3 people are combined.", "cr.category = 'employer_contribution'"), STATUTORY_MONTHLY, MONTHLY],
+        componentByUnit("contributions-by-unit", "Employer contributions by organisation unit", "Employer contributions for each unit. Small groups are merged into Other only for users who see part of the company; HR admin sees every group.", "cr.category = 'employer_contribution'"), STATUTORY_MONTHLY, MONTHLY],
   K09: [componentMonthly("allowances-by-month", "Allowances and other earnings by month", "Each allowance and other earning for each month.", "cr.category IN ('earning', 'adjustment') AND cr.component_key <> 'basic_salary'"),
         componentByRun("allowances-by-run", "Allowances by run", "Each allowance's total in each run.", "cr.category IN ('earning', 'adjustment') AND cr.component_key <> 'basic_salary'"),
-        componentByUnit("allowances-by-unit", "Allowances by organisation unit", "Each allowance's total for each unit. Groups under 3 people are combined.", "cr.category IN ('earning', 'adjustment') AND cr.component_key <> 'basic_salary'"), CATEGORY_MONTHLY],
+        componentByUnit("allowances-by-unit", "Allowances by organisation unit", "Each allowance's total for each unit. Small groups are merged into Other only for users who see part of the company; HR admin sees every group.", "cr.category IN ('earning', 'adjustment') AND cr.component_key <> 'basic_salary'"), CATEGORY_MONTHLY],
   K10: [componentMonthly("deductions-by-month", "Deductions by month", "Each deduction, tax and recovery for each month.", `cr.category IN ${DEDUCTIONS}`), componentByRun("deductions-by-run", "Deductions by run", "Each deduction's total in each run.", `cr.category IN ${DEDUCTIONS}`),
-        componentByUnit("deductions-by-unit", "Deductions by organisation unit", "Each deduction's total for each unit. Groups under 3 people are combined.", `cr.category IN ${DEDUCTIONS}`), STATUTORY_MONTHLY, PAYSLIP_FLAGS],
+        componentByUnit("deductions-by-unit", "Deductions by organisation unit", "Each deduction's total for each unit. Small groups are merged into Other only for users who see part of the company; HR admin sees every group.", `cr.category IN ${DEDUCTIONS}`), STATUTORY_MONTHLY, PAYSLIP_FLAGS],
   K11: [F03_COMPONENT_MOVE, CATEGORY_MONTHLY, RUNS_BY_TYPE, MONTHLY],
   K12: [K12_MOVEMENT, K12_UNPAID, K12_BY_AREA, MONTHLY],
   K13: [K13_COVERAGE, K13_BY_UNIT, K13_CENTRES, K13_INACTIVE],

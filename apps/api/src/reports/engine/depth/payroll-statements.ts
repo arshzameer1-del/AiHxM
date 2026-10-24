@@ -7,7 +7,7 @@ import { LABEL, NAME, col } from "./common";
  * loans and final settlements).
  *
  * Rules: every table applies the same company, payroll-area and team limits as its report (q.emp(), q.area(), q.co());
- * money comes only from finalised payslips; a table that groups people merges any group of fewer than 3 into "Other" so
+ * money comes only from finalised payslips; a table that groups people merges any group of fewer than 3 into "Other" (only for callers who see part of the company, never for HR admin) so
  * a total or an average cannot be read as one person's pay; a table lists people only inside the Restricted reports;
  * nothing here reads an encrypted value, an account number or a bank's free-text rejection reason.
  */
@@ -53,7 +53,7 @@ function slipGroup(
       const outer = measures.map(([k], i) => `ROUND(SUM(g.m${i}), 2) AS "${k}"`).join(", ");
       const ratio = o.ratio ? `, CASE WHEN SUM(g.m${o.ratio.bottom}) > 0 THEN ROUND(SUM(g.m${o.ratio.top}) * 100.0 / SUM(g.m${o.ratio.bottom}), 1) END AS "${o.ratio.key}"` : "";
       return `
-        SELECT ${m ? "g.month, " : ""}CASE WHEN g.people < 3 AND g.label NOT LIKE 'No %' THEN '${OTHER}' ELSE g.label END AS label, SUM(g.people)::int AS people, SUM(g.slips)::int AS payslips, ${outer}${ratio}
+        SELECT ${m ? "g.month, " : ""}CASE WHEN g.people < ${q.minGroup} AND g.label NOT LIKE 'No %' THEN '${OTHER}' ELSE g.label END AS label, SUM(g.people)::int AS people, SUM(g.slips)::int AS payslips, ${outer}${ratio}
           FROM (SELECT ${m ? `${MONTH} AS month, ` : ""}${labelExpr} AS label, COUNT(DISTINCT ps.employee_id) AS people, COUNT(*) AS slips, ${inner}
                   FROM ${SLIPS} ${j} WHERE ${SLIP_WHERE(q)} GROUP BY ${m ? "1, 2" : "1"}) g
          GROUP BY ${m ? "1, 2" : "1"} ORDER BY ${m ? "1, " : ""}SUM(g.m0) DESC NULLS LAST, ${m ? 2 : 1}`;
@@ -73,7 +73,7 @@ const EOBI_MEASURES: Measure[] = [
   ["total", "Total", "ps.eobi_employee_contribution + ps.eobi_employer_contribution + ps.social_security_employer_contribution"],
 ];
 
-/** Pay statistics of current employees in a group, groups under 3 people merged. */
+/** Pay statistics of current employees in a group, small groups merged for limited-access users. */
 function salaryGroup(key: string, title: string, description: string, dimLabel: string, labelExpr: string, join: string): ReportSectionSpec {
   return {
     key,
@@ -82,7 +82,7 @@ function salaryGroup(key: string, title: string, description: string, dimLabel: 
     columns: [col("label", dimLabel), n("people", "People with a salary"), n("lowest", "Lowest"), n("median", "Median"), n("average", "Average"), n("highest", "Highest"), n("total", "Total monthly salary")],
     sql: (q) => `
       SELECT x.label, COUNT(*)::int AS people, MIN(x.salary) AS lowest, ROUND((PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY x.salary))::numeric, 0) AS median, ROUND(AVG(x.salary), 0) AS average, MAX(x.salary) AS highest, SUM(x.salary) AS total
-        FROM (SELECT CASE WHEN COUNT(*) OVER (PARTITION BY s.label) < 3 AND s.label NOT LIKE 'No %' THEN '${OTHER}' ELSE s.label END AS label, s.salary
+        FROM (SELECT CASE WHEN COUNT(*) OVER (PARTITION BY s.label) < ${q.minGroup} AND s.label NOT LIKE 'No %' THEN '${OTHER}' ELSE s.label END AS label, s.salary
                 FROM (SELECT ${labelExpr} AS label, ${SALARY_NOW(q)} AS salary FROM employees e ${join} WHERE ${q.emp()} AND ${q.current()} AND ${q.area("e")}) s
                WHERE s.salary IS NOT NULL) x
        GROUP BY x.label ORDER BY total DESC, label`,
@@ -113,11 +113,11 @@ const REVISIONS = (q: Q) => `
 const REVISIONS_BY_UNIT: ReportSectionSpec = {
   key: "revisions-by-unit",
   title: "Revisions by organisation unit",
-  description: "Salary revisions in the period for each unit: how many, how many people, the average change and what they add to the monthly salary bill. Units with fewer than 3 people revised are combined.",
+  description: "Salary revisions in the period for each unit: how many, how many people, the average change and what they add to the monthly salary bill. Small groups are merged into Other only for users who see part of the company (a manager or a payroll-area limit); HR admin sees every group.",
   columns: [col("label", "Organisation unit"), n("revisions", "Revisions"), n("people", "People revised"), pct("averagePct", "Average change (%)"), n("added", "Added to monthly salary bill")],
   sql: (q) => `
     WITH r AS (${REVISIONS(q)})
-    SELECT CASE WHEN g.people < 3 AND g.label NOT LIKE 'No %' THEN '${OTHER}' ELSE g.label END AS label, SUM(g.revisions)::int AS revisions, SUM(g.people)::int AS people,
+    SELECT CASE WHEN g.people < ${q.minGroup} AND g.label NOT LIKE 'No %' THEN '${OTHER}' ELSE g.label END AS label, SUM(g.revisions)::int AS revisions, SUM(g.people)::int AS people,
            ROUND(SUM(g.pct_sum) / NULLIF(SUM(g.pct_n), 0), 1) AS "averagePct", SUM(g.added) AS added
       FROM (SELECT r.unit AS label, COUNT(*) AS revisions, COUNT(DISTINCT r.employee_id) AS people, SUM(r.pct) AS pct_sum, COUNT(r.pct) AS pct_n, SUM(r.change) AS added FROM r GROUP BY r.unit) g
      GROUP BY 1 ORDER BY SUM(g.revisions) DESC, 1`,
@@ -213,10 +213,10 @@ const COMPONENT_TAXABLE: ReportSectionSpec = {
 const COMPONENT_BY_UNIT: ReportSectionSpec = {
   key: "by-unit",
   title: "By organisation unit",
-  description: "Earning and deduction components in force today for each unit. Units with fewer than 3 people are combined.",
+  description: "Earning and deduction components in force today for each unit. Small groups are merged into Other only for users who see part of the company (a manager or a payroll-area limit); HR admin sees every group.",
   columns: [col("label", "Organisation unit"), n("people", "People"), n("earnings", "Monthly earnings from components"), n("deductions", "Monthly deductions from components")],
   sql: (q) => `
-    SELECT CASE WHEN g.people < 3 AND g.label NOT LIKE 'No %' THEN '${OTHER}' ELSE g.label END AS label, SUM(g.people)::int AS people, ROUND(SUM(g.earnings), 2) AS earnings, ROUND(SUM(g.deductions), 2) AS deductions
+    SELECT CASE WHEN g.people < ${q.minGroup} AND g.label NOT LIKE 'No %' THEN '${OTHER}' ELSE g.label END AS label, SUM(g.people)::int AS people, ROUND(SUM(g.earnings), 2) AS earnings, ROUND(SUM(g.deductions), 2) AS deductions
       FROM (SELECT ${UNIT} AS label, COUNT(DISTINCT x.employee_id) AS people,
                    COALESCE(SUM(${MONTHLY}) FILTER (WHERE cc.component_type IN ('earning', 'shift_premium')), 0) AS earnings, COALESCE(SUM(${MONTHLY}) FILTER (WHERE cc.component_type = 'deduction'), 0) AS deductions
               FROM ${COMPONENT_FROM(q)} GROUP BY ou.name) g
@@ -485,10 +485,10 @@ const RETRY_COUNTS: ReportSectionSpec = {
 const LOAN_BY_STATUS: ReportSectionSpec = {
   key: "by-status",
   title: "By loan status",
-  description: "Loans and advances in each state. States with fewer than 3 borrowers are combined.",
+  description: "Loans and advances in each state. Small groups are merged into Other only for users who see part of the company (a manager or a payroll-area limit); HR admin sees every group.",
   columns: [col("label", "Status"), n("loans", "Loans"), n("borrowers", "Borrowers"), n("principal", "Principal"), n("outstanding", "Outstanding")],
   sql: (q) => `
-    SELECT CASE WHEN g.borrowers < 3 THEN '${OTHER}' ELSE g.label END AS label, SUM(g.loans)::int AS loans, SUM(g.borrowers)::int AS borrowers, SUM(g.principal) AS principal, SUM(g.outstanding) AS outstanding
+    SELECT CASE WHEN g.borrowers < ${q.minGroup} THEN '${OTHER}' ELSE g.label END AS label, SUM(g.loans)::int AS loans, SUM(g.borrowers)::int AS borrowers, SUM(g.principal) AS principal, SUM(g.outstanding) AS outstanding
       FROM (SELECT ${LABEL("l.status")} AS label, COUNT(*) AS loans, COUNT(DISTINCT l.employee_id) AS borrowers, SUM(l.principal_amount) AS principal, SUM(l.outstanding_balance) AS outstanding
               FROM employee_loans l ${LOAN_JOIN} WHERE ${LOAN_WHERE(q)} GROUP BY l.status) g
      GROUP BY 1 ORDER BY SUM(g.loans) DESC, 1`,
@@ -497,10 +497,10 @@ const LOAN_BY_STATUS: ReportSectionSpec = {
 const LOAN_BY_TYPE: ReportSectionSpec = {
   key: "by-type",
   title: "By loan type",
-  description: "All loans by type, with what was lent, recovered and is still outstanding. Types with fewer than 3 borrowers are combined.",
+  description: "All loans by type, with what was lent, recovered and is still outstanding. Small groups are merged into Other only for users who see part of the company (a manager or a payroll-area limit); HR admin sees every group.",
   columns: [col("label", "Loan type"), n("loans", "Loans"), n("borrowers", "Borrowers"), n("principal", "Principal"), n("recovered", "Recovered"), n("outstanding", "Outstanding")],
   sql: (q) => `
-    SELECT CASE WHEN g.borrowers < 3 THEN '${OTHER}' ELSE g.label END AS label, SUM(g.loans)::int AS loans, SUM(g.borrowers)::int AS borrowers, SUM(g.principal) AS principal, SUM(g.recovered) AS recovered, SUM(g.outstanding) AS outstanding
+    SELECT CASE WHEN g.borrowers < ${q.minGroup} THEN '${OTHER}' ELSE g.label END AS label, SUM(g.loans)::int AS loans, SUM(g.borrowers)::int AS borrowers, SUM(g.principal) AS principal, SUM(g.recovered) AS recovered, SUM(g.outstanding) AS outstanding
       FROM (SELECT ${LOAN_KIND} AS label, COUNT(*) AS loans, COUNT(DISTINCT l.employee_id) AS borrowers, SUM(l.principal_amount) AS principal, SUM(l.principal_amount - l.outstanding_balance) AS recovered, SUM(l.outstanding_balance) AS outstanding
               FROM employee_loans l ${LOAN_JOIN} WHERE ${LOAN_WHERE(q)} GROUP BY ${LOAN_KIND}) g
      GROUP BY 1 ORDER BY SUM(g.principal) DESC, 1`,
@@ -509,10 +509,10 @@ const LOAN_BY_TYPE: ReportSectionSpec = {
 const LOAN_BY_UNIT: ReportSectionSpec = {
   key: "by-unit",
   title: "Active loans by organisation unit",
-  description: "Active and on-hold loans for each unit. Units with fewer than 3 borrowers are combined.",
+  description: "Active and on-hold loans for each unit. Small groups are merged into Other only for users who see part of the company (a manager or a payroll-area limit); HR admin sees every group.",
   columns: [col("label", "Organisation unit"), n("loans", "Loans"), n("borrowers", "Borrowers"), n("outstanding", "Outstanding")],
   sql: (q) => `
-    SELECT CASE WHEN g.borrowers < 3 AND g.label NOT LIKE 'No %' THEN '${OTHER}' ELSE g.label END AS label, SUM(g.loans)::int AS loans, SUM(g.borrowers)::int AS borrowers, SUM(g.outstanding) AS outstanding
+    SELECT CASE WHEN g.borrowers < ${q.minGroup} AND g.label NOT LIKE 'No %' THEN '${OTHER}' ELSE g.label END AS label, SUM(g.loans)::int AS loans, SUM(g.borrowers)::int AS borrowers, SUM(g.outstanding) AS outstanding
       FROM (SELECT ${UNIT} AS label, COUNT(*) AS loans, COUNT(DISTINCT l.employee_id) AS borrowers, SUM(l.outstanding_balance) AS outstanding
               FROM employee_loans l ${LOAN_JOIN} ${UNIT_JOIN} WHERE ${LOAN_WHERE(q)} AND l.status IN ('active', 'on_hold') GROUP BY ou.name) g
      GROUP BY 1 ORDER BY SUM(g.outstanding) DESC NULLS LAST, 1`,
@@ -566,23 +566,23 @@ const INSTALMENT_BY_STATUS: ReportSectionSpec = {
 const INSTALMENT_BY_TYPE: ReportSectionSpec = {
   key: "by-type",
   title: "Instalments by loan type",
-  description: "Instalments due in the period for each loan type. Types with fewer than 3 borrowers are combined.",
+  description: "Instalments due in the period for each loan type. Small groups are merged into Other only for users who see part of the company (a manager or a payroll-area limit); HR admin sees every group.",
   columns: [col("label", "Loan type"), n("instalments", "Instalments"), n("borrowers", "Borrowers"), n("due", "Amount due"), n("recovered", "Recovered")],
   sql: (q) => `
-    SELECT CASE WHEN g.borrowers < 3 THEN '${OTHER}' ELSE g.label END AS label, SUM(g.instalments)::int AS instalments, SUM(g.borrowers)::int AS borrowers, SUM(g.due) AS due, SUM(g.recovered) AS recovered
+    SELECT CASE WHEN g.borrowers < ${q.minGroup} THEN '${OTHER}' ELSE g.label END AS label, SUM(g.instalments)::int AS instalments, SUM(g.borrowers)::int AS borrowers, SUM(g.due) AS due, SUM(g.recovered) AS recovered
       FROM (SELECT ${LOAN_KIND} AS label, COUNT(*) AS instalments, COUNT(DISTINCT l.employee_id) AS borrowers, SUM(s.amount) AS due, COALESCE(SUM(s.paid_amount), 0) AS recovered
               FROM ${INSTALMENT_FROM(q)} GROUP BY ${LOAN_KIND}) g
      GROUP BY 1 ORDER BY SUM(g.due) DESC, 1`,
 };
 
-/** Overdue instalments (as of today) by how late they are, bands with fewer than 3 borrowers combined. */
+/** Overdue instalments (as of today) by how late they are, small bands merged for limited-access users. */
 const OVERDUE_AGEING: ReportSectionSpec = {
   key: "overdue-ageing",
   title: "Overdue instalments by age",
-  description: "Instalments that fell due before today and are still unrecovered, grouped by days past due. Bands with fewer than 3 borrowers are combined.",
+  description: "Instalments that fell due before today and are still unrecovered, grouped by days past due. Small groups are merged into Other only for users who see part of the company (a manager or a payroll-area limit); HR admin sees every group.",
   columns: [col("label", "Days past due"), n("instalments", "Instalments"), n("borrowers", "Borrowers"), n("amount", "Amount overdue")],
   sql: (q) => `
-    SELECT CASE WHEN g.borrowers < 3 THEN '${OTHER}' ELSE g.label END AS label, SUM(g.instalments)::int AS instalments, SUM(g.borrowers)::int AS borrowers, SUM(g.amount) AS amount
+    SELECT CASE WHEN g.borrowers < ${q.minGroup} THEN '${OTHER}' ELSE g.label END AS label, SUM(g.instalments)::int AS instalments, SUM(g.borrowers)::int AS borrowers, SUM(g.amount) AS amount
       FROM (SELECT CASE WHEN ${q.today} - s.due_date <= 30 THEN '1 to 30 days' WHEN ${q.today} - s.due_date <= 60 THEN '31 to 60 days' WHEN ${q.today} - s.due_date <= 90 THEN '61 to 90 days' ELSE 'Over 90 days' END AS label,
                    MIN(CASE WHEN ${q.today} - s.due_date <= 30 THEN 1 WHEN ${q.today} - s.due_date <= 60 THEN 2 WHEN ${q.today} - s.due_date <= 90 THEN 3 ELSE 4 END) AS ord,
                    COUNT(*) AS instalments, COUNT(DISTINCT l.employee_id) AS borrowers, SUM(GREATEST(s.amount - COALESCE(s.paid_amount, 0), 0)) AS amount
@@ -633,10 +633,10 @@ const SETTLEMENT_BY_STATUS: ReportSectionSpec = {
 const SETTLEMENT_BY_UNIT: ReportSectionSpec = {
   key: "by-unit",
   title: "By organisation unit",
-  description: "Settlements for each unit. Units with fewer than 3 leavers are combined.",
+  description: "Settlements for each unit. Small groups are merged into Other only for users who see part of the company (a manager or a payroll-area limit); HR admin sees every group.",
   columns: [col("label", "Organisation unit"), n("settlements", "Settlements"), n("net", "Net settlement")],
   sql: (q) => `
-    SELECT CASE WHEN g.settlements < 3 AND g.label NOT LIKE 'No %' THEN '${OTHER}' ELSE g.label END AS label, SUM(g.settlements)::int AS settlements, SUM(g.net) AS net
+    SELECT CASE WHEN g.settlements < ${q.minGroup} AND g.label NOT LIKE 'No %' THEN '${OTHER}' ELSE g.label END AS label, SUM(g.settlements)::int AS settlements, SUM(g.net) AS net
       FROM (SELECT ${UNIT} AS label, COUNT(DISTINCT st.id) AS settlements, COALESCE(SUM(ln.amount), 0) AS net FROM ${SETTLEMENT_FROM(q)} GROUP BY ou.name) g
      GROUP BY 1 ORDER BY SUM(g.net) DESC, 1`,
 };
@@ -659,10 +659,10 @@ const REASON = `COALESCE(${LABEL("pr.off_cycle_reason")}, CASE WHEN pr.run_type 
 const OFFCYCLE_BY_REASON: ReportSectionSpec = {
   key: "by-reason",
   title: "By reason",
-  description: "Off-cycle payments and arrears by reason, with people, arrears, gross and net pay. Reasons with fewer than 3 people are combined.",
+  description: "Off-cycle payments and arrears by reason, with people, arrears, gross and net pay. Small groups are merged into Other only for users who see part of the company (a manager or a payroll-area limit); HR admin sees every group.",
   columns: [col("label", "Reason"), n("people", "People"), n("payslips", "Payslips"), n("arrears", "Arrears and retro"), n("gross", "Gross pay"), n("net", "Net pay")],
   sql: (q) => `
-    SELECT CASE WHEN g.people < 3 THEN '${OTHER}' ELSE g.label END AS label, SUM(g.people)::int AS people, SUM(g.slips)::int AS payslips, SUM(g.arrears) AS arrears, SUM(g.gross) AS gross, SUM(g.net) AS net
+    SELECT CASE WHEN g.people < ${q.minGroup} THEN '${OTHER}' ELSE g.label END AS label, SUM(g.people)::int AS people, SUM(g.slips)::int AS payslips, SUM(g.arrears) AS arrears, SUM(g.gross) AS gross, SUM(g.net) AS net
       FROM (SELECT ${REASON} AS label, COUNT(DISTINCT ps.employee_id) AS people, COUNT(*) AS slips, COALESCE(SUM(ps.arrears_amount), 0) AS arrears, SUM(ps.gross_pay) AS gross, SUM(ps.net_pay) AS net
               FROM ${SLIPS} WHERE ${OFFCYCLE_WHERE(q)} GROUP BY 1) g
      GROUP BY 1 ORDER BY SUM(g.gross) DESC NULLS LAST, 1`,
@@ -681,10 +681,10 @@ const OFFCYCLE_BY_MONTH: ReportSectionSpec = {
 const OFFCYCLE_BY_UNIT: ReportSectionSpec = {
   key: "by-unit",
   title: "By organisation unit",
-  description: "Off-cycle payments and arrears for each unit. Units with fewer than 3 people are combined.",
+  description: "Off-cycle payments and arrears for each unit. Small groups are merged into Other only for users who see part of the company (a manager or a payroll-area limit); HR admin sees every group.",
   columns: [col("label", "Organisation unit"), n("people", "People"), n("payslips", "Payslips"), n("arrears", "Arrears and retro"), n("gross", "Gross pay")],
   sql: (q) => `
-    SELECT CASE WHEN g.people < 3 AND g.label NOT LIKE 'No %' THEN '${OTHER}' ELSE g.label END AS label, SUM(g.people)::int AS people, SUM(g.slips)::int AS payslips, SUM(g.arrears) AS arrears, SUM(g.gross) AS gross
+    SELECT CASE WHEN g.people < ${q.minGroup} AND g.label NOT LIKE 'No %' THEN '${OTHER}' ELSE g.label END AS label, SUM(g.people)::int AS people, SUM(g.slips)::int AS payslips, SUM(g.arrears) AS arrears, SUM(g.gross) AS gross
       FROM (SELECT ${UNIT} AS label, COUNT(DISTINCT ps.employee_id) AS people, COUNT(*) AS slips, COALESCE(SUM(ps.arrears_amount), 0) AS arrears, SUM(ps.gross_pay) AS gross
               FROM ${SLIPS} ${UNIT_JOIN} WHERE ${OFFCYCLE_WHERE(q)} GROUP BY ou.name) g
      GROUP BY 1 ORDER BY SUM(g.gross) DESC NULLS LAST, 1`,
@@ -702,21 +702,21 @@ const OFFCYCLE_RUNS: ReportSectionSpec = {
 
 // ---------------------------------------------------------------- registry
 
-const SALARY_BY_UNIT = salaryGroup("salary-by-unit", "Salary by organisation unit", "Lowest, median, average and highest monthly salary of current employees in each unit. Units with fewer than 3 people are combined.", "Organisation unit", UNIT, UNIT_JOIN);
-const SALARY_BY_LOCATION = salaryGroup("salary-by-location", "Salary by location", "Monthly salary of current employees at each work location. Locations with fewer than 3 people are combined.", "Location", LOC_LABEL, LOC_JOIN);
-const SALARY_BY_TYPE = salaryGroup("salary-by-type", "Salary by employment type", "Monthly salary of current employees by employment type. Types with fewer than 3 people are combined.", "Employment type", TYPE_LABEL, "");
-const SALARY_BY_GRADE = salaryGroup("salary-by-band", "Salary by salary band", "Monthly salary of current employees by the salary band on their record. Bands with fewer than 3 people are combined.", "Salary band", GRADE_LABEL, "");
+const SALARY_BY_UNIT = salaryGroup("salary-by-unit", "Salary by organisation unit", "Lowest, median, average and highest monthly salary of current employees in each unit. Small groups are merged into Other only for users who see part of the company (a manager or a payroll-area limit); HR admin sees every group.", "Organisation unit", UNIT, UNIT_JOIN);
+const SALARY_BY_LOCATION = salaryGroup("salary-by-location", "Salary by location", "Monthly salary of current employees at each work location. Small groups are merged into Other only for users who see part of the company (a manager or a payroll-area limit); HR admin sees every group.", "Location", LOC_LABEL, LOC_JOIN);
+const SALARY_BY_TYPE = salaryGroup("salary-by-type", "Salary by employment type", "Monthly salary of current employees by employment type. Small groups are merged into Other only for users who see part of the company (a manager or a payroll-area limit); HR admin sees every group.", "Employment type", TYPE_LABEL, "");
+const SALARY_BY_GRADE = salaryGroup("salary-by-band", "Salary by salary band", "Monthly salary of current employees by the salary band on their record. Small groups are merged into Other only for users who see part of the company (a manager or a payroll-area limit); HR admin sees every group.", "Salary band", GRADE_LABEL, "");
 
-const TAX_BY_UNIT = slipGroup("tax-by-unit", "Tax by organisation unit", "Tax withheld in the period for each unit. Units with fewer than 3 people are combined.", "Organisation unit", UNIT, UNIT_JOIN, TAX_MEASURES, { ratio: TAX_RATIO });
-const TAX_BY_LOCATION = slipGroup("tax-by-location", "Tax by location", "Tax withheld in the period for each work location. Locations with fewer than 3 people are combined.", "Location", LOC_LABEL, LOC_JOIN, TAX_MEASURES, { ratio: TAX_RATIO });
-const TAX_BY_FILER = slipGroup("tax-by-filer", "Tax by filer status", "Tax withheld for filers and non-filers, using the tax profile in force today. Groups with fewer than 3 people are combined.", "Filer status", FILER, TAX_NOW, TAX_MEASURES, { ratio: TAX_RATIO });
+const TAX_BY_UNIT = slipGroup("tax-by-unit", "Tax by organisation unit", "Tax withheld in the period for each unit. Small groups are merged into Other only for users who see part of the company (a manager or a payroll-area limit); HR admin sees every group.", "Organisation unit", UNIT, UNIT_JOIN, TAX_MEASURES, { ratio: TAX_RATIO });
+const TAX_BY_LOCATION = slipGroup("tax-by-location", "Tax by location", "Tax withheld in the period for each work location. Small groups are merged into Other only for users who see part of the company (a manager or a payroll-area limit); HR admin sees every group.", "Location", LOC_LABEL, LOC_JOIN, TAX_MEASURES, { ratio: TAX_RATIO });
+const TAX_BY_FILER = slipGroup("tax-by-filer", "Tax by filer status", "Tax withheld for filers and non-filers, using the tax profile in force today. Small groups are merged into Other only for users who see part of the company (a manager or a payroll-area limit); HR admin sees every group.", "Filer status", FILER, TAX_NOW, TAX_MEASURES, { ratio: TAX_RATIO });
 const TAX_BY_RUN_TYPE = slipGroup("tax-by-run-type", "Tax in regular and off-cycle runs", "Tax withheld in regular runs and in off-cycle runs (bonus, arrears, settlement).", "Run type", RUN_TYPE, "", TAX_MEASURES, { ratio: TAX_RATIO });
-const TAX_UNIT_MONTH = slipGroup("tax-by-unit-month", "Organisation unit by month", "Tax withheld for each unit in each month. Groups with fewer than 3 people in a month are combined.", "Organisation unit", UNIT, UNIT_JOIN, TAX_MEASURES, { monthly: true, ratio: TAX_RATIO });
+const TAX_UNIT_MONTH = slipGroup("tax-by-unit-month", "Organisation unit by month", "Tax withheld for each unit in each month. Small groups are merged into Other only for users who see part of the company (a manager or a payroll-area limit); HR admin sees every group.", "Organisation unit", UNIT, UNIT_JOIN, TAX_MEASURES, { monthly: true, ratio: TAX_RATIO });
 
-const EOBI_BY_UNIT = slipGroup("contributions-by-unit", "Contributions by organisation unit", "EOBI and social security for each unit. Units with fewer than 3 people are combined.", "Organisation unit", UNIT, UNIT_JOIN, EOBI_MEASURES);
-const EOBI_BY_SCHEME = slipGroup("contributions-by-scheme", "Contributions by provincial scheme", "EOBI and social security by the provincial scheme on the tax profile. Schemes with fewer than 3 people are combined.", "Provincial scheme", SCHEME, TAX_NOW, EOBI_MEASURES);
+const EOBI_BY_UNIT = slipGroup("contributions-by-unit", "Contributions by organisation unit", "EOBI and social security for each unit. Small groups are merged into Other only for users who see part of the company (a manager or a payroll-area limit); HR admin sees every group.", "Organisation unit", UNIT, UNIT_JOIN, EOBI_MEASURES);
+const EOBI_BY_SCHEME = slipGroup("contributions-by-scheme", "Contributions by provincial scheme", "EOBI and social security by the provincial scheme on the tax profile. Small groups are merged into Other only for users who see part of the company (a manager or a payroll-area limit); HR admin sees every group.", "Provincial scheme", SCHEME, TAX_NOW, EOBI_MEASURES);
 const EOBI_BY_RUN_TYPE = slipGroup("contributions-by-run-type", "Contributions in regular and off-cycle runs", "Contributions recorded in regular and in off-cycle runs.", "Run type", RUN_TYPE, "", EOBI_MEASURES);
-const EOBI_BY_LOCATION = slipGroup("contributions-by-location", "Contributions by location", "EOBI and social security for each work location. Locations with fewer than 3 people are combined.", "Location", LOC_LABEL, LOC_JOIN, EOBI_MEASURES);
+const EOBI_BY_LOCATION = slipGroup("contributions-by-location", "Contributions by location", "EOBI and social security for each work location. Small groups are merged into Other only for users who see part of the company (a manager or a payroll-area limit); HR admin sees every group.", "Location", LOC_LABEL, LOC_JOIN, EOBI_MEASURES);
 
 export const PAYROLL_STATEMENTS_DEPTH: Readonly<Record<string, readonly ReportSectionSpec[]>> = {
   F11: [SALARY_BY_UNIT, SALARY_BY_LOCATION, SALARY_BY_TYPE, SALARY_BY_GRADE, SALARY_BANDS, NOT_REVISED, NO_SALARY],

@@ -27,6 +27,11 @@ export type Q = {
   dim: (key: typeof DEPT | typeof LOC, column: string) => string;
   /** One row per month from the range start to its end: `ms` (month start) and `point` (month end, or today for the current month). */
   months: () => string;
+  /**
+   * Smallest group a table may show on its own. 1 (no merging) for a caller who sees the whole company, such as HR admin;
+   * 3 for team-scoped or payroll-area-limited callers, whose small groups would reveal one person.
+   */
+  minGroup: number;
   /** `alias.company_id = $n::uuid` for tables that are not tied to an employee. */
   co: (alias: string) => string;
   /** Payroll area limit for a `payroll_runs` alias: TRUE for company-wide payroll access, else the caller's areas. */
@@ -173,6 +178,7 @@ function makeQ(ctx: ExecutorContext): { q: Q; p: Params; used: Set<string> } {
       return `SELECT gs::date AS ms, LEAST((gs + interval '1 month - 1 day')::date, ${todayParam()}) AS point
                 FROM generate_series(date_trunc('month', ${a}::date)::date, date_trunc('month', ${b}::date)::date, interval '1 month') gs`;
     },
+    minGroup: ctx.scope === "tenant" && (!ctx.payrollAccess || ctx.payrollAccess.unrestricted) ? 1 : 3,
     co: (alias) => `${alias}.company_id = ${p.add(ctx.companyId)}::uuid`,
     area: (alias) => {
       const a = ctx.payrollAccess;

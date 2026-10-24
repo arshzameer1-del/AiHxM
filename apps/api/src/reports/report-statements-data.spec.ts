@@ -211,8 +211,8 @@ describe("Pay statement reports: hand-counted figures", () => {
     expect(t.rows.every((x) => !("name" in x))).toBe(true);
     expect(sum(section(t, "revision-size"), "revisions")).toBe(1);
     expect(section(t, "revision-size").rows[0]).toEqual(expect.objectContaining({ label: "20% or more" }));
-    // one person revised in a unit: the unit is combined into "Other"
-    expect(section(t, "revisions-by-unit").rows.map((x) => x.label)).toEqual([expect.stringMatching(/^Other/)]);
+    // HR admin sees the real unit even though only one person was revised (small groups are merged only for limited-access callers)
+    expect(section(t, "revisions-by-unit").rows).toEqual([expect.objectContaining({ label: "Engineering", revisions: 1, people: 1, added: 20000 })]);
   });
 
   it("F13 lists the components in force, dividing the yearly one by 12", async () => {
@@ -224,13 +224,13 @@ describe("Pay statement reports: hand-counted figures", () => {
     expect(section(r, "taxable-split").rows.length).toBeGreaterThan(0);
   });
 
-  it("F14 gives the spread of salaries for a unit of 3 and combines groups of fewer than 3", async () => {
+  it("F14 gives the spread of salaries by unit and, for HR admin, shows small groups as they are", async () => {
     const r = await reports.run(hr, "F14", {});
     expect(r.rows).toEqual([expect.objectContaining({ label: "Engineering", people: 3, lowest: 60000, median: 80000, average: 86667, highest: 120000, total: 260000 })]);
     const byType = section(r, "salary-by-type");
-    expect(byType.rows).toHaveLength(1);
-    expect(String(byType.rows[0].label)).toMatch(/^Other/);
-    expect(byType.rows[0].people).toBe(3);
+    expect(byType.rows.find((x) => x.label === "Permanent")).toEqual(expect.objectContaining({ people: 2, lowest: 80000, highest: 120000, total: 200000 }));
+    expect(byType.rows.find((x) => x.label === "Contract")).toEqual(expect.objectContaining({ people: 1, total: 60000 }));
+    expect(byType.rows.some((x) => String(x.label).startsWith("Other"))).toBe(false);
   });
 
   it("F16 puts each employee's tax in the month the pay period ends and the months add up to the total", async () => {
@@ -302,7 +302,7 @@ describe("Pay statement reports: hand-counted figures", () => {
     expect(kpi(ex, "amount")).toBe(80000);
   });
 
-  it("F26, F27 and F28 give the loan book, the instalments and the exposure, combining small groups", async () => {
+  it("F26, F27 and F28 give the loan book, the instalments and the exposure", async () => {
     const reg = await reports.run(hr, "F26", {});
     expect(reg.rows).toHaveLength(3);
     expect(row(reg, "1")).toEqual(expect.objectContaining({ principal: 60000, recovered: 20000, outstanding: 40000, paid: 2, overdue: 1, next: day(25), status: "Active" }));
@@ -315,8 +315,9 @@ describe("Pay statement reports: hand-counted figures", () => {
     expect(kpi(inst, "late")).toBe(1);
     expect(sum(section(inst, "by-month"), "instalments")).toBe(3);
     const exp = await reports.run(hr, "F28", {});
-    expect(exp.rows).toEqual([expect.objectContaining({ loans: 2, borrowers: 2, principal: 80000, recovered: 20000, outstanding: 60000, overdue: 1 })]);
-    expect(String(exp.rows[0].label)).toMatch(/^Other/);
+    expect(exp.rows.find((x) => x.label === "Loan")).toEqual(expect.objectContaining({ loans: 1, borrowers: 1, principal: 60000, recovered: 20000, outstanding: 40000, overdue: 1 }));
+    expect(exp.rows.find((x) => x.label === "Salary Advance")).toEqual(expect.objectContaining({ loans: 1, principal: 20000, outstanding: 20000, overdue: 0 }));
+    expect(sum(exp, "outstanding")).toBe(60000);
     expect(section(exp, "overdue-ageing").rows).toEqual([expect.objectContaining({ instalments: 1, amount: 10000 })]);
   });
 

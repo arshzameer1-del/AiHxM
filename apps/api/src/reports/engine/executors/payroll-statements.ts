@@ -177,7 +177,7 @@ export const F13 = listReport({
 });
 
 export const F14 = sqlReport({
-  description: "How salaries are spread across organisation units: people, lowest, median, average and highest monthly salary. Groups under 3 people are combined.",
+  description: "How salaries are spread across organisation units: people, lowest, median, average and highest monthly salary. Small groups are merged into Other only for users who see part of the company; HR admin sees every group.",
   filters: [DEPT, LOC, ETYPE],
   sensitivity: "sensitive",
   tables: ["employees", "employee_compensation", "org_units"],
@@ -186,12 +186,12 @@ export const F14 = sqlReport({
   columns: [col("label", "Organisation unit"), col("people", "People with a salary", "number"), col("lowest", "Lowest", "number"), col("median", "Median", "number"), col("average", "Average", "number"), col("highest", "Highest", "number"), col("total", "Total monthly salary", "number")],
   sql: (q) => `
     SELECT g.label, COUNT(*)::int AS people, MIN(g.salary) AS lowest, ROUND((PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY g.salary))::numeric, 0) AS median, ROUND(AVG(g.salary), 0) AS average, MAX(g.salary) AS highest, SUM(g.salary) AS total
-      FROM (SELECT CASE WHEN COUNT(*) OVER (PARTITION BY ${UNIT}) < 3 THEN '${OTHER}' ELSE ${UNIT} END AS label, ${SALARY_NOW(q)} AS salary
+      FROM (SELECT CASE WHEN COUNT(*) OVER (PARTITION BY ${UNIT}) < ${q.minGroup} THEN '${OTHER}' ELSE ${UNIT} END AS label, ${SALARY_NOW(q)} AS salary
               FROM employees e ${UNIT_JOIN} WHERE ${q.emp()} AND ${q.current()} AND ${q.area("e")}) g
      WHERE g.salary IS NOT NULL GROUP BY g.label ORDER BY total DESC, label`,
   chart: ({ rows }) => (rows.length ? barChart({ title: "Average monthly salary by organisation unit", unit: "PKR", rows, labelKey: "label", valueKey: "average" }) : null),
   kpis: ({ rows }) => [count("people", "People with a salary", sum(rows, "people")), count("total", "Total monthly salary (PKR)", round2(sum(rows, "total"))), count("groups", "Groups", rows.length)],
-  calculation: ["Uses each current employee's salary in force today. Median is the middle salary of the group. Groups with fewer than 3 people are combined so that no one person's pay can be read from a figure.", MONEY_NOTE],
+  calculation: ["Uses each current employee's salary in force today. Median is the middle salary of the group. Small groups are merged into Other only for users who see part of the company (a manager or a payroll-area limit); HR admin sees every group.", MONEY_NOTE],
 });
 
 export const F15 = sqlReport({
@@ -611,7 +611,7 @@ export const F27 = listReport({
 });
 
 export const F28 = sqlReport({
-  description: "Loans and advances in total by type: borrowers, principal, recovered, outstanding and overdue. Types with fewer than 3 borrowers are combined.",
+  description: "Loans and advances in total by type: borrowers, principal, recovered, outstanding and overdue. Small groups are merged into Other only for users who see part of the company (a manager or a payroll-area limit); HR admin sees every group.",
   sensitivity: "sensitive",
   filters: [DEPT, LOC, ETYPE],
   tables: ["employee_loans", "loan_types", "loan_schedules", "employees"],
@@ -619,7 +619,7 @@ export const F28 = sqlReport({
   tags: ["loans", "outstanding", "exposure"],
   columns: [col("label", "Loan type"), col("loans", "Active loans", "number"), col("borrowers", "Borrowers", "number"), col("principal", "Principal", "number"), col("recovered", "Recovered", "number"), col("outstanding", "Outstanding", "number"), col("recoveredPct", "Recovered (%)", "percent"), col("overdue", "Overdue instalments", "number")],
   sql: (q) => `
-    SELECT CASE WHEN g.borrowers < 3 THEN '${OTHER}' ELSE g.kind END AS label, SUM(g.loans)::int AS loans, SUM(g.borrowers)::int AS borrowers, SUM(g.principal) AS principal, SUM(g.recovered) AS recovered, SUM(g.outstanding) AS outstanding,
+    SELECT CASE WHEN g.borrowers < ${q.minGroup} THEN '${OTHER}' ELSE g.kind END AS label, SUM(g.loans)::int AS loans, SUM(g.borrowers)::int AS borrowers, SUM(g.principal) AS principal, SUM(g.recovered) AS recovered, SUM(g.outstanding) AS outstanding,
            CASE WHEN SUM(g.principal) > 0 THEN ROUND(SUM(g.recovered) * 100.0 / SUM(g.principal), 1) END AS "recoveredPct", SUM(g.overdue)::int AS overdue
       FROM (SELECT ${LOAN_KIND} AS kind, COUNT(*) AS loans, COUNT(DISTINCT l.employee_id) AS borrowers, SUM(l.principal_amount) AS principal, SUM(l.principal_amount - l.outstanding_balance) AS recovered, SUM(l.outstanding_balance) AS outstanding,
                    SUM((SELECT COUNT(*) FROM loan_schedules s WHERE s.loan_id = l.id AND s.status = 'scheduled' AND s.due_date < ${q.today})) AS overdue
@@ -627,7 +627,7 @@ export const F28 = sqlReport({
      GROUP BY 1 ORDER BY outstanding DESC NULLS LAST, label`,
   chart: ({ rows }) => (rows.length ? barChart({ title: "Outstanding balance by loan type", unit: "PKR", rows, labelKey: "label", valueKey: "outstanding" }) : null),
   kpis: ({ rows }) => [count("loans", "Active loans", sum(rows, "loans")), count("outstanding", "Outstanding (PKR)", round2(sum(rows, "outstanding"))), count("overdue", "Overdue instalments", sum(rows, "overdue"))],
-  calculation: ["Covers active and on-hold loans. Recovered is principal minus the outstanding balance. A loan type with fewer than 3 borrowers is combined so one person's loan cannot be read from it.", MONEY_NOTE],
+  calculation: ["Covers active and on-hold loans. Recovered is principal minus the outstanding balance. Small groups are merged into Other only for users who see part of the company (a manager or a payroll-area limit); HR admin sees every group.", MONEY_NOTE],
 });
 
 export const F29 = listReport({

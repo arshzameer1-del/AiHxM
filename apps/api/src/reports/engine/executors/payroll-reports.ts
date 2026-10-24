@@ -286,7 +286,7 @@ function costBy(o: { dimension: string; label: string; join: string; group: stri
       { key: "perPerson", label: "Employer cost per person paid", type: "number" },
     ],
     sql: (q) => `
-      SELECT CASE WHEN g.people < 3 AND g.label NOT LIKE 'No %' THEN 'Other (groups under 3 people combined)' ELSE g.label END AS label, SUM(g.people)::int AS people, ROUND(SUM(g.gross), 2) AS gross, ROUND(SUM(g.employer), 2) AS employer,
+      SELECT CASE WHEN g.people < ${q.minGroup} AND g.label NOT LIKE 'No %' THEN 'Other (groups under 3 people combined)' ELSE g.label END AS label, SUM(g.people)::int AS people, ROUND(SUM(g.gross), 2) AS gross, ROUND(SUM(g.employer), 2) AS employer,
              ROUND(SUM(g.employer) / NULLIF(SUM(g.people), 0), 2) AS "perPerson"
         FROM (
           SELECT ${o.label} AS label, COUNT(DISTINCT ps.employee_id) AS people, SUM(ps.gross_pay * ${o.weight}) AS gross, SUM(ps.employer_cost * ${o.weight}) AS employer
@@ -296,7 +296,7 @@ function costBy(o: { dimension: string; label: string; join: string; group: stri
        GROUP BY 1 ORDER BY employer DESC, label`,
     chart: ({ rows }) => barChart({ title: o.title, unit: "PKR", rows, labelKey: "label", valueKey: "employer", valueLabel: "Employer cost", max: 12 }),
     kpis: ({ rows }) => [count("employer", "Total employer cost", round2(sum(rows, "employer"))), count("gross", "Gross pay", round2(sum(rows, "gross"))), count("groups", `${o.dimension}s`, rows.length)],
-    calculation: [...o.calc, "A group with fewer than 3 people is merged into 'Other' so one person's pay cannot be read off. Employer cost is gross pay plus employer contributions. " + FINAL_NOTE, MONEY_NOTE],
+    calculation: [...o.calc, "Small groups are merged into Other only for users who see part of the company (a manager or a payroll-area limit); HR admin sees every group. Employer cost is gross pay plus employer contributions. " + FINAL_NOTE, MONEY_NOTE],
   });
 }
 
@@ -423,14 +423,14 @@ export const F08 = sqlReport({
       SELECT e.org_unit_id, SUM(ps.gross_pay) AS gross
         FROM payslips ps JOIN payroll_runs pr ON pr.id = ps.payroll_run_id JOIN employees e ON e.id = ps.employee_id
        WHERE ${RUN(q)} AND ${FINAL} AND ps.status <> 'voided' AND ${PERIOD(q)} AND ${q.dim(DEPT, "e.org_unit_id")} AND ${q.dim(LOC, "e.location_id")} GROUP BY 1)
-    SELECT CASE WHEN m.people < 3 AND m.unit NOT LIKE 'No %' THEN 'Other (groups under 3 people combined)' ELSE m.unit END AS unit, SUM(m.people)::int AS people, ROUND(SUM(m.amount), 2) AS amount,
+    SELECT CASE WHEN m.people < ${q.minGroup} AND m.unit NOT LIKE 'No %' THEN 'Other (groups under 3 people combined)' ELSE m.unit END AS unit, SUM(m.people)::int AS people, ROUND(SUM(m.amount), 2) AS amount,
            ROUND(SUM(m.amount) * 100.0 / NULLIF(SUM(m.gross), 0), 2) AS "grossShare"
       FROM (SELECT COALESCE(ou.name, 'No organisation unit set') AS unit, o.people, o.amount, g.gross
               FROM o LEFT JOIN g ON g.org_unit_id IS NOT DISTINCT FROM o.org_unit_id LEFT JOIN org_units ou ON ou.id = o.org_unit_id) m
      GROUP BY 1 ORDER BY amount DESC, unit`,
   chart: ({ rows }) => barChart({ title: "Overtime pay by unit", unit: "PKR", rows, labelKey: "unit", valueKey: "amount", valueLabel: "Overtime pay", max: 12 }),
   kpis: ({ rows }) => [count("amount", "Overtime pay", round2(sum(rows, "amount"))), count("people", "People paid overtime", sum(rows, "people"))],
-  calculation: ["Sums payroll component results that came from overtime records, on finalised runs in the range, by the unit the employee is in today. Units with fewer than 3 people are combined.", "Share of gross divides by all gross pay paid to that unit in the same runs. " + FINAL_NOTE, MONEY_NOTE],
+  calculation: ["Sums payroll component results that came from overtime records, on finalised runs in the range, by the unit the employee is in today. Small groups are merged into Other only for users who see part of the company (a manager or a payroll-area limit); HR admin sees every group.", "Share of gross divides by all gross pay paid to that unit in the same runs. " + FINAL_NOTE, MONEY_NOTE],
 });
 
 export const K07 = sqlReport({
@@ -507,7 +507,7 @@ export const K05 = sqlReport({
     { key: "avgGross", label: "Average gross pay per payslip", type: "number" },
   ],
   sql: (q) => `
-    SELECT CASE WHEN g.people < 3 AND g.unit NOT LIKE 'No %' THEN 'Other (groups under 3 people combined)' ELSE g.unit END AS unit, SUM(g.people)::int AS people, SUM(g.slips)::int AS payslips,
+    SELECT CASE WHEN g.people < ${q.minGroup} AND g.unit NOT LIKE 'No %' THEN 'Other (groups under 3 people combined)' ELSE g.unit END AS unit, SUM(g.people)::int AS people, SUM(g.slips)::int AS payslips,
            ROUND(SUM(g.cost) / NULLIF(SUM(g.slips), 0), 2) AS "avgCost", ROUND(SUM(g.gross) / NULLIF(SUM(g.slips), 0), 2) AS "avgGross"
       FROM (
         SELECT COALESCE(ou.name, 'No organisation unit set') AS unit, COUNT(DISTINCT ps.employee_id) AS people, COUNT(*) AS slips, SUM(ps.employer_cost) AS cost, SUM(ps.gross_pay) AS gross
@@ -520,7 +520,7 @@ export const K05 = sqlReport({
     const slips = sum(rows, "payslips");
     return [count("people", "People", sum(rows, "people")), { key: "avg", label: "Average employer cost per payslip", value: slips ? round2(rows.reduce((s, r) => s + num(r, "avgCost") * num(r, "payslips"), 0) / slips) : null, unit: "count" as const }];
   },
-  calculation: ["Averages employer cost (gross pay plus employer contributions) and gross pay over regular finalised payslips, by the unit each employee is in today.", "Units with fewer than 3 people are combined so an average cannot be traced to one person. Off-cycle runs are excluded. " + MONEY_NOTE],
+  calculation: ["Averages employer cost (gross pay plus employer contributions) and gross pay over regular finalised payslips, by the unit each employee is in today.", "Small groups are merged into Other only for users who see part of the company (a manager or a payroll-area limit); HR admin sees every group. Off-cycle runs are excluded. " + MONEY_NOTE],
 });
 
 // ---------------------------------------------------------------- K11 variance drivers
