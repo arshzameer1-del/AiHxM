@@ -357,7 +357,6 @@ export function WorkflowTemplatesPanel() {
   const [assignableUsers, setAssignableUsers] = useState<{ userAccountId: string | null; fullName: string }[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [configuring, setConfiguring] = useState<string | null>(null);
-  const [peopleFailed, setPeopleFailed] = useState(false);
   const [toggleError, setToggleError] = useState<string | null>(null);
 
   async function toggleActive(key: string, isActive: boolean) {
@@ -371,13 +370,11 @@ export function WorkflowTemplatesPanel() {
   }
 
   function load() {
-    // The list of people only feeds the "A specific person" picker, so its failure must not take the whole screen down.
-    Promise.all([api.listWorkflowTemplates(), api.listAssignableRoles(), api.listAssignableUsers().catch(() => null)])
-      .then(([t, r, u]) => {
+    Promise.all([api.listWorkflowTemplates(), api.getWorkflowApproverOptions()])
+      .then(([t, options]) => {
         setTemplates(t);
-        setRoles(r);
-        setAssignableUsers(u ?? []);
-        setPeopleFailed(u === null);
+        setRoles(options.roles);
+        setAssignableUsers(options.people);
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : "Could not load workflow templates."));
   }
@@ -395,9 +392,6 @@ export function WorkflowTemplatesPanel() {
         workflow template."
       </p>
 
-      {peopleFailed && (
-        <p className="text-xs text-warning">The list of people could not be loaded, so "A specific person" is unavailable for now. Role and manager approvers still work.</p>
-      )}
       {toggleError && <p className="text-xs text-danger">{toggleError}</p>}
 
       {KNOWN_WORKFLOWS.map((workflow) => {

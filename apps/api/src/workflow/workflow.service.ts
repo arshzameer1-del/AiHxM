@@ -16,12 +16,15 @@ import type {
   WorkflowFieldCondition,
   WorkflowInstanceView,
   WorkflowPriority,
+  WorkflowApproverOptions,
   WorkflowStepApprovalView,
   WorkflowStepInstanceView,
   WorkflowTemplate,
 } from "@aihxm/shared-types";
 
 const MANAGE_PERMISSION = "workflow_template.manage.all";
+// The built-in roles a workflow step can point at (same list System Admin can grant); a company's own active custom roles are added on top.
+const APPROVER_ROLE_KEYS = ["hr_admin", "line_manager", "employee_self_service", "ess_portal", "system_admin", "payroll_approver"];
 const PRIORITIES: WorkflowPriority[] = ["low", "normal", "high", "urgent"];
 
 // ---------------------------------------------------------------------------
@@ -438,6 +441,33 @@ export class WorkflowService {
         [claims.company_id, key]
       );
       return r.rows.map((v) => ({ versionNo: v.version_no, contentHash: v.content_hash, createdAt: toIso(v.created_at), definition: v.definition }));
+    });
+  }
+
+  /**
+   * BACKLOG56 - what the template editor needs to fill its pickers: the roles a step can point at and the
+   * people who can sign in. Gated by the SAME permission as editing templates, so whoever may configure
+   * workflows (a custom role holder included) needs nothing from System Admin's role-assignment screens.
+   */
+  async listApproverOptions(claims: RequestClaims): Promise<WorkflowApproverOptions> {
+    if (!claims.company_id) throw new ForbiddenException();
+    if (!(await this.rbac.can(claims, MANAGE_PERMISSION))) throw new ForbiddenException("Not permitted to manage workflow templates");
+    return this.db.withClaims(claims, async (client) => {
+      const roles = await client.query(
+        "SELECT id, key, name, description FROM roles WHERE key = ANY($1::text[]) OR (company_id = $2 AND is_system = false AND is_active) ORDER BY is_system DESC, key ASC",
+        [APPROVER_ROLE_KEYS, claims.company_id]
+      );
+      const people = await client.query(
+        `SELECT employee_number, first_name, last_name, user_account_id FROM employees
+          WHERE company_id = $1 AND user_account_id IS NOT NULL ORDER BY first_name ASC, last_name ASC`,
+        [claims.company_id]
+      );
+      return {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        roles: roles.rows.map((r: any) => ({ id: r.id, key: r.key, name: r.name, description: r.description ?? null })),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        people: people.rows.map((e: any) => ({ userAccountId: e.user_account_id, fullName: `${e.first_name} ${e.last_name}`, employeeNumber: e.employee_number })),
+      };
     });
   }
 

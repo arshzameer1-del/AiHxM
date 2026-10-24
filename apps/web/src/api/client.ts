@@ -433,6 +433,7 @@ import type {
   UserSessionView,
   VerticalPosition,
   WorkflowInstanceView,
+  WorkflowApproverOptions,
   WorkflowTemplate,
   WorkScheduleAssignmentRuleView,
   WorkScheduleDayView,
@@ -3310,6 +3311,8 @@ export const api = {
   // holds it too, but that's Phase 4 test scaffolding, never assigned to
   // a real company).
   listWorkflowTemplates: () => request<WorkflowTemplate[]>("/workflow/templates"),
+  // BACKLOG56 - approver pickers for the template editor, gated by workflow_template.manage.all alone.
+  getWorkflowApproverOptions: () => request<WorkflowApproverOptions>("/workflow/approver-options"),
 
   // Backs the workflow timeline on an Expense Management claim's detail
   // view (Part 2: "Expense detail includes... workflow timeline") — any

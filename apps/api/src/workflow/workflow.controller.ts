@@ -30,6 +30,12 @@ export class WorkflowController {
     return this.workflow.listTemplates(claims);
   }
 
+  // BACKLOG56 - pickers for the template editor; same permission as editing templates. Declared before `templates/:key`.
+  @Get("approver-options")
+  approverOptions(@CurrentClaims() claims: RequestClaims) {
+    return this.workflow.listApproverOptions(claims);
+  }
+
   @Get("templates/:key/versions")
   listVersions(@CurrentClaims() claims: RequestClaims, @Param("key") key: string) {
     return this.workflow.listTemplateVersions(claims, key);

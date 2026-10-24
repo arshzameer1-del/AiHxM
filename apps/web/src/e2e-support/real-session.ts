@@ -239,3 +239,27 @@ export async function loginToApp(page: Page, token: string, opts: { menuCollapse
   const phone = (page.viewportSize()?.width ?? 1280) < 768;
   await page.waitForSelector(phone ? 'button[aria-label="Open menu"]' : "#app-sidebar nav", { timeout: 10000 });
 }
+
+/**
+ * BACKLOG56 - a real session for a person whose ONLY extra access comes from a company custom role holding exactly
+ * `permissionKeys` (they also keep the basic employee self service role, like any employee). The role is made by the
+ * System Admin and handed over through the same endpoints the Roles & Permissions and Roles & Access screens use.
+ */
+export async function createCustomRoleSession(hrToken: string, systemAdminToken: string, permissionKeys: string[]): Promise<{ token: string; roleKey: string; roleId: string; employeeId: string }> {
+  const suffix = uniqueSuffix();
+  const call = async <T>(path: string, method: string, token: string, body?: unknown): Promise<T> => {
+    const res = await fetch(`${API_BASE_URL}${path}`, { method, headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: body ? JSON.stringify(body) : undefined });
+    const text = await res.text();
+    if (!res.ok) throw new Error(`${method} ${path} -> ${res.status}: ${text}`);
+    return (text ? JSON.parse(text) : {}) as T;
+  };
+  const me = await call<{ companySlug: string }>("/auth/me", "GET", hrToken);
+  const roleKey = `e2e_custom_${suffix.replace(/[^0-9]/g, "").slice(-10)}`;
+  const role = await call<{ id: string; key: string }>("/rbac/roles", "POST", systemAdminToken, { key: roleKey, name: `E2E custom ${suffix.slice(-6)}`, permissionKeys });
+  const employee = await call<{ id: string; employeeNumber: string }>("/employees", "POST", hrToken, { firstName: "E2E", lastName: "custom role", email: `e2e-custom-${suffix}@example.com` });
+  const password = "E2eTestPassw0rd!";
+  await call(`/employees/${employee.id}/account`, "POST", hrToken, { initialPassword: password, roleKeys: ["employee_self_service"] });
+  await call("/system-admin/role-assignments", "POST", systemAdminToken, { employeeId: employee.id, roleKey: role.key });
+  const login = await apiPost<MfaSetupRequired>("/auth/login/employee", { companySlug: me.companySlug, employeeNumber: employee.employeeNumber, password });
+  return { token: await completeMfaEnrollment(login), roleKey: role.key, roleId: role.id, employeeId: employee.id };
+}

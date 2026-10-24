@@ -5320,6 +5320,12 @@ export type RatingDistributionView = {
  * 0024_system_admin.sql's role description) and doesn't need one just to
  * see who exists and what access they already hold.
  */
+/** BACKLOG56 - what the workflow template editor offers as approvers: roles (built-in and custom) and people who can sign in. */
+export type WorkflowApproverOptions = {
+  roles: Role[];
+  people: Array<{ userAccountId: string; fullName: string; employeeNumber: string }>;
+};
+
 export type AssignableUserView = {
   employeeId: string;
   employeeNumber: string;
