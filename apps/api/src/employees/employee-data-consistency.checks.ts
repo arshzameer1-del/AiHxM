@@ -21,6 +21,11 @@ const LIVE = "e.employment_status <> 'terminated'";
 const PRIMARY_CONTACT = (types: string) =>
   `(SELECT c.value FROM employee_contacts c WHERE c.employee_id = e.id AND c.is_primary AND c.status = 'active' AND c.contact_type IN (${types}) ORDER BY CASE c.contact_type WHEN 'business_email' THEN 0 WHEN 'business_phone' THEN 0 ELSE 1 END LIMIT 1)`;
 
+/** The mandatory document types: HR Administration > Business Policies > Document Policy (the company default). */
+const REQUIRED_DOCS = `LATERAL (SELECT jsonb_array_elements_text(p.rules->'requiredDocumentTypes') AS document_type
+    FROM hr_business_policies p WHERE p.company_id = e.company_id AND p.policy_type = 'document' AND p.is_default AND p.is_active
+      AND jsonb_typeof(p.rules->'requiredDocumentTypes') = 'array')`;
+
 export const CONSISTENCY_CHECKS: ConsistencyCheck[] = [
   {
     id: "department_differs_from_org_unit",
@@ -278,5 +283,29 @@ export const CONSISTENCY_CHECKS: ConsistencyCheck[] = [
     where: `${LIVE} AND EXISTS (SELECT 1 FROM employee_family_members f WHERE f.employee_id = e.id AND f.status = 'active' AND f.is_beneficiary)
             AND COALESCE((SELECT SUM(f.beneficiary_share_percent) FROM employee_family_members f WHERE f.employee_id = e.id AND f.status = 'active' AND f.is_beneficiary), 0) <> 100`,
     detail: "'Shares total ' || COALESCE((SELECT SUM(f.beneficiary_share_percent) FROM employee_family_members f WHERE f.employee_id = e.id AND f.status = 'active' AND f.is_beneficiary), 0)::text || '%'",
+  },
+  {
+    id: "mandatory_document_missing",
+    label: "Mandatory document missing",
+    explanation: "The company lists this document type as mandatory, but no approved copy is on the employee's file.",
+    severity: "medium",
+    fixable: false,
+    where: `${LIVE} AND EXISTS (SELECT 1 FROM ${REQUIRED_DOCS} rd(document_type)
+              WHERE NOT EXISTS (SELECT 1 FROM employee_documents d WHERE d.employee_id = e.id AND d.document_type = rd.document_type AND d.review_status = 'approved'))`,
+    detail: `'Missing: ' || (SELECT string_agg(rd.document_type, ', ' ORDER BY rd.document_type) FROM ${REQUIRED_DOCS} rd(document_type)
+              WHERE NOT EXISTS (SELECT 1 FROM employee_documents d WHERE d.employee_id = e.id AND d.document_type = rd.document_type AND d.review_status = 'approved'))`,
+  },
+  {
+    id: "document_expired",
+    label: "A document on file has expired",
+    explanation: "The newest approved copy of this document type is past its expiry date and nothing in date replaces it.",
+    severity: "medium",
+    fixable: false,
+    where: `${LIVE} AND EXISTS (SELECT 1 FROM employee_documents d WHERE d.employee_id = e.id AND d.review_status = 'approved' AND d.expiry_date < CURRENT_DATE
+              AND NOT EXISTS (SELECT 1 FROM employee_documents n WHERE n.employee_id = e.id AND n.document_type = d.document_type AND n.review_status = 'approved'
+                              AND (n.expiry_date IS NULL OR n.expiry_date >= CURRENT_DATE)))`,
+    detail: `'Expired: ' || (SELECT string_agg(DISTINCT d.document_type, ', ') FROM employee_documents d WHERE d.employee_id = e.id AND d.review_status = 'approved' AND d.expiry_date < CURRENT_DATE
+              AND NOT EXISTS (SELECT 1 FROM employee_documents n WHERE n.employee_id = e.id AND n.document_type = d.document_type AND n.review_status = 'approved'
+                              AND (n.expiry_date IS NULL OR n.expiry_date >= CURRENT_DATE)))`,
   },
 ];

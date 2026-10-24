@@ -26,6 +26,7 @@ import { EmployeeSchemeAccountsPanel } from "../payroll/PayrollSettlementPanels"
 import { EmployeeAdditionalPaymentsPanel } from "./EmployeeAdditionalPaymentsPanel";
 import { SubEntityPanel } from "./subentities/SubEntityPanel";
 import { StatutoryIdsPanel } from "./StatutoryIdsPanel";
+import { EmployeeDocumentsPanel } from "./EmployeeDocumentsPanel";
 import {
   addressesConfig,
   assetsConfig,
@@ -69,7 +70,7 @@ function serviceText(joined: string | null | undefined, left: string | null | un
   return [years ? `${years} yr${years === 1 ? "" : "s"}` : "", rest ? `${rest} mo${rest === 1 ? "" : "s"}` : ""].filter(Boolean).join(" ");
 }
 
-const TABS = ["Overview", "Personal Details", "Contact & Address", "Family & Education", "Compensation & Assets", "Lifecycle Actions"] as const;
+const TABS = ["Overview", "Personal Details", "Contact & Address", "Family & Education", "Compensation & Assets", "Documents", "Lifecycle Actions"] as const;
 type Tab = (typeof TABS)[number];
 
 const EMPLOYMENT_TYPES: EmploymentType[] = ["permanent", "contract", "probation", "intern"];
@@ -328,6 +329,9 @@ export function EmployeeDetailPage() {
           <SubEntityPanel employeeId={employee.id} canManage={canManage} config={importantDatesConfig} />
         </>
       )}
+
+      {/* BACKLOG50: the document vault - upload with expiry, approve what the employee uploaded, mandatory checklist. */}
+      {tab === "Documents" && <EmployeeDocumentsPanel employeeId={employee.id} canManage={canManage} />}
 
       {/* Core Employee Enterprise Phase 10 — the 9 explicit lifecycle transactions. */}
       {tab === "Lifecycle Actions" &&

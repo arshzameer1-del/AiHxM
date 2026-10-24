@@ -4,6 +4,7 @@ import type { EmployeeChangeRequestStatus, EmployeeChangeRequestView } from "@ai
 import { api, ApiError } from "../../api/client";
 import { PageHeader, LoadingNote } from "../shared/PageChrome";
 import { formatDateTime } from "../shared/dates";
+import { PendingDocumentsInbox } from "./PendingDocumentsInbox";
 
 /**
  * BACKLOG48 - HR's inbox for the changes employees ask for on their own record (contact details, addresses, family,
@@ -88,6 +89,7 @@ export function EmployeeChangeRequestsPage() {
   return (
     <div className="max-w-3xl">
       <PageHeader title="Change Requests" subtitle="Changes employees asked for on their own record. Nothing changes until you approve." />
+      <PendingDocumentsInbox />
       <div className="flex gap-1 border-b border-black/10 mb-4">
         {FILTERS.map((f) => (
           <button

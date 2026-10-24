@@ -110,7 +110,19 @@ export class EmployeesController {
     @Body() dto: UploadEmployeeDocumentDto,
     @UploadedFile() file: Express.Multer.File
   ) {
-    return this.employees.addDocument(claims, id, dto.documentType, file);
+    return this.employees.addDocument(claims, id, dto.documentType, file, { expiryDate: dto.expiryDate, note: dto.note });
+  }
+
+  /** BACKLOG50 - an employee's own upload; waits as 'pending' until HR approves it. */
+  @Post(`${EMPLOYEE_ID}/documents/own`)
+  @UseInterceptors(FileInterceptor("file", { limits: { fileSize: 10 * 1024 * 1024 } }))
+  uploadOwnDocument(
+    @CurrentClaims() claims: RequestClaims,
+    @Param("id") id: string,
+    @Body() dto: UploadEmployeeDocumentDto,
+    @UploadedFile() file: Express.Multer.File
+  ) {
+    return this.employees.addOwnDocument(claims, id, dto.documentType, file, { expiryDate: dto.expiryDate, note: dto.note });
   }
 
   @Get(`${EMPLOYEE_ID}/documents`)

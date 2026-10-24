@@ -1,13 +1,15 @@
 import { LoadingNote } from "../shared/PageChrome";
 import { useSearchParams } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { FileText, Download, Mail, Phone, ChevronDown } from "lucide-react";
-import type { EmployeeDocumentView, EmployeeView, JobHistoryEntryView, MyPersonalDataView } from "@aihxm/shared-types";
+import { Mail, Phone, ChevronDown } from "lucide-react";
+import type { EmployeeView, JobHistoryEntryView, MyPersonalDataView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { EmployeeFields } from "./EmployeeFields";
 import { PersonalDataCard } from "./PersonalDataCard";
 import { StatutoryIdsPanel } from "./StatutoryIdsPanel";
+import { EmployeeDocumentsPanel } from "./EmployeeDocumentsPanel";
+import { ProfilePhoto } from "./ProfilePhoto";
 import { MyChangeRequestsPanel } from "./MyChangeRequestsPanel";
 import { MaritalStatusRequest } from "./MaritalStatusRequest";
 import { SubEntityPanel } from "./subentities/SubEntityPanel";
@@ -23,7 +25,7 @@ import {
 } from "./subentities/subEntityConfigs";
 import { PROFILE_TABS, profileTabFromParam, type ProfileTab } from "./profileTabs";
 import { OnboardingOffboardingSection } from "../onboarding-offboarding/OnboardingOffboardingSection";
-import { formatDay, localDayKey } from "../shared/dates";
+import { formatDay } from "../shared/dates";
 
 /**
  * The employee_self_service view of the same object `EmployeeDetailPage`
@@ -47,72 +49,6 @@ import { formatDay, localDayKey } from "../shared/dates";
  */
 const TABS = PROFILE_TABS;
 type Tab = ProfileTab;
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function DocumentsTab({ employeeId }: { employeeId: string }) {
-  const [documents, setDocuments] = useState<EmployeeDocumentView[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [downloadingId, setDownloadingId] = useState<string | null>(null);
-
-  useEffect(() => {
-    api
-      .listEmployeeDocuments(employeeId)
-      .then(setDocuments)
-      .catch((err) => setError(err instanceof ApiError ? err.message : "Could not load your documents."));
-  }, [employeeId]);
-
-  async function handleDownload(doc: EmployeeDocumentView) {
-    setDownloadingId(doc.id);
-    try {
-      await api.downloadEmployeeDocument(employeeId, doc.id, doc.fileName);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not download this document.");
-    } finally {
-      setDownloadingId(null);
-    }
-  }
-
-  if (error) return <div className="text-sm text-danger">{error}</div>;
-  if (documents === null) return <LoadingNote />;
-  if (documents.length === 0) {
-    return <div className="text-sm text-label-tertiary">No documents have been placed on your file yet.</div>;
-  }
-
-  return (
-    <div className="divide-y divide-black/5">
-      {documents.map((doc) => (
-        <div key={doc.id} className="py-3 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-9 h-9 rounded-lg bg-accent/10 text-accent flex items-center justify-center shrink-0">
-              <FileText size={16} strokeWidth={1.75} />
-            </div>
-            <div className="min-w-0">
-              <div className="text-sm font-medium truncate">{doc.fileName}</div>
-              <div className="text-xs text-label-tertiary capitalize">
-                {doc.documentType.replace(/_/g, " ")} · {formatBytes(doc.sizeBytes)} ·{" "}
-                {formatDay(localDayKey(doc.createdAt))}
-              </div>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => handleDownload(doc)}
-            disabled={downloadingId === doc.id}
-            className="flex items-center gap-1.5 text-sm font-medium text-accent hover:text-accent-dark disabled:opacity-50 shrink-0"
-          >
-            <Download size={15} strokeWidth={1.75} />
-            {downloadingId === doc.id ? "Downloading…" : "Download"}
-          </button>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 export function MyProfilePage() {
   const { identity } = useAuth();
@@ -155,9 +91,7 @@ export function MyProfilePage() {
     <div className="max-w-4xl">
       <section className="bg-card rounded-card p-5 shadow-sm mb-6">
         <div className="flex items-start gap-4">
-          <div className="w-14 h-14 rounded-full bg-accent/10 text-accent font-semibold text-lg flex items-center justify-center shrink-0">
-            {(employee.firstName[0] ?? "") + (employee.lastName[0] ?? "")}
-          </div>
+          <ProfilePhoto employeeId={employee.id} initials={(employee.firstName[0] ?? "") + (employee.lastName[0] ?? "")} />
           <div className="min-w-0 flex-1">
             <h1 className="text-xl font-bold tracking-tight truncate">
               {employee.firstName} {employee.lastName}
@@ -315,9 +249,7 @@ export function MyProfilePage() {
       )}
 
       {activeTab === "Documents" && (
-        <section className="bg-card rounded-card p-5 shadow-sm">
-          <DocumentsTab employeeId={employee.id} />
-        </section>
+        <EmployeeDocumentsPanel employeeId={employee.id} canManage={false} own />
       )}
 
       <MyChangeRequestsPanel />

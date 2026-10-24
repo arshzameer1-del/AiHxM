@@ -1,6 +1,7 @@
 import { assertValidCnic } from "../crypto/identifier-validation";
 import { sensitive } from "../crypto/sensitive-fields";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { isOwnEmployee } from "./employee-self-read";
 import type { PoolClient } from "pg";
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
@@ -78,14 +79,15 @@ const SENSITIVE_FIELDS: readonly string[] = Array.from(
 const TENANT_ROLE_KEYS = ["hr_admin", "line_manager", "employee_self_service", "ess_portal", "system_admin", "payroll_approver"] as const;
 // Roles only a System Admin hands out at login creation (the first System Admin of a company is the one exception).
 const PRIVILEGED_LOGIN_ROLE_KEYS = ["system_admin", "payroll_approver"] as const;
-const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024; // 10MB — see addDocument()'s doc comment.
+export const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;
+const MAX_PENDING_SELF_UPLOADS = 10; // 10MB — see addDocument()'s doc comment.
 
 // Tenant Management gap-fill Phase 1 item #10 — Storage quota enforcement.
 // A conservative allowlist covering what an HR document vault realistically
 // holds (ID/contract scans, certificates, photos, offer letters, payroll
 // spreadsheets) — executables, scripts, and archives are never acceptable
 // here regardless of a tenant's quota headroom.
-const ALLOWED_DOCUMENT_MIME_TYPES = new Set([
+export const ALLOWED_DOCUMENT_MIME_TYPES = new Set([
   "application/pdf",
   "image/jpeg",
   "image/png",
@@ -144,8 +146,11 @@ function rowToEmployee(row: any): Record<string, unknown> {
   };
 }
 
+const docDay = (v: unknown): string | null => (v == null ? null : v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10));
+const docStamp = (v: unknown): string | null => (v == null ? null : v instanceof Date ? v.toISOString() : String(v));
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function rowToDocument(row: any): EmployeeDocumentView {
+export function rowToDocument(row: any): EmployeeDocumentView {
   return {
     id: row.id,
     employeeId: row.employee_id,
@@ -153,7 +158,12 @@ function rowToDocument(row: any): EmployeeDocumentView {
     fileName: row.file_name,
     mimeType: row.mime_type,
     sizeBytes: row.size_bytes,
-    createdAt: row.created_at?.toISOString ? row.created_at.toISOString() : row.created_at,
+    createdAt: docStamp(row.created_at) as string,
+    expiryDate: docDay(row.expiry_date),
+    note: row.note ?? null,
+    reviewStatus: row.review_status ?? "approved",
+    reviewNote: row.review_note ?? null,
+    reviewedAt: docStamp(row.reviewed_at),
   };
 }
 
@@ -1170,18 +1180,66 @@ export class EmployeesService {
     claims: RequestClaims,
     employeeId: string,
     documentType: string,
-    file: { originalname: string; mimetype: string; buffer: Buffer; size: number }
+    file: { originalname: string; mimetype: string; buffer: Buffer; size: number },
+    extra: { expiryDate?: string | null; note?: string | null } = {}
   ): Promise<EmployeeDocumentView> {
     await this.requireModuleAndManagePermission(claims);
+    return this.storeDocument(claims, employeeId, documentType, file, { ...extra, reviewStatus: "approved" });
+  }
+
+  /**
+   * BACKLOG50 - an employee uploads a document to their OWN file (a renewed CNIC, a degree certificate, a new photo).
+   * It is stored as 'pending' and only counts once HR approves it. Uses employee.view.self, the same door as the rest
+   * of My Profile, so no new permission is needed. At most MAX_PENDING_SELF_UPLOADS can wait at once.
+   */
+  async addOwnDocument(
+    claims: RequestClaims,
+    employeeId: string,
+    documentType: string,
+    file: { originalname: string; mimetype: string; buffer: Buffer; size: number },
+    extra: { expiryDate?: string | null; note?: string | null } = {}
+  ): Promise<EmployeeDocumentView> {
+    if (!(await this.entitlements.isModuleEnabled(claims, MODULE_KEY))) throw new NotFoundException();
+    if (!(await isOwnEmployee(this.db, this.rbac, claims, employeeId))) {
+      throw new ForbiddenException("You can only upload documents to your own file");
+    }
+    if (!file) throw new BadRequestException("Choose a file to upload");
+    if (documentType === "photograph" && !["image/jpeg", "image/png", "image/webp"].includes(file.mimetype)) {
+      throw new BadRequestException("A profile photo must be a JPEG, PNG or WEBP image");
+    }
+    const pending = await this.db.withClaims(claims, async (client) => {
+      const r = await client.query(
+        "SELECT COUNT(*)::int AS n FROM employee_documents WHERE employee_id = $1 AND review_status = 'pending'",
+        [employeeId]
+      );
+      return r.rows[0].n as number;
+    });
+    if (pending >= MAX_PENDING_SELF_UPLOADS) {
+      throw new BadRequestException(`You already have ${MAX_PENDING_SELF_UPLOADS} documents waiting for HR. Wait for a decision before uploading more.`);
+    }
+    return this.storeDocument(claims, employeeId, documentType, file, { ...extra, reviewStatus: "pending" });
+  }
+
+  private async storeDocument(
+    claims: RequestClaims,
+    employeeId: string,
+    documentType: string,
+    file: { originalname: string; mimetype: string; buffer: Buffer; size: number },
+    opts: { expiryDate?: string | null; note?: string | null; reviewStatus: "approved" | "pending" }
+  ): Promise<EmployeeDocumentView> {
+    if (!file) throw new BadRequestException("Choose a file to upload");
     if (file.size > MAX_DOCUMENT_BYTES) {
       throw new BadRequestException(`File exceeds the ${MAX_DOCUMENT_BYTES / (1024 * 1024)}MB limit`);
     }
-    // Tenant Management gap-fill Phase 1 item #10 — file-type allowlist.
+    // Tenant Management gap-fill Phase 1 item #10 - file-type allowlist.
     if (!ALLOWED_DOCUMENT_MIME_TYPES.has(file.mimetype)) {
       throw new BadRequestException(
         `"${file.mimetype}" isn't an allowed file type for employee documents. Allowed types: PDF, JPEG, PNG, WEBP, Word, and Excel files.`
       );
     }
+    const expiry = opts.expiryDate ? String(opts.expiryDate).slice(0, 10) : null;
+    if (expiry && !/^\d{4}-\d{2}-\d{2}$/.test(expiry)) throw new BadRequestException("Expiry date must be a valid date");
+    const note = opts.note ? String(opts.note).trim().slice(0, 500) || null : null;
 
     return this.db.withClaims(claims, async (client) => {
       const employee = await client.query("SELECT id, company_id FROM employees WHERE id = $1", [employeeId]);
@@ -1189,12 +1247,7 @@ export class EmployeesService {
       const companyId = employee.rows[0].company_id;
       await this.validateDocumentType(client, companyId, documentType);
 
-      // Tenant Management gap-fill Phase 1 item #10 — storage quota
-      // enforcement. UsageService.getSummary() (TM-027/028) already
-      // SURFACES storageUsedMb/storageQuotaMb from this exact same
-      // SUM(size_bytes) query; this is the first place that actually
-      // BLOCKS an upload once the tenant would go over quota, rather than
-      // just reporting the number after the fact.
+      // Tenant Management gap-fill Phase 1 item #10 - storage quota enforcement (blocks the upload once over quota).
       const quotaRow = await client.query(
         `SELECT c.storage_quota_mb,
                 (SELECT COALESCE(SUM(size_bytes), 0) FROM employee_documents WHERE company_id = c.id) AS used_bytes
@@ -1214,10 +1267,11 @@ export class EmployeesService {
 
       const result = await client.query(
         `INSERT INTO employee_documents
-           (company_id, employee_id, document_type, file_name, mime_type, size_bytes, storage_path, uploaded_by_user_account_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           (company_id, employee_id, document_type, file_name, mime_type, size_bytes, storage_path, uploaded_by_user_account_id,
+            expiry_date, note, review_status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          RETURNING *`,
-        [companyId, employeeId, documentType, file.originalname, file.mimetype, stored.sizeBytes, stored.storagePath, claims.sub]
+        [companyId, employeeId, documentType, file.originalname, file.mimetype, stored.sizeBytes, stored.storagePath, claims.sub, expiry, note, opts.reviewStatus]
       );
       return rowToDocument(result.rows[0]);
     });
@@ -1225,14 +1279,21 @@ export class EmployeesService {
 
   async listDocuments(claims: RequestClaims, employeeId: string): Promise<EmployeeDocumentView[]> {
     // Viewing the vault's contents follows the same view-scope rules as
-    // the employee record itself — if you can't see the employee, you
+    // the employee record itself - if you can't see the employee, you
     // can't see what's attached to them either.
     await this.get(claims, employeeId);
+    const canManage = await this.rbac.can(claims, MANAGE_PERMISSION);
     return this.db.withClaims(claims, async (client) => {
-      const result = await client.query(
-        "SELECT * FROM employee_documents WHERE employee_id = $1 ORDER BY created_at ASC",
-        [employeeId]
-      );
+      // HR sees everything, including documents waiting for review. Anyone else (the employee, a manager) sees the approved
+      // documents plus whatever they uploaded themselves.
+      const result = canManage
+        ? await client.query("SELECT * FROM employee_documents WHERE employee_id = $1 ORDER BY created_at ASC", [employeeId])
+        : await client.query(
+            `SELECT * FROM employee_documents
+              WHERE employee_id = $1 AND (review_status = 'approved' OR uploaded_by_user_account_id = $2)
+              ORDER BY created_at ASC`,
+            [employeeId, claims.sub]
+          );
       return result.rows.map(rowToDocument);
     });
   }
@@ -1243,13 +1304,18 @@ export class EmployeesService {
     documentId: string
   ): Promise<{ buffer: Buffer; fileName: string; mimeType: string }> {
     await this.get(claims, employeeId);
+    const canManage = await this.rbac.can(claims, MANAGE_PERMISSION);
     const row = await this.db.withClaims(claims, async (client) => {
       const result = await client.query(
         "SELECT * FROM employee_documents WHERE id = $1 AND employee_id = $2",
         [documentId, employeeId]
       );
       if (result.rowCount === 0) throw new NotFoundException("Document not found");
-      return result.rows[0];
+      const doc = result.rows[0];
+      if (!canManage && doc.review_status !== "approved" && doc.uploaded_by_user_account_id !== claims.sub) {
+        throw new NotFoundException("Document not found");
+      }
+      return doc;
     });
     const buffer = await this.fileStorage.read(row.storage_path);
     return { buffer, fileName: row.file_name, mimeType: row.mime_type };

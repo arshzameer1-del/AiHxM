@@ -211,7 +211,10 @@ import type {
   DecideExpenseClaimRequest,
   DecideLeaveRequestRequest,
   DecideOfferResponse,
+  EmployeeDocumentChecklist,
   EmployeeDocumentView,
+  PendingEmployeeDocumentView,
+  RequiredEmployeeDocumentTypes,
   ExpenseClaimView,
   ExpenseReceiptView,
   EmployeeGroupPolicyAssignmentView,
@@ -1756,6 +1759,50 @@ export const api = {
   // pattern as `downloadBackup`/`downloadDisbursementFile` below.
   listEmployeeDocuments: (employeeId: string) =>
     request<EmployeeDocumentView[]>(`/employees/${employeeId}/documents`),
+
+  // --- BACKLOG50: document upload (HR / employee's own), review inbox, checklist, photo ---
+  async uploadEmployeeDocument(
+    employeeId: string,
+    input: { file: File; documentType: string; expiryDate?: string; note?: string; own: boolean }
+  ): Promise<EmployeeDocumentView> {
+    const token = getToken();
+    const formData = new FormData();
+    formData.append("documentType", input.documentType);
+    if (input.expiryDate) formData.append("expiryDate", input.expiryDate);
+    if (input.note) formData.append("note", input.note);
+    formData.append("file", input.file);
+    const res = await fetch(`${API_PREFIX}/employees/${employeeId}/documents${input.own ? "/own" : ""}`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    });
+    invalidateResponseCache();
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = await res.json();
+        message = Array.isArray(body.message) ? body.message.join(", ") : (body.message ?? message);
+      } catch {
+        // not JSON - keep the generic message
+      }
+      throw new ApiError(res.status, message);
+    }
+    return res.json();
+  },
+  getEmployeeDocumentChecklist: (employeeId: string) => request<EmployeeDocumentChecklist>(`/employees/${employeeId}/document-checklist`),
+  listPendingEmployeeDocuments: () => request<PendingEmployeeDocumentView[]>("/employees/documents/pending"),
+  reviewEmployeeDocument: (documentId: string, decision: "approved" | "rejected", note?: string) =>
+    request<EmployeeDocumentView>(`/employees/documents/${documentId}/review`, { method: "POST", body: JSON.stringify({ decision, note }) }),
+  getRequiredEmployeeDocuments: () => request<RequiredEmployeeDocumentTypes>("/employees/documents/required"),
+  saveRequiredEmployeeDocuments: (documentTypes: string[]) =>
+    request<RequiredEmployeeDocumentTypes>("/employees/documents/required", { method: "PUT", body: JSON.stringify({ documentTypes }) }),
+  /** A blob: URL for the employee's approved profile photo, or null when there is none. */
+  async getEmployeePhotoUrl(employeeId: string): Promise<string | null> {
+    const token = getToken();
+    const res = await fetch(`${API_PREFIX}/employees/${employeeId}/photo`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    if (!res.ok) return null;
+    return URL.createObjectURL(await res.blob());
+  },
 
   async downloadEmployeeDocument(employeeId: string, documentId: string, fileName: string): Promise<void> {
     const token = getToken();

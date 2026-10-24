@@ -2645,6 +2645,8 @@ export type MyOrgChart = {
   truncated: boolean;
 };
 
+export type EmployeeDocumentReviewStatus = "approved" | "pending" | "rejected";
+
 export type EmployeeDocumentView = {
   id: string;
   employeeId: string;
@@ -2653,7 +2655,39 @@ export type EmployeeDocumentView = {
   mimeType: string;
   sizeBytes: number;
   createdAt: string;
+  /** BACKLOG50 - yyyy-mm-dd, null when the document does not expire. */
+  expiryDate: string | null;
+  note: string | null;
+  /** BACKLOG50 - HR uploads are approved at once; an employee's own upload waits for HR. */
+  reviewStatus: EmployeeDocumentReviewStatus;
+  reviewNote: string | null;
+  reviewedAt: string | null;
 };
+
+/** BACKLOG50 - a document waiting for HR to approve or reject (the HR inbox). */
+export type PendingEmployeeDocumentView = EmployeeDocumentView & {
+  employeeNumber: string;
+  employeeName: string;
+};
+
+export type EmployeeDocumentChecklistStatus = "on_file" | "pending" | "missing" | "expired";
+
+export type EmployeeDocumentChecklistItem = {
+  documentType: string;
+  status: EmployeeDocumentChecklistStatus;
+  documentId: string | null;
+  expiryDate: string | null;
+};
+
+export type EmployeeDocumentChecklist = {
+  employeeId: string;
+  items: EmployeeDocumentChecklistItem[];
+  /** Mandatory types that are on file and in date, e.g. 3 of 5. */
+  completeCount: number;
+  requiredCount: number;
+};
+
+export type RequiredEmployeeDocumentTypes = { documentTypes: string[] };
 
 // Core Employee Enterprise Phase 10 (0088_core_employee_lifecycle_transactions.sql)
 // widened this vocabulary with the 6 values below ('demotion' through

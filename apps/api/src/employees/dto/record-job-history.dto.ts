@@ -1,4 +1,4 @@
-import { IsDateString, IsIn, IsOptional, IsString } from "class-validator";
+import { IsDateString, IsIn, IsOptional, IsString, MaxLength } from "class-validator";
 import type { JobHistoryEventType } from "@aihxm/shared-types";
 
 export class RecordJobHistoryDto {
@@ -28,4 +28,14 @@ export class RecordJobHistoryDto {
 export class UploadEmployeeDocumentDto {
   @IsString()
   documentType!: string;
+
+  /** BACKLOG50 - yyyy-mm-dd; leave out for documents that do not expire. */
+  @IsOptional()
+  @IsString()
+  expiryDate?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  note?: string;
 }
