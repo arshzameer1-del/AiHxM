@@ -174,3 +174,28 @@ test("an administrator reads the built-in rules, tests a draft rule and saves it
   await timing.getByRole("button", { name: "Save timing rules" }).click();
   await expect(timing.getByRole("status")).toContainText("Saved (version 2)");
 });
+
+test("an administrator sets a leave type's supporting document and limits in its Settings, and the request form follows", async ({ page }) => {
+  await loginToApp(page, hrToken);
+  await page.goto("/app/admin?tab=leavetypes");
+  await page.getByRole("button", { name: /Edit settings of Annual/i }).click();
+  const form = page.getByTestId("edit-annual-form");
+  await expect(form).toBeVisible();
+  await form.getByLabel("A supporting document must be attached").check();
+  await form.getByLabel("Only when the request is longer than (days)").fill("3");
+  await form.getByLabel("Longest request (days)").fill("10");
+  await form.getByLabel("Unused balance carries into the next year").check();
+  await form.getByLabel("Carry-forward limit (days)").fill("5");
+  await form.getByRole("button", { name: "Save settings" }).click();
+  await expect(page.getByTestId("edit-annual-form")).toHaveCount(0);
+  await expect(page.getByText(/document over 3d/i).first()).toBeVisible();
+  await expect(page.getByText(/up to 10 day\(s\) at a time/i).first()).toBeVisible();
+  await expect(page.getByText(/carries forward/i).first()).toBeVisible();
+
+  // the employee's form now asks for the document on a longer request
+  await loginToApp(page, staffToken);
+  await page.goto("/app/leave/new");
+  const request = page.getByRole("form", { name: "Create leave request" });
+  await request.locator("#leave-type").selectOption("annual");
+  await expect(request.locator("#leave-attachment")).toBeVisible();
+});
