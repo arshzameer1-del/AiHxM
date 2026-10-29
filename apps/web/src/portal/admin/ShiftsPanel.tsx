@@ -5,6 +5,7 @@ import { api, ApiError } from "../../api/client";
 import { WeeklyPatternEditor } from "./WeeklyPatternEditor";
 import { WorkScheduleAssignmentRulesPanel } from "./WorkScheduleAssignmentRulesPanel";
 import { SchedulePreview } from "./SchedulePreview";
+import { RotationEditor } from "./RotationEditor";
 import { formatClock, formatDay, todayIso } from "../shared/dates";
 
 function describeError(err: unknown): string {
@@ -24,6 +25,7 @@ type ShiftFormValue = {
   graceMinutesLate: string;
   graceMinutesEarly: string;
   isDefault: boolean;
+  scheduleType: ShiftView["scheduleType"];
 };
 
 function emptyForm(initial?: ShiftView): ShiftFormValue {
@@ -35,6 +37,7 @@ function emptyForm(initial?: ShiftView): ShiftFormValue {
     graceMinutesLate: String(initial?.graceMinutesLate ?? 0),
     graceMinutesEarly: String(initial?.graceMinutesEarly ?? 0),
     isDefault: initial?.isDefault ?? false,
+    scheduleType: initial?.scheduleType ?? "fixed",
   };
 }
 
@@ -64,6 +67,7 @@ function ShiftForm({
         graceMinutesLate: Number(value.graceMinutesLate) || 0,
         graceMinutesEarly: Number(value.graceMinutesEarly) || 0,
         isDefault: value.isDefault,
+        scheduleType: value.scheduleType,
       };
       const saved = initial ? await api.updateShift(initial.id, payload) : await api.createShift(payload);
       onSaved(saved);
@@ -84,6 +88,21 @@ function ShiftForm({
           onChange={(e) => setValue((v) => ({ ...v, name: e.target.value }))}
           className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
         />
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium mb-1" htmlFor="shift-type">Schedule type</label>
+        <select
+          id="shift-type"
+          value={value.scheduleType}
+          onChange={(e) => setValue((v) => ({ ...v, scheduleType: e.target.value as ShiftView["scheduleType"] }))}
+          className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+        >
+          <option value="fixed">Fixed hours</option>
+          <option value="flexible">Flexible hours</option>
+          <option value="rotating">Rotating (cycles between other shifts week by week)</option>
+          {!["fixed", "flexible", "rotating"].includes(value.scheduleType) && <option value={value.scheduleType}>{value.scheduleType}</option>}
+        </select>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
@@ -170,7 +189,7 @@ function ShiftForm({
   );
 }
 
-function ShiftRow({ shift, onChanged }: { shift: ShiftView; onChanged: () => void }) {
+function ShiftRow({ shift, onChanged, allShifts }: { shift: ShiftView; onChanged: () => void; allShifts: ShiftView[] }) {
   const [editing, setEditing] = useState(false);
   const [showPattern, setShowPattern] = useState(false);
 
@@ -198,6 +217,9 @@ function ShiftRow({ shift, onChanged }: { shift: ShiftView; onChanged: () => voi
             <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold bg-accent/10 text-accent">
               Company default
             </span>
+          )}
+          {shift.scheduleType === "rotating" && (
+            <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold bg-black/5 text-label-secondary">Rotating</span>
           )}
           {shift.crossesMidnight && (
             <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold bg-black/5 text-label-secondary">
@@ -230,7 +252,8 @@ function ShiftRow({ shift, onChanged }: { shift: ShiftView; onChanged: () => voi
           <div className="font-mono">{shift.graceMinutesEarly} min</div>
         </div>
       </div>
-      {showPattern && <WeeklyPatternEditor shiftId={shift.id} />}
+      {shift.scheduleType === "rotating" && <RotationEditor shift={shift} allShifts={allShifts} />}
+      {shift.scheduleType !== "rotating" && showPattern && <WeeklyPatternEditor shiftId={shift.id} />}
     </div>
   );
 }
@@ -399,7 +422,7 @@ export function ShiftsPanel() {
       )}
 
       {shifts.map((shift) => (
-        <ShiftRow key={shift.id} shift={shift} onChanged={load} />
+        <ShiftRow key={shift.id} shift={shift} onChanged={load} allShifts={shifts} />
       ))}
 
       <AssignShiftForm shifts={shifts} onAssigned={load} />

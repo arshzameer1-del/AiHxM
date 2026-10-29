@@ -4546,6 +4546,10 @@ export type AttendanceRecordView = {
   shiftName: string | null;
   /** True when nobody clocked out and the system set the clock-out to the shift end time at the end of the day. */
   autoClosed?: boolean;
+  /** Location checks (attendance depth): where the punch was relative to the allowed places, and anything that looked wrong. */
+  geofenceResult?: GeofenceResult;
+  locationFlags?: LocationFlag[];
+  hasSelfie?: boolean;
 };
 
 export type ClockInRequest = {
@@ -4553,6 +4557,12 @@ export type ClockInRequest = {
   source: AttendanceSource;
   gpsLat?: number;
   gpsLng?: number;
+  /** Horizontal accuracy the device reported, in metres. */
+  gpsAccuracyM?: number;
+  /** True when the app knows the position was supplied by a mock-location tool (only a native wrapper can know this). */
+  mockLocation?: boolean;
+  /** A small JPEG as a data URL ("data:image/jpeg;base64,..."). */
+  selfie?: string;
 };
 
 export type ClockOutRequest = {
@@ -10385,4 +10395,96 @@ export type SaveRequisitionCareersRequest = {
   location?: string | null;
   employmentType?: CareersEmploymentType | null;
   closesOn?: string | null;
+};
+
+
+// ---- Attendance depth: rotating shifts, location checks, penalty rules
+export type GeofenceMode = "off" | "flag" | "block";
+export type SelfieMode = "off" | "optional" | "required";
+export type GeofenceResult = "not_applicable" | "inside" | "outside" | "unknown";
+/** Rule-based signals, not proof: a person can be flagged by a poor signal and a careful spoofer may not be. */
+export type LocationFlag = "low_accuracy" | "impossible_travel" | "perfect_accuracy" | "reported_mock_location";
+
+export type AttendanceGeofenceView = { id: string; name: string; latitude: number; longitude: number; radiusM: number; isActive: boolean };
+export type SaveAttendanceGeofenceRequest = { name: string; latitude: number; longitude: number; radiusM: number; isActive?: boolean };
+
+export type AttendancePolicyView = {
+  geofenceMode: GeofenceMode;
+  selfieMode: SelfieMode;
+  blockSuspectLocation: boolean;
+  maxGpsAccuracyM: number | null;
+  maxTravelSpeedKmh: number;
+  geofences: AttendanceGeofenceView[];
+};
+export type UpdateAttendancePolicyRequest = Partial<Omit<AttendancePolicyView, "geofences">>;
+
+/** What the clock-in screen needs to know: which extras to collect. Safe for any signed-in employee. */
+export type AttendanceClockPolicyView = { geofenceMode: GeofenceMode; selfieMode: SelfieMode; hasGeofences: boolean };
+
+export type LocationExceptionView = {
+  recordId: string;
+  employeeId: string;
+  employeeNumber: string;
+  employeeName: string;
+  workDate: string;
+  clockInAt: string;
+  geofenceResult: GeofenceResult;
+  geofenceName: string | null;
+  flags: LocationFlag[];
+  gpsLat: number | null;
+  gpsLng: number | null;
+  gpsAccuracyM: number | null;
+  hasSelfie: boolean;
+};
+
+export type ShiftRotationView = {
+  shiftId: string;
+  shiftName: string;
+  cycleWeeks: number;
+  anchorDate: string;
+  weeks: Array<{ weekNo: number; memberShiftId: string; memberShiftName: string }>;
+};
+export type SaveShiftRotationRequest = {
+  cycleWeeks: number;
+  anchorDate: string;
+  weeks: Array<{ weekNo: number; memberShiftId: string }>;
+};
+
+export type AttendancePenaltyTrigger = "late" | "early_leave";
+export type AttendancePenaltyType = "leave_deduction" | "salary_deduction";
+export type AttendancePenaltyRuleView = {
+  id: string;
+  name: string;
+  triggerKind: AttendancePenaltyTrigger;
+  minMinutes: number;
+  everyN: number;
+  penaltyType: AttendancePenaltyType;
+  leaveType: string | null;
+  penaltyDays: number | null;
+  penaltyAmount: number | null;
+  isActive: boolean;
+};
+export type SaveAttendancePenaltyRuleRequest = {
+  name: string;
+  triggerKind: AttendancePenaltyTrigger;
+  minMinutes: number;
+  everyN: number;
+  penaltyType: AttendancePenaltyType;
+  leaveType?: string | null;
+  penaltyDays?: number | null;
+  penaltyAmount?: number | null;
+  isActive?: boolean;
+};
+export type AttendancePenaltyRowView = {
+  ruleId: string;
+  ruleName: string;
+  employeeId: string;
+  employeeNumber: string;
+  employeeName: string;
+  occurrences: number;
+  units: number;
+  penaltyDays: number | null;
+  penaltyAmount: number | null;
+  applicationId: string | null;
+  status: "pending" | "applied" | "reversed";
 };

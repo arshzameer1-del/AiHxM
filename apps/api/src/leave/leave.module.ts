@@ -13,6 +13,9 @@ import { AttendanceDevicesService } from "./attendance-devices.service";
 import { TimesheetsService } from "./timesheets.service";
 import { AttendanceOpsController, DeviceIngestController } from "./attendance-ops.controller";
 import { DeviceKeyGuard } from "./device-key.guard";
+import { AttendancePolicyService } from "./attendance-policy.service";
+import { AttendancePolicyController } from "./attendance-policy.controller";
+import { FileStorageModule } from "../file-storage/file-storage.module";
 import { AttendanceService } from "./attendance.service";
 import { AttendanceAutoCloseService } from "./attendance-auto-close.service";
 import { AttendanceAutoCloseScheduler } from "./attendance-auto-close.scheduler";
@@ -48,9 +51,10 @@ import { EffectiveDatingModule } from "../effective-dating/effective-dating.modu
     WorkflowModule,
     ShiftsModule,
     EffectiveDatingModule,
+    FileStorageModule,
   ],
-  controllers: [LeaveController, AttendanceOpsController, DeviceIngestController],
-  providers: [LeaveRequestsService, LeaveTypesService, LeaveLedgerService, LeaveDurationSettingsService, LeaveValidationRulesService, LeaveRequestValidationService, LeaveAccrualService, LeaveYearEndService, AttendanceEvaluationService, AttendanceDevicesService, TimesheetsService, DeviceKeyGuard, AttendanceService, AttendanceAutoCloseService, AttendanceAutoCloseScheduler, AttendanceCorrectionsService, OvertimeService, WorkProfileService, OnDutyService],
-  exports: [LeaveRequestsService, LeaveTypesService, LeaveLedgerService, LeaveDurationSettingsService, LeaveValidationRulesService, LeaveAccrualService, LeaveYearEndService, AttendanceEvaluationService, AttendanceDevicesService, TimesheetsService, AttendanceService, AttendanceAutoCloseService, AttendanceCorrectionsService, OvertimeService, WorkProfileService, OnDutyService],
+  controllers: [LeaveController, AttendanceOpsController, DeviceIngestController, AttendancePolicyController],
+  providers: [LeaveRequestsService, LeaveTypesService, LeaveLedgerService, LeaveDurationSettingsService, LeaveValidationRulesService, LeaveRequestValidationService, LeaveAccrualService, LeaveYearEndService, AttendanceEvaluationService, AttendanceDevicesService, TimesheetsService, DeviceKeyGuard, AttendanceService, AttendancePolicyService, AttendanceAutoCloseService, AttendanceAutoCloseScheduler, AttendanceCorrectionsService, OvertimeService, WorkProfileService, OnDutyService],
+  exports: [LeaveRequestsService, LeaveTypesService, LeaveLedgerService, LeaveDurationSettingsService, LeaveValidationRulesService, LeaveAccrualService, LeaveYearEndService, AttendanceEvaluationService, AttendanceDevicesService, TimesheetsService, AttendanceService, AttendancePolicyService, AttendanceAutoCloseService, AttendanceCorrectionsService, OvertimeService, WorkProfileService, OnDutyService],
 })
 export class LeaveModule {}

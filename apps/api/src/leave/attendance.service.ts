@@ -8,6 +8,7 @@ import { AuditService } from "../audit/audit.service";
 import { WorkScheduleResolutionService } from "../shifts/work-schedule-resolution.service";
 import { AttendanceAutoCloseService, AUTO_CLOSED_STATUS } from "./attendance-auto-close.service";
 import { localParts } from "./attendance-evaluation.service";
+import { AttendancePolicyService } from "./attendance-policy.service";
 import type { AttendanceRecordView, ClockInRequest, ClockOutRequest, ResolvedWorkScheduleView } from "@aihxm/shared-types";
 
 const LEAVE_MODULE_KEY = "leave" as const;
@@ -65,6 +66,9 @@ async function rowToRecord(
     status,
     shiftName,
     autoClosed: row.derived_status === AUTO_CLOSED_STATUS,
+    geofenceResult: row.geofence_result ?? "not_applicable",
+    locationFlags: row.location_flags ?? [],
+    hasSelfie: Boolean(row.selfie_path),
   };
 }
 
@@ -86,7 +90,9 @@ export class AttendanceService {
     private readonly entitlements: EntitlementsService,
     private readonly audit: AuditService,
     private readonly workSchedule: WorkScheduleResolutionService,
-    private readonly autoClose: AttendanceAutoCloseService
+    private readonly autoClose: AttendanceAutoCloseService,
+    // Location checks (attendance depth): optional so positional spec constructions keep working.
+    private readonly policy?: AttendancePolicyService
   ) {}
 
   async clockIn(claims: RequestClaims, input: ClockInRequest): Promise<AttendanceRecordView> {
@@ -144,18 +150,27 @@ export class AttendanceService {
       const now = new Date();
       const schedule = await this.workSchedule.resolve(client, employee.id, localParts(now, DEFAULT_SCHEDULE_TIMEZONE).date);
       const workDate = localParts(now, schedule.timezone ?? DEFAULT_SCHEDULE_TIMEZONE).date;
+      // Location checks (each is off until the company turns it on). A blocked clock-in throws here, before anything is written.
+      const where = this.policy ? await this.policy.assess(client, employee.company_id, employee.id, input, now) : null;
       const result = await client.query(
-        `INSERT INTO attendance_records (company_id, employee_id, employee_number, source, gps_lat, gps_lng, shift_id, work_date)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        `INSERT INTO attendance_records (company_id, employee_id, employee_number, source, gps_lat, gps_lng, shift_id, work_date, gps_accuracy_m, geofence_result, geofence_id, location_flags)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
          RETURNING *`,
-        [employee.company_id, employee.id, input.employeeNumber, input.source, input.gpsLat ?? null, input.gpsLng ?? null, schedule.scheduleId, workDate]
+        [
+          employee.company_id, employee.id, input.employeeNumber, input.source, input.gpsLat ?? null, input.gpsLng ?? null, schedule.scheduleId, workDate,
+          input.gpsAccuracyM ?? null, where?.geofenceResult ?? "not_applicable", where?.geofenceId ?? null, where?.flags ?? [],
+        ]
       );
+      if (where?.selfie && this.policy) {
+        const path = await this.policy.storeSelfie(employee.company_id, employee.id, where.selfie);
+        result.rows[0] = (await client.query("UPDATE attendance_records SET selfie_path = $2, selfie_mime = 'image/jpeg' WHERE id = $1 RETURNING *", [result.rows[0].id, path])).rows[0];
+      }
 
       await this.audit.record(client, claims, {
         companyId: employee.company_id,
         action: "attendance.clock_in",
         target: result.rows[0].id,
-        metadata: { source: input.source },
+        metadata: { source: input.source, geofence: where?.geofenceResult ?? "not_applicable", flags: where?.flags ?? [] },
       });
 
       return rowToRecord(client, this.workSchedule, result.rows[0]);

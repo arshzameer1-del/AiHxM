@@ -1,4 +1,4 @@
-import { IsIn, IsLatitude, IsLongitude, IsOptional, IsString, MinLength } from "class-validator";
+import { IsBoolean, IsIn, IsLatitude, IsLongitude, IsNumber, IsOptional, IsString, Max, MaxLength, Min, MinLength } from "class-validator";
 import type { AttendanceSource } from "@aihxm/shared-types";
 
 export class ClockInDto {
@@ -20,4 +20,19 @@ export class ClockInDto {
   @IsOptional()
   @IsLongitude()
   gpsLng?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100000)
+  gpsAccuracyM?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  mockLocation?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(90000)
+  selfie?: string;
 }

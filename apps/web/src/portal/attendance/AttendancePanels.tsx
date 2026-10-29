@@ -2,7 +2,7 @@ import { LoadingNote } from "../shared/PageChrome";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Clock } from "lucide-react";
-import type { AttendanceCorrectionRequestView, AttendanceRecordView, EmployeeView } from "@aihxm/shared-types";
+import type { AttendanceClockPolicyView, AttendanceCorrectionRequestView, AttendanceRecordView, ClockInRequest, EmployeeView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { AttendanceCorrectionForm } from "./AttendanceCorrectionForm";
 import { SapSection } from "../shared/FormSections";
@@ -14,6 +14,7 @@ import { minutesText, runningText } from "./attendanceDays";
 import { MyAttendanceCard } from "./AttendanceCards";
 import { summariseShift } from "./scheduleText";
 import { useMyAttendance } from "./useMyAttendance";
+import { selfieFromFile } from "./selfie";
 
 /**
  * Pages of the Time & Attendance module. Each is one task on its own page (the launchpad tiles link here):
@@ -38,6 +39,18 @@ function useAttendance(employeeId: string, refreshKey: number) {
   return { employee, attendance, corrections, error };
 }
 
+/** The device's position, or null when it is refused or unavailable (the server then decides whether that blocks the clock-in). */
+function currentPosition(): Promise<{ latitude: number; longitude: number; accuracy: number } | null> {
+  return new Promise((resolve) => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) return resolve(null);
+    navigator.geolocation.getCurrentPosition(
+      (p) => resolve({ latitude: p.coords.latitude, longitude: p.coords.longitude, accuracy: p.coords.accuracy }),
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  });
+}
+
 function useNow(active: boolean): Date {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
@@ -59,6 +72,14 @@ export function ClockPanel({ employeeId, refreshKey, onChanged }: { employeeId: 
   const [employeeError, setEmployeeError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [clockError, setClockError] = useState<string | null>(null);
+  // Location checks and selfies are the company's choice: only ask the person for what the company uses.
+  const [clockPolicy, setClockPolicy] = useState<AttendanceClockPolicyView | null>(null);
+  const [selfie, setSelfie] = useState<string | null>(null);
+  const [selfieError, setSelfieError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.getAttendanceClockPolicy().then(setClockPolicy).catch(() => setClockPolicy(null));
+  }, []);
 
   useEffect(() => {
     api.getEmployee(employeeId).then(setEmployee).catch((err) => setEmployeeError(describeError(err)));
@@ -80,7 +101,16 @@ export function ClockPanel({ employeeId, refreshKey, onChanged }: { employeeId: 
     setClockError(null);
     try {
       if (kind === "out") await api.clockOut({ employeeNumber: employee.employeeNumber });
-      else await api.clockIn({ employeeNumber: employee.employeeNumber, source: "manual" });
+      else {
+        const input: ClockInRequest = { employeeNumber: employee.employeeNumber, source: "manual" };
+        if (clockPolicy && clockPolicy.geofenceMode !== "off" && clockPolicy.hasGeofences) {
+          const here = await currentPosition();
+          if (here) Object.assign(input, { source: "gps", gpsLat: here.latitude, gpsLng: here.longitude, gpsAccuracyM: here.accuracy });
+        }
+        if (clockPolicy && clockPolicy.selfieMode !== "off" && selfie) input.selfie = selfie;
+        await api.clockIn(input);
+        setSelfie(null);
+      }
       data.reload();
       onChanged();
     } catch (err) {
@@ -114,6 +144,30 @@ export function ClockPanel({ employeeId, refreshKey, onChanged }: { employeeId: 
             {shift.hours && <div className="text-sm tabular-nums mt-0.5" data-testid="shift-hours">{shift.hours}</div>}
             {shift.detail && <div className="text-xs text-label-secondary mt-0.5">{shift.detail}</div>}
           </div>
+
+          {clockPolicy && clockPolicy.selfieMode !== "off" && canClockIn && (
+            <div className="rounded-lg border border-black/5 px-4 py-3 space-y-1.5" data-testid="selfie-step">
+              <label className="block text-sm font-medium" htmlFor="clock-selfie">Selfie {clockPolicy.selfieMode === "required" ? "(required to clock in)" : "(optional)"}</label>
+              <input
+                id="clock-selfie"
+                type="file"
+                accept="image/*"
+                capture="user"
+                className="text-sm"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  setSelfieError(null);
+                  if (!file) { setSelfie(null); return; }
+                  try { setSelfie(await selfieFromFile(file)); } catch (err) { setSelfie(null); setSelfieError(err instanceof Error ? err.message : "Could not use this photo."); }
+                }}
+              />
+              {selfie && <img src={selfie} alt="Your selfie" className="h-16 rounded" />}
+              {selfieError && <p className="text-xs text-danger" role="alert">{selfieError}</p>}
+            </div>
+          )}
+          {clockPolicy && clockPolicy.geofenceMode !== "off" && clockPolicy.hasGeofences && canClockIn && (
+            <p className="text-xs text-label-secondary" data-testid="location-step">Your company checks where you clock in from. Allow location access when your browser asks.</p>
+          )}
 
           <div className="grid grid-cols-2 gap-3" data-testid="clock-buttons">
             <div className="flex flex-col items-stretch gap-1.5">

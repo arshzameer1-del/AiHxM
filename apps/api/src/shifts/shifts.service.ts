@@ -1,3 +1,4 @@
+import { ShiftRotationsService } from "./shift-rotations.service";
 import { localToday } from "../common/local-date";
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import type { PoolClient } from "pg";
@@ -739,6 +740,12 @@ export class ShiftsService {
       row = fallback.rows[0];
       assignmentId = "default";
       assignmentSource = "default";
+    }
+
+    // A rotating schedule is a container: swap in the member shift that the rotation puts on this date.
+    if (row.schedule_type === "rotating") {
+      const member = await ShiftRotationsService.memberFor(client, row.shift_row_id ?? row.id ?? row.shift_id, dateIso);
+      if (member) row = member;
     }
 
     return {

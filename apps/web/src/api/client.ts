@@ -3,6 +3,17 @@ import { createResponseCache, isCacheablePath } from "./responseCache";
 import { WARM_READS_BY_ROLE } from "./warmReads";
 import { createForegroundGate } from "./foregroundGate";
 import type {
+  AttendanceClockPolicyView,
+  AttendanceGeofenceView,
+  AttendancePenaltyRowView,
+  AttendancePenaltyRuleView,
+  AttendancePolicyView,
+  LocationExceptionView,
+  SaveAttendanceGeofenceRequest,
+  SaveAttendancePenaltyRuleRequest,
+  SaveShiftRotationRequest,
+  ShiftRotationView,
+  UpdateAttendancePolicyRequest,
   CareersJobView,
   CareersPageView,
   RequisitionCareersView,
@@ -3365,6 +3376,37 @@ export const api = {
   },
   deleteCandidateDocument: (candidateId: string, documentId: string) =>
     request<void>(`/candidates/${candidateId}/documents/${documentId}`, { method: "DELETE" }),
+  // --- Attendance depth: rotations, location checks, penalty rules ---
+  getShiftRotation: (shiftId: string) => request<ShiftRotationView | null>(`/shifts/${shiftId}/rotation`),
+  saveShiftRotation: (shiftId: string, input: SaveShiftRotationRequest) =>
+    request<ShiftRotationView>(`/shifts/${shiftId}/rotation`, { method: "PUT", body: JSON.stringify(input) }),
+  removeShiftRotation: (shiftId: string) => request<void>(`/shifts/${shiftId}/rotation`, { method: "DELETE" }),
+  getAttendancePolicy: () => request<AttendancePolicyView>("/attendance-policy"),
+  updateAttendancePolicy: (input: UpdateAttendancePolicyRequest) =>
+    request<AttendancePolicyView>("/attendance-policy", { method: "PUT", body: JSON.stringify(input) }),
+  getAttendanceClockPolicy: () => request<AttendanceClockPolicyView>("/attendance-policy/clock"),
+  createAttendanceGeofence: (input: SaveAttendanceGeofenceRequest) =>
+    request<AttendanceGeofenceView>("/attendance-policy/geofences", { method: "POST", body: JSON.stringify(input) }),
+  updateAttendanceGeofence: (id: string, input: SaveAttendanceGeofenceRequest) =>
+    request<AttendanceGeofenceView>(`/attendance-policy/geofences/${id}`, { method: "PUT", body: JSON.stringify(input) }),
+  deleteAttendanceGeofence: (id: string) => request<void>(`/attendance-policy/geofences/${id}`, { method: "DELETE" }),
+  listLocationExceptions: (from: string, to: string) => request<LocationExceptionView[]>(`/attendance-policy/exceptions?from=${from}&to=${to}`),
+  async fetchAttendanceSelfie(recordId: string): Promise<string> {
+    const token = getToken();
+    const res = await fetch(`${API_PREFIX}/attendance-policy/selfies/${recordId}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    if (!res.ok) throw new ApiError(res.status, res.status === 403 ? "You are not allowed to see this selfie." : "No selfie for this clock-in.");
+    return URL.createObjectURL(await res.blob());
+  },
+  listAttendancePenaltyRules: () => request<AttendancePenaltyRuleView[]>("/attendance-penalties/rules"),
+  createAttendancePenaltyRule: (input: SaveAttendancePenaltyRuleRequest) =>
+    request<AttendancePenaltyRuleView>("/attendance-penalties/rules", { method: "POST", body: JSON.stringify(input) }),
+  updateAttendancePenaltyRule: (id: string, input: SaveAttendancePenaltyRuleRequest) =>
+    request<AttendancePenaltyRuleView>(`/attendance-penalties/rules/${id}`, { method: "PUT", body: JSON.stringify(input) }),
+  deleteAttendancePenaltyRule: (id: string) => request<void>(`/attendance-penalties/rules/${id}`, { method: "DELETE" }),
+  previewAttendancePenalties: (month: string) => request<AttendancePenaltyRowView[]>(`/attendance-penalties/preview?month=${month}`),
+  applyAttendancePenalty: (input: { ruleId: string; employeeId: string; month: string }) =>
+    request<AttendancePenaltyRowView>("/attendance-penalties/apply", { method: "POST", body: JSON.stringify(input) }),
+  reverseAttendancePenalty: (applicationId: string) => request<void>(`/attendance-penalties/${applicationId}/reverse`, { method: "POST" }),
   // --- Careers page: HR side, then the public side (no session, no token) ---
   listCareersRequisitions: () => request<RequisitionCareersView[]>("/recruitment/careers"),
   saveRequisitionCareers: (requisitionId: string, input: SaveRequisitionCareersRequest) =>

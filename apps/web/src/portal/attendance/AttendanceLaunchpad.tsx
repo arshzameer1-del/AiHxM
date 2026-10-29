@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CalendarCheck, ClipboardList, Clock, FileClock, Hourglass, House, Timer, Users } from "lucide-react";
+import { CalendarCheck, ClipboardList, Clock, FileClock, Hourglass, House, MapPinCheck, Timer, Users } from "lucide-react";
 import { useAuth } from "../../auth/AuthContext";
 import { api } from "../../api/client";
 import { useModuleContext } from "../shared/ModuleContext";
@@ -49,6 +49,10 @@ export function AttendanceLaunchpad() {
 
   if (identity?.roleKeys.includes("line_manager")) {
     manage.push({ to: "/app/attendance/team", title: "Team Attendance", description: "How your team did over the last 14 days", icon: Users, testId: "tile-team-attendance" });
+  }
+
+  if (identity?.roleKeys.includes("hr_admin")) {
+    manage.push({ to: "/app/attendance/rules", title: "Attendance Rules", description: "Location checks, selfies and lateness penalties", icon: MapPinCheck, testId: "tile-attendance-rules" });
   }
 
   return (

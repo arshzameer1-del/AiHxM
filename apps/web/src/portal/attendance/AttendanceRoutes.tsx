@@ -9,6 +9,7 @@ import { useMyAttendance } from "./useMyAttendance";
 import { MyTimesheet } from "./MyTimesheet";
 import { TeamAttendancePage } from "./TeamAttendancePage";
 import { WorkAwayApprovals, WorkAwayPanel } from "./WorkAwayRequests";
+import { AttendanceRulesPage } from "./AttendanceRulesPage";
 
 /**
  * Time & Attendance is its own module: it opens on tiles and every tile is its own page.
@@ -22,6 +23,7 @@ import { WorkAwayApprovals, WorkAwayPanel } from "./WorkAwayRequests";
  *   /app/attendance/work-away        work-from-home and on-duty requests
  *   /app/attendance/work-away-approvals  those requests waiting for the signed-in approver
  *   /app/attendance/team             how the signed-in manager's reports did (Line Manager)
+ *   /app/attendance/rules            location checks, selfies, clock-in review and penalty rules (HR Admin)
  *
  * Which actions exist is decided by the roles plus the server; the client only chooses what to show.
  */
@@ -39,6 +41,7 @@ export function AttendanceRoutes() {
         <Route path="work-away" element={<WorkAwayPage />} />
         <Route path="work-away-approvals" element={<WorkAwayApprovalsPage />} />
         <Route path="team" element={<TeamAttendancePage />} />
+        <Route path="rules" element={<AttendanceRulesPage />} />
       </Route>
     </Routes>
   );
