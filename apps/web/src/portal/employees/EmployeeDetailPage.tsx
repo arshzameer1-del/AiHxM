@@ -47,6 +47,7 @@ import {
 } from "./subentities/subEntityConfigs";
 import { formatDay } from "../shared/dates";
 import { useTheme } from "../../theme/useTheme";
+import { hasStandardLook } from "../../theme/theme";
 import { ProfileHero } from "../shared/ProfileHero";
 
 /**
@@ -166,7 +167,7 @@ export function EmployeeDetailPage() {
 
   return (
     <div className="max-w-4xl">
-      {theme === "onexd" ? (
+      {hasStandardLook(theme) ? (
         <div className="mb-5">
           <ProfileHero
             name={`${employee.firstName} ${employee.lastName}`}

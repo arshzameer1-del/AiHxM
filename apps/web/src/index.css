@@ -971,3 +971,21 @@ html[dir="rtl"] input[type="date"] {
   direction: ltr;
   text-align: end;
 }
+
+/* AiHxM Menu Bar (data-nav="dropdown", on top of the Standard look): a light top bar like a classic HR suite, with the menu as a drop-down list. */
+:root[data-nav="dropdown"] .app-topbar {
+  --c-card: 255 255 255;
+  --c-surface: 246 243 244;
+  --c-border: 230 223 227;
+  --c-accent: 113 99 158;
+  --c-label-primary: 44 32 33;
+  --c-label-secondary: 98 86 90;
+  --c-label-tertiary: 140 128 133;
+  border-color: rgb(230 223 227);
+  box-shadow: 0 1px 0 rgb(230 223 227);
+}
+:root[data-nav="dropdown"] .app-topbar input,
+:root[data-nav="dropdown"] .app-topbar > div:first-child > button[aria-label] {
+  border-radius: 999px;
+}
+:root[data-nav="dropdown"] #hamburger-menu .rail-ic { width: 2rem; height: 2rem; }

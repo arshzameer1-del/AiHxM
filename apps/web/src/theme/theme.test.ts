@@ -48,3 +48,18 @@ test("storage that throws never breaks the theme", () => {
   assert.equal(applyTheme("boostfactor", broken, root), "boostfactor");
   assert.equal(root.dataset.theme, "boostfactor");
 });
+
+test("the menu-bar theme is the Standard look with the menu on top, and is remembered under its own key", () => {
+  const storage = fakeStorage();
+  const root = { dataset: {} as Record<string, string | undefined> };
+  assert.equal(isThemeKey("menubar"), true);
+  assert.equal(applyTheme("menubar", storage, root), "menubar");
+  assert.equal(root.dataset.theme, "onexd");
+  assert.equal(root.dataset.nav, "dropdown");
+  assert.equal(currentTheme(root), "menubar");
+  assert.equal(readStoredTheme(storage), "menubar");
+  // Switching back to Standard puts the side menu back.
+  assert.equal(applyTheme("onexd", storage, root), "onexd");
+  assert.equal(root.dataset.nav, "side");
+  assert.equal(currentTheme(root), "onexd");
+});

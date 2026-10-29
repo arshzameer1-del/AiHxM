@@ -33,6 +33,8 @@ import { hueOf } from "../components/shell/hue";
 import { RAIL_GROUP_CHILDREN_CLASS, railChildClass, railContainerClass, railLinkClassFor } from "../components/shell/sidebarTheme";
 import { MobileMenuButton, SidebarToggle } from "../components/shell/SidebarToggle";
 import { useSidebar } from "../components/shell/useSidebar";
+import { HamburgerNav } from "../components/shell/HamburgerNav";
+import { useTheme } from "../theme/useTheme";
 
 const ROLE_LABELS: Record<TenantRoleKey, string> = {
   hr_admin: "HR Admin",
@@ -581,6 +583,8 @@ export function PortalLayout() {
   }, [identity?.email, navKey, roleKeys.join(","), entryLoading]);
 
   const sidebar = useSidebar();
+  // "AiHxM Menu Bar" theme: no side menu; the same entries are a three-line drop-down list in the top bar.
+  const menuBar = useTheme() === "menubar";
   // Escape closes the phone drawer; Ctrl/Cmd+B collapses or widens the menu on a computer (not while typing).
   const { drawer, closeDrawer, toggle: toggleMenu } = sidebar;
   useEffect(() => {
@@ -644,8 +648,8 @@ export function PortalLayout() {
       {impersonation && <ImpersonationBanner impersonation={impersonation} endImpersonation={endImpersonation} />}
 
       <div className="relative flex flex-1 min-h-0">
-        {sidebar.visible && !sidebar.narrow && menu}
-        {sidebar.drawer && (
+        {!menuBar && sidebar.visible && !sidebar.narrow && menu}
+        {!menuBar && sidebar.drawer && (
           <>
             <div className="fixed inset-0 z-30 bg-black/25" onClick={sidebar.closeDrawer} aria-hidden="true" />
             <div className="fixed inset-y-0 start-0 z-40 flex">{menu}</div>
@@ -660,9 +664,20 @@ export function PortalLayout() {
             onLogout={logout}
             accountPath="/app/account"
             avatarUrl={myPhoto}
-            leading={sidebar.narrow ? <MobileMenuButton open={sidebar.drawer} onToggle={sidebar.toggle} /> : null}
+            leading={
+              menuBar ? (
+                <>
+                  <HamburgerNav items={navItems} />
+                  <span className="hidden sm:block shrink-0 me-2" data-testid="menubar-brand">
+                    <PortalMark companySlug={identity?.companySlug ?? null} companyName={identity?.companyName ?? null} />
+                  </span>
+                </>
+              ) : sidebar.narrow ? (
+                <MobileMenuButton open={sidebar.drawer} onToggle={sidebar.toggle} />
+              ) : null
+            }
           />
-          <main className="flex-1 min-w-0 app-main px-4 py-5 sm:px-8 sm:py-8 max-w-5xl overflow-y-auto">
+          <main className={`flex-1 min-w-0 app-main px-4 py-5 sm:px-8 sm:py-8 overflow-y-auto ${menuBar ? "max-w-6xl w-full mx-auto" : "max-w-5xl"}`}>
             <Outlet />
           </main>
         </div>

@@ -7,17 +7,30 @@
  *    cards). The stored key stays "onexd" so choices saved earlier keep working.
  *  - "enterprise": the AiHxM Enterprise Master Design System (dark sidebar, #2563EB).
  *  - "boostfactor": the iOS-style look of the BoostFactor prototype (white sidebar, #007AFF, pill buttons).
+ *  - "menubar": the AiHxM Standard colours with no side menu: a light top bar with a three-line button that opens the whole menu as a
+ *    drop-down list. On the document it is `data-theme="onexd"` plus `data-nav="dropdown"`, so every Standard style keeps working.
  */
-export type ThemeKey = "enterprise" | "boostfactor" | "onexd";
+export type ThemeKey = "enterprise" | "boostfactor" | "onexd" | "menubar";
 
 export const THEMES: ReadonlyArray<{ key: ThemeKey; label: string; hint: string }> = [
   { key: "onexd", label: "AiHxM Standard", hint: "Purple top bar, warm light, rounded" },
+  { key: "menubar", label: "AiHxM Menu Bar", hint: "Top bar with a three-line drop-down menu, no side menu" },
   { key: "enterprise", label: "AiHxM Enterprise", hint: "Dark sidebar, blue accent" },
   { key: "boostfactor", label: "BoostFactor", hint: "Light, iOS style, pill buttons" },
 ];
 
 export const DEFAULT_THEME: ThemeKey = "onexd";
 export const THEME_STORAGE_KEY = "aihxm.theme";
+
+/** The look the CSS is written for: the menu-bar theme is the Standard look with the menu moved to the top. */
+export function visualTheme(theme: ThemeKey): Exclude<ThemeKey, "menubar"> {
+  return theme === "menubar" ? "onexd" : theme;
+}
+
+function stamp(root: RootLike, theme: ThemeKey) {
+  root.dataset.theme = visualTheme(theme);
+  root.dataset.nav = theme === "menubar" ? "dropdown" : "side";
+}
 
 type StorageLike = Pick<Storage, "getItem" | "setItem">;
 type RootLike = { dataset: Record<string, string | undefined> };
@@ -51,7 +64,7 @@ export function readStoredTheme(storage: StorageLike | null = defaultStorage()):
 /** Puts the theme on the document and remembers it. Returns the theme that is now active. */
 export function applyTheme(theme: ThemeKey, storage: StorageLike | null = defaultStorage(), root: RootLike | null = defaultRoot()): ThemeKey {
   const next = isThemeKey(theme) ? theme : DEFAULT_THEME;
-  if (root) root.dataset.theme = next;
+  if (root) stamp(root, next);
   try {
     storage?.setItem(THEME_STORAGE_KEY, next);
   } catch {
@@ -60,15 +73,21 @@ export function applyTheme(theme: ThemeKey, storage: StorageLike | null = defaul
   return next;
 }
 
+/** True for the two themes that use the Standard look (purple, rounded, tinted icon chips). */
+export function hasStandardLook(theme: ThemeKey): boolean {
+  return theme === "onexd" || theme === "menubar";
+}
+
 /** Called once before the first render so there is no flash of the other theme. */
 export function initTheme(): ThemeKey {
   const theme = readStoredTheme();
   const root = defaultRoot();
-  if (root) root.dataset.theme = theme;
+  if (root) stamp(root, theme);
   return theme;
 }
 
 export function currentTheme(root: RootLike | null = defaultRoot()): ThemeKey {
   const value = root?.dataset.theme;
-  return isThemeKey(value) ? value : DEFAULT_THEME;
+  if (value === "onexd" && root?.dataset.nav === "dropdown") return "menubar";
+  return isThemeKey(value) && value !== "menubar" ? value : DEFAULT_THEME;
 }

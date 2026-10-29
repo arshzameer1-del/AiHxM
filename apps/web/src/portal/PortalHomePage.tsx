@@ -30,6 +30,7 @@ import type {
 } from "@aihxm/shared-types";
 import { useAuth } from "../auth/AuthContext";
 import { useTheme } from "../theme/useTheme";
+import { hasStandardLook } from "../theme/theme";
 import { hueOf } from "../components/shell/hue";
 import { WorkspaceHero } from "./WorkspaceHero";
 import { ActionCentre } from "./ActionCentre";
@@ -413,7 +414,7 @@ export function PortalHomePage() {
 
   return (
     <div>
-      {theme === "onexd" ? (
+      {hasStandardLook(theme) ? (
         <div className="mb-6">
           <WorkspaceHero fullName={fullName} companyName={companyName} email={identity.email} employeeId={identity.employeeId} />
         </div>

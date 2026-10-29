@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { useTheme } from "../../theme/useTheme";
+import { hasStandardLook } from "../../theme/theme";
 import { formatTime } from "../../portal/shared/dates";
 import { useMyAttendance } from "../../portal/attendance/useMyAttendance";
 import { ATTENDANCE_CHANGED_EVENT } from "../../portal/attendance/attendanceEvents";
@@ -10,7 +11,7 @@ import { ATTENDANCE_CHANGED_EVENT } from "../../portal/attendance/attendanceEven
 export function StatusPill() {
   const theme = useTheme();
   const { identity } = useAuth();
-  if (theme !== "onexd" || !identity?.employeeId) return null;
+  if (!hasStandardLook(theme) || !identity?.employeeId) return null;
   return <StatusPillInner employeeId={identity.employeeId} />;
 }
 

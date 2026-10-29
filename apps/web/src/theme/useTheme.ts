@@ -7,7 +7,7 @@ export function useTheme(): ThemeKey {
   useEffect(() => {
     if (typeof MutationObserver === "undefined") return;
     const observer = new MutationObserver(() => setTheme(currentTheme()));
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-nav"] });
     setTheme(currentTheme());
     return () => observer.disconnect();
   }, []);
