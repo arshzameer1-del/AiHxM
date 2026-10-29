@@ -26,6 +26,7 @@ const BINDABLE_TABLES = new Set([
   "employee_offboarding",
   "performance_reviews",
   "timesheets",
+  "travel_requests",
 ]);
 
 export async function submitToEngineIfConfigured(

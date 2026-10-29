@@ -18,6 +18,7 @@ import {
   Wallet,
   BookOpenCheck,
   Laptop,
+  Plane,
   Receipt,
   GraduationCap,
   LayoutGrid,
@@ -230,6 +231,7 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[], p
   // Leave entry just above it.
   if (hasModule("expense") && roleKeys.length > 0) {
     items.push({ to: "/app/expenses", label: "Expenses", icon: Receipt });
+    items.push({ to: "/app/travel", label: "Business Travel", icon: Plane });
   }
 
   // ESS build-out (2026-10, Part 2 category 7) — course_enrollment.view.self/

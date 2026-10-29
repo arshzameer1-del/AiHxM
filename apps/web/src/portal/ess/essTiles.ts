@@ -9,6 +9,7 @@ import {
   IdCard,
   Landmark,
   Laptop,
+  Plane,
   ListChecks,
   MapPin,
   Megaphone,
@@ -84,6 +85,7 @@ export function buildEssTileGroups(enabledModules: readonly ModuleKey[]): EssTil
   hcm.push(soon("My Online Selections", "Manage my online selections", ListChecks));
 
   const more: TileSpec[] = [];
+  if (has("expense")) more.push({ to: "/app/travel", title: "My Business Travel", description: "Ask to travel, advances and settlement", icon: Plane });
   if (has("expense")) more.push({ to: "/app/expenses", title: "My Expenses", description: "Submit and track expense claims", icon: Receipt });
   if (has("learning")) more.push({ to: "/app/learning", title: "My Learning", description: "Courses and progress", icon: GraduationCap });
   if (has("performance")) more.push({ to: "/app/performance", title: "My Performance", description: "Goals, feedback and reviews", icon: Target });

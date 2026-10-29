@@ -300,6 +300,9 @@ const AssetRegisterPage = lazy(() =>
 const MyAssetsPage = lazy(() =>
   import("./portal/ess/MyAssetsPage").then((m) => ({ default: m.MyAssetsPage })),
 );
+const TravelPage = lazy(() =>
+  import("./portal/travel/TravelPage").then((m) => ({ default: m.TravelPage })),
+);
 const LeavePage = lazy(() =>
   import("./portal/leave/LeaveRoutes").then((m) => ({ default: m.LeaveRoutes })),
 );
@@ -462,6 +465,7 @@ export default function App() {
                   <Route path="ess/announcements" element={<AnnouncementsPage />} />
                   <Route path="ess/assets" element={<MyAssetsPage />} />
                   <Route path="assets" element={<AssetRegisterPage />} />
+                  <Route path="travel" element={<TravelPage />} />
                   <Route path="my-hiring" element={<MyHiringPage />} />
                   <Route path="employees" element={<EmployeeListPage />} />
                   <Route

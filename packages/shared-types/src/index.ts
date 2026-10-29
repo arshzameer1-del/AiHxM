@@ -10569,3 +10569,77 @@ export type MyAssetView = {
   condition: AssetCondition | null;
   acknowledgedAt: string | null;
 };
+
+// ---------------------------------------------------------------- business travel
+export type TravelTripType = "domestic" | "international";
+export type TravelMode = "air" | "car" | "bus" | "train" | "other";
+export type TravelStatus = "pending" | "approved" | "rejected" | "returned" | "cancelled" | "settled";
+export type TravelRateKind = "per_diem" | "mileage";
+
+export type TravelRateView = {
+  id: string;
+  name: string;
+  rateKind: TravelRateKind;
+  tripType: TravelTripType;
+  /** PKR per day for a per diem, PKR per kilometre for mileage. */
+  amount: number;
+  isActive: boolean;
+};
+export type UpsertTravelRateRequest = { name: string; rateKind: TravelRateKind; tripType: TravelTripType; amount: number; isActive?: boolean };
+
+export type TravelSettlementView = {
+  actualDays: number;
+  actualKm: number;
+  perDiemRate: number | null;
+  mileageRate: number | null;
+  perDiemAmount: number;
+  mileageAmount: number;
+  otherCost: number;
+  otherCostNote: string | null;
+  totalCost: number;
+  advanceAmount: number;
+  /** Positive: the company owes the employee. Negative: the employee owes the company. */
+  netAmount: number;
+};
+
+export type TravelRequestView = {
+  id: string;
+  employeeId: string;
+  employeeNumber: string;
+  employeeName: string;
+  destination: string;
+  purpose: string;
+  tripType: TravelTripType;
+  travelMode: TravelMode;
+  startDate: string;
+  endDate: string;
+  estDistanceKm: number | null;
+  estOtherCost: number | null;
+  advanceRequested: number;
+  /** Worked out from today's rates; shown to approvers. Not stored. */
+  estimatedCost: number;
+  status: TravelStatus;
+  isOnBehalf: boolean;
+  decisionComment: string | null;
+  decidedAt: string | null;
+  advanceAmount: number;
+  advanceIssuedAt: string | null;
+  settledAt: string | null;
+  settlement: (TravelSettlementView & { settlementPaymentCreated: boolean }) | null;
+  createdAt: string;
+};
+export type SubmitTravelRequestRequest = {
+  employeeId: string;
+  destination: string;
+  purpose: string;
+  tripType?: TravelTripType;
+  travelMode?: TravelMode;
+  startDate: string;
+  endDate: string;
+  estDistanceKm?: number | null;
+  estOtherCost?: number | null;
+  advanceRequested?: number | null;
+};
+export type DecideTravelRequestRequest = { decision: "approved" | "rejected"; comment?: string };
+export type IssueTravelAdvanceRequest = { amount: number };
+export type SettleTravelRequest = { actualDays: number; actualKm?: number | null; otherCost?: number | null; otherCostNote?: string | null };

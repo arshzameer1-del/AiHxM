@@ -16,6 +16,7 @@ import type {
   UpdateAttendancePolicyRequest,
   CareersJobView,
   CareersPageView,
+  TravelRateView, UpsertTravelRateRequest, TravelRequestView, SubmitTravelRequestRequest, DecideTravelRequestRequest, IssueTravelAdvanceRequest, SettleTravelRequest, TravelSettlementView,
   AssetView, AssetDetailView, AssetSummaryView, MyAssetView, CreateAssetRequest, UpdateAssetRequest, AssignAssetRequest, ReturnAssetRequest, AssetMaintenanceRequest, RetireAssetRequest,
   RequisitionCareersView,
   SaveRequisitionCareersRequest,
@@ -3408,6 +3409,19 @@ export const api = {
   applyAttendancePenalty: (input: { ruleId: string; employeeId: string; month: string }) =>
     request<AttendancePenaltyRowView>("/attendance-penalties/apply", { method: "POST", body: JSON.stringify(input) }),
   reverseAttendancePenalty: (applicationId: string) => request<void>(`/attendance-penalties/${applicationId}/reverse`, { method: "POST" }),
+  // --- Business travel ---
+  listTravelRates: () => request<TravelRateView[]>("/travel/rates"),
+  saveTravelRate: (id: string | null, input: UpsertTravelRateRequest) =>
+    request<TravelRateView>(id ? `/travel/rates/${id}` : "/travel/rates", { method: id ? "PUT" : "POST", body: JSON.stringify(input) }),
+  submitTravel: (input: SubmitTravelRequestRequest) => request<TravelRequestView>("/travel/requests", { method: "POST", body: JSON.stringify(input) }),
+  listMyTravel: () => request<TravelRequestView[]>("/travel/requests/mine"),
+  listPendingTravel: () => request<TravelRequestView[]>("/travel/requests/pending"),
+  listAllTravel: (status?: string) => request<TravelRequestView[]>(`/travel/requests${status ? `?status=${encodeURIComponent(status)}` : ""}`),
+  decideTravel: (id: string, input: DecideTravelRequestRequest) => request<TravelRequestView>(`/travel/requests/${id}/decide`, { method: "POST", body: JSON.stringify(input) }),
+  cancelTravel: (id: string) => request<TravelRequestView>(`/travel/requests/${id}/cancel`, { method: "POST" }),
+  issueTravelAdvance: (id: string, input: IssueTravelAdvanceRequest) => request<TravelRequestView>(`/travel/requests/${id}/advance`, { method: "POST", body: JSON.stringify(input) }),
+  previewTravelSettlement: (id: string, input: SettleTravelRequest) => request<TravelSettlementView>(`/travel/requests/${id}/settlement-preview`, { method: "POST", body: JSON.stringify(input) }),
+  settleTravel: (id: string, input: SettleTravelRequest) => request<TravelRequestView>(`/travel/requests/${id}/settle`, { method: "POST", body: JSON.stringify(input) }),
   // --- Asset register ---
   listAssets: (f: { status?: string; category?: string; q?: string } = {}) => {
     const qs = new URLSearchParams();

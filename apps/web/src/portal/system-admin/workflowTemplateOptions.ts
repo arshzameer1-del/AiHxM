@@ -24,6 +24,8 @@ export const KNOWN_WORKFLOWS: readonly KnownWorkflow[] = [
     fields: [{ key: "overtimeMinutes", label: "Overtime minutes", kind: "number" }, { key: "dayType", label: "Day type", kind: "text" }] },
   { key: "on_duty_request", objectKey: "on_duty_request", label: "On-duty request approval", group: "Time and leave", description: "Working away from the office on company business.",
     fields: [{ key: "location", label: "Location", kind: "text" }] },
+  { key: "travel_request", objectKey: "travel_request", label: "Travel request approval", group: "Pay", description: "A trip on company business, with its advance. Without a route here, the manager or HR decides it directly.",
+    fields: [{ key: "destination", label: "Destination", kind: "text" }, { key: "advanceRequested", label: "Advance asked (PKR)", kind: "number" }] },
   { key: "timesheet", objectKey: "timesheet", label: "Timesheet approval", group: "Time and leave", description: "A submitted weekly timesheet.",
     fields: [{ key: "totalMinutes", label: "Total minutes", kind: "number" }] },
   { key: "expense_claim", objectKey: "expense_claim", label: "Expense claim approval", group: "Pay", description: "Routes every expense claim.",
