@@ -8,6 +8,7 @@ import {
   HeartPulse,
   IdCard,
   Landmark,
+  Laptop,
   ListChecks,
   MapPin,
   Megaphone,
@@ -86,6 +87,7 @@ export function buildEssTileGroups(enabledModules: readonly ModuleKey[]): EssTil
   if (has("expense")) more.push({ to: "/app/expenses", title: "My Expenses", description: "Submit and track expense claims", icon: Receipt });
   if (has("learning")) more.push({ to: "/app/learning", title: "My Learning", description: "Courses and progress", icon: GraduationCap });
   if (has("performance")) more.push({ to: "/app/performance", title: "My Performance", description: "Goals, feedback and reviews", icon: Target });
+  if (has("employee")) more.push({ to: "/app/ess/assets", title: "My Assets", description: "Equipment issued to me", icon: Laptop });
   if (has("employee")) more.push({ to: `${PROFILE}?tab=documents`, title: "My Documents", description: "Documents kept on my file", icon: FolderOpen });
 
   const groups: EssTileGroup[] = [{ key: "hcm", title: "Employee (HCM)", tiles: hcm }];

@@ -17,6 +17,7 @@ import {
   Target,
   Wallet,
   BookOpenCheck,
+  Laptop,
   Receipt,
   GraduationCap,
   LayoutGrid,
@@ -206,6 +207,7 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[], p
   // the real gate is server-side in HrReferenceCatalogService.
   if (hasRole("hr_admin") && hasModule("employee")) {
     items.push({ to: "/app/hr-administration", label: "HR Administration", icon: BookOpenCheck });
+    items.push({ to: "/app/assets", label: "Asset Register", icon: Laptop });
   }
 
   // Decision #20 — deliberately not module-gated: workflow/role

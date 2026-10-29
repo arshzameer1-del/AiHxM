@@ -61,6 +61,13 @@ export const NOTIFICATION_CATEGORIES: Array<{
     defaults: { email: false, inApp: true },
   },
   {
+    key: "assets_travel",
+    label: "Assets and travel",
+    description: "When a company asset is issued to you or taken back, and when a travel request of yours is decided.",
+    channels: ["in_app", "email"],
+    defaults: { email: false, inApp: true },
+  },
+  {
     key: "payslip",
     label: "Payslip is ready",
     description: "The email that tells you a new payslip is available. The email never contains amounts.",

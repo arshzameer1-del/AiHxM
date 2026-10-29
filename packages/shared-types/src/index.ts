@@ -10016,7 +10016,8 @@ export type NotificationCategoryKey =
   | "request_progress"
   | "document_expiry"
   | "learning_due"
-  | "announcements";
+  | "announcements"
+  | "assets_travel";
 
 export type NotificationPreferenceView = {
   category: NotificationCategoryKey;
@@ -10487,4 +10488,84 @@ export type AttendancePenaltyRowView = {
   penaltyAmount: number | null;
   applicationId: string | null;
   status: "pending" | "applied" | "reversed";
+};
+
+
+// ---- Asset register (0188)
+export type AssetCategory = "laptop" | "desktop" | "mobile" | "tablet" | "vehicle" | "furniture" | "access_card" | "uniform" | "tool" | "other";
+export type AssetRegisterStatus = "in_stock" | "assigned" | "under_maintenance" | "lost" | "retired";
+export type AssetCondition = "new" | "good" | "fair" | "poor" | "damaged";
+export type AssetDisposalMethod = "sold" | "scrapped" | "donated" | "returned_to_vendor";
+export type AssetEventType =
+  | "registered" | "updated" | "assigned" | "returned" | "transferred" | "maintenance_started" | "maintenance_completed" | "marked_lost" | "found" | "retired" | "verified";
+
+export type AssetView = {
+  id: string;
+  assetTag: string;
+  name: string;
+  category: AssetCategory;
+  serialNumber: string | null;
+  vendor: string | null;
+  purchaseDate: string | null;
+  purchaseCost: number | null;
+  warrantyUntil: string | null;
+  warrantyExpired: boolean;
+  location: string | null;
+  status: AssetRegisterStatus;
+  holderId: string | null;
+  holderName: string | null;
+  holderNumber: string | null;
+  lastVerifiedOn: string | null;
+  retiredOn: string | null;
+  disposalMethod: AssetDisposalMethod | null;
+  disposalValue: number | null;
+  notes: string | null;
+};
+export type CreateAssetRequest = {
+  assetTag: string;
+  name: string;
+  category: AssetCategory;
+  serialNumber?: string | null;
+  vendor?: string | null;
+  purchaseDate?: string | null;
+  purchaseCost?: number | null;
+  warrantyUntil?: string | null;
+  location?: string | null;
+  notes?: string | null;
+};
+export type UpdateAssetRequest = Partial<CreateAssetRequest>;
+export type AssetEventView = {
+  id: string;
+  eventType: AssetEventType;
+  employeeId: string | null;
+  employeeName: string | null;
+  fromEmployeeName: string | null;
+  occurredOn: string;
+  condition: AssetCondition | null;
+  cost: number | null;
+  note: string | null;
+  acknowledgedAt: string | null;
+  recordedAt: string;
+};
+export type AssetDetailView = AssetView & { history: AssetEventView[] };
+export type AssignAssetRequest = { employeeId: string; occurredOn?: string; condition?: AssetCondition; note?: string };
+export type ReturnAssetRequest = { occurredOn?: string; condition?: AssetCondition; note?: string };
+export type AssetMaintenanceRequest = { occurredOn?: string; note?: string; cost?: number | null };
+export type RetireAssetRequest = { occurredOn?: string; disposalMethod: AssetDisposalMethod; disposalValue?: number | null; note?: string };
+export type AssetSummaryView = {
+  total: number;
+  byStatus: Record<AssetRegisterStatus, number>;
+  warrantyExpiringSoon: number;
+  notVerifiedInYear: number;
+  totalPurchaseCost: number;
+};
+export type MyAssetView = {
+  eventId: string;
+  assetId: string;
+  assetTag: string;
+  name: string;
+  category: AssetCategory;
+  assignedOn: string;
+  condition: AssetCondition | null;
+  acknowledgedAt: string | null;
 };

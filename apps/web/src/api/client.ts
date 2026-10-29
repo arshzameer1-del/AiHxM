@@ -16,6 +16,7 @@ import type {
   UpdateAttendancePolicyRequest,
   CareersJobView,
   CareersPageView,
+  AssetView, AssetDetailView, AssetSummaryView, MyAssetView, CreateAssetRequest, UpdateAssetRequest, AssignAssetRequest, ReturnAssetRequest, AssetMaintenanceRequest, RetireAssetRequest,
   RequisitionCareersView,
   SaveRequisitionCareersRequest,
   BuilderCatalogResponse,
@@ -3407,6 +3408,27 @@ export const api = {
   applyAttendancePenalty: (input: { ruleId: string; employeeId: string; month: string }) =>
     request<AttendancePenaltyRowView>("/attendance-penalties/apply", { method: "POST", body: JSON.stringify(input) }),
   reverseAttendancePenalty: (applicationId: string) => request<void>(`/attendance-penalties/${applicationId}/reverse`, { method: "POST" }),
+  // --- Asset register ---
+  listAssets: (f: { status?: string; category?: string; q?: string } = {}) => {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(f)) if (v) qs.set(k, v);
+    return request<AssetView[]>(`/asset-register${qs.toString() ? `?${qs}` : ""}`);
+  },
+  getAssetSummary: () => request<AssetSummaryView>("/asset-register/summary"),
+  getAsset: (id: string) => request<AssetDetailView>(`/asset-register/${id}`),
+  createAsset: (input: CreateAssetRequest) => request<AssetDetailView>("/asset-register", { method: "POST", body: JSON.stringify(input) }),
+  updateAsset: (id: string, input: UpdateAssetRequest) => request<AssetDetailView>(`/asset-register/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+  assignAsset: (id: string, input: AssignAssetRequest) => request<AssetDetailView>(`/asset-register/${id}/assign`, { method: "POST", body: JSON.stringify(input) }),
+  transferAsset: (id: string, input: AssignAssetRequest) => request<AssetDetailView>(`/asset-register/${id}/transfer`, { method: "POST", body: JSON.stringify(input) }),
+  returnAsset: (id: string, input: ReturnAssetRequest) => request<AssetDetailView>(`/asset-register/${id}/return`, { method: "POST", body: JSON.stringify(input) }),
+  assetMaintenance: (id: string, step: "start" | "complete", input: AssetMaintenanceRequest) =>
+    request<AssetDetailView>(`/asset-register/${id}/maintenance/${step}`, { method: "POST", body: JSON.stringify(input) }),
+  markAssetLost: (id: string, input: { note?: string }) => request<AssetDetailView>(`/asset-register/${id}/lost`, { method: "POST", body: JSON.stringify(input) }),
+  markAssetFound: (id: string, input: { note?: string }) => request<AssetDetailView>(`/asset-register/${id}/found`, { method: "POST", body: JSON.stringify(input) }),
+  retireAsset: (id: string, input: RetireAssetRequest) => request<AssetDetailView>(`/asset-register/${id}/retire`, { method: "POST", body: JSON.stringify(input) }),
+  verifyAssets: (ids: string[]) => request<{ verified: number }>("/asset-register/verify", { method: "POST", body: JSON.stringify({ ids }) }),
+  listMyAssets: () => request<MyAssetView[]>("/asset-register/mine"),
+  acknowledgeMyAsset: (eventId: string) => request<void>(`/asset-register/mine/${eventId}/acknowledge`, { method: "POST" }),
   // --- Careers page: HR side, then the public side (no session, no token) ---
   listCareersRequisitions: () => request<RequisitionCareersView[]>("/recruitment/careers"),
   saveRequisitionCareers: (requisitionId: string, input: SaveRequisitionCareersRequest) =>
