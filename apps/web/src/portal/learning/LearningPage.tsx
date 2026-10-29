@@ -1,7 +1,8 @@
 import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, useEffect, useState } from "react";
 import { isSelfService } from "../shared/roles";
-import { BookOpen, GraduationCap, PlayCircle, Users } from "lucide-react";
+import { Award, BookOpen, ClipboardCheck, GraduationCap, Layers, PlayCircle, Users } from "lucide-react";
+import { CertificateCard, CourseExamEditor, ExamTaker, LearningPathsAdminPanel, MyLearningPathsPanel } from "./LearningDepthPanels";
 import { TeamLearningPanel } from "./TeamLearningPanel";
 import type { CourseCategory, CourseEnrollmentView, CourseView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
@@ -9,7 +10,7 @@ import { useAuth } from "../../auth/AuthContext";
 import { COURSE_CATEGORIES, COURSE_CATEGORY_LABELS, ENROLLMENT_STATUS_LABELS, ENROLLMENT_STATUS_STYLES } from "./learningLabels";
 import { formatDay } from "../shared/dates";
 
-type Tab = "my-learning" | "browse" | "progress" | "team";
+type Tab = "my-learning" | "paths" | "manage-paths" | "browse" | "progress" | "team";
 
 function describeError(err: unknown): string {
   if (err instanceof ApiError) {
@@ -85,6 +86,9 @@ function ContinueLearningCard({ enrollment, onChanged }: { enrollment: CourseEnr
 function EnrollmentRow({ enrollment, onChanged }: { enrollment: CourseEnrollmentView; onChanged: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [needsExam, setNeedsExam] = useState(false);
+  const [exam, setExam] = useState(false);
+  const [cert, setCert] = useState(false);
 
   async function markComplete() {
     setBusy(true);
@@ -93,7 +97,10 @@ function EnrollmentRow({ enrollment, onChanged }: { enrollment: CourseEnrollment
       await api.updateCourseEnrollmentProgress(enrollment.id, { progressPercent: 100 });
       onChanged();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not mark this complete.");
+      const message = err instanceof ApiError ? err.message : "Could not mark this complete.";
+      // A course with an exam is finished by passing it, not by the progress bar.
+      if (/exam/i.test(message)) setNeedsExam(true);
+      setError(message);
     } finally {
       setBusy(false);
     }
@@ -123,14 +130,35 @@ function EnrollmentRow({ enrollment, onChanged }: { enrollment: CourseEnrollment
       </div>
       {enrollment.status !== "completed" && (
         <div className="mt-3 pt-3 border-t border-black/5 flex items-center gap-4">
-          <button onClick={markComplete} disabled={busy} className="text-xs font-semibold text-green-700 hover:underline">
-            Mark complete
-          </button>
+          {needsExam ? (
+            <button onClick={() => setExam(true)} className="text-xs font-semibold text-accent hover:underline flex items-center gap-1">
+              <ClipboardCheck size={12} /> Take exam
+            </button>
+          ) : (
+            <button onClick={markComplete} disabled={busy} className="text-xs font-semibold text-green-700 hover:underline">
+              Mark complete
+            </button>
+          )}
           {error && <p className="text-xs text-danger">{error}</p>}
         </div>
       )}
       {enrollment.status === "completed" && enrollment.completedAt && (
-        <div className="mt-2 text-xs text-label-tertiary">Completed {formatDay(enrollment.completedAt)}</div>
+        <div className="mt-2 flex items-center gap-4 text-xs text-label-tertiary">
+          <span>Completed {formatDay(enrollment.completedAt)}</span>
+          <button onClick={() => setCert(true)} className="font-semibold text-accent flex items-center gap-1">
+            <Award size={12} /> Certificate
+          </button>
+        </div>
+      )}
+      {exam && (
+        <div className="mt-3">
+          <ExamTaker enrollmentId={enrollment.id} onClose={() => setExam(false)} onDone={onChanged} />
+        </div>
+      )}
+      {cert && (
+        <div className="mt-3">
+          <CertificateCard enrollmentId={enrollment.id} onClose={() => setCert(false)} />
+        </div>
       )}
     </div>
   );
@@ -271,6 +299,7 @@ function CourseCard({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [examEditing, setExamEditing] = useState(false);
   const { identity } = useAuth();
 
   async function handleEnroll() {
@@ -315,6 +344,21 @@ function CourseCard({
     );
   }
 
+  if (examEditing) {
+    return (
+      <div className="sm:col-span-2 lg:col-span-3">
+        <CourseExamEditor
+          course={course}
+          onClose={() => setExamEditing(false)}
+          onSaved={() => {
+            setExamEditing(false);
+            onChanged();
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="bg-card rounded-card p-4 shadow-sm flex flex-col gap-2">
       <div className="font-medium text-sm">{course.title}</div>
@@ -338,6 +382,9 @@ function CourseCard({
           <span className="flex items-center gap-3">
             <button onClick={() => setEditing(true)} disabled={busy} className="text-xs text-label-tertiary hover:text-accent">
               Edit
+            </button>
+            <button onClick={() => setExamEditing(true)} disabled={busy} className="text-xs text-label-tertiary hover:text-accent">
+              Exam
             </button>
             <button onClick={handleDeactivate} disabled={busy} className="text-xs text-label-tertiary hover:text-danger">
               Deactivate
@@ -406,9 +453,11 @@ export function LearningPage() {
           {(
             [
               ["my-learning", "My Learning", GraduationCap],
+              ["paths", "Learning Paths", Layers],
               ["browse", "Browse Courses", BookOpen],
               ["progress", "My Progress", PlayCircle],
               ...(canSeeTeam ? ([["team", "My Team", Users]] as const) : []),
+              ...(canManageCatalog ? ([["manage-paths", "Manage Paths", Layers]] as const) : []),
             ] as const
           ).map(([key, label, Icon]) => (
             <button
@@ -445,6 +494,10 @@ export function LearningPage() {
           )}
         </div>
       )}
+
+      {activeTab === "paths" && <MyLearningPathsPanel onChanged={bump} />}
+
+      {activeTab === "manage-paths" && canManageCatalog && <LearningPathsAdminPanel courses={courses} />}
 
       {activeTab === "team" && canSeeTeam && <TeamLearningPanel myEmployeeId={identity?.employeeId} />}
 

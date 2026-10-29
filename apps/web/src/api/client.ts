@@ -162,6 +162,17 @@ import type {
   CompensationView,
   CourseEnrollmentView,
   CourseView,
+  LearningPathView,
+  UpsertLearningPathRequest,
+  AssignLearningPathRequest,
+  AssignLearningPathResult,
+  MyLearningPathView,
+  LearningPathProgressRow,
+  CourseExamAdminView,
+  SaveCourseExamRequest,
+  ExamForTakerView,
+  ExamResultView,
+  CertificateView,
   CreateApplicationRequest,
   CreateCandidateRequest,
   CreateCompanyRequest,
@@ -3261,6 +3272,27 @@ export const api = {
     request<CourseEnrollmentView>(`/course-enrollments/${id}/progress`, { method: "PATCH", body: JSON.stringify(input) }),
 
   cancelCourseEnrollment: (id: string) => request<void>(`/course-enrollments/${id}/cancel`, { method: "POST" }),
+
+  // Learning paths, course exams and certificates (GAPB7a).
+  listLearningPaths: (includeInactive?: boolean) =>
+    request<LearningPathView[]>(`/learning-paths${includeInactive ? "?includeInactive=true" : ""}`),
+  listMyLearningPaths: () => request<MyLearningPathView[]>("/learning-paths/mine"),
+  createLearningPath: (input: UpsertLearningPathRequest) =>
+    request<LearningPathView>("/learning-paths", { method: "POST", body: JSON.stringify(input) }),
+  updateLearningPath: (id: string, input: UpsertLearningPathRequest) =>
+    request<LearningPathView>(`/learning-paths/${id}`, { method: "PUT", body: JSON.stringify(input) }),
+  assignLearningPath: (id: string, input: AssignLearningPathRequest) =>
+    request<AssignLearningPathResult>(`/learning-paths/${id}/assign`, { method: "POST", body: JSON.stringify(input) }),
+  learningPathProgress: (id: string) => request<LearningPathProgressRow[]>(`/learning-paths/${id}/progress`),
+  getCourseExam: (courseId: string) => request<CourseExamAdminView | { exam: null }>(`/courses/${courseId}/exam`),
+  saveCourseExam: (courseId: string, input: SaveCourseExamRequest) =>
+    request<CourseExamAdminView>(`/courses/${courseId}/exam`, { method: "PUT", body: JSON.stringify(input) }),
+  removeCourseExam: (courseId: string) => request<void>(`/courses/${courseId}/exam`, { method: "DELETE" }),
+  getExamForTaker: (enrollmentId: string) => request<ExamForTakerView>(`/course-enrollments/${enrollmentId}/exam`),
+  submitExam: (enrollmentId: string, answers: Array<number | null>) =>
+    request<ExamResultView>(`/course-enrollments/${enrollmentId}/exam`, { method: "POST", body: JSON.stringify({ answers }) }),
+  resetExamAttempts: (enrollmentId: string) => request<{ cleared: number }>(`/course-enrollments/${enrollmentId}/exam/reset`, { method: "POST" }),
+  getCertificate: (enrollmentId: string) => request<CertificateView>(`/course-enrollments/${enrollmentId}/certificate`),
 
   // --- Recruitment (Task #51) -------------------------------------------
   // recruitment.manage.all is a single scope-less permission granted only

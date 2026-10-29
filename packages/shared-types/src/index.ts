@@ -10650,3 +10650,46 @@ export type SubmitTravelRequestRequest = {
 export type DecideTravelRequestRequest = { decision: "approved" | "rejected"; comment?: string };
 export type IssueTravelAdvanceRequest = { amount: number };
 export type SettleTravelRequest = { actualDays: number; actualKm?: number | null; otherCost?: number | null; otherCostNote?: string | null };
+
+// ---------------------------------------------------------------- learning paths, course exams and certificates
+export type LearningPathCourseView = { courseId: string; title: string; durationMinutes: number; position: number; hasExam: boolean };
+export type LearningPathView = {
+  id: string;
+  title: string;
+  description: string | null;
+  isActive: boolean;
+  courses: LearningPathCourseView[];
+  assignedCount: number;
+  totalMinutes: number;
+};
+export type UpsertLearningPathRequest = { title: string; description?: string | null; courseIds: string[]; isActive?: boolean };
+export type AssignLearningPathRequest = { employeeIds: string[]; dueDate?: string | null };
+export type AssignLearningPathResult = { assigned: number; alreadyAssigned: number; enrollmentsCreated: number };
+export type MyLearningPathView = {
+  pathId: string;
+  title: string;
+  description: string | null;
+  dueDate: string | null;
+  completedCourses: number;
+  totalCourses: number;
+  courses: Array<{ courseId: string; title: string; position: number; enrollmentId: string | null; status: "assigned" | "in_progress" | "completed" | "not_enrolled"; progressPercent: number; hasExam: boolean }>;
+};
+export type LearningPathProgressRow = { employeeId: string; employeeName: string; employeeNumber: string; dueDate: string | null; completedCourses: number; totalCourses: number };
+
+export type ExamQuestionInput = { prompt: string; options: string[]; correctIndex: number };
+export type CourseExamAdminView = { courseId: string; title: string; passMarkPct: number; maxAttempts: number | null; isActive: boolean; attemptCount: number; questions: ExamQuestionInput[] };
+export type SaveCourseExamRequest = { title: string; passMarkPct: number; maxAttempts?: number | null; isActive?: boolean; questions: ExamQuestionInput[] };
+export type ExamForTakerView = {
+  examId: string;
+  enrollmentId: string;
+  title: string;
+  courseTitle: string;
+  passMarkPct: number;
+  attemptsUsed: number;
+  attemptsLeft: number | null;
+  passed: boolean;
+  bestScorePct: number | null;
+  questions: Array<{ position: number; prompt: string; options: string[] }>;
+};
+export type ExamResultView = { scorePct: number; correctCount: number; questionCount: number; passed: boolean; passMarkPct: number; attemptsLeft: number | null; enrollmentCompleted: boolean };
+export type CertificateView = { certificateNo: string; employeeName: string; employeeNumber: string; courseTitle: string; companyName: string; completedOn: string; scorePct: number | null };

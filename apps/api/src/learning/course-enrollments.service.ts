@@ -206,6 +206,14 @@ export class CourseEnrollmentsService {
     if (row.status === "completed") {
       throw new BadRequestException("This course is already completed");
     }
+    // a course with an active exam is completed by passing it, not by moving the progress bar
+    if (progressPercent >= 100) {
+      const gated = await this.db.withClaims(claims, async (client) => {
+        const r = await client.query("SELECT 1 FROM course_exams WHERE course_id = $1 AND is_active", [row.course_id]);
+        return (r.rowCount ?? 0) > 0;
+      });
+      if (gated) throw new BadRequestException("This course ends with an exam. Pass the exam to complete it");
+    }
 
     return this.db.withClaims(claims, async (client) => {
       const newStatus = progressPercent >= 100 ? "completed" : progressPercent > 0 ? "in_progress" : row.status;
