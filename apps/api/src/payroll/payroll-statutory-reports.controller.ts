@@ -1,4 +1,4 @@
-import { Controller, Get, Header, Param, ParseUUIDPipe, UseGuards } from "@nestjs/common";
+import { Controller, Get, Header, Param, ParseUUIDPipe, Query, UseGuards } from "@nestjs/common";
 import { SessionGuard } from "../auth/session.guard";
 import { CurrentClaims } from "../auth/current-claims.decorator";
 import type { RequestClaims } from "../database/tenant-context";
@@ -17,7 +17,7 @@ export class PayrollStatutoryReportsController {
 
   @Get("payroll/runs/:runId/statutory/:kind/csv")
   @Header("Content-Type", "text/csv; charset=utf-8")
-  csv(@CurrentClaims() claims: RequestClaims, @Param("runId", ParseUUIDPipe) runId: string, @Param("kind") kind: string) {
-    return this.reports.csv(claims, runId, kind);
+  csv(@CurrentClaims() claims: RequestClaims, @Param("runId", ParseUUIDPipe) runId: string, @Param("kind") kind: string, @Query("layout") layout?: string) {
+    return this.reports.csv(claims, runId, kind, layout || "standard");
   }
 }

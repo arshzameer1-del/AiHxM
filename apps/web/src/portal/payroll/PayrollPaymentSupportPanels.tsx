@@ -1,5 +1,6 @@
 import { LoadingNote } from "../shared/PageChrome";
 import { useEffect, useState } from "react";
+import { BANK_FORMAT_TEMPLATES } from "./bankFormatTemplates";
 import type { BankFileDelimiter, BankFileFormatView, DisbursementFieldKey, PayrollReconciliationKind, PayrollReconciliationView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { pkr } from "./payrollLabels";
@@ -124,9 +125,28 @@ export function BankFileFormatsPanel() {
         ))}
       </div>
       {!draft && (
-        <button onClick={() => { setError(null); setDraft(emptyDraft()); }} className="text-sm font-semibold rounded-lg px-4 py-2 text-white bg-accent">
-          Add a layout
-        </button>
+        <div className="flex flex-wrap items-end gap-3">
+          <button onClick={() => { setError(null); setDraft(emptyDraft()); }} className="text-sm font-semibold rounded-lg px-4 py-2 text-white bg-accent">
+            Add a layout
+          </button>
+          <label className="text-xs">Or start from a template
+            <select
+              id="bank-format-template"
+              value=""
+              onChange={(e) => {
+                const t = BANK_FORMAT_TEMPLATES.find((x) => x.key === e.target.value);
+                if (!t) return;
+                setError(null);
+                setDraft({ id: null, code: t.code, name: t.name, delimiter: t.delimiter, includeHeader: t.includeHeader, columns: t.columns, headerLabels: Object.fromEntries(Object.entries(t.headerLabels)) as Record<string, string>, fileExtension: t.fileExtension, isDefault: false, isActive: true });
+              }}
+              className="mt-1 block rounded-lg border border-black/10 px-2 py-2 text-sm"
+            >
+              <option value="">Choose…</option>
+              {BANK_FORMAT_TEMPLATES.map((t) => <option key={t.key} value={t.key}>{t.name}</option>)}
+            </select>
+          </label>
+          <p className="text-[11px] text-label-tertiary basis-full">Templates are generic starting points, not any bank's own specification. Compare the result with the sample your bank gave you before sending a real file.</p>
+        </div>
       )}
       {draft && (
         <div className="space-y-3 border border-black/10 rounded-lg p-3">

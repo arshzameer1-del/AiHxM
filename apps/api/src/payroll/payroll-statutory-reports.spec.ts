@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import { buildPayrollFixture, type PayrollFixture } from "./testing/payroll-fixture";
+import { sensitive } from "../crypto/sensitive-fields";
 import { PayrollStatutoryReportsService } from "./payroll-statutory-reports.service";
 
 /** Statutory reports (income tax withheld, EOBI, social security) of a finalised run. */
@@ -62,6 +63,25 @@ describe("Payroll statutory reports", () => {
     expect(lines.length).toBe((await reports.get(f.hr, runId, "income_tax")).rows.length + 2);
     expect(lines[lines.length - 1]).toContain(",TOTAL,");
     expect(csv).toContain("35202-1234567-1");
+  });
+
+  it("the challan working file lists the registration number and what to pay, and refuses an unknown layout", async () => {
+    const people = await f.sql<{ employee_number: string }>("SELECT employee_number FROM payslips WHERE payroll_run_id = $1 ORDER BY employee_number", [runId]);
+    const first = (await f.sql<{ id: string }>("SELECT id FROM employees WHERE employee_number = $1 AND company_id = $2", [people[0].employee_number, f.companyId]))[0].id;
+    await f.sql("INSERT INTO employee_statutory_ids (company_id, employee_id, eobi_number) VALUES ($1,$2,$3)", [f.companyId, first, sensitive.encrypt(f.companyId, "EOBI-998877")]);
+    const report = await reports.get(f.hr, runId, "eobi");
+    expect(report.registrationLabel).toBe("EOBI number");
+    expect(report.rows.find((r) => r.employeeNumber === people[0].employee_number)?.registration).toBe("EOBI-998877");
+    expect(report.missingRegistrationCount).toBe(report.rows.length - 1);
+    const lines = (await reports.csv(f.hr, runId, "eobi", "challan")).trim().split("\n");
+    expect(lines[0]).toBe("month,employee_number,employee_name,cnic,EOBI number,Employee share,Employer share,amount_payable");
+    expect(lines[1].startsWith("2071-03,")).toBe(true);
+    const row = report.rows.find((r) => r.employeeNumber === people[0].employee_number)!;
+    expect(lines.find((l) => l.includes("EOBI-998877"))).toContain(`,${(row.values[0] + row.values[1]).toFixed(2)}`);
+    expect(lines[lines.length - 1]).toContain(",TOTAL,");
+    const tax = (await reports.csv(f.hr, runId, "income_tax", "challan")).trim().split("\n");
+    expect(tax[0]).toBe("month,employee_number,employee_name,cnic,Tax withheld,amount_payable");
+    await expect(reports.csv(f.hr, runId, "eobi", "weird")).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it("is refused for a run that is not finalised, for an unknown report, for a login without payroll rights, and across tenants", async () => {

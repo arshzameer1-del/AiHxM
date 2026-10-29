@@ -114,7 +114,7 @@ describe("Notifications HTTP surface (e2e)", () => {
         .post("/notifications")
         .set("Authorization", `Bearer ${employeeToken}`)
         .send({
-          channel: "sms",
+          channel: "carrier_pigeon",
           recipient: "employee@example.com",
           templateKey: "leave_request.submitted",
         });

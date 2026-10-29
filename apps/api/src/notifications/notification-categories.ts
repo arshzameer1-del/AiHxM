@@ -68,6 +68,13 @@ export const NOTIFICATION_CATEGORIES: Array<{
     defaults: { email: false, inApp: true },
   },
   {
+    key: "payroll_deadlines",
+    label: "Payroll deadlines",
+    description: "For people who run payroll: a payroll period is ending and no run has been started, or the pay date is close and the run is not finalised.",
+    channels: ["in_app", "email"],
+    defaults: { email: false, inApp: true },
+  },
+  {
     key: "payslip",
     label: "Payslip is ready",
     description: "The email that tells you a new payslip is available. The email never contains amounts.",

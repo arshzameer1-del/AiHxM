@@ -15,7 +15,7 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const day = (v: any): string => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10));
 
-type Def = { title: string; columns: Array<{ key: string; label: string; column: string }>; keep: string[] };
+type Def = { title: string; columns: Array<{ key: string; label: string; column: string }>; keep: string[]; registration?: "eobi" | "social_security" };
 
 /** What each report lists and which payslip figures it takes. No rate or threshold lives here: the figures are those the run calculated. */
 const REPORTS: Record<PayrollStatutoryReportKind, Def> = {
@@ -35,11 +35,13 @@ const REPORTS: Record<PayrollStatutoryReportKind, Def> = {
       { key: "employer", label: "Employer share", column: "eobi_employer_contribution" },
     ],
     keep: ["eobi_employee_contribution", "eobi_employer_contribution"],
+    registration: "eobi",
   },
   social_security: {
     title: "Social security contributions",
     columns: [{ key: "employer", label: "Employer contribution", column: "social_security_employer_contribution" }],
     keep: ["social_security_employer_contribution"],
+    registration: "social_security",
   },
 };
 
@@ -75,14 +77,17 @@ export class PayrollStatutoryReportsService {
         throw new BadRequestException("A statutory report is only available for a finalised run, because it reports what was actually withheld");
       }
       const slips = await client.query(
-        `SELECT p.company_id, p.employee_number, e.first_name, e.last_name, e.cnic, ${def.columns.map((c) => `p.${c.column}`).join(", ")}
+        `SELECT p.company_id, p.employee_number, e.first_name, e.last_name, e.cnic, si.eobi_number, si.social_security_number, si.social_security_scheme,
+                ${def.columns.map((c) => `p.${c.column}`).join(", ")}
            FROM payslips p JOIN employees e ON e.id = p.employee_id
+           LEFT JOIN employee_statutory_ids si ON si.employee_id = e.id
           WHERE p.payroll_run_id = $1 ORDER BY p.employee_number`,
         [runId]
       );
       const rows = [];
       let omitted = 0;
       let missingCnic = 0;
+      let missingRegistration = 0;
       const totals = def.columns.map(() => 0);
       for (const s of slips.rows) {
         const values = def.columns.map((c) => r2(Number(s[c.column] ?? 0)));
@@ -93,7 +98,10 @@ export class PayrollStatutoryReportsService {
         const cnic = sensitive.decrypt(s.company_id, s.cnic);
         if (!cnic) missingCnic += 1;
         values.forEach((v, i) => (totals[i] += v));
-        rows.push({ employeeNumber: s.employee_number as string, employeeName: `${s.first_name} ${s.last_name}`.trim(), cnic: cnic ?? null, values });
+        const registration =
+          def.registration === "eobi" ? sensitive.decrypt(s.company_id, s.eobi_number) : def.registration === "social_security" ? sensitive.decrypt(s.company_id, s.social_security_number) : null;
+        if (def.registration && !registration) missingRegistration += 1;
+        rows.push({ employeeNumber: s.employee_number as string, employeeName: `${s.first_name} ${s.last_name}`.trim(), cnic: cnic ?? null, registration: registration ?? null, values });
       }
       await this.audit.record(client, claims, {
         companyId: claims.company_id ?? null,
@@ -112,11 +120,19 @@ export class PayrollStatutoryReportsService {
         totals: totals.map(r2),
         omittedCount: omitted,
         missingCnicCount: missingCnic,
+        registrationLabel: def.registration === "eobi" ? "EOBI number" : def.registration === "social_security" ? "Social security number" : null,
+        missingRegistrationCount: missingRegistration,
       };
     });
   }
 
-  async csv(claims: RequestClaims, runId: string, kind: string): Promise<string> {
+  /**
+   * `standard` is the full working list. `challan` is the shorter layout a payment slip is prepared from: month, who, their registration
+   * number, and what to pay. It is a working file, not a file any portal accepts as it stands: check it against the format your bank or the
+   * authority asks for before uploading.
+   */
+  async csv(claims: RequestClaims, runId: string, kind: string, layout: string = "standard"): Promise<string> {
+    if (!["standard", "challan"].includes(layout)) throw new BadRequestException('layout must be "standard" or "challan"');
     const report = await this.get(claims, runId, kind);
     const esc = (v: unknown) => {
       const s = v === null || v === undefined ? "" : String(v);
@@ -124,11 +140,26 @@ export class PayrollStatutoryReportsService {
       const safe = /^[=+@]/.test(s) ? `'${s}` : s;
       return /[",\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
     };
-    const lines: string[][] = [["period_start", "period_end", "employee_number", "employee_name", "cnic", ...report.columns.map((c) => c.label)]];
-    for (const r of report.rows) {
-      lines.push([report.periodStart, report.periodEnd, r.employeeNumber, r.employeeName, r.cnic ?? "", ...r.values.map((v) => v.toFixed(2))]);
+    const lines: string[][] = [];
+    if (layout === "challan") {
+      const month = report.periodStart.slice(0, 7);
+      const reg = report.registrationLabel;
+      // what is paid over: the contributions (employee + employer shares), or the tax withheld
+      const payable = (values: number[]) => (report.kind === "income_tax" ? values[2] : values.reduce((a, v) => a + v, 0));
+      lines.push(["month", "employee_number", "employee_name", "cnic", ...(reg ? [reg] : []), ...report.columns.filter((c) => report.kind !== "income_tax" || c.key === "taxWithheld").map((c) => c.label), "amount_payable"]);
+      for (const r of report.rows) {
+        const shown = report.kind === "income_tax" ? [r.values[2]] : r.values;
+        lines.push([month, r.employeeNumber, r.employeeName, r.cnic ?? "", ...(reg ? [r.registration ?? ""] : []), ...shown.map((v) => v.toFixed(2)), payable(r.values).toFixed(2)]);
+      }
+      const shownTotals = report.kind === "income_tax" ? [report.totals[2]] : report.totals;
+      lines.push([month, "", "TOTAL", "", ...(reg ? [""] : []), ...shownTotals.map((v) => v.toFixed(2)), payable(report.totals).toFixed(2)]);
+    } else {
+      lines.push(["period_start", "period_end", "employee_number", "employee_name", "cnic", ...report.columns.map((c) => c.label)]);
+      for (const r of report.rows) {
+        lines.push([report.periodStart, report.periodEnd, r.employeeNumber, r.employeeName, r.cnic ?? "", ...r.values.map((v) => v.toFixed(2))]);
+      }
+      lines.push([report.periodStart, report.periodEnd, "", "TOTAL", "", ...report.totals.map((v) => v.toFixed(2))]);
     }
-    lines.push([report.periodStart, report.periodEnd, "", "TOTAL", "", ...report.totals.map((v) => v.toFixed(2))]);
     return lines.map((l) => l.map(esc).join(",")).join("\n") + "\n";
   }
 }

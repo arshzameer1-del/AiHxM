@@ -6679,6 +6679,8 @@ export type PayrollStatutoryReportRowView = {
   employeeNumber: string;
   employeeName: string;
   cnic: string | null;
+  /** the person's registration number for this report (EOBI number, social security number); null for income tax or when none is on file */
+  registration: string | null;
   /** the person's figures for the run, one per column the report lists (see `columns`) */
   values: number[];
 };
@@ -6697,6 +6699,10 @@ export type PayrollStatutoryReportView = {
   omittedCount: number;
   /** people on the run with no CNIC on file; the regulator's statements need it */
   missingCnicCount: number;
+  /** what `registration` is ("EOBI number"), or null when the report has none */
+  registrationLabel: string | null;
+  /** people listed who have no registration number on file */
+  missingRegistrationCount: number;
 };
 
 export type PayrollRunValidationView = {
@@ -10017,7 +10023,8 @@ export type NotificationCategoryKey =
   | "document_expiry"
   | "learning_due"
   | "announcements"
-  | "assets_travel";
+  | "assets_travel"
+  | "payroll_deadlines";
 
 export type NotificationPreferenceView = {
   category: NotificationCategoryKey;

@@ -78,14 +78,28 @@ export function PayrollStatutoryReportsPanel() {
             {r.missingCnicCount > 0 && r.rows.length > 0 && (
               <p className="text-xs text-amber-800">{r.missingCnicCount} of {r.rows.length} have no CNIC on file; the authority's statements need it.</p>
             )}
-            <button
-              type="button"
-              className={buttonClass}
-              disabled={r.rows.length === 0}
-              onClick={() => api.downloadPayrollText(`/payroll/runs/${r.payrollRunId}/statutory/${r.kind}/csv`, `${r.kind}-${r.periodStart}-to-${r.periodEnd}.csv`).catch((e) => setError(errorMessage(e, "Could not download the report.")))}
-            >
-              Download CSV
-            </button>
+            {r.registrationLabel && r.missingRegistrationCount > 0 && r.rows.length > 0 && (
+              <p className="text-xs text-amber-800">{r.missingRegistrationCount} of {r.rows.length} have no {r.registrationLabel.toLowerCase()} on file (add it on the employee's statutory IDs).</p>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className={buttonClass}
+                disabled={r.rows.length === 0}
+                onClick={() => api.downloadPayrollText(`/payroll/runs/${r.payrollRunId}/statutory/${r.kind}/csv`, `${r.kind}-${r.periodStart}-to-${r.periodEnd}.csv`).catch((e) => setError(errorMessage(e, "Could not download the report.")))}
+              >
+                Download CSV
+              </button>
+              <button
+                type="button"
+                className={buttonClass}
+                disabled={r.rows.length === 0}
+                title="A shorter working file to prepare the payment slip from. Check it against the format your bank or the authority asks for."
+                onClick={() => api.downloadPayrollText(`/payroll/runs/${r.payrollRunId}/statutory/${r.kind}/csv?layout=challan`, `${r.kind}-challan-${r.periodStart.slice(0, 7)}.csv`).catch((e) => setError(errorMessage(e, "Could not download the challan file.")))}
+              >
+                Challan working file
+              </button>
+            </div>
           </div>
         ))}
       </div>
