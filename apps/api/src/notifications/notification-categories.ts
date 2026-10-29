@@ -54,6 +54,13 @@ export const NOTIFICATION_CATEGORIES: Array<{
     defaults: { email: false, inApp: true },
   },
   {
+    key: "announcements",
+    label: "Company announcements",
+    description: "When HR posts a notice for you on the notice board.",
+    channels: ["in_app", "email"],
+    defaults: { email: false, inApp: true },
+  },
+  {
     key: "payslip",
     label: "Payslip is ready",
     description: "The email that tells you a new payslip is available. The email never contains amounts.",

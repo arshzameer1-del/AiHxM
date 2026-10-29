@@ -562,6 +562,11 @@ import type {
   DelegateCandidateView,
   DelegationView,
   ProfileCompleteness,
+  AnnouncementAdminView,
+  AnnouncementReceiptView,
+  AnnouncementView,
+  MessagingChannelsView,
+  SaveAnnouncementRequest,
   ApproveEmployeeLoanRequestInput,
   ApproveLeaveEncashmentInput,
   EncashableLeaveView,
@@ -3102,6 +3107,19 @@ export const api = {
 
   listAttendanceCorrections: (employeeId: string) =>
     request<AttendanceCorrectionRequestView[]>(`/employees/${employeeId}/attendance-corrections`),
+
+  // Company announcements (notice board)
+  listMyAnnouncements: () => request<AnnouncementView[]>("/announcements/mine"),
+  announcementSummary: () => request<{ unread: number; needsAck: number }>("/announcements/mine/summary"),
+  markAnnouncementRead: (id: string) => request<{ ok: true }>(`/announcements/${id}/read`, { method: "POST" }),
+  acknowledgeAnnouncement: (id: string) => request<{ ok: true }>(`/announcements/${id}/acknowledge`, { method: "POST" }),
+  announcementChannels: () => request<MessagingChannelsView>("/announcements/channels"),
+  listAnnouncementsAdmin: () => request<AnnouncementAdminView[]>("/announcements"),
+  createAnnouncement: (input: SaveAnnouncementRequest) => request<AnnouncementAdminView>("/announcements", { method: "POST", body: JSON.stringify(input) }),
+  updateAnnouncement: (id: string, input: SaveAnnouncementRequest) => request<AnnouncementAdminView>(`/announcements/${id}`, { method: "PUT", body: JSON.stringify(input) }),
+  publishAnnouncement: (id: string) => request<AnnouncementAdminView>(`/announcements/${id}/publish`, { method: "POST" }),
+  archiveAnnouncement: (id: string) => request<AnnouncementAdminView>(`/announcements/${id}/archive`, { method: "POST" }),
+  announcementReceipts: (id: string) => request<AnnouncementReceiptView[]>(`/announcements/${id}/receipts`),
 
   // On-duty and work-from-home requests share one record and one approval route.
   submitOnDutyRequest: (input: SubmitOnDutyRequestRequest) =>

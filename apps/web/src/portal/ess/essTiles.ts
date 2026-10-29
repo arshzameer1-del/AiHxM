@@ -10,6 +10,7 @@ import {
   Landmark,
   ListChecks,
   MapPin,
+  Megaphone,
   PlayCircle,
   Receipt,
   Search,
@@ -69,6 +70,7 @@ export function buildEssTileGroups(enabledModules: readonly ModuleKey[]): EssTil
     hcm.push({ to: `${PROFILE}?tab=disciplinary`, title: "My Disciplinary Records", description: "Read and acknowledge notices from HR", note: "Private", icon: ClipboardList });
   }
   hcm.push(soon("My External Organizations", "Manage my external organizations", Building2));
+  if (has("employee")) hcm.push({ to: "/app/ess/announcements", title: "Announcements", description: "Notices from HR and your company", icon: Megaphone });
   if (has("employee")) {
     hcm.push({ to: "/app/ess/requests?new=loan", title: "Request a Loan or Advance", description: "Ask HR for a loan or a salary advance", icon: Wallet });
     hcm.push({ to: "/app/ess/requests?new=letter", title: "Request a Letter", description: "Salary certificate, employment letter, NOC", icon: FileText });

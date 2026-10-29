@@ -2,6 +2,7 @@ import { ForbiddenException, Injectable, Logger } from "@nestjs/common";
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
 import { MailerService } from "../mailer/mailer.service";
+import { MessagingService } from "../messaging/messaging.service";
 import { incrementDailyUsage } from "../tenant-management/usage-tracking.util";
 import { renderEmailTemplate } from "./email-templates";
 import type { DispatchNotificationRequest, NotificationLogEntry } from "@aihxm/shared-types";
@@ -43,7 +44,8 @@ export class NotificationsService {
 
   constructor(
     private readonly db: DatabaseService,
-    private readonly mailer: MailerService
+    private readonly mailer: MailerService,
+    private readonly messaging?: MessagingService
   ) {}
 
   async dispatch(claims: RequestClaims, dto: DispatchNotificationRequest): Promise<NotificationLogEntry> {
@@ -57,6 +59,17 @@ export class NotificationsService {
       );
       return toEntry(result.rows[0]);
     });
+
+    if ((dto.channel === "sms" || dto.channel === "whatsapp") && this.messaging?.isConfigured(dto.channel)) {
+      const text = String(logged.payload.text ?? logged.payload.body ?? logged.payload.title ?? "");
+      const sent = await this.messaging.send(dto.channel, logged.recipient, text);
+      const status = sent.ok ? "sent" : "failed";
+      if (!sent.ok) this.logger.warn(`Notification ${logged.id} (${dto.channel} -> ${logged.recipient}) failed to send: ${sent.error}`);
+      await this.db.withClaims(claims, async (client) => {
+        await client.query("UPDATE notification_log SET status = $2, payload = payload || $3::jsonb WHERE id = $1", [logged.id, status, JSON.stringify(sent.ok ? { providerRef: sent.providerRef } : { error: sent.error })]);
+      });
+      return { ...logged, status };
+    }
 
     if (dto.channel !== "email" || !this.mailer.isConfigured()) {
       return logged;

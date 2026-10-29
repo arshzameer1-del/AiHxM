@@ -172,6 +172,12 @@ const EmployeeRequestsPage = lazy(() =>
     default: m.EmployeeRequestsPage,
   }))
 );
+const AnnouncementsPage = lazy(() =>
+  import("./portal/announcements/AnnouncementsPage").then((m) => ({ default: m.AnnouncementsPage }))
+);
+const AnnouncementsAdminPage = lazy(() =>
+  import("./portal/announcements/AnnouncementsAdminPage").then((m) => ({ default: m.AnnouncementsAdminPage }))
+);
 const MyHrRequestsPage = lazy(() =>
   import("./portal/requests/MyHrRequestsPage").then((m) => ({
     default: m.MyHrRequestsPage,
@@ -443,6 +449,7 @@ export default function App() {
                   <Route path="ess/org-chart" element={<MyOrgChartPage />} />
                   <Route path="ess/paystubs" element={<MyPaystubsPage />} />
                   <Route path="ess/requests" element={<MyHrRequestsPage />} />
+                  <Route path="ess/announcements" element={<AnnouncementsPage />} />
                   <Route path="my-hiring" element={<MyHiringPage />} />
                   <Route path="employees" element={<EmployeeListPage />} />
                   <Route
@@ -468,6 +475,7 @@ export default function App() {
                   <Route path="employees/data-consistency" element={<EmployeeDataConsistencyPage />} />
                   <Route path="employees/change-requests" element={<EmployeeChangeRequestsPage />} />
                   <Route path="employees/requests" element={<EmployeeRequestsPage />} />
+                  <Route path="employees/announcements" element={<AnnouncementsAdminPage />} />
                   <Route path="reports" element={<ReportsShell />}>
                     <Route index element={<ReportsOverviewPage />} />
                     <Route path="library" element={<ReportsLibraryPage />} />

@@ -1911,7 +1911,7 @@ export type AddCardCustomFieldRequest = {
 // 0009_wricef_fields_notifications_forms.sql's header comment and
 // KNOWN_ISSUES.md for what "real provider" means when it's built.
 
-export type NotificationChannel = "email" | "whatsapp" | "push" | "in_app";
+export type NotificationChannel = "email" | "sms" | "whatsapp" | "push" | "in_app";
 
 export type DispatchNotificationRequest = {
   channel: NotificationChannel;
@@ -9998,7 +9998,8 @@ export type NotificationCategoryKey =
   | "approval_requests"
   | "request_progress"
   | "document_expiry"
-  | "learning_due";
+  | "learning_due"
+  | "announcements";
 
 export type NotificationPreferenceView = {
   category: NotificationCategoryKey;
@@ -10248,3 +10249,88 @@ export function isDarkEnoughForWhiteText(hex: string): boolean {
   const luminance = 0.2126 * lin(0) + 0.7152 * lin(2) + 0.0722 * lin(4);
   return 1.05 / (luminance + 0.05) >= 4.5;
 }
+
+
+// ---- Announcements (company notice board)
+export type AnnouncementPriority = "normal" | "important" | "urgent";
+export type AnnouncementAudienceType = "all" | "org_unit" | "location";
+export type AnnouncementStatus = "draft" | "published" | "archived";
+
+/** What SMS and WhatsApp can do right now (a provider has to be configured on the server). */
+export type MessagingChannelsView = {
+  sms: { configured: boolean; provider: "twilio" | "webhook" | null };
+  whatsapp: { configured: boolean; provider: "twilio" | "webhook" | null };
+};
+
+export type AnnouncementDeliverySummary = {
+  recipients?: number;
+  email?: number;
+  smsSent?: number;
+  smsFailed?: number;
+  whatsappSent?: number;
+  whatsappFailed?: number;
+  /** people in the audience without a usable mobile number */
+  noPhone?: number;
+};
+
+/** The notice-board view an employee gets. */
+export type AnnouncementView = {
+  id: string;
+  title: string;
+  body: string;
+  priority: AnnouncementPriority;
+  pinned: boolean;
+  requireAck: boolean;
+  publishedAt: string;
+  expiresOn: string | null;
+  read: boolean;
+  acknowledged: boolean;
+};
+
+/** What HR sees: the same plus audience, delivery and how many people have read it. */
+export type AnnouncementAdminView = {
+  id: string;
+  title: string;
+  body: string;
+  priority: AnnouncementPriority;
+  audienceType: AnnouncementAudienceType;
+  audienceIds: string[];
+  audienceNames: string[];
+  pinned: boolean;
+  requireAck: boolean;
+  status: AnnouncementStatus;
+  expiresOn: string | null;
+  sendEmail: boolean;
+  sendSms: boolean;
+  sendWhatsapp: boolean;
+  deliverySummary: AnnouncementDeliverySummary;
+  publishedAt: string | null;
+  createdAt: string;
+  audienceCount: number;
+  readCount: number;
+  acknowledgedCount: number;
+};
+
+export type SaveAnnouncementRequest = {
+  title: string;
+  body: string;
+  priority?: AnnouncementPriority;
+  audienceType?: AnnouncementAudienceType;
+  audienceIds?: string[];
+  pinned?: boolean;
+  requireAck?: boolean;
+  expiresOn?: string | null;
+  sendEmail?: boolean;
+  sendSms?: boolean;
+  sendWhatsapp?: boolean;
+  /** true publishes straight away; otherwise it is saved as a draft. */
+  publish?: boolean;
+};
+
+export type AnnouncementReceiptView = {
+  employeeId: string;
+  employeeNumber: string;
+  employeeName: string;
+  readAt: string | null;
+  acknowledgedAt: string | null;
+};
