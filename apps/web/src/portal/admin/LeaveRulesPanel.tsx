@@ -231,7 +231,7 @@ function RuleEditor({
   types: LeaveTypeView[];
   policies: LeavePolicyView[];
   groups: EmployeeGroupView[];
-  onSaved: () => void;
+  onSaved: (notices?: string[]) => void;
   onCancel: () => void;
 }) {
   const first = catalog.find((c) => !c.locked) ?? catalog[0];
@@ -257,9 +257,8 @@ function RuleEditor({
     setBusy(true);
     try {
       const body = draftToRequest(draft, allowed);
-      if (draft.id) await api.updateLeaveValidationRule(draft.id, body);
-      else await api.createLeaveValidationRule(body);
-      onSaved();
+      const saved = draft.id ? await api.updateLeaveValidationRule(draft.id, body) : await api.createLeaveValidationRule(body);
+      onSaved(saved.notices);
     } catch (err) {
       setError(describe(err));
     } finally {
@@ -423,6 +422,7 @@ export function LeaveRulesPanel() {
   const [editing, setEditing] = useState<LeaveValidationRuleView | "new" | null>(null);
   const [filter, setFilter] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [saveNotices, setSaveNotices] = useState<string[]>([]);
 
   function load() {
     api.listLeaveValidationRules().then(setRules).catch((err) => setError(describe(err)));
@@ -472,7 +472,7 @@ export function LeaveRulesPanel() {
           types={types}
           policies={policies}
           groups={groups}
-          onSaved={() => { setEditing(null); load(); }}
+          onSaved={(notices) => { setEditing(null); setSaveNotices(notices ?? []); load(); }}
           onCancel={() => setEditing(null)}
         />
       </div>
@@ -482,6 +482,15 @@ export function LeaveRulesPanel() {
   return (
     <div className="space-y-4" data-testid="leave-rules-panel">
       {error && <p className="text-sm text-danger" role="alert">{error}</p>}
+      {saveNotices.length > 0 && (
+        <div role="status" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 space-y-1" data-testid="rule-priority-notice">
+          <div className="font-semibold">Saved. Please check the order of your rules:</div>
+          {saveNotices.map((n) => (
+            <p key={n}>{n}</p>
+          ))}
+          <button type="button" onClick={() => setSaveNotices([])} className="text-xs font-semibold underline">Dismiss</button>
+        </div>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-label-secondary max-w-2xl">
           The checks every leave request goes through before it can be submitted. Each company starts with one rule per check; reword them, scope them to a leave type, policy or group, or add your own. A <b>block</b> stops the request, a <b>warning</b> lets the employee confirm and continue, an <b>info</b> is just a notice.

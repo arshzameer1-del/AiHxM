@@ -144,6 +144,19 @@ function ClaimDetail({
     }
   }
 
+  async function handleReimburse() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.reimburseExpenseClaimInPayroll(claim.id);
+      onChanged();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not queue this claim for payroll.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleCancel() {
     if (!window.confirm("Cancel this expense claim?")) return;
     setBusy(true);
@@ -212,14 +225,24 @@ function ClaimDetail({
         </div>
       )}
 
-      {claim.status === "approved" && canPay && (
-        <button
-          onClick={handleMarkPaid}
-          disabled={busy}
-          className="text-xs font-semibold rounded-lg px-3 py-1.5 bg-accent text-white disabled:opacity-50"
-        >
-          Mark as paid
-        </button>
+      {claim.status === "approved" && claim.queuedForPayroll && (
+        <p className="text-xs text-label-secondary" data-testid="claim-queued-for-payroll">
+          Queued for payroll. It is paid with the payroll run that covers today, and turns Paid when that run is finalised.
+        </p>
+      )}
+      {claim.status === "approved" && canPay && !claim.queuedForPayroll && (
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={handleReimburse}
+            disabled={busy}
+            className="text-xs font-semibold rounded-lg px-3 py-1.5 bg-accent text-white disabled:opacity-50"
+          >
+            Reimburse in payroll
+          </button>
+          <button onClick={handleMarkPaid} disabled={busy} className="text-xs font-semibold text-accent hover:underline disabled:opacity-50">
+            Mark as paid (already paid outside payroll)
+          </button>
+        </div>
       )}
 
       {canActOnThis && (

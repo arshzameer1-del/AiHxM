@@ -13,6 +13,7 @@ import {
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import type { Response } from "express";
+import { ReimburseExpenseClaimDto } from "./dto/reimburse-expense-claim.dto";
 import { pageOf } from "../common/paging";
 import { SessionGuard } from "../auth/session.guard";
 import { CurrentClaims } from "../auth/current-claims.decorator";
@@ -61,6 +62,11 @@ export class ExpensesController {
   @Post("expense-claims/:id/mark-paid")
   markPaid(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
     return this.expenseClaims.markPaid(claims, id);
+  }
+
+  @Post("expense-claims/:id/reimburse-in-payroll")
+  reimburseInPayroll(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: ReimburseExpenseClaimDto) {
+    return this.expenseClaims.reimburseInPayroll(claims, id, dto.effectiveDate);
   }
 
   @Post("expense-claims/:id/cancel")

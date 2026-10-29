@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
-import type { EmployeeOffboardingView, EmployeeOnboardingView, EmploymentStatus, OffboardingReason } from "@aihxm/shared-types";
+import { Link } from "react-router-dom";
+import type { EmployeeOffboardingView, EmployeeOnboardingView, EmploymentStatus, FinalSettlementStatus, FinalSettlementView, OffboardingReason } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { ChecklistItemsList } from "./ChecklistItems";
 import { formatDay, todayIso } from "../shared/dates";
@@ -95,6 +96,49 @@ function OnboardingSubsection({
         />
       )}
     </section>
+  );
+}
+
+const SETTLEMENT_STATUS_TEXT: Record<FinalSettlementStatus, string> = {
+  open: "Created - not calculated yet",
+  calculated: "Calculated - waiting for approval",
+  approved: "Approved - waiting for the final payroll run",
+  finalized: "Paid out in the final payroll run",
+  cancelled: "Cancelled",
+  reversed: "Reversed",
+};
+
+/** Where this person's final pay stands. The settlement is created when the employee is terminated; payroll finishes it. */
+function FinalSettlementHandoff({ employeeId }: { employeeId: string }) {
+  const [rows, setRows] = useState<FinalSettlementView[] | null | undefined>(undefined);
+  useEffect(() => {
+    api
+      .listFinalSettlements()
+      .then((all) => setRows(all.filter((r) => r.employeeId === employeeId)))
+      .catch(() => setRows(null)); // not permitted to see payroll, or the module is off - show nothing
+  }, [employeeId]);
+  if (rows === undefined || rows === null) return null;
+  const latest = rows[0];
+  return (
+    <div className="mt-4 pt-4 border-t border-black/5 text-sm" data-testid="final-settlement-handoff">
+      <div className="font-medium">Final settlement</div>
+      {latest ? (
+        <p className="text-label-secondary mt-1">
+          {SETTLEMENT_STATUS_TEXT[latest.status]} · last working day {formatDay(latest.lastWorkingDay)}.{" "}
+          <Link to="/app/payroll?section=final-settlements" className="font-semibold text-accent hover:underline">
+            Open in Payroll
+          </Link>
+        </p>
+      ) : (
+        <p className="text-label-secondary mt-1">
+          No final settlement yet. It is created when the employee is terminated (finalize offboarding below), and then prepared and approved in{" "}
+          <Link to="/app/payroll?section=final-settlements" className="font-semibold text-accent hover:underline">
+            Payroll
+          </Link>
+          .
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -250,6 +294,7 @@ function OffboardingSubsection({
               load();
             }}
           />
+          {canManage && <FinalSettlementHandoff employeeId={employeeId} />}
           {canManage && offboarding.status === "in_progress" && (
             <div className="mt-4 pt-4 border-t border-black/5">
               {error && <div className="text-danger text-sm mb-2">{error}</div>}

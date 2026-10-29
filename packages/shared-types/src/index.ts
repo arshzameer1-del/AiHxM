@@ -3993,6 +3993,8 @@ export type LeaveValidationRuleView = {
   isLocked: boolean;
   version: number;
   updatedAt: string;
+  /** Only on the answer to a save: heads-ups about how this rule interacts with others (for example, it runs first and is more lenient). */
+  notices?: string[];
 };
 
 export type SaveLeaveValidationRuleRequest = {
@@ -4161,9 +4163,16 @@ export type ExpenseClaimView = {
   workflowInstanceId: string | null;
   paidAt: string | null;
   paidByUserAccountId: string | null;
+  /** True while an approved claim waits to be paid through a payroll run. */
+  queuedForPayroll: boolean;
   receipts: ExpenseReceiptView[];
   createdAt: string;
   updatedAt: string;
+};
+
+export type ReimburseExpenseClaimRequest = {
+  /** The day the payment counts for; the payroll run whose period contains it pays it. Defaults to today. */
+  effectiveDate?: string;
 };
 
 export type SubmitExpenseClaimRequest = {
@@ -4213,6 +4222,9 @@ export type CreateCourseRequest = {
   isMandatory?: boolean;
   costAmount?: number | null;
 };
+
+/** Any subset of a course's own details; what is left out stays as it is. */
+export type UpdateCourseRequest = Partial<Omit<CreateCourseRequest, "description">> & { description?: string | null };
 
 export type CourseEnrollmentRawStatus = "assigned" | "in_progress" | "completed";
 
@@ -9971,7 +9983,14 @@ export type AccountSessionView = {
   current: boolean;
 };
 
-export type NotificationCategoryKey = "request_decisions" | "hr_inbox" | "payslip" | "approval_requests" | "request_progress";
+export type NotificationCategoryKey =
+  | "request_decisions"
+  | "hr_inbox"
+  | "payslip"
+  | "approval_requests"
+  | "request_progress"
+  | "document_expiry"
+  | "learning_due";
 
 export type NotificationPreferenceView = {
   category: NotificationCategoryKey;

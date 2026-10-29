@@ -11,6 +11,7 @@ import { EmployeeCompletenessService } from "./employee-completeness.service";
 import { EmployeeContactsService } from "./employee-contacts.service";
 import { EmployeeDocumentComplianceService } from "./employee-document-compliance.service";
 import { EmployeesService } from "./employees.service";
+import { tinyPngFile } from "../testing-tiny-png";
 
 const FIXTURE: RequestClaims = { is_platform_admin: true, company_id: null, sub: "employee-completeness-spec" };
 const pdf = { originalname: "cnic.pdf", mimetype: "application/pdf", buffer: Buffer.from("%PDF-1.4 test"), size: 13 };
@@ -115,7 +116,7 @@ describe("Profile completeness", () => {
   it("an approved photo counts, a pending one does not", async () => {
     // BACKLOG55: employee photos show at once unless the company asks for HR approval first
     await fx((c) => c.query("INSERT INTO company_appearance (company_id, photo_needs_hr_approval) VALUES ($1, true) ON CONFLICT (company_id) DO UPDATE SET photo_needs_hr_approval = true", [a]));
-    const pending = await employees.addOwnDocument(ess, me, "photograph", { ...pdf, originalname: "me.png", mimetype: "image/png" });
+    const pending = await employees.addOwnDocument(ess, me, "photograph", tinyPngFile("me.png"));
     expect((await state(ess)).photo).toBe(false);
     await compliance.review(hr, pending.id, "approved");
     expect((await state(ess)).photo).toBe(true);

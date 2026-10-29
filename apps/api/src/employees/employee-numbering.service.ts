@@ -1,3 +1,4 @@
+import { localToday } from "../common/local-date";
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import type { EmployeeNumberFormat } from "@aihxm/shared-types";
@@ -176,7 +177,7 @@ export class EmployeeNumberingService {
     if (cfg.rowCount === 0) throw new NotFoundException("Company config not found");
     const format = cfg.rows[0].employee_number_format;
     const policy = await this.loadPolicy(client, companyId);
-    const seriesKey = policy.resetPolicy === "yearly" ? String(new Date().getFullYear()) : "";
+    const seriesKey = policy.resetPolicy === "yearly" ? localToday().slice(0, 4) : "";
 
     // lock the series counter (legacy counter seeds the '' series)
     if (seriesKey === "") {

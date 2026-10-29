@@ -1,10 +1,10 @@
-import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
 import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
-import type { CourseView, CreateCourseRequest } from "@aihxm/shared-types";
+import type { CourseView, CreateCourseRequest, UpdateCourseRequest } from "@aihxm/shared-types";
 
 const LEARNING_MODULE_KEY = "learning" as const;
 
@@ -66,6 +66,44 @@ export class CoursesService {
         action: "course.create",
         target: result.rows[0].id,
         metadata: { title: input.title, category: input.category, mandatory: input.isMandatory ?? false },
+      });
+      return rowToCourse(result.rows[0]);
+    });
+  }
+
+  /** Changes a course's own details (title, category, length, mandatory flag, cost). Existing enrollments keep pointing at it. */
+  async update(claims: RequestClaims, id: string, input: UpdateCourseRequest): Promise<CourseView> {
+    await this.requireLearningModule(claims);
+    if (!(await this.rbac.can(claims, "course.manage.all"))) {
+      throw new ForbiddenException("Not permitted to manage the learning catalog");
+    }
+    const columns: Record<string, string> = {
+      title: "title",
+      description: "description",
+      category: "category",
+      durationMinutes: "duration_minutes",
+      isMandatory: "is_mandatory",
+      costAmount: "cost_amount",
+    };
+    const sets: string[] = [];
+    const values: unknown[] = [id];
+    const changed: string[] = [];
+    for (const [key, column] of Object.entries(columns)) {
+      const value = (input as Record<string, unknown>)[key];
+      if (value === undefined) continue;
+      values.push(value === "" && key === "description" ? null : value);
+      sets.push(`${column} = $${values.length}`);
+      changed.push(key);
+    }
+    if (sets.length === 0) throw new BadRequestException("Nothing to change");
+    return this.db.withClaims(claims, async (client) => {
+      const result = await client.query(`UPDATE courses SET ${sets.join(", ")}, updated_at = now() WHERE id = $1 RETURNING *`, values);
+      if (result.rowCount === 0) throw new NotFoundException("Course not found");
+      await this.audit.record(client, claims, {
+        companyId: result.rows[0].company_id,
+        action: "course.update",
+        target: id,
+        metadata: { changed },
       });
       return rowToCourse(result.rows[0]);
     });

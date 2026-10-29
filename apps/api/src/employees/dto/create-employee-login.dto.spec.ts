@@ -4,7 +4,7 @@ import { validate } from "class-validator";
 import { CreateEmployeeLoginDto } from "./create-employee-login.dto";
 
 async function errorsFor(roleKeys: string[]) {
-  return validate(plainToInstance(CreateEmployeeLoginDto, { initialPassword: "Password@123456789", roleKeys }));
+  return validate(plainToInstance(CreateEmployeeLoginDto, { initialPassword: "Quiet-River-Lantern-4821", roleKeys }));
 }
 
 describe("CreateEmployeeLoginDto role keys", () => {

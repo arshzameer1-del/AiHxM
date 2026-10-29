@@ -958,3 +958,16 @@ button.approvals-tab.is-active[aria-selected="true"], button.approvals-tab.is-ac
   .timer-pill-dot { animation: ws-ping-dot 1.4s ease-in-out infinite; }
 }
 @keyframes ws-ping-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+/* P5 - Urdu: a font stack with real Urdu letterforms (Windows, macOS and Android all ship one of these) and a little more line height. */
+html[lang="ur"] body {
+  font-family: "Noto Naskh Arabic", "Segoe UI", Tahoma, "Geeza Pro", "Noto Sans Arabic", system-ui, sans-serif;
+  line-height: 1.7;
+}
+html[dir="rtl"] input[type="email"],
+html[dir="rtl"] input[type="tel"],
+html[dir="rtl"] input[type="number"],
+html[dir="rtl"] input[type="date"] {
+  direction: ltr;
+  text-align: end;
+}

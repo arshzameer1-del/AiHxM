@@ -24,6 +24,7 @@ import { demoFixtureModules } from "./dummy/demo-fixtures.gate";
 import { WorkflowModule } from "./workflow/workflow.module";
 import { CustomFieldsModule } from "./custom-fields/custom-fields.module";
 import { NotificationsModule } from "./notifications/notifications.module";
+import { RemindersModule } from "./reminders/reminders.module";
 import { DocumentTemplatesModule } from "./document-templates/document-templates.module";
 import { ImportExportModule } from "./import-export/import-export.module";
 import { FileStorageModule } from "./file-storage/file-storage.module";
@@ -110,6 +111,7 @@ import { HrAdministrationModule } from "./hr-administration/hr-administration.mo
     WorkflowModule,
     CustomFieldsModule,
     NotificationsModule,
+    RemindersModule,
     DocumentTemplatesModule,
     ImportExportModule,
     FileStorageModule,

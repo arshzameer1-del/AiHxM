@@ -26,6 +26,7 @@ import {
 import type { ModuleKey, PublicTenantBranding, TenantRoleKey } from "@aihxm/shared-types";
 import { api, doneLoadOnEntry, prefetchRoute, publicTenantBrandingAssetUrl, startKeepWarm, takeLoadOnEntry, warmForRoles } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { useT } from "../i18n/i18n";
 import { Topbar, type QuickJumpItem } from "../components/shell/Topbar";
 import { useEmployeePhoto } from "./employees/employeePhoto";
 import { hueOf } from "../components/shell/hue";
@@ -343,10 +344,11 @@ function NavIcon({ icon: Icon, label }: { icon?: LucideIcon; label: string }) {
 /** One flat menu entry. Collapsed, only the icon shows and the name appears as a tooltip. */
 function NavEntry({ item, collapsed, onNavigate }: { item: NavItem; collapsed: boolean; onNavigate: () => void }) {
   const linkClass = railLinkClassFor(collapsed);
+  const t = useT();
   return (
-    <NavLink to={item.to} end={item.end} className={linkClass} title={item.label} aria-label={collapsed ? item.label : undefined} onClick={onNavigate} onMouseEnter={() => prefetchRoute(item.to)} onFocus={() => prefetchRoute(item.to)}>
+    <NavLink to={item.to} end={item.end} className={linkClass} title={t(item.label)} aria-label={collapsed ? t(item.label) : undefined} onClick={onNavigate} onMouseEnter={() => prefetchRoute(item.to)} onFocus={() => prefetchRoute(item.to)}>
       <NavIcon icon={item.icon} label={item.label} />
-      {!collapsed && <span className="truncate">{item.label}</span>}
+      {!collapsed && <span className="truncate">{t(item.label)}</span>}
     </NavLink>
   );
 }
@@ -357,6 +359,7 @@ function NavEntry({ item, collapsed, onNavigate }: { item: NavItem; collapsed: b
  * no page is ever out of reach.
  */
 function NavGroup({ item, collapsed, onNavigate }: { item: NavItem & { children: NavItem[] }; collapsed: boolean; onNavigate: () => void }) {
+  const t = useT();
   const { pathname } = useLocation();
   const inGroup = [item, ...item.children].some((entry) => (entry.end ? pathname === entry.to : pathname === entry.to || pathname.startsWith(`${entry.to}/`)));
   const [manual, setManual] = useState<boolean | null>(null);
@@ -387,17 +390,17 @@ function NavGroup({ item, collapsed, onNavigate }: { item: NavItem & { children:
           <div
             role="group"
             aria-label={`${item.label} pages`}
-            style={{ top: flyTop, left: 72 }}
+            style={{ top: flyTop, insetInlineStart: 72 }}
             className="fixed z-50 min-w-[200px] max-w-[260px] rounded-xl border border-sidebar-edge bg-sidebar shadow-xl p-2 flex flex-col gap-0.5"
             onMouseEnter={openFly}
             onMouseLeave={closeFly}
           >
             <NavLink to={item.to} end={item.end} className={railChildClass} onClick={() => { setFlyTop(null); onNavigate(); }}>
-              <span className="font-semibold">{item.label}</span>
+              <span className="font-semibold">{t(item.label)}</span>
             </NavLink>
             {item.children.map((child) => (
               <NavLink key={child.to} to={child.to} end={child.end} className={railChildClass} onClick={() => { setFlyTop(null); onNavigate(); }} onMouseEnter={() => prefetchRoute(child.to)} onFocus={() => prefetchRoute(child.to)}>
-                {child.label}
+                {t(child.label)}
               </NavLink>
             ))}
           </div>
@@ -415,7 +418,7 @@ function NavGroup({ item, collapsed, onNavigate }: { item: NavItem & { children:
           onClick={() => setManual(!expanded)}
           aria-expanded={expanded}
           aria-label={expanded ? `Collapse ${item.label}` : `Expand ${item.label}`}
-          className="absolute top-1/2 -translate-y-1/2 right-1.5 w-7 h-7 flex items-center justify-center text-[10px] leading-none text-sidebar-muted hover:text-sidebar-fg-hover rounded-md"
+          className="absolute top-1/2 -translate-y-1/2 end-1.5 w-7 h-7 flex items-center justify-center text-[10px] leading-none text-sidebar-muted hover:text-sidebar-fg-hover rounded-md"
         >
           <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>
         </button>
@@ -424,7 +427,7 @@ function NavGroup({ item, collapsed, onNavigate }: { item: NavItem & { children:
         <div className={RAIL_GROUP_CHILDREN_CLASS}>
           {item.children.map((child) => (
             <NavLink key={child.to} to={child.to} end={child.end} className={railChildClass} onClick={onNavigate} onMouseEnter={() => prefetchRoute(child.to)} onFocus={() => prefetchRoute(child.to)}>
-              {child.label}
+              {t(child.label)}
             </NavLink>
           ))}
         </div>
@@ -645,7 +648,7 @@ export function PortalLayout() {
         {sidebar.drawer && (
           <>
             <div className="fixed inset-0 z-30 bg-black/25" onClick={sidebar.closeDrawer} aria-hidden="true" />
-            <div className="fixed inset-y-0 left-0 z-40 flex">{menu}</div>
+            <div className="fixed inset-y-0 start-0 z-40 flex">{menu}</div>
           </>
         )}
         <div className="flex-1 min-w-0 flex flex-col">

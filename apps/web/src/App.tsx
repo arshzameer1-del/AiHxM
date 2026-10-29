@@ -378,7 +378,7 @@ function RedirectHireDraft() {
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter useTransitions={false}>
       <AuthProvider>
         <Suspense fallback={<RouteFallback />}>
           <Routes>

@@ -1,3 +1,4 @@
+import { localToday } from "../common/local-date";
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { DatabaseService } from "../database/database.service";
@@ -275,7 +276,7 @@ export class PositionPlanningService {
   async summary(claims: RequestClaims, fiscalYear?: number): Promise<PositionPlanningSummaryRow[]> {
     const visible = await this.positions.list(claims);
     if (visible.length === 0) return [];
-    const year = fiscalYear ?? new Date().getUTCFullYear();
+    const year = fiscalYear ?? Number(localToday().slice(0, 4));
     return this.db.withClaims(claims, async (client) => {
       const r = await client.query(
         `SELECT p.id, p.position_title, p.org_unit_id, p.status, p.headcount_fte,

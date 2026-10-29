@@ -181,6 +181,8 @@ export class EmployeeAdditionalPaymentsService {
         "UPDATE employee_additional_payments SET status = 'cancelled' WHERE id = $1 RETURNING *",
         [id]
       );
+      // a reimbursement queued from an expense claim: the claim goes back to plain "approved"
+      await client.query("UPDATE expense_claims SET payroll_payment_id = NULL, updated_at = now() WHERE payroll_payment_id = $1", [id]);
       await this.audit.record(client, claims, { companyId: claims.company_id ?? null, action: "employee_additional_payment.cancel", target: id });
       return rowToView(result.rows[0]);
     });

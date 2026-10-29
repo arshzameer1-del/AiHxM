@@ -22,6 +22,7 @@ import { WebhookDispatchService } from "../webhooks/webhook-dispatch.service";
 import { IntegrationsService } from "../tenant-management/integrations.service";
 import { EmployeeLoansService } from "../employees/employee-loans.service";
 import { EmployeeAdditionalPaymentsService } from "../employees/employee-additional-payments.service";
+import { ExpenseClaimsService } from "../expenses/expense-claims.service";
 import { EmployeeOffCyclePaymentsService } from "../employees/employee-offcycle-payments.service";
 
 const FIXTURE_CLAIMS: RequestClaims = { is_platform_admin: true, company_id: null, sub: "payroll-spec-fixtures" };
@@ -1319,6 +1320,41 @@ describe("PayrollService", () => {
       expect(afterFinalizePayments.find((p) => p.id === earning.id)!.status).toBe("consumed");
       expect(afterFinalizePayments.find((p) => p.id === deduction.id)!.status).toBe("consumed");
       expect(afterFinalizePayments.find((p) => p.id === earning.id)!.consumedPayrollRunId).toBe(run.id);
+    });
+
+    it("an approved expense claim queued for payroll is paid by the run and turns paid when the run is finalised (gap 4)", async () => {
+      await db.withClaims(FIXTURE_CLAIMS, (c) =>
+        c.query("INSERT INTO tenant_module_entitlement (company_id, module_key, enabled) VALUES ($1, 'expense', true) ON CONFLICT (company_id, module_key) DO UPDATE SET enabled = true", [companyId])
+      );
+      const expenses = new ExpenseClaimsService(db, rbac, entitlements, audit, workflow, {} as never);
+      const employee = await createEmployee({ dateOfJoining: "2020-01-01" });
+      await compensation.setCompensation(hrAdminClaims, { employeeId: employee.id, monthlySalary: 100000, effectiveFrom: "2020-01-01" });
+      const claimId = (
+        await db.withClaims(FIXTURE_CLAIMS, (c) =>
+          c.query(
+            "INSERT INTO expense_claims (company_id, employee_id, category, expense_date, amount, status) VALUES ($1,$2,'travel','2026-10-12',3200,'approved') RETURNING id",
+            [companyId, employee.id]
+          )
+        )
+      ).rows[0].id as string;
+
+      const queued = await expenses.reimburseInPayroll(hrAdminClaims, claimId, "2030-02-15");
+      expect(queued).toMatchObject({ status: "approved", queuedForPayroll: true });
+      await expect(expenses.reimburseInPayroll(hrAdminClaims, claimId, "2030-02-15")).rejects.toThrow(/already queued/);
+
+      const run = await payroll.createRun(hrAdminClaims, { periodStart: "2030-02-01", periodEnd: "2030-02-28" });
+      await payroll.calculateRun(hrAdminClaims, run.id);
+      const slip = (await payroll.listPayslips(hrAdminClaims, { payrollRunId: run.id })).find((p) => p.employeeId === employee.id)!;
+      expect(slip.grossPay).toBe(103200); // salary + the reimbursement
+      expect(slip.taxableGrossThisPeriod).toBe(100000); // a reimbursement is not taxed
+      expect(slip.calculationBreakdown.some((b) => String(b.label).includes("Expense reimbursement"))).toBe(true);
+
+      await submitAndApprove(run.id);
+      await payroll.finalizeRun(hrAdminClaims, run.id);
+      const after = (await expenses.getClaim(hrAdminClaims, claimId)) as { status: string; paidAt: string | null; queuedForPayroll: boolean };
+      expect(after.status).toBe("paid");
+      expect(after.paidAt).not.toBeNull();
+      expect(after.queuedForPayroll).toBe(false);
     });
 
     it("a non-taxable additional earning adds to gross pay but not taxable gross", async () => {

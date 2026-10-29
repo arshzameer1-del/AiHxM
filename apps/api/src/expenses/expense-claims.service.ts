@@ -1,3 +1,5 @@
+import { localToday } from "../common/local-date";
+import { payrollRunHooks } from "../payroll/payroll-run-hooks";
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { DatabaseService } from "../database/database.service";
@@ -77,6 +79,7 @@ function rowToClaim(row: any, employeeUserAccountId: string | null, receipts: Ex
     workflowInstanceId: row.workflow_instance_id,
     paidAt: row.paid_at ? toIso(row.paid_at) : null,
     paidByUserAccountId: row.paid_by_user_account_id,
+    queuedForPayroll: row.status === "approved" && !!row.payroll_payment_id,
     receipts,
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
@@ -115,6 +118,17 @@ export class ExpenseClaimsService {
     private readonly workflow: WorkflowService,
     @Inject(FILE_STORAGE) private readonly fileStorage: FileStorageService
   ) {
+    // Functional gap 4: a claim queued for payroll becomes "paid" when the run that pays it is finalised.
+    payrollRunHooks.register("expense-claim-reimbursement", {
+      onFinalized: async (client, claims, run) => {
+        await client.query(
+          `UPDATE expense_claims c SET status = 'paid', paid_at = now(), paid_by_user_account_id = $2, updated_at = now()
+            WHERE c.status = 'approved'
+              AND c.id IN (SELECT expense_claim_id FROM employee_additional_payments WHERE consumed_payroll_run_id = $1 AND expense_claim_id IS NOT NULL)`,
+          [run.id, claims.sub]
+        );
+      },
+    });
     // WFL-01: one approval center - My Inbox decides through this module so its effect is applied.
     this.workflow?.adapters?.register({
       objectKey: WORKFLOW_OBJECT_KEY,
@@ -294,6 +308,9 @@ export class ExpenseClaimsService {
       if (row.status !== "approved") {
         throw new BadRequestException(`Cannot mark as paid: expense claim is ${row.status}, not approved`);
       }
+      if (row.payroll_payment_id) {
+        throw new BadRequestException("This claim is queued to be paid through payroll; cancel that payment first if you want to mark it paid by hand");
+      }
       const emp = await this.loadEmployee(client, row.employee_id);
 
       const updateResult = await client.query(
@@ -311,6 +328,48 @@ export class ExpenseClaimsService {
       return { updatedRow: updateResult.rows[0], employee: emp };
     });
 
+    const receipts = await this.listReceiptRows(claims, claimId);
+    return rowToClaim(updatedRow, employee?.user_account_id ?? null, receipts.map(rowToReceipt));
+  }
+
+  /**
+   * Queues an approved claim to be reimbursed through payroll: creates a non-taxable additional payment for the employee
+   * (the existing way payroll takes one-off money) which the run covering `effectiveDate` pays. The claim turns "paid"
+   * on its own when that run is finalised. `expense_claim.pay.all` only, same as marking a claim paid by hand.
+   */
+  async reimburseInPayroll(claims: RequestClaims, claimId: string, effectiveDate?: string): Promise<ExpenseClaimView> {
+    await this.requireExpenseModule(claims);
+    if (!(await this.rbac.can(claims, "expense_claim.pay.all"))) {
+      throw new ForbiddenException("Not permitted to reimburse expense claims");
+    }
+    if (!(await this.entitlements.isModuleEnabled(claims, "payroll"))) {
+      throw new BadRequestException("Payroll is not switched on for this company - mark the claim as paid instead");
+    }
+    const day = effectiveDate ?? localToday();
+    const { updatedRow, employee } = await this.db.withClaims(claims, async (client) => {
+      const result = await client.query(`SELECT * FROM expense_claims WHERE id = $1 FOR UPDATE`, [claimId]);
+      if (result.rowCount === 0) throw new NotFoundException("Expense claim not found");
+      const row = result.rows[0];
+      if (row.status !== "approved") throw new BadRequestException(`Only an approved claim can be reimbursed through payroll (this one is ${row.status})`);
+      if (row.payroll_payment_id) throw new BadRequestException("This claim is already queued for payroll");
+      if (row.currency !== "PKR") throw new BadRequestException(`Payroll pays in PKR; this claim is in ${row.currency} - mark it as paid instead`);
+      const emp = await this.loadEmployee(client, row.employee_id);
+      const label = `Expense reimbursement - ${String(row.category).replace(/_/g, " ")}`;
+      const payment = await client.query(
+        `INSERT INTO employee_additional_payments
+           (company_id, employee_id, payment_type, label, amount, is_taxable, effective_date, created_by_user_account_id, reason_note, expense_claim_id)
+         VALUES ($1, $2, 'earning', $3, $4, false, $5, $6, $7, $8) RETURNING id`,
+        [row.company_id, row.employee_id, label, row.amount, day, claims.sub, row.description ?? null, claimId]
+      );
+      const updated = await client.query(`UPDATE expense_claims SET payroll_payment_id = $2, updated_at = now() WHERE id = $1 RETURNING *`, [claimId, payment.rows[0].id]);
+      await this.audit.record(client, claims, {
+        companyId: row.company_id,
+        action: "expense_claim.reimburse_in_payroll",
+        target: claimId,
+        metadata: { paymentId: payment.rows[0].id, effectiveDate: day, amount: Number(row.amount) },
+      });
+      return { updatedRow: updated.rows[0], employee: emp };
+    });
     const receipts = await this.listReceiptRows(claims, claimId);
     return rowToClaim(updatedRow, employee?.user_account_id ?? null, receipts.map(rowToReceipt));
   }

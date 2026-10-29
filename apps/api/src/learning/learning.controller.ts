@@ -8,6 +8,7 @@ import { CoursesService } from "./courses.service";
 import { CourseEnrollmentsService } from "./course-enrollments.service";
 import { CreateCourseDto } from "./dto/create-course.dto";
 import { EnrollInCourseDto } from "./dto/enroll-in-course.dto";
+import { UpdateCourseDto } from "./dto/update-course.dto";
 import { UpdateCourseEnrollmentProgressDto } from "./dto/update-progress.dto";
 
 /**
@@ -36,6 +37,11 @@ export class LearningController {
   @Get("courses/:id")
   getCourse(@CurrentClaims() claims: RequestClaims, @Param("id") id: string) {
     return this.courses.get(claims, id);
+  }
+
+  @Patch("courses/:id")
+  updateCourse(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: UpdateCourseDto) {
+    return this.courses.update(claims, id, dto);
   }
 
   @Patch("courses/:id/active")

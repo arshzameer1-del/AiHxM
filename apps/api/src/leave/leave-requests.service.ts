@@ -1,3 +1,4 @@
+import { localToday } from "../common/local-date";
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { DatabaseService } from "../database/database.service";
@@ -707,7 +708,7 @@ export class LeaveRequestsService {
     const visible = await this.isVisible(claims, employee.user_account_id, employee.manager_user_account_id);
     if (!visible) throw new NotFoundException("Employee not found");
 
-    const year = new Date().getUTCFullYear();
+    const year = Number(localToday().slice(0, 4));
     const resolved = await this.employeeGroups.resolvePolicyInternal(claims, employeeId, "leave");
 
     return this.db.withClaims(claims, async (client) => {

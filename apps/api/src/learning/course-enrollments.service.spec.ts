@@ -150,6 +150,17 @@ describe("CoursesService + CourseEnrollmentsService", () => {
       expect(staffView.some((c) => c.id === activeCourseId)).toBe(true);
     });
 
+    it("lets manage.all edit a course's details, changing only what is sent, and refuses an empty edit or a non-manager", async () => {
+      const c = await courses.create(hrAdminClaims, { title: "Old title", category: "other", durationMinutes: 10, description: "keep me" });
+      const edited = await courses.update(hrAdminClaims, c.id, { title: "New title", durationMinutes: 45, isMandatory: true, costAmount: 1500 });
+      expect(edited).toMatchObject({ title: "New title", durationMinutes: 45, isMandatory: true, costAmount: 1500, category: "other", description: "keep me" });
+      const cleared = await courses.update(hrAdminClaims, c.id, { description: null });
+      expect(cleared.description).toBeNull();
+      await expect(courses.update(hrAdminClaims, c.id, {})).rejects.toBeInstanceOf(BadRequestException);
+      await expect(courses.update(staffClaims, c.id, { title: "Hijack" })).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(courses.update(hrAdminClaims, "00000000-0000-0000-0000-000000000000", { title: "x" })).rejects.toBeInstanceOf(NotFoundException);
+    });
+
     it("denies catalog management to a non-hr_admin", async () => {
       await expect(
         courses.create(staffClaims, { title: "Unauthorized", category: "other", durationMinutes: 5 })

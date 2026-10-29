@@ -146,6 +146,7 @@ import type {
   CreateCandidateRequest,
   CreateCompanyRequest,
   CreateCourseRequest,
+  UpdateCourseRequest,
   CancelEmployeeLoanRequest,
   CreateCompensationComponentRequest,
   CreateEmployeeAdditionalPaymentRequest,
@@ -3116,6 +3117,9 @@ export const api = {
   markExpenseClaimPaid: (id: string) =>
     request<ExpenseClaimView>(`/expense-claims/${id}/mark-paid`, { method: "POST" }),
 
+  reimburseExpenseClaimInPayroll: (id: string, effectiveDate?: string) =>
+    request<ExpenseClaimView>(`/expense-claims/${id}/reimburse-in-payroll`, { method: "POST", body: JSON.stringify({ effectiveDate }) }),
+
   cancelExpenseClaim: (id: string) => request<void>(`/expense-claims/${id}/cancel`, { method: "POST" }),
 
   // Same multipart shape as uploadBrandingAsset above.
@@ -3184,6 +3188,9 @@ export const api = {
 
   createCourse: (input: CreateCourseRequest) =>
     request<CourseView>("/courses", { method: "POST", body: JSON.stringify(input) }),
+
+  updateCourse: (id: string, input: UpdateCourseRequest) =>
+    request<CourseView>(`/courses/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
 
   setCourseActive: (id: string, isActive: boolean) =>
     request<CourseView>(`/courses/${id}/active`, { method: "PATCH", body: JSON.stringify({ isActive }) }),

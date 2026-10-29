@@ -113,6 +113,33 @@ export class LeaveValidationRulesService {
     });
   }
 
+  /**
+   * Gap 15 - the first rule (lowest priority number) that fires decides a validation, so a lenient rule placed ahead of a stricter one
+   * hides the stricter one for every request the lenient rule also catches. That is sometimes intended (an exception), so a save is
+   * never refused, but the admin is told.
+   */
+  shadowNotices(draft: LeaveValidationRuleView, all: LeaveValidationRuleView[]): string[] {
+    if (!draft.isActive) return [];
+    const rank = { info: 1, warning: 2, block: 3 } as const;
+    const overlaps = (a: string[], b: string[]) => a.length === 0 || b.length === 0 || a.some((x) => b.includes(x));
+    return all
+      .filter(
+        (o) =>
+          o.id !== draft.id &&
+          o.isActive &&
+          o.validationType === draft.validationType &&
+          o.priority > draft.priority &&
+          rank[o.severity] > rank[draft.severity] &&
+          overlaps(o.leaveTypes, draft.leaveTypes) &&
+          overlaps(o.policyIds, draft.policyIds) &&
+          overlaps(o.employeeGroupIds, draft.employeeGroupIds)
+      )
+      .map(
+        (o) =>
+          `This rule (priority ${draft.priority}, ${draft.severity}) runs before "${o.name}" (priority ${o.priority}, ${o.severity}). When this rule applies to a request, "${o.name}" is no longer checked for it. Give this rule a higher priority number if the stricter rule should win.`
+      );
+  }
+
   async create(claims: RequestClaims, input: SaveLeaveValidationRuleRequest): Promise<LeaveValidationRuleView> {
     await this.requireManage(claims);
     if (!input.code || !input.validationType || !input.name || !input.message) {
@@ -136,8 +163,10 @@ export class LeaveValidationRulesService {
         ]
       );
       const view = rowToRule(r.rows[0]);
+      const notices = this.shadowNotices(view, await this.loadAll(client, claims.company_id!));
       await this.recordHistory(client, claims, view, "create");
       await this.audit.record(client, claims, { companyId: claims.company_id ?? null, action: "leave_validation_rule.create", target: view.id, metadata: { code: view.code, validationType: view.validationType, severity: view.severity } });
+      if (notices.length > 0) view.notices = notices;
       return view;
     });
   }
@@ -171,11 +200,13 @@ export class LeaveValidationRulesService {
         ]
       );
       const view = rowToRule(r.rows[0]);
+      const notices = this.shadowNotices(view, await this.loadAll(client, claims.company_id!));
       await this.recordHistory(client, claims, view, "update");
       await this.audit.record(client, claims, {
         companyId: claims.company_id ?? null, action: "leave_validation_rule.update", target: id,
         metadata: { code: view.code, version: view.version, fields: Object.keys(patch) },
       });
+      if (notices.length > 0) view.notices = notices;
       return view;
     });
   }

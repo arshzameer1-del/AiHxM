@@ -256,7 +256,7 @@ describe("Auth HTTP surface (e2e)", () => {
       const devModeToken = requestRes.body.devModeToken;
       expect(devModeToken).toEqual(expect.any(String));
 
-      const newPassword = "NewPassword456!";
+      const newPassword = "Violet-Harbor-Ladder-2917!";
       const confirmRes = await request(app.getHttpServer())
         .post("/auth/password-reset/confirm")
         .send({ token: devModeToken, newPassword });

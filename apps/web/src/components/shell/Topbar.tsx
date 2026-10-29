@@ -1,3 +1,4 @@
+import { useLanguage, useT, setLanguage } from "../../i18n/i18n";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { Check, ChevronDown, Download, LogOut, Search, ShieldCheck } from "lucide-react";
@@ -54,6 +55,8 @@ export function Topbar({
   /** The person's profile photo (blob: URL). Initials are shown when there is none. */
   avatarUrl?: string | null;
 }) {
+  const t = useT();
+  const language = useLanguage();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [installHelp, setInstallHelp] = useState(false);
@@ -134,11 +137,11 @@ export function Topbar({
         <button
           type="button"
           onClick={() => setPaletteOpen(true)}
-          aria-label="Search pages and actions"
-          className="flex items-center justify-center sm:justify-start gap-2.5 w-10 h-10 sm:h-auto sm:w-full sm:max-w-sm shrink-0 sm:shrink sm:px-3.5 sm:py-2 rounded-lg border border-border bg-surface text-left text-sm text-label-secondary hover:border-accent/40 transition-colors"
+          aria-label={t("Search pages and actions")}
+          className="flex items-center justify-center sm:justify-start gap-2.5 w-10 h-10 sm:h-auto sm:w-full sm:max-w-sm shrink-0 sm:shrink sm:px-3.5 sm:py-2 rounded-lg border border-border bg-surface text-start text-sm text-label-secondary hover:border-accent/40 transition-colors"
         >
           <Search size={16} strokeWidth={1.75} className="shrink-0" />
-          <span className="hidden sm:block flex-1 truncate">Search pages, actions…</span>
+          <span className="hidden sm:block flex-1 truncate">{t("Search pages, actions…")}</span>
           <kbd className="hidden sm:block text-[11px] font-semibold text-label-secondary bg-card border border-border rounded px-1.5 py-0.5">
             ⌘K
           </kbd>
@@ -158,7 +161,7 @@ export function Topbar({
             type="button"
             onClick={() => setProfileOpen((v) => !v)}
             aria-expanded={profileOpen}
-            aria-label="Account menu"
+            aria-label={t("Account menu")}
             className="flex items-center gap-2.5 pl-1.5 pr-1.5 sm:pr-2.5 py-1.5 rounded-lg hover:bg-surface transition-colors"
           >
             <span className="w-8 h-8 rounded-full bg-accent/10 text-accent font-semibold text-xs flex items-center justify-center shrink-0 overflow-hidden">
@@ -172,29 +175,46 @@ export function Topbar({
           </button>
 
           {profileOpen && (
-            <div className="app-topbar-menu absolute right-0 mt-2 w-64 max-w-[calc(100vw-1.5rem)] bg-card border border-border rounded-xl shadow-lg py-1.5 z-30">
+            <div className="app-topbar-menu absolute end-0 mt-2 w-64 max-w-[calc(100vw-1.5rem)] bg-card border border-border rounded-xl shadow-lg py-1.5 z-30">
               <div className="px-3.5 py-2 border-b border-border">
                 <div className="text-sm font-medium text-label-primary truncate">{userName}</div>
                 <div className="text-xs text-label-secondary truncate">{userEmail}</div>
               </div>
               <div role="group" aria-label="Theme" className="px-1.5 py-1.5 border-b border-border">
-                <div className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-label-tertiary">Theme</div>
-                {THEMES.map((t) => (
+                <div className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-label-tertiary">{t("Theme")}</div>
+                {THEMES.map((th) => (
                   <button
-                    key={t.key}
+                    key={th.key}
                     type="button"
                     role="menuitemradio"
-                    aria-checked={theme === t.key}
-                    onClick={() => setTheme(applyTheme(t.key))}
-                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left text-sm hover:bg-surface transition-colors"
+                    aria-checked={theme === th.key}
+                    onClick={() => setTheme(applyTheme(th.key))}
+                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-start text-sm hover:bg-surface transition-colors"
                   >
-                    <span className="w-4 shrink-0 text-accent">{theme === t.key && <Check size={15} strokeWidth={2.25} aria-hidden />}</span>
+                    <span className="w-4 shrink-0 text-accent">{theme === th.key && <Check size={15} strokeWidth={2.25} aria-hidden />}</span>
                     <span className="min-w-0">
-                      <span className="block text-label-primary">{t.label}</span>
-                      <span className="block text-xs text-label-secondary">{t.hint}</span>
+                      <span className="block text-label-primary">{th.label}</span>
+                      <span className="block text-xs text-label-secondary">{th.hint}</span>
                     </span>
                   </button>
                 ))}
+              </div>
+              <div role="group" aria-label={t("Language")} className="px-1.5 py-1.5 border-b border-border" data-testid="menu-language">
+                <div className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-label-tertiary">{t("Language")}</div>
+                <div className="flex gap-1 px-1">
+                  {([["en", "English"], ["ur", "اردو"]] as const).map(([code, label]) => (
+                    <button
+                      key={code}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={language === code}
+                      onClick={() => setLanguage(code)}
+                      className={`flex-1 rounded-md px-2 py-1.5 text-sm transition-colors ${language === code ? "bg-accent/10 text-accent font-semibold" : "text-label-primary hover:bg-surface"}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
               {accountPath && (
                 <button
@@ -207,7 +227,7 @@ export function Topbar({
                   className="w-full flex items-center gap-2 px-3.5 py-2 text-sm text-label-primary hover:bg-surface transition-colors border-b border-border"
                 >
                   <ShieldCheck size={15} strokeWidth={1.75} />
-                  Account &amp; security
+                  {t("Account & security")}
                 </button>
               )}
               {(installMode === "prompt" || installMode === "ios" || installMode === "ios-other-browser") && (
@@ -222,7 +242,7 @@ export function Topbar({
                   className="w-full flex items-center gap-2 px-3.5 py-2 text-sm text-label-primary hover:bg-surface transition-colors border-b border-border"
                 >
                   <Download size={15} strokeWidth={1.75} />
-                  Install app
+                  {t("Install app")}
                 </button>
               )}
               <button
@@ -231,7 +251,7 @@ export function Topbar({
                 className="w-full flex items-center gap-2 px-3.5 py-2 text-sm text-danger hover:bg-danger/5 transition-colors"
               >
                 <LogOut size={15} strokeWidth={1.75} />
-                Log out
+                {t("Log out")}
               </button>
             </div>
           )}
@@ -260,8 +280,8 @@ export function Topbar({
                   setActiveIndex(0);
                 }}
                 onKeyDown={handlePaletteKeyDown}
-                placeholder="Search pages, actions…"
-                aria-label="Search pages and actions"
+                placeholder={t("Search pages, actions…")}
+                aria-label={t("Search pages and actions")}
                 className="flex-1 outline-none text-sm text-label-primary placeholder:text-label-tertiary bg-transparent"
               />
               <kbd className="text-[11px] font-semibold text-label-secondary bg-surface border border-border rounded px-1.5 py-0.5">
@@ -281,12 +301,12 @@ export function Topbar({
                     navigate(item.to);
                     setPaletteOpen(false);
                   }}
-                  className={`w-full text-left px-4 py-2.5 text-sm flex items-center justify-between transition-colors ${
+                  className={`w-full text-start px-4 py-2.5 text-sm flex items-center justify-between transition-colors ${
                     idx === activeIndex ? "bg-accent/10 text-accent" : "text-label-primary"
                   }`}
                 >
-                  <span>{item.label}</span>
-                  {item.group && <span className="text-xs text-label-secondary">{item.group}</span>}
+                  <span>{t(item.label)}</span>
+                  {item.group && <span className="text-xs text-label-secondary">{t(item.group)}</span>}
                 </button>
               ))}
             </div>

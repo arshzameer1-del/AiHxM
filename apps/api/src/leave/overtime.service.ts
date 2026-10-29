@@ -1,3 +1,4 @@
+import { localToday } from "../common/local-date";
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { WorkflowService } from "../workflow/workflow.service";
 import { decideInEngine, statusForOutcome, submitToEngineIfConfigured } from "../workflow/engine-routing";
@@ -856,7 +857,7 @@ export class OvertimeService {
         companyId: row.company_id,
         employeeId: row.employee_id,
         leaveType: "compensatory",
-        year: new Date().getUTCFullYear(),
+        year: Number(localToday().slice(0, 4)),
         entryType: "accrual",
         days,
         sourceType: "overtime",

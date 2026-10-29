@@ -40,6 +40,20 @@ export const NOTIFICATION_CATEGORIES: Array<{
     defaults: { email: true, inApp: true },
   },
   {
+    key: "document_expiry",
+    label: "My documents are about to expire",
+    description: "A reminder at 30 days, at 7 days and when one of your documents has expired.",
+    channels: ["in_app", "email"],
+    defaults: { email: true, inApp: true },
+  },
+  {
+    key: "learning_due",
+    label: "My courses are due",
+    description: "A reminder at 30 days, at 7 days and when a course you were assigned is overdue.",
+    channels: ["in_app", "email"],
+    defaults: { email: false, inApp: true },
+  },
+  {
     key: "payslip",
     label: "Payslip is ready",
     description: "The email that tells you a new payslip is available. The email never contains amounts.",

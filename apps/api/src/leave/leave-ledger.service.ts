@@ -236,7 +236,7 @@ export class LeaveLedgerService {
     }
     if (!input.reason?.trim()) throw new BadRequestException("An adjustment needs a reason");
     if (!Number.isFinite(input.days) || input.days === 0) throw new BadRequestException("An adjustment needs a non-zero number of days");
-    const year = input.year ?? new Date().getUTCFullYear();
+    const year = input.year ?? Number(localToday().slice(0, 4));
     return this.db.withClaims(claims, async (client) => {
       const emp = await client.query("SELECT company_id FROM employees WHERE id = $1", [input.employeeId]);
       if (emp.rowCount === 0) throw new NotFoundException("Employee not found");

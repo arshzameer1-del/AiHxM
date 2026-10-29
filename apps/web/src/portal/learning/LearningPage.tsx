@@ -136,13 +136,14 @@ function EnrollmentRow({ enrollment, onChanged }: { enrollment: CourseEnrollment
   );
 }
 
-function AddCourseForm({ onCancel, onCreated }: { onCancel: () => void; onCreated: () => void }) {
-  const [title, setTitle] = useState("");
-  const [category, setCategory] = useState<CourseCategory>("compliance");
-  const [durationMinutes, setDurationMinutes] = useState("30");
-  const [description, setDescription] = useState("");
-  const [isMandatory, setIsMandatory] = useState(false);
-  const [cost, setCost] = useState("");
+/** Adds a course, or edits `course` when one is passed (the same fields either way). */
+function AddCourseForm({ onCancel, onCreated, course }: { onCancel: () => void; onCreated: () => void; course?: CourseView }) {
+  const [title, setTitle] = useState(course?.title ?? "");
+  const [category, setCategory] = useState<CourseCategory>(course?.category ?? "compliance");
+  const [durationMinutes, setDurationMinutes] = useState(String(course?.durationMinutes ?? 30));
+  const [description, setDescription] = useState(course?.description ?? "");
+  const [isMandatory, setIsMandatory] = useState(course?.isMandatory ?? false);
+  const [cost, setCost] = useState(course?.costAmount == null ? "" : String(course.costAmount));
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -161,10 +162,14 @@ function AddCourseForm({ onCancel, onCreated }: { onCancel: () => void; onCreate
     }
     setSubmitting(true);
     try {
-      await api.createCourse({ title, category, durationMinutes: duration, description: description || undefined, isMandatory, costAmount });
+      if (course) {
+        await api.updateCourse(course.id, { title, category, durationMinutes: duration, description, isMandatory, costAmount });
+      } else {
+        await api.createCourse({ title, category, durationMinutes: duration, description: description || undefined, isMandatory, costAmount });
+      }
       onCreated();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not create this course.");
+      setError(err instanceof ApiError ? err.message : course ? "Could not save this course." : "Could not create this course.");
     } finally {
       setSubmitting(false);
     }
@@ -215,8 +220,8 @@ function AddCourseForm({ onCancel, onCreated }: { onCancel: () => void; onCreate
         className="w-full rounded-lg border border-black/10 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
       />
       <div className="flex flex-wrap items-end gap-4">
-        <label htmlFor="course-mandatory" className="flex items-center gap-2 text-sm">
-          <input id="course-mandatory" type="checkbox" checked={isMandatory} onChange={(e) => setIsMandatory(e.target.checked)} />
+        <label htmlFor={`course-mandatory-${course?.id ?? "new"}`} className="flex items-center gap-2 text-sm">
+          <input id={`course-mandatory-${course?.id ?? "new"}`} type="checkbox" checked={isMandatory} onChange={(e) => setIsMandatory(e.target.checked)} />
           Mandatory for every employee
         </label>
         <div>
@@ -239,7 +244,7 @@ function AddCourseForm({ onCancel, onCreated }: { onCancel: () => void; onCreate
           disabled={submitting}
           className="bg-accent text-white rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
         >
-          {submitting ? "Creating…" : "Add course"}
+          {submitting ? (course ? "Saving…" : "Creating…") : course ? "Save changes" : "Add course"}
         </button>
         <button type="button" onClick={onCancel} className="text-xs font-medium text-label-secondary">
           Cancel
@@ -265,6 +270,7 @@ function CourseCard({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
   const { identity } = useAuth();
 
   async function handleEnroll() {
@@ -294,6 +300,21 @@ function CourseCard({
     }
   }
 
+  if (editing) {
+    return (
+      <div className="sm:col-span-2 lg:col-span-3">
+        <AddCourseForm
+          course={course}
+          onCancel={() => setEditing(false)}
+          onCreated={() => {
+            setEditing(false);
+            onChanged();
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="bg-card rounded-card p-4 shadow-sm flex flex-col gap-2">
       <div className="font-medium text-sm">{course.title}</div>
@@ -314,9 +335,14 @@ function CourseCard({
           <span className="text-xs text-label-tertiary">Not enrolled</span>
         )}
         {canManageCatalog && (
-          <button onClick={handleDeactivate} disabled={busy} className="text-xs text-label-tertiary hover:text-danger">
-            Deactivate
-          </button>
+          <span className="flex items-center gap-3">
+            <button onClick={() => setEditing(true)} disabled={busy} className="text-xs text-label-tertiary hover:text-accent">
+              Edit
+            </button>
+            <button onClick={handleDeactivate} disabled={busy} className="text-xs text-label-tertiary hover:text-danger">
+              Deactivate
+            </button>
+          </span>
         )}
       </div>
       {error && <p className="text-xs text-danger">{error}</p>}
