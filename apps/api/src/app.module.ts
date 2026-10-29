@@ -25,6 +25,7 @@ import { WorkflowModule } from "./workflow/workflow.module";
 import { CustomFieldsModule } from "./custom-fields/custom-fields.module";
 import { CareersModule } from "./careers/careers.module";
 import { TravelModule } from "./travel/travel.module";
+import { SmartChecksModule } from "./smart-checks/smart-checks.module";
 import { AssetsModule } from "./assets/assets.module";
 import { AttendancePenaltiesModule } from "./attendance-penalties/attendance-penalties.module";
 import { AnnouncementsModule } from "./announcements/announcements.module";
@@ -120,6 +121,7 @@ import { HrAdministrationModule } from "./hr-administration/hr-administration.mo
     CareersModule,
     AssetsModule,
     TravelModule,
+    SmartChecksModule,
     AttendancePenaltiesModule,
     MessagingModule,
     NotificationsModule,

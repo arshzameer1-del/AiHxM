@@ -163,6 +163,9 @@ const WorkforceAnalyticsPage = lazy(() =>
     default: m.WorkforceAnalyticsPage,
   })),
 );
+const SmartChecksPage = lazy(() =>
+  import("./portal/employees/SmartChecksPage").then((m) => ({ default: m.SmartChecksPage })),
+);
 const EmployeeDataConsistencyPage = lazy(() =>
   import("./portal/employees/EmployeeDataConsistencyPage").then((m) => ({
     default: m.EmployeeDataConsistencyPage,
@@ -489,6 +492,7 @@ export default function App() {
                   <Route path="employees/bulk-import" element={<Navigate to="/app/hire/bulk" replace />} />
                   <Route path="employees/analytics" element={<WorkforceAnalyticsPage />} />
                   <Route path="employees/data-consistency" element={<EmployeeDataConsistencyPage />} />
+                  <Route path="employees/smart-checks" element={<SmartChecksPage />} />
                   <Route path="employees/change-requests" element={<EmployeeChangeRequestsPage />} />
                   <Route path="employees/requests" element={<EmployeeRequestsPage />} />
                   <Route path="employees/announcements" element={<AnnouncementsAdminPage />} />

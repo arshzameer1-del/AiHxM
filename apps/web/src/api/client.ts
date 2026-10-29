@@ -640,6 +640,8 @@ import type {
   GoalPlanRequest,
   GoalPlanView,
   GoalUpdateView,
+  SmartCheckReport,
+  DismissSmartCheckRequest,
   CreateKeyResultRequest,
   UpdateKeyResultRequest,
   KeyResultCheckInRequest,
@@ -3672,6 +3674,13 @@ export const api = {
     request<KeyResultsResultView>(`/key-results/${id}/check-in`, { method: "POST", body: JSON.stringify(input) }),
   removeKeyResult: (id: string) => request<KeyResultsResultView>(`/key-results/${id}`, { method: "DELETE" }),
   getGoalAlignment: (reviewCycleId: string) => request<GoalAlignmentNode[]>(`/goal-alignment?reviewCycleId=${reviewCycleId}`),
+
+  // Smart checks (GAPB8).
+  runSmartChecks: () => request<SmartCheckReport>("/smart-checks"),
+  listDismissedSmartChecks: () =>
+    request<Array<{ id: string; ruleKey: string; ruleTitle: string; subjectKey: string; reason: string; dismissedAt: string }>>("/smart-checks/dismissed"),
+  dismissSmartCheck: (input: DismissSmartCheckRequest) => request<{ ok: true }>("/smart-checks/dismiss", { method: "POST", body: JSON.stringify(input) }),
+  restoreSmartCheck: (id: string) => request<void>(`/smart-checks/dismissed/${id}`, { method: "DELETE" }),
   listGoalEvidence: (goalId: string) => request<GoalEvidenceView[]>(`/goals/${goalId}/evidence`),
   addGoalEvidence: (goalId: string, input: { label: string; url: string }) =>
     request<GoalEvidenceView>(`/goals/${goalId}/evidence`, { method: "POST", body: JSON.stringify(input) }),

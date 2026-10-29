@@ -10723,3 +10723,20 @@ export type GoalAlignmentNode = {
   /** True when the goal is only shown to place a visible goal under its parent: its details are not the reader's to open. */
   isContext: boolean;
 };
+
+// ---------------------------------------------------------------- smart checks (rule-based, read-only scans)
+export type SmartCheckSeverity = "high" | "medium";
+export type SmartCheckSample = { subjectKey: string; employeeId: string | null; label: string; detail: string };
+export type SmartCheckFinding = {
+  ruleKey: string;
+  title: string;
+  severity: SmartCheckSeverity;
+  /** The rule in plain words: what is looked at and why a match deserves a look. */
+  why: string;
+  count: number;
+  dismissedCount: number;
+  samples: SmartCheckSample[];
+  link: string | null;
+};
+export type SmartCheckReport = { ranAt: string; totalOpen: number; high: number; medium: number; findings: SmartCheckFinding[] };
+export type DismissSmartCheckRequest = { ruleKey: string; subjectKey: string; reason: string };
