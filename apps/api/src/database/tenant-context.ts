@@ -132,7 +132,8 @@ export async function runInTenantContext<T>(
  *
  * Only for queries whose parameters are plain strings, numbers, booleans or null: they are written into the statement as
  * escaped literals (the simple-query protocol has no bound parameters). It does not load tenant field keys, so it must not
- * touch an encrypted column.
+ * touch an encrypted column. The session time zone is the business zone here too: the role-window checks use CURRENT_DATE, and with the
+ * server's UTC date a grant starting "today" in Pakistan was not yet active, and one that ended yesterday still worked, from midnight to 05:00.
  */
 export async function queryInTenantContext<R extends Record<string, unknown> = Record<string, unknown>>(
   pool: Pool,
@@ -157,7 +158,7 @@ export async function queryInTenantContext<R extends Record<string, unknown> = R
       return literal(values[i]);
     });
     const results = (await client.query(
-      `BEGIN; SELECT set_config('request.jwt.claims', ${client.escapeLiteral(JSON.stringify(claims))}, true); ${statement}; COMMIT`
+      `BEGIN; SELECT set_config('request.jwt.claims', ${client.escapeLiteral(JSON.stringify(claims))}, true), set_config('TimeZone', ${client.escapeLiteral(DEFAULT_TIMEZONE)}, true); ${statement}; COMMIT`
     )) as unknown as Array<{ rows: R[]; rowCount: number | null }>;
     const r = results[2];
     return { rows: r.rows, rowCount: r.rowCount ?? r.rows.length };

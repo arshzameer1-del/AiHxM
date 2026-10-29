@@ -53,11 +53,15 @@ const MANAGER_ID_READERS: Record<string, "writer" | "decision" | "display"> = {
   "reports/engine/depth/platform-governance.ts": "display",
   "reports/engine/depth/workforce.ts": "display",
   "reports/engine/executors/master-data.ts": "display",
+  "performance/key-results.service.ts": "decision",
   "shifts/shifts.service.ts": "decision",
+  "smart-checks/smart-checks.service.ts": "display",
+  "travel/travel.service.ts": "decision",
   "workflow/workflow.service.ts": "decision",
 };
 
 const DEPARTMENT_READERS: Record<string, "writer" | "decision" | "display"> = {
+  "careers/careers.service.ts": "display",
   "employee-groups/employee-groups.service.ts": "decision",
   "employees/employee-analytics.service.ts": "display",
   "employees/employee-data-consistency.checks.ts": "display",
