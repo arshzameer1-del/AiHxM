@@ -10693,3 +10693,33 @@ export type ExamForTakerView = {
 };
 export type ExamResultView = { scorePct: number; correctCount: number; questionCount: number; passed: boolean; passMarkPct: number; attemptsLeft: number | null; enrollmentCompleted: boolean };
 export type CertificateView = { certificateNo: string; employeeName: string; employeeNumber: string; courseTitle: string; companyName: string; completedOn: string; scorePct: number | null };
+
+// ---------------------------------------------------------------- OKR key results and goal alignment
+export type KeyResultView = {
+  id: string;
+  goalId: string;
+  title: string;
+  startValue: number;
+  targetValue: number;
+  currentValue: number;
+  unit: string | null;
+  weight: number;
+  progressPct: number;
+  updatedAt: string;
+};
+export type CreateKeyResultRequest = { title: string; startValue?: number; targetValue: number; unit?: string | null; weight?: number };
+export type UpdateKeyResultRequest = { title?: string; startValue?: number; targetValue?: number; unit?: string | null; weight?: number };
+export type KeyResultCheckInRequest = { currentValue: number; note?: string | null };
+export type KeyResultsResultView = { keyResults: KeyResultView[]; goalProgressPct: number; goalStatus: GoalStatus };
+export type GoalAlignmentNode = {
+  goalId: string;
+  parentGoalId: string | null;
+  title: string;
+  employeeId: string;
+  employeeName: string;
+  progressPct: number;
+  status: GoalStatus;
+  keyResultCount: number;
+  /** True when the goal is only shown to place a visible goal under its parent: its details are not the reader's to open. */
+  isContext: boolean;
+};

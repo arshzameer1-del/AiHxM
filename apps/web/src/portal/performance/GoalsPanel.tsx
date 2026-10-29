@@ -1,10 +1,11 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import type { EmployeeView, GoalPlanView, GoalUpdateView, GoalView, ReviewCycleView } from "@aihxm/shared-types";
+import { Fragment, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import type { EmployeeView, GoalAlignmentNode, GoalPlanView, GoalUpdateView, GoalView, ReviewCycleView } from "@aihxm/shared-types";
 import { api } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { ReasonModal } from "../../components/ReasonModal";
 import { ErrorNote, Field, GoalStatusBadge, GOAL_STATUS_LABELS, ProgressBar, errorText, formatDate, inputCls, linkBtn, primaryBtn } from "./perfUi";
 import { formatDateTime } from "../shared/dates";
+import { GoalAlignmentTree, KeyResultsPanel } from "./KeyResultsPanel";
 
 type GoalForm = { title: string; description: string; weight: string; dueDate: string; targetValue: string; targetUnit: string };
 const emptyForm: GoalForm = { title: "", description: "", weight: "", dueDate: "", targetValue: "", targetUnit: "" };
@@ -32,6 +33,9 @@ export function GoalsPanel() {
   const [historyFor, setHistoryFor] = useState<GoalView | null>(null);
   const [history, setHistory] = useState<GoalUpdateView[]>([]);
   const [reopening, setReopening] = useState(false);
+  const [view, setView] = useState<"goals" | "alignment">("goals");
+  const [krOpen, setKrOpen] = useState<string | null>(null);
+  const [krCounts, setKrCounts] = useState<Map<string, number>>(new Map());
   const [progressEdit, setProgressEdit] = useState<{ goal: GoalView; value: string; status: string; note: string } | null>(null);
 
   useEffect(() => {
@@ -54,6 +58,9 @@ export function GoalsPanel() {
       setGoals(g);
       setPlan(p);
       setError(null);
+      api.getGoalAlignment(cycleId)
+        .then((nodes: GoalAlignmentNode[]) => setKrCounts(new Map(nodes.map((n) => [n.goalId, n.keyResultCount]))))
+        .catch(() => setKrCounts(new Map()));
     } catch (err) {
       setError(errorText(err, "Could not load goals"));
     }
@@ -98,7 +105,7 @@ export function GoalsPanel() {
     setBusy(true);
     try {
       await api.updateGoal(goal.id, {
-        ...(value !== "" ? (goal.targetValue ? { currentValue: Number(value) } : { progressPct: Number(value) }) : {}),
+        ...(value !== "" && !(krCounts.get(goal.id) ?? 0) ? (goal.targetValue ? { currentValue: Number(value) } : { progressPct: Number(value) }) : {}),
         ...(status && status !== goal.status ? { status: status as Exclude<GoalView["status"], "overdue"> } : {}),
         note: note || undefined,
       });
@@ -157,7 +164,19 @@ export function GoalsPanel() {
         {cycle?.currentPhase === "goal_setting" && <span className="text-xs bg-accent/10 text-accent-dark rounded px-2 py-1">Goal-setting window is open</span>}
       </div>
 
-      {plan && (
+      {cycleId && (
+        <div className="flex gap-1 border-b border-black/10" role="tablist" aria-label="Goal views">
+          {([["goals", "Goals"], ["alignment", "Alignment"]] as const).map(([k, label]) => (
+            <button key={k} role="tab" aria-selected={view === k} onClick={() => setView(k)}
+              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${view === k ? "border-accent text-accent" : "border-transparent text-label-secondary hover:text-label-primary"}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+      {view === "alignment" && cycleId && <GoalAlignmentTree cycleId={cycleId} />}
+
+      {view === "goals" && plan && (
         <div className="bg-card rounded-card shadow-sm p-4 space-y-2">
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div>
@@ -189,7 +208,7 @@ export function GoalsPanel() {
         </div>
       )}
 
-      {canEditPlan && !locked && (
+      {view === "goals" && canEditPlan && !locked && (
         <div>
           {!showForm ? (
             <button onClick={() => setShowForm(true)} className={primaryBtn}>Add goal</button>
@@ -217,7 +236,7 @@ export function GoalsPanel() {
       )}
       {locked && <p className="text-sm text-label-tertiary">This goal plan is finalised. Ask HR or your manager to reopen it to change goals.</p>}
 
-      {goals.length === 0 ? (
+      {view !== "goals" ? null : goals.length === 0 ? (
         <div className="text-label-tertiary text-sm">{cycleId && employeeId ? "No goals yet" : "Choose a cycle and an employee to see goals."}</div>
       ) : (
         <div className="overflow-x-auto">
@@ -234,7 +253,8 @@ export function GoalsPanel() {
             </thead>
             <tbody>
               {goals.map((g) => (
-                <tr key={g.id} className="border-b border-black/5 align-top">
+                <Fragment key={g.id}>
+                <tr className="border-b border-black/5 align-top">
                   <td className="py-3 px-3">
                     <div className="font-medium">{g.title}</div>
                     {g.description && <div className="text-xs text-label-tertiary">{g.description}</div>}
@@ -248,9 +268,25 @@ export function GoalsPanel() {
                     {g.status !== "cancelled" && cycle?.status !== "closed" && (
                       <button className={linkBtn} onClick={() => setProgressEdit({ goal: g, value: String((g.targetValue ? g.currentValue : g.progressPct) ?? ""), status: g.status, note: "" })}>Update</button>
                     )}
+                    <button className={linkBtn} onClick={() => setKrOpen(krOpen === g.id ? null : g.id)}>
+                      Key results{(krCounts.get(g.id) ?? 0) > 0 ? ` (${krCounts.get(g.id)})` : ""}
+                    </button>
                     <button className={linkBtn} onClick={() => openHistory(g)}>History</button>
                   </td>
                 </tr>
+                {krOpen === g.id && (
+                  <tr className="border-b border-black/5">
+                    <td colSpan={6} className="px-3 pb-3">
+                      <KeyResultsPanel
+                        goal={g}
+                        canShape={cycle?.status !== "closed" && !locked && g.status !== "cancelled" && g.status !== "completed"}
+                        canCheckIn={cycle?.status !== "closed" && g.status !== "cancelled" && g.status !== "completed"}
+                        onChanged={() => void load()}
+                      />
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -261,9 +297,13 @@ export function GoalsPanel() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center px-4 z-50" onClick={() => setProgressEdit(null)}>
           <form onSubmit={saveProgress} onClick={(e) => e.stopPropagation()} className="bg-card rounded-card p-6 shadow-lg max-w-md w-full space-y-4">
             <h2 className="font-bold text-lg">Update “{progressEdit.goal.title}”</h2>
-            <Field label={progressEdit.goal.targetValue ? `Current value (${progressEdit.goal.targetUnit ?? "units"})` : "Progress (%)"}>
-              <input type="number" min={0} step="any" className={inputCls} value={progressEdit.value} onChange={(e) => setProgressEdit({ ...progressEdit, value: e.target.value })} />
-            </Field>
+            {(krCounts.get(progressEdit.goal.id) ?? 0) > 0 ? (
+              <p className="text-sm text-label-secondary">Progress follows this goal's key results. Check in on a key result to move it.</p>
+            ) : (
+              <Field label={progressEdit.goal.targetValue ? `Current value (${progressEdit.goal.targetUnit ?? "units"})` : "Progress (%)"}>
+                <input type="number" min={0} step="any" className={inputCls} value={progressEdit.value} onChange={(e) => setProgressEdit({ ...progressEdit, value: e.target.value })} />
+              </Field>
+            )}
             <Field label="Status">
               <select className={inputCls} value={progressEdit.status} onChange={(e) => setProgressEdit({ ...progressEdit, status: e.target.value })}>
                 {(["active", "in_progress", "at_risk", "completed", "cancelled"] as const).map((s) => (

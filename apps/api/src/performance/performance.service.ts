@@ -189,10 +189,24 @@ export class PerformanceService {
     });
   }
 
+  /**
+   * HR sees every cycle. Anyone who manages their own or their team's goals sees the cycles that have started (never drafts), because the
+   * Goals screen has to know which cycle to set goals in; the cycle itself holds nothing personal.
+   */
   async listCycles(claims: RequestClaims): Promise<ReviewCycleView[]> {
-    await this.requireHrManage(claims);
+    await this.requireModule(claims);
+    const isHr = await this.rbac.can(claims, HR_MANAGE_PERMISSION);
+    if (!isHr) {
+      const [self, team] = await Promise.all([
+        this.rbac.can(claims, GOAL_SELF_PERMISSION, { ownerId: claims.sub }),
+        this.rbac.can(claims, GOAL_TEAM_PERMISSION, { teamOwnerId: claims.sub }),
+      ]);
+      if (!self && !team) throw new ForbiddenException("Not permitted to manage performance cycles");
+    }
     return this.db.withClaims(claims, async (client) => {
-      const result = await client.query("SELECT * FROM review_cycles ORDER BY created_at DESC");
+      const result = await client.query(
+        isHr ? "SELECT * FROM review_cycles ORDER BY created_at DESC" : "SELECT * FROM review_cycles WHERE status <> 'draft' ORDER BY created_at DESC"
+      );
       const today = await tenantToday(client, claims.company_id);
       const phases = await loadPhases(client, result.rows.map((r) => r.id), today);
       return result.rows.map((r) => {
@@ -490,6 +504,10 @@ export class PerformanceService {
         if (before.status !== "cancelled" && total > 100.0001) {
           throw new BadRequestException(`Goal weights cannot add up to more than 100 (this would make ${round2(total)}).`);
         }
+      }
+      if (patch.progressPct !== undefined || patch.currentValue !== undefined) {
+        const krs = await client.query("SELECT 1 FROM goal_key_results WHERE goal_id = $1 LIMIT 1", [id]);
+        if (krs.rowCount) throw new BadRequestException("This goal's progress comes from its key results. Check in on a key result instead.");
       }
       if (patch.targetValue !== undefined && patch.targetValue !== null && Number(patch.targetValue) <= 0) {
         throw new BadRequestException("A goal target must be greater than zero");

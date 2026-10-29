@@ -640,6 +640,11 @@ import type {
   GoalPlanRequest,
   GoalPlanView,
   GoalUpdateView,
+  CreateKeyResultRequest,
+  UpdateKeyResultRequest,
+  KeyResultCheckInRequest,
+  KeyResultsResultView,
+  GoalAlignmentNode,
   InterviewFeedbackView,
   InterviewView,
   OfferLetterView,
@@ -3656,6 +3661,17 @@ export const api = {
 
   // --- Step 11B (TAL-05/06/07): performance depth -------------------------
   listGoalUpdates: (goalId: string) => request<GoalUpdateView[]>(`/goals/${goalId}/updates`),
+
+  // OKR key results and goal alignment (GAPB7b).
+  listKeyResults: (goalId: string) => request<KeyResultsResultView>(`/goals/${goalId}/key-results`),
+  createKeyResult: (goalId: string, input: CreateKeyResultRequest) =>
+    request<KeyResultsResultView>(`/goals/${goalId}/key-results`, { method: "POST", body: JSON.stringify(input) }),
+  updateKeyResult: (id: string, input: UpdateKeyResultRequest) =>
+    request<KeyResultsResultView>(`/key-results/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+  checkInKeyResult: (id: string, input: KeyResultCheckInRequest) =>
+    request<KeyResultsResultView>(`/key-results/${id}/check-in`, { method: "POST", body: JSON.stringify(input) }),
+  removeKeyResult: (id: string) => request<KeyResultsResultView>(`/key-results/${id}`, { method: "DELETE" }),
+  getGoalAlignment: (reviewCycleId: string) => request<GoalAlignmentNode[]>(`/goal-alignment?reviewCycleId=${reviewCycleId}`),
   listGoalEvidence: (goalId: string) => request<GoalEvidenceView[]>(`/goals/${goalId}/evidence`),
   addGoalEvidence: (goalId: string, input: { label: string; url: string }) =>
     request<GoalEvidenceView>(`/goals/${goalId}/evidence`, { method: "POST", body: JSON.stringify(input) }),
