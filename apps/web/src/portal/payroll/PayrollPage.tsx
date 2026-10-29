@@ -19,6 +19,7 @@ import { BankFileFormatsPanel, ReconciliationPanel } from "./PayrollPaymentSuppo
 import { FinalSettlementsSection, SchemesAndSettlementSettingsPanel } from "./PayrollSettlementPanels";
 import { GlMappingsPanel, RunAccountingPanel } from "./PayrollAccountingPanels";
 import { MyPayrollDocumentsCard, PayrollDocumentsPanel } from "./PayrollDocumentsPanels";
+import { RunPayslipsPanel } from "./RunPayslipsPanel";
 import { BenefitsPanel } from "./PayrollBenefitsPanel";
 import { PayrollMonthCard } from "./PayrollMonthCard";
 import { PayrollStatutoryReportsPanel } from "./PayrollStatutoryReportsPanel";
@@ -960,6 +961,10 @@ export function PayrollPage() {
                 </CollapsibleSection>
 
                 <RunsSection refreshKey={refreshKey} canPrepare={isHrAdmin || isRegionalPayroll} canApprove={isPayrollApprover} onChanged={bump} />
+
+                <CollapsibleSection title="Employee payslips" defaultOpen forceOpen={focusSection === "employee-payslips"} sectionId="employee-payslips">
+                  <RunPayslipsPanel refreshKey={refreshKey} />
+                </CollapsibleSection>
 
                 <CollapsibleSection title="Payslips & Certificates" forceOpen={focusSection === "payroll-documents"} sectionId="payroll-documents">
                   <PayrollDocumentsPanel canIssue={isHrAdmin} />
