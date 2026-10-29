@@ -71,7 +71,7 @@ export function MyPaystubsTable() {
   function load() {
     setError(null);
     api
-      .listPayslips()
+      .listPayslips({ mine: true })
       .then(setPayslips)
       .catch((err) => setError(err instanceof ApiError ? err.message : "Could not load your paystubs."));
   }
@@ -83,7 +83,7 @@ export function MyPaystubsTable() {
   const columnCount = 1 + (Object.keys(COLUMN_LABELS) as ColumnKey[]).filter(show).length + 3;
 
   function open(id: string, mode?: "print") {
-    navigate(`/app/payroll/paystub/${id}${mode ? `?${mode}=1` : ""}`);
+    navigate(`/app/payroll/paystub/${id}${mode ? `?${mode}=1` : ""}`, { state: { from: "mine" } });
   }
 
   function exportCsv() {

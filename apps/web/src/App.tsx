@@ -328,6 +328,9 @@ const PerformancePage = lazy(() =>
 const PayrollPage = lazy(() =>
   import("./portal/payroll/PayrollPage").then((m) => ({ default: m.PayrollPage })),
 );
+const MyPaystubsPage = lazy(() =>
+  import("./portal/payroll/MyPaystubsPage").then((m) => ({ default: m.MyPaystubsPage })),
+);
 const PaystubViewPage = lazy(() =>
   import("./portal/payroll/PaystubViewPage").then((m) => ({ default: m.PaystubViewPage })),
 );
@@ -438,6 +441,7 @@ export default function App() {
                   <Route path="account" element={<AccountPage />} />
                   <Route path="ess" element={<EssLaunchpadPage />} />
                   <Route path="ess/org-chart" element={<MyOrgChartPage />} />
+                  <Route path="ess/paystubs" element={<MyPaystubsPage />} />
                   <Route path="ess/requests" element={<MyHrRequestsPage />} />
                   <Route path="my-hiring" element={<MyHiringPage />} />
                   <Route path="employees" element={<EmployeeListPage />} />

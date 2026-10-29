@@ -84,7 +84,8 @@ function PayslipRow({ payslip }: { payslip: PayslipView }) {
     <div className="bg-card rounded-lg px-4 py-3 shadow-sm border border-black/5">
       <button className="w-full flex items-center justify-between text-left" onClick={() => setExpanded((e) => !e)}>
         <span className="text-sm font-medium">
-          {formatPeriod(payslip.payrollRunPeriodStart, payslip.payrollRunPeriodEnd)}
+          {payslip.employeeNumber} · {payslip.employeeName || "—"}
+          <span className="ms-2 text-xs font-normal text-label-tertiary">{formatPeriod(payslip.payrollRunPeriodStart, payslip.payrollRunPeriodEnd)}</span>
         </span>
         <span className="flex items-center gap-4">
           <span className="text-sm font-mono tabular-nums">{pkr.format(payslip.netPay)}</span>
@@ -913,8 +914,10 @@ export function PayrollPage() {
             : "Your paystubs appear here once a payroll run has been finalized."}
       </p>
 
-      {isSelfService && <MyPaystubsTable />}
-      {isSelfService && <MyPayrollDocumentsCard />}
+      {/* HR, payroll approvers and regional payroll see everybody's payslips below, under their payroll runs. Their own pay is in
+          Employee Self Service > My Paystubs, so it is not mixed in here. */}
+      {isSelfService && !isHrAdmin && !isPayrollApprover && !isRegionalPayroll && <MyPaystubsTable />}
+      {isSelfService && !isHrAdmin && !isPayrollApprover && !isRegionalPayroll && <MyPayrollDocumentsCard />}
 
       {(isHrAdmin || isPayrollApprover || isRegionalPayroll) && (
         <>

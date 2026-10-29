@@ -313,6 +313,7 @@ function rowToPayslip(row: any): PayslipView {
     payrollRunFinalizedAt: row.run_finalized_at ? new Date(row.run_finalized_at).toISOString() : null,
     employeeId: row.employee_id,
     employeeNumber: row.employee_number,
+    employeeName: [row.employee_first_name, row.employee_last_name].filter(Boolean).join(" ").trim(),
     // SEC-02: the payslip snapshot is stored encrypted (legacy plaintext passes through).
     bankAccountNumber: sensitive.decrypt(row.company_id, row.bank_account_number),
     daysInPeriod: Number(row.days_in_period),
@@ -1865,12 +1866,15 @@ export class PayrollService {
    * writes) can see every payslip too, same as hr_admin — reviewing the
    * actual numbers is the entire point of an approval step, not just the
    * run's period dates. */
-  async listPayslips(claims: RequestClaims, filter: { payrollRunId?: string; employeeId?: string }): Promise<PayslipView[]> {
+  async listPayslips(claims: RequestClaims, filter: { payrollRunId?: string; employeeId?: string; mine?: boolean }): Promise<PayslipView[]> {
     await this.requireModule(claims);
     return this.db.withClaims(claims, async (client) => {
-      const hasAll = await this.hasAnyPayrollStaffPermission(claims);
+      // `mine`: "My Paystubs" - only the signed-in person's own payslips, whatever role they hold (HR, payroll approver, ...).
+      // The same rules as for an employee apply: the run must be final and the payslip published to the employee.
+      const mineOnly = filter.mine === true;
+      const hasAll = mineOnly ? false : await this.hasAnyPayrollStaffPermission(claims);
       const result = await client.query(
-        `SELECT p.*, e.user_account_id AS employee_user_account_id, pr.status AS run_status, pr.payroll_area_id AS run_payroll_area_id, pr.period_start AS run_period_start, pr.period_end AS run_period_end, pr.run_type AS run_type, pr.finalized_at AS run_finalized_at
+        `SELECT p.*, e.user_account_id AS employee_user_account_id, e.first_name AS employee_first_name, e.last_name AS employee_last_name, pr.status AS run_status, pr.payroll_area_id AS run_payroll_area_id, pr.period_start AS run_period_start, pr.period_end AS run_period_end, pr.run_type AS run_type, pr.finalized_at AS run_finalized_at
          FROM payslips p
          JOIN employees e ON e.id = p.employee_id
          JOIN payroll_runs pr ON pr.id = p.payroll_run_id
@@ -1881,7 +1885,7 @@ export class PayrollService {
       );
       // Payroll Areas: a `payroll.*.scoped` holder also sees every payslip
       // of in-scope runs (reviewing the numbers they calculate/finalize).
-      const scoped = hasAll ? null : await resolvePayrollAreaAccess(this.db, this.rbac, claims, RUN_SCOPED_VIEW_BASES);
+      const scoped = hasAll || mineOnly ? null : await resolvePayrollAreaAccess(this.db, this.rbac, claims, RUN_SCOPED_VIEW_BASES);
       let visible = hasAll
         ? result.rows
         : result.rows.filter(
@@ -1910,7 +1914,7 @@ export class PayrollService {
     await this.requireModule(claims);
     return this.db.withClaims(claims, async (client) => {
       const result = await client.query(
-        `SELECT p.*, e.user_account_id AS employee_user_account_id, pr.status AS run_status, pr.payroll_area_id AS run_payroll_area_id, pr.period_start AS run_period_start, pr.period_end AS run_period_end, pr.run_type AS run_type, pr.finalized_at AS run_finalized_at
+        `SELECT p.*, e.user_account_id AS employee_user_account_id, e.first_name AS employee_first_name, e.last_name AS employee_last_name, pr.status AS run_status, pr.payroll_area_id AS run_payroll_area_id, pr.period_start AS run_period_start, pr.period_end AS run_period_end, pr.run_type AS run_type, pr.finalized_at AS run_finalized_at
          FROM payslips p
          JOIN employees e ON e.id = p.employee_id
          JOIN payroll_runs pr ON pr.id = p.payroll_run_id

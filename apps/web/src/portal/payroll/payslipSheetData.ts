@@ -19,6 +19,7 @@ export function toPayslipSheetData(payslip: PayslipView, detail: PayslipDetailVi
   return {
     companyName: identity?.companyName ?? "Payslip",
     companySlug: identity?.companySlug ?? "",
+    employeeName: payslip.employeeName,
     employeeNumber: payslip.employeeNumber,
     bankAccountNumber: payslip.bankAccountNumber,
     payrollPeriod: describePayrollPeriod(payslip.payrollRunPeriodStart, payslip.payrollRunPeriodEnd),

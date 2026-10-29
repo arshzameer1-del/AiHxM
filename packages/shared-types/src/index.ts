@@ -7045,6 +7045,8 @@ export type PayslipView = {
   /** Denormalized snapshot at calculation time — see 0022_payroll.sql's
    * header comment for why these don't just join to `employees` live. */
   employeeNumber: string;
+  /** The employee's name as it is today, so payroll staff can tell payslips apart in a list. */
+  employeeName: string;
   bankAccountNumber: string | null;
   daysInPeriod: number;
   paidDays: number;

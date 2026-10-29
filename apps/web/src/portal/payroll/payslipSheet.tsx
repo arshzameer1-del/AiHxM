@@ -19,6 +19,7 @@ export type PayslipSheetData = {
   companyName: string;
   /** Used for the logo address. Empty draws no logo. */
   companySlug: string;
+  employeeName: string;
   employeeNumber: string;
   bankAccountNumber: string | null;
   payrollPeriod: string;
@@ -41,6 +42,7 @@ export type PayslipSheetData = {
 export const SAMPLE_PAYSLIP: PayslipSheetData = {
   companyName: "Your company name",
   companySlug: "",
+  employeeName: "Sample Employee",
   employeeNumber: "EMP-0042",
   bankAccountNumber: "PK36SCBL0000001123456702",
   payrollPeriod: "Sep 2026",
@@ -103,6 +105,8 @@ function maskAccount(value: string | null): string {
 
 function detailValue(field: PayslipDetailField, d: PayslipSheetData): string {
   switch (field) {
+    case "employeeName":
+      return d.employeeName || "—";
     case "employeeNumber":
       return d.employeeNumber;
     case "payrollPeriod":
@@ -226,9 +230,11 @@ export function PayslipSheet({ design, data, preview = false }: { design: Paysli
 
   function Details(): ReactNode {
     if (design.detailFields.length === 0) return null;
+    // Designs saved before "Employee name" existed list only the number: the name is shown in front of it all the same.
+    const fields = design.detailFields.includes("employeeNumber") && !design.detailFields.includes("employeeName") ? (["employeeName", ...design.detailFields] as typeof design.detailFields) : design.detailFields;
     return (
       <div style={{ display: "grid", gridTemplateColumns: `repeat(${design.detailColumns}, minmax(0, 1fr))`, gap: "0.5em 1.4em" }}>
-        {design.detailFields.map((f) => (
+        {fields.map((f) => (
           <div key={f}>
             <div style={{ fontSize: "0.8em", opacity: 0.65 }}>{PAYSLIP_DETAIL_FIELD_LABELS[f]}</div>
             <div style={{ fontWeight: 600 }}>{detailValue(f, data)}</div>

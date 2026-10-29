@@ -298,9 +298,10 @@ export class PayrollController {
   listPayslips(
     @CurrentClaims() claims: RequestClaims,
     @Query("payrollRunId") payrollRunId?: string,
-    @Query("employeeId") employeeId?: string
+    @Query("employeeId") employeeId?: string,
+    @Query("mine") mine?: string
   ) {
-    return this.payroll.listPayslips(claims, { payrollRunId, employeeId });
+    return this.payroll.listPayslips(claims, { payrollRunId, employeeId, mine: mine === "true" || mine === "1" });
   }
 
   @Get("payslips/:id/detail")

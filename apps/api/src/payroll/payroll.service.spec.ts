@@ -917,6 +917,13 @@ describe("PayrollService", () => {
       const payslips = await payroll.listPayslips(hrAdminClaims, { payrollRunId: run.id });
       const slip = payslips.find((p) => p.employeeId === employee.id)!;
 
+      // Payroll staff see everybody's payslips in a list, so each one carries the employee's number and name.
+      expect(slip.employeeNumber).toBeTruthy();
+      expect(slip.employeeName.length).toBeGreaterThan(0);
+      // "My Paystubs" (mine) is only ever the signed-in person's own pay, even for HR: this employee's payslip is not HR's.
+      const mine = await payroll.listPayslips(hrAdminClaims, { payrollRunId: run.id, mine: true });
+      expect(mine.some((p) => p.employeeId === employee.id)).toBe(false);
+
       expect(slip.grossPay).toBe(120000); // both components
       expect(slip.taxableGrossThisPeriod).toBe(100000); // only Basic Salary
       expect(slip.calculationBreakdown.some((s) => String(s.label).includes("Basic Salary"))).toBe(true);

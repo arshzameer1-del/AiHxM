@@ -3448,7 +3448,7 @@ export const api = {
 
   // Goals
   listGoals: (params?: { reviewCycleId?: string; employeeId?: string }) =>
-    request<GoalView[]>(`/goals${params ? `?${new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined) as [string, string][]).toString()}` : ""}`),
+    request<GoalView[]>(`/goals${params ? `?${new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)])).toString()}` : ""}`),
 
   createGoal: (input: CreateGoalRequest) =>
     request<GoalView>("/goals", { method: "POST", body: JSON.stringify(input) }),
@@ -3783,7 +3783,8 @@ export const api = {
   reversePayrollRun: (id: string, input: ReversePayrollRunRequest) =>
     request<PayrollRunView>(`/payroll/runs/${id}/reverse`, { method: "POST", body: JSON.stringify(input) }),
 
-  listPayslips: (params?: { payrollRunId?: string; employeeId?: string }) =>
+  // `mine: true` is "My Paystubs": only the signed-in person's own payslips, for every role (HR and payroll staff included).
+  listPayslips: (params?: { payrollRunId?: string; employeeId?: string; mine?: boolean }) =>
     request<PayslipView[]>(
       `/payslips${
         params

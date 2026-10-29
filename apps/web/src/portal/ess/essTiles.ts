@@ -44,7 +44,7 @@ export function buildEssTileGroups(enabledModules: readonly ModuleKey[]): EssTil
   const soon = (title: string, description: string, icon: TileSpec["icon"]): TileSpec => ({ title, description, icon, comingSoon: true });
 
   const hcm: TileSpec[] = [];
-  if (has("payroll")) hcm.push({ to: "/app/payroll", title: "My Paystubs", description: "View my paystubs", note: "Confidential", icon: Wallet });
+  if (has("payroll")) hcm.push({ to: "/app/ess/paystubs", title: "My Paystubs", description: "View my paystubs", note: "Confidential", icon: Wallet });
   if (has("leave")) hcm.push({ to: "/app/attendance/clock", title: "My Time Events", description: "Manage my time events", icon: Clock });
   if (has("leave")) hcm.push({ to: "/app/leave/my-requests", title: "My Leave Requests", description: "Requests, balance and team calendar", icon: Sun });
   hcm.push(soon("Employee Lookup", "Search for employees", Search));

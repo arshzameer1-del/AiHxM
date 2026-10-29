@@ -273,7 +273,7 @@ function QuickActionsRow({ enabledModules, roleKeys }: { enabledModules: ModuleK
     { to: "/app/leave", label: "Apply Leave", icon: CalendarDays },
   ];
   if (enabledModules.includes("payroll") && isSelfService(roleKeys)) {
-    actions.push({ to: "/app/payroll", label: "View Payslip", icon: Wallet });
+    actions.push({ to: "/app/ess/paystubs", label: "View Payslip", icon: Wallet });
   }
   actions.push({ to: "/app/profile", label: "Documents", icon: FileText });
 

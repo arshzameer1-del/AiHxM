@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useParams, useSearchParams, useLocation } from "react-router-dom";
 import { Download, Printer } from "lucide-react";
 import { DEFAULT_PAYSLIP_DESIGN, type PayslipDetailView, type PayslipPrintDesign, type PayslipView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
@@ -19,6 +19,9 @@ import { toPaystubRow } from "./paystubs";
 export function PaystubViewPage() {
   const { id = "" } = useParams();
   const [search] = useSearchParams();
+  const location = useLocation();
+  // Opened from My Paystubs (own pay) or from the Payroll page (someone else's payslip): "back" goes to where the person came from.
+  const fromMine = (location.state as { from?: string } | null)?.from === "mine";
   const { identity } = useAuth();
   const [payslip, setPayslip] = useState<PayslipView | null>(null);
   const [detail, setDetail] = useState<PayslipDetailView | null>(null);
@@ -56,7 +59,7 @@ export function PaystubViewPage() {
     <div>
       <style>{payslipPrintCss(design ?? DEFAULT_PAYSLIP_DESIGN)}</style>
       <div className="no-print">
-        <BackLink to="/app/payroll">My Paystubs</BackLink>
+        <BackLink to={fromMine ? "/app/ess/paystubs" : "/app/payroll"}>{fromMine ? "My Paystubs" : "Payroll"}</BackLink>
         <PageHeader
           title="Paystub"
           subtitle={row ? `${row.payrollPeriod} · paid ${formatDay(row.payDate)}` : undefined}

@@ -19,6 +19,7 @@ function slip(id: string, over: Partial<PayslipView>): PayslipView {
     payrollRunFinalizedAt: "2026-06-25T09:00:00.000Z",
     employeeId: "e1",
     employeeNumber: "EMP-0001",
+    employeeName: "Test Employee",
     bankAccountNumber: null,
     daysInPeriod: 30,
     paidDays: 30,
@@ -65,7 +66,7 @@ const DETAIL: PayslipDetailView = {
   ],
 };
 
-async function mockApi(page: Page) {
+async function mockApi(page: Page, roleKeys: string[] = ["employee_self_service"], asked: string[] = []) {
   await page.addInitScript(() => localStorage.setItem("aihxm.platformAdminToken", "e2e-token"));
   await page.route((url) => url.pathname.startsWith("/api/"), async (route: Route) => {
     const path = new URL(route.request().url()).pathname.replace(/^\/api/, "");
@@ -78,13 +79,16 @@ async function mockApi(page: Page) {
         companySlug: "acme",
         email: "e@acme.test",
         fullName: "Test Employee",
-        roleKeys: ["employee_self_service"] as MeResponse["roleKeys"],
+        roleKeys: roleKeys as MeResponse["roleKeys"],
         employeeId: "e1",
         enabledModules: ["employee", "payroll"] as MeResponse["enabledModules"],
       };
       return json(me);
     }
-    if (path === "/payslips") return json(SLIPS);
+    if (path === "/payslips") {
+      asked.push(new URL(route.request().url()).search);
+      return json(SLIPS);
+    }
     if (path === "/payroll/my-documents") return json([]);
     const detail = path.match(/^\/payslips\/([^/]+)\/detail$/);
     if (detail) return json({ ...DETAIL, payslipId: detail[1] });
@@ -95,6 +99,21 @@ async function mockApi(page: Page) {
 }
 
 test.describe("My Paystubs", () => {
+  test("an HR Admin opening My Paystubs from Employee Self Service gets their own paystubs, not the Payroll page", async ({ page }) => {
+    const asked: string[] = [];
+    await mockApi(page, ["hr_admin", "employee_self_service"], asked);
+    await page.goto("/app/ess");
+    await page.getByRole("link", { name: /My Paystubs/ }).click();
+    await expect(page).toHaveURL(/\/app\/ess\/paystubs$/);
+    await expect(page.getByRole("heading", { name: "My Paystubs" })).toBeVisible();
+    await expect(page.getByTestId("paystub-count")).toHaveText("Items (3)");
+    expect(asked.some((q) => q.includes("mine=true"))).toBe(true);
+    // Opening one and going back returns to My Paystubs.
+    await page.getByTestId("paystub-row").first().click();
+    await page.getByRole("link", { name: "My Paystubs" }).first().click();
+    await expect(page).toHaveURL(/\/app\/ess\/paystubs$/);
+  });
+
   test("lists paystubs grouped by payroll year with readable dates and coloured amounts", async ({ page }) => {
     await mockApi(page);
     await page.goto("/app/payroll");

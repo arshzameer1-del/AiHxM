@@ -20,9 +20,10 @@ export const PAYSLIP_LOGO_POSITIONS = ["none", "left", "center", "right"] as con
 export type PayslipLogoPosition = (typeof PAYSLIP_LOGO_POSITIONS)[number];
 
 /** The facts about the employee and the pay period a design can show in the details block. */
-export const PAYSLIP_DETAIL_FIELDS = ["employeeNumber", "payrollPeriod", "payDate", "paidDays", "payrollType", "bankAccount"] as const;
+export const PAYSLIP_DETAIL_FIELDS = ["employeeName", "employeeNumber", "payrollPeriod", "payDate", "paidDays", "payrollType", "bankAccount"] as const;
 export type PayslipDetailField = (typeof PAYSLIP_DETAIL_FIELDS)[number];
 export const PAYSLIP_DETAIL_FIELD_LABELS: Record<PayslipDetailField, string> = {
+  employeeName: "Employee name",
   employeeNumber: "Employee no.",
   payrollPeriod: "Payroll period",
   payDate: "Pay date",
@@ -107,7 +108,7 @@ export const DEFAULT_PAYSLIP_DESIGN: PayslipPrintDesign = {
   typography: { fontFamily: "sans", baseSizePt: 10, headingCase: "upper" },
   colors: { accent: "#1d4ed8", text: "#111827", zebraRows: false },
   header: { style: "underline", logo: "left", logoHeightMm: 14, showCompanyName: true, title: "Payslip", subtitle: "", addressLines: [], taxIds: "" },
-  detailFields: ["employeeNumber", "payrollPeriod", "payDate", "paidDays"],
+  detailFields: ["employeeName", "employeeNumber", "payrollPeriod", "payDate", "paidDays"],
   detailColumns: 2,
   sections: [
     { key: "details", enabled: true },
@@ -151,7 +152,7 @@ export function payslipDesignPreset(key: PayslipDesignPresetKey): PayslipPrintDe
     d.colors = { accent: "#1f2937", text: "#111827", zebraRows: false };
     d.header.style = "underline";
     d.header.logo = "left";
-    d.detailFields = ["employeeNumber", "payrollPeriod", "payDate", "paidDays"];
+    d.detailFields = ["employeeName", "employeeNumber", "payrollPeriod", "payDate", "paidDays"];
     d.detailColumns = 2;
     d.footer.employerSignature = true;
     d.footer.employeeSignature = true;
@@ -159,7 +160,7 @@ export function payslipDesignPreset(key: PayslipDesignPresetKey): PayslipPrintDe
     d.typography = { fontFamily: "sans", baseSizePt: 10, headingCase: "normal" };
     d.colors = { accent: "#0f766e", text: "#0f172a", zebraRows: true };
     d.header = { ...d.header, style: "band", logo: "left", logoHeightMm: 12 };
-    d.detailFields = ["employeeNumber", "payrollPeriod", "payDate", "paidDays", "payrollType"];
+    d.detailFields = ["employeeName", "employeeNumber", "payrollPeriod", "payDate", "paidDays", "payrollType"];
     d.detailColumns = 3;
     d.summary.emphasis = "box";
     d.sections = sectionsWith(["details", "earnings", "deductions", "summary", "amountInWords", "notes"]);
@@ -168,7 +169,7 @@ export function payslipDesignPreset(key: PayslipDesignPresetKey): PayslipPrintDe
     d.typography = { fontFamily: "sans", baseSizePt: 8.5, headingCase: "upper" };
     d.colors = { accent: "#374151", text: "#111827", zebraRows: false };
     d.header = { ...d.header, style: "plain", logo: "none", showCompanyName: true, title: "Payslip" };
-    d.detailFields = ["employeeNumber", "payrollPeriod", "payDate", "paidDays"];
+    d.detailFields = ["employeeName", "employeeNumber", "payrollPeriod", "payDate", "paidDays"];
     d.detailColumns = 3;
     d.sections = sectionsWith(["details", "earnings", "deductions", "summary", "notes"]);
     d.lines.decimals = 0;
