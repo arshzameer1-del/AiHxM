@@ -3,7 +3,7 @@ import type { TravelMode, TravelRateKind, TravelRateView, TravelRequestView, Tra
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { LoadingNote, PageHeader } from "../shared/PageChrome";
-import { formatDay } from "../shared/dates";
+import { formatDay, todayKey } from "../shared/dates";
 import { MODE_LABEL, STATUS_BADGE, TRIP_LABEL, balanceText, pkr } from "./travelUi";
 
 const field = "w-full rounded-lg border border-black/10 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-accent";
@@ -242,7 +242,7 @@ function ManageTrips() {
               {t.status === "approved" && (
                 <div className="flex flex-wrap gap-2 mt-3">
                   {t.advanceAmount === 0 && t.advanceRequested > 0 && <button type="button" onClick={() => { setOpen({ id: t.id, mode: "advance" }); setAdv(String(t.advanceRequested)); }} className={`${btn} border border-black/10 bg-white`}>Pay advance</button>}
-                  {t.startDate <= new Date().toISOString().slice(0, 10) && <button type="button" onClick={() => setOpen({ id: t.id, mode: "settle" })} className={`${btn} border border-black/10 bg-white`}>Settle</button>}
+                  {t.startDate <= todayKey() && <button type="button" onClick={() => setOpen({ id: t.id, mode: "settle" })} className={`${btn} border border-black/10 bg-white`}>Settle</button>}
                 </div>
               )}
               {open?.id === t.id && open.mode === "advance" && (

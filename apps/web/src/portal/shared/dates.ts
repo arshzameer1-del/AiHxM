@@ -158,3 +158,12 @@ export function formatTimeAgo(value: string | number | Date | null | undefined, 
   if (hours < 24) return `${hours}h ago`;
   return `${Math.floor(hours / 24)}d ago`;
 }
+
+/**
+ * Today's date on the user's own clock, as yyyy-mm-dd. `new Date().toISOString().slice(0, 10)` is the UTC date, which in Pakistan
+ * is still yesterday from midnight to 05:00, so a clock-in made after midnight fell outside a "to today" range.
+ */
+export function todayKey(now: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}

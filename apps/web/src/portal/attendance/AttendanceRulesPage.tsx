@@ -4,7 +4,7 @@ import type {
 } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { BackLink, LoadingNote, PageHeader } from "../shared/PageChrome";
-import { formatDateTime } from "../shared/dates";
+import { formatDateTime, todayKey } from "../shared/dates";
 
 const inputCls = "w-full rounded-lg border border-black/10 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-accent";
 const primaryBtn = "bg-accent text-white rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-50";
@@ -216,7 +216,7 @@ function GeofenceForm({ initial, onDone, onCancel }: { initial: AttendanceGeofen
 
 // ---------------------------------------------------------------------------------------------------- review
 
-const iso = (d: Date) => d.toISOString().slice(0, 10);
+const iso = (d: Date) => todayKey(d);
 
 function ReviewPanel() {
   const [from, setFrom] = useState(() => iso(new Date(Date.now() - 13 * 86_400_000)));
