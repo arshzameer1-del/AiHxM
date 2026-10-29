@@ -1,4 +1,6 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Post, Query, Res, UseGuards } from "@nestjs/common";
+import type { Response } from "express";
+import { pageOf } from "../common/paging";
 import { SessionGuard } from "../auth/session.guard";
 import { CurrentClaims } from "../auth/current-claims.decorator";
 import type { RequestClaims } from "../database/tenant-context";
@@ -47,8 +49,14 @@ export class LearningController {
   }
 
   @Get("course-enrollments")
-  listEnrollments(@CurrentClaims() claims: RequestClaims, @Query("employeeId") employeeId?: string) {
-    return this.enrollments.listEnrollments(claims, { employeeId });
+  async listEnrollments(
+    @CurrentClaims() claims: RequestClaims,
+    @Res({ passthrough: true }) res: Response,
+    @Query("employeeId") employeeId?: string,
+    @Query("limit") limit?: string,
+    @Query("offset") offset?: string
+  ) {
+    return pageOf(await this.enrollments.listEnrollments(claims, { employeeId }), limit, offset, res);
   }
 
   @Get("course-enrollments/:id")

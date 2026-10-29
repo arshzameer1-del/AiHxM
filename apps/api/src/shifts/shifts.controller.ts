@@ -1,3 +1,4 @@
+import { localToday } from "../common/local-date";
 import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, UseGuards } from "@nestjs/common";
 import { SessionGuard } from "../auth/session.guard";
 import { CurrentClaims } from "../auth/current-claims.decorator";
@@ -100,6 +101,6 @@ export class ShiftsController {
     if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       throw new BadRequestException("date must be YYYY-MM-DD");
     }
-    return this.workSchedule.getEffectiveSchedule(claims, employeeId, date ?? new Date().toISOString().slice(0, 10));
+    return this.workSchedule.getEffectiveSchedule(claims, employeeId, date ?? localToday());
   }
 }

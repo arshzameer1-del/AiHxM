@@ -347,7 +347,9 @@ describe("Leave types, ledger and request rules (Step 8A)", () => {
 
     it("the monthly accrual job accrues each elapsed month once, is idempotent and catches up", async () => {
       await types.create(hr, { code: "monthly_leave", name: "Monthly leave", accrualMethod: "monthly" });
-      await groups.updateLeavePolicy(hr, defaultPolicyId, { entitlements: [{ leaveType: "monthly_leave", days: 12 }] });
+      // Grant the entitlement on the policy this employee actually resolves to (a group assignment can win over the default policy).
+      const resolved = await groups.resolvePolicyInternal({ ...FIXTURE, company_id: companyId, is_service: true } as RequestClaims, staffEmployeeId, "leave");
+      await groups.updateLeavePolicy(hr, resolved.policyId ?? defaultPolicyId, { entitlements: [{ leaveType: "monthly_leave", days: 12 }] });
       const mar = await accrual.run("2027-03-15", companyId);
       expect(mar.accruals).toBeGreaterThanOrEqual(3);
       expect(await balance(staffEmployeeId, "monthly_leave")).toEqual({ entitled: 3, used: 0 });

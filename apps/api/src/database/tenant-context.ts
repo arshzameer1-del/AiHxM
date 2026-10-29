@@ -1,3 +1,4 @@
+import { DEFAULT_TIMEZONE } from "../common/local-date";
 import type { Pool, PoolClient } from "pg";
 import { fieldCrypto } from "../crypto/field-crypto";
 
@@ -96,7 +97,10 @@ export async function runInTenantContext<T>(
   try {
     // One round trip, not two: BEGIN and the claims go to the server together (simple-query protocol runs both).
     // The database is often a continent away from the API, so every round trip saved is felt on every request.
-    await client.query(`BEGIN; SELECT set_config('request.jwt.claims', ${client.escapeLiteral(JSON.stringify(claims))}, true)`);
+    // The session time zone is the business zone, so CURRENT_DATE / now()::date are Pakistan dates (not UTC dates that lag by 5 hours).
+    await client.query(
+      `BEGIN; SELECT set_config('request.jwt.claims', ${client.escapeLiteral(JSON.stringify(claims))}, true), set_config('TimeZone', ${client.escapeLiteral(DEFAULT_TIMEZONE)}, true)`
+    );
     await warmFieldKeys(client, claims);
     const result = await fn(client);
     await client.query("COMMIT");

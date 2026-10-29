@@ -66,6 +66,8 @@ export function PayrollSettingsForm({
   const [socialSecurityWageCeiling, setSocialSecurityWageCeiling] = useState(
     settings.socialSecurityWageCeiling === null ? "" : String(settings.socialSecurityWageCeiling)
   );
+  const [absenceMode, setAbsenceMode] = useState<"off" | "absent_days">(settings.absenceDeductionMode ?? "off");
+  const [lateMarks, setLateMarks] = useState(settings.lateMarksPerAbsence === null || settings.lateMarksPerAbsence === undefined ? "" : String(settings.lateMarksPerAbsence));
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -75,6 +77,8 @@ export function PayrollSettingsForm({
     setSubmitting(true);
     try {
       const updated = await api.updatePayrollSettings({
+        absenceDeductionMode: absenceMode,
+        lateMarksPerAbsence: absenceMode === "off" || lateMarks === "" ? null : Number(lateMarks),
         eobiEmployeeRatePercent: Number(eobiEmployeeRatePercent),
         eobiEmployerRatePercent: Number(eobiEmployerRatePercent),
         eobiWageBase: Number(eobiWageBase),
@@ -167,6 +171,24 @@ export function PayrollSettingsForm({
           />
         </div>
       </div>
+
+      <fieldset className="grid grid-cols-3 gap-4" aria-label="Pay deduction for absence">
+        <div className="col-span-3 text-xs opacity-70">
+          Pay deduction for absence. When on, every day the attendance records mark as absent (half a day for a half-day) is deducted from that month&apos;s pay, in the same way as unpaid leave.
+          Days of approved leave, holidays and rest days are never counted. HR sees the affected people in the run check before calculating.
+        </div>
+        <div>
+          <label htmlFor="absence-mode" className={labelClass}>Deduct pay for absent days</label>
+          <select id="absence-mode" value={absenceMode} onChange={(e) => setAbsenceMode(e.target.value as "off" | "absent_days")} className={inputClass}>
+            <option value="off">No (only approved unpaid leave)</option>
+            <option value="absent_days">Yes, deduct absent days</option>
+          </select>
+        </div>
+        <div>
+          <label htmlFor="late-marks" className={labelClass}>Late arrivals that count as one day (optional)</label>
+          <input id="late-marks" type="number" min={2} max={31} step={1} placeholder="e.g. 3" value={lateMarks} onChange={(e) => setLateMarks(e.target.value)} className={inputClass} disabled={absenceMode === "off"} />
+        </div>
+      </fieldset>
 
       {error && <div className="text-danger text-sm">{error}</div>}
 

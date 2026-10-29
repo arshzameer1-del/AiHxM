@@ -4,6 +4,7 @@ import type { EmployeeConsistencyCheckResult, EmployeeConsistencyReport } from "
 import { api, ApiError } from "../../api/client";
 import { PageHeader, LoadingNote } from "../shared/PageChrome";
 import { formatDateTime } from "../shared/dates";
+import { NO_ACCESS, PageLoadError } from "../../components/NoAccessPanel";
 
 /**
  * BACKLOG46 — where the employee record disagrees with the place that owns the value (organization unit, position,
@@ -27,7 +28,7 @@ export function EmployeeDataConsistencyPage() {
     api
       .getEmployeeDataConsistency()
       .then(setReport)
-      .catch((err) => setError(err instanceof ApiError && err.status === 403 ? "Requires HR Admin." : "Could not load the data check."));
+      .catch((err) => setError(err instanceof ApiError && err.status === 403 ? NO_ACCESS : "Could not load the data check."));
   }, []);
   useEffect(load, [load]);
 
@@ -46,7 +47,7 @@ export function EmployeeDataConsistencyPage() {
     }
   }
 
-  if (error) return <div className="text-danger text-sm">{error}</div>;
+  if (error) return <PageLoadError message={error} what="The data check" />;
   if (!report) return <LoadingNote />;
 
   const withIssues = report.checks.filter((c) => c.count > 0);

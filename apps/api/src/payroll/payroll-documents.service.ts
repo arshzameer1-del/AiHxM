@@ -1,3 +1,4 @@
+import { localToday } from "../common/local-date";
 import { createHash } from "node:crypto";
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import type { PoolClient } from "pg";
@@ -316,7 +317,7 @@ export class PayrollDocumentsService {
           netPay: money(p.net_pay, currency),
           earningsTable: table(earn, 1),
           deductionsTable: table(ded, -1),
-          issueDate: new Date().toISOString().slice(0, 10),
+          issueDate: localToday(),
         };
         const doc = await this.insertDocument(client, claims, tpl, data, {
           documentType: "payslip",
@@ -374,7 +375,7 @@ export class PayrollDocumentsService {
         netPay: money(y.net_pay),
         payslipCount: String(y.payslip_count),
         monthlyTable: ["  Period                       Gross pay             Tax withheld", ...slips.rows.map((s) => `  ${day(s.period_start)} - ${day(s.period_end)}${padL(money(s.gross_pay), 16)}${padL(money(s.income_tax_monthly), 22)}`)].join("\n"),
-        issueDate: new Date().toISOString().slice(0, 10),
+        issueDate: localToday(),
       };
       const live = await client.query("SELECT id FROM generated_documents WHERE employee_id = $1 AND tax_year = $2 AND document_type = 'tax_certificate' AND status = 'issued'", [input.employeeId, input.taxYear]);
       if (live.rowCount) await client.query("UPDATE generated_documents SET status = 'superseded' WHERE id = $1", [live.rows[0].id]);
@@ -424,7 +425,7 @@ export class PayrollDocumentsService {
         componentTable: comps.rows.map((c) => `  ${pad(c.payslip_label ?? c.name, 40)}${padL(money(monthly(c), currency), 18)}`).join("\n"),
         addressedTo: input.addressedTo?.trim() || "Whom it may concern",
         purpose: input.purpose?.trim() || "general purposes",
-        issueDate: new Date().toISOString().slice(0, 10),
+        issueDate: localToday(),
       };
       const doc = await this.insertDocument(client, claims, tpl, data, {
         documentType: "salary_certificate",

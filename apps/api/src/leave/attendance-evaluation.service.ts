@@ -1,3 +1,4 @@
+import { localToday } from "../common/local-date";
 import { ExclusiveCron } from "../common/cron-lock";
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { Cron } from "@nestjs/schedule";
@@ -132,7 +133,7 @@ export class AttendanceEvaluationService {
     if (this.running) return;
     this.running = true;
     try {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = localToday();
       const r = await this.run({ from: addDays(today, -3), to: addDays(today, -1) });
       if (r.days > 0) this.logger.log(`Attendance evaluation: ${r.days} employee-day(s) across ${r.companies} tenant(s)`);
     } catch (err) {

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { CardDefinitionView, UpdateCardDefinitionRequest } from "@aihxm/shared-types";
 import { api, ApiError } from "../../../api/client";
+import { NO_ACCESS, PageLoadError } from "../../../components/NoAccessPanel";
 
 /**
  * Core Employee Enterprise Phase 3's own scoped admin surface (2026-09-27)
@@ -68,7 +69,7 @@ export function HiringCardDesignerPage() {
         setCards([...list].sort((a, b) => a.displayOrder - b.displayOrder));
         setLoadError(null);
       })
-      .catch((err) => setLoadError(err instanceof ApiError && err.status === 403 ? "Requires HR Admin." : "Could not load hiring card configuration."));
+      .catch((err) => setLoadError(err instanceof ApiError && err.status === 403 ? NO_ACCESS : "Could not load hiring card configuration."));
   }
 
   useEffect(() => {
@@ -149,7 +150,7 @@ export function HiringCardDesignerPage() {
     persist(reordered, changed);
   }
 
-  if (loadError) return <div className="text-danger text-sm">{loadError}</div>;
+  if (loadError) return <PageLoadError message={loadError} what="The hiring card designer" />;
   if (!cards) return <LoadingNote />;
 
   return (

@@ -157,7 +157,8 @@ export class StarterSetupService {
     // The rest go through each module's own service, so its checks, audit trail and module switch all apply.
     const attempt = async (key: string, work: () => Promise<boolean>) => {
       try {
-        (await work()) ? created.push(key) : skipped.push(key);
+        if (await work()) created.push(key);
+        else skipped.push(key);
       } catch (err) {
         if (err instanceof NotFoundException || err instanceof ForbiddenException) skipped.push(key);
         else throw err;

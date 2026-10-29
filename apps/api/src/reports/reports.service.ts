@@ -1,3 +1,4 @@
+import { localToday } from "../common/local-date";
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, RequestTimeoutException } from "@nestjs/common";
 import type {
   ReportDatePreset,
@@ -188,7 +189,7 @@ export class ReportsService {
       } catch {
         // an unknown timezone name falls back to UTC rather than failing the report
       }
-      return new Date().toISOString().slice(0, 10);
+      return localToday();
     });
   }
 

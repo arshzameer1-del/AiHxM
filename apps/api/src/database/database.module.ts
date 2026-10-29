@@ -33,6 +33,8 @@ import { registerCronLockPool } from "../common/cron-lock";
           ssl: resolveSslConfig(connectionString),
           idleTimeoutMillis: 300_000,
           keepAlive: true,
+          // Waiting for a free connection longer than this fails the request instead of hanging it forever.
+          connectionTimeoutMillis: 15_000,
           ...(Number.isInteger(max) && max > 0 ? { max } : {}),
         });
         // An idle connection can be dropped by the database at any time (restart, failover, maintenance). pg reports that

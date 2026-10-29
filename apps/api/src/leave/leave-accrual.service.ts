@@ -1,3 +1,4 @@
+import { localToday } from "../common/local-date";
 import { ExclusiveCron } from "../common/cron-lock";
 import { Injectable, Logger } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
@@ -49,7 +50,7 @@ export class LeaveAccrualService {
     }
   }
 
-  async run(asOf: string = new Date().toISOString().slice(0, 10), companyId?: string): Promise<{ companies: number; accruals: number }> {
+  async run(asOf: string = localToday(), companyId?: string): Promise<{ companies: number; accruals: number }> {
     const companies = await this.db.withClaims(SERVICE, async (client) => {
       const r = await client.query<{ id: string }>(
         `SELECT DISTINCT t.company_id AS id

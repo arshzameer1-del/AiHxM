@@ -10,7 +10,7 @@
  */
 export type ComponentCategory = "earning" | "employee_deduction" | "employer_contribution" | "tax" | "statutory_deduction" | "recovery" | "adjustment";
 export type ComponentAffects = "gross" | "net" | "employer_cost";
-export type ComponentSource = "compensation" | "overtime" | "additional_payment" | "off_cycle_payment" | "loan" | "leave" | "statutory" | "tax" | "override" | "rounding" | "retro";
+export type ComponentSource = "compensation" | "overtime" | "additional_payment" | "off_cycle_payment" | "loan" | "leave" | "statutory" | "tax" | "override" | "rounding" | "retro" | "attendance";
 
 export type ComponentLine = {
   key: string;
@@ -74,6 +74,8 @@ export type PayslipInputSnapshot = {
   organisation: Record<string, unknown>;
   workingDays: { mode: "calendar" | "working_days"; prorationDays: number; unit: string; scheduleNames?: string[]; note?: string | null };
   compensation: Array<{ segmentId: string; componentKey: string; componentType: string; monthlyAmount: number; from: string; to: string; days: number; taxable: boolean }>;
+  /** R3 - loss of pay from attendance (empty / mode 'off' unless the tenant opted in). */
+  attendance?: { mode: string; absentDays: number; absent: number; halfDays: number; lateMarks: number };
   leave: { unpaidDays: number; segments: Array<{ startDate: string; endDate: string; days: number; leaveRequestId?: string }> };
   overtime: { claimCount: number; minutes: number; total: number; claimIds: string[] };
   adjustments: { additionalPaymentIds: string[]; offCyclePaymentIds: string[]; loanIds: string[]; retroResultIds?: string[] };

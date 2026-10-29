@@ -6,6 +6,7 @@ import { EmployeeAvatar } from "../shared/EmployeeAvatar";
 import { PageHeader, LoadingNote } from "../shared/PageChrome";
 import { formatDateTime } from "../shared/dates";
 import { PendingDocumentsInbox } from "./PendingDocumentsInbox";
+import { NO_ACCESS, PageLoadError } from "../../components/NoAccessPanel";
 
 /**
  * BACKLOG48 - HR's inbox for the changes employees ask for on their own record (contact details, addresses, family,
@@ -65,7 +66,7 @@ export function EmployeeChangeRequestsPage() {
     api
       .listEmployeeChangeRequests(filter === "all" ? undefined : filter)
       .then(setItems)
-      .catch((err) => setError(err instanceof ApiError && err.status === 403 ? "Requires HR Admin." : "Could not load the requests."));
+      .catch((err) => setError(err instanceof ApiError && err.status === 403 ? NO_ACCESS : "Could not load the requests."));
   }, [filter]);
   useEffect(load, [load]);
 
@@ -85,7 +86,7 @@ export function EmployeeChangeRequestsPage() {
     }
   }
 
-  if (error) return <div className="text-danger text-sm">{error}</div>;
+  if (error) return <PageLoadError message={error} what="Change requests" />;
 
   return (
     <div className="max-w-3xl">

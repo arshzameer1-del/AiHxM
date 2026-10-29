@@ -1855,7 +1855,7 @@ export const api = {
   async getEmployeePhotoUrl(employeeId: string): Promise<string | null> {
     const token = getToken();
     const res = await fetch(`${API_PREFIX}/employees/${employeeId}/photo`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
-    if (!res.ok) return null;
+    if (!res.ok || res.status === 204) return null;
     return URL.createObjectURL(await res.blob());
   },
 
@@ -2457,7 +2457,7 @@ export const api = {
   async getBannerImageUrl(): Promise<string | null> {
     const token = getToken();
     const res = await fetch(`${API_PREFIX}/company/appearance/banner-image`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
-    if (!res.ok) return null;
+    if (!res.ok || res.status === 204) return null;
     return URL.createObjectURL(await res.blob());
   },
 

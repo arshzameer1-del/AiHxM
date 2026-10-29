@@ -141,6 +141,7 @@ export function HiringWizardPage() {
   const [process, setProcess] = useState<HireProcessView | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [options, setOptions] = useState<HiringPickerOptions | null>(null);
+  const [lookupWarning, setLookupWarning] = useState<string | null>(null);
 
   const [activeCardKey, setActiveCardKey] = useState<string | null>(null);
   const [cardData, setCardData] = useState<Record<string, unknown>>({});
@@ -177,19 +178,26 @@ export function HiringWizardPage() {
   }, [loadProcess]);
 
   useEffect(() => {
+    // The core pick-lists must not fail silently into "no options": remember which ones could not be loaded and say so.
+    const failed: string[] = [];
+    const soft = <T,>(label: string, p: Promise<T[]>): Promise<T[]> =>
+      p.catch(() => {
+        failed.push(label);
+        return [] as T[];
+      });
     Promise.all([
-      api.listOrgUnits().catch(() => []),
-      api.listLocations().catch(() => []),
-      api.listCostCenters().catch(() => []),
-      api.listEmployees().catch(() => []),
-      api.listShifts().catch(() => []),
+      soft("organization units", api.listOrgUnits()),
+      soft("locations", api.listLocations()),
+      soft("cost centers", api.listCostCenters()),
+      soft("colleagues", api.listEmployees()),
+      soft("shifts", api.listShifts()),
       // kumail's own SAP-modeled feedback (2026-09-27) — Position should be
       // pickable on Organization Assignment, the same "occupy a vacant slot"
       // list the standalone Position Workbench already offers. Only vacant
       // positions can ever be assigned (positions.service.ts's own
       // `assignEmployee()` rejects anything else), so there's no reason to
       // fetch filled/frozen/abolished ones here at all.
-      api.listPositions({ status: "vacant" }).catch(() => []),
+      soft("vacant positions", api.listPositions({ status: "vacant" })),
       // HR Administration v2 (2026-09-27) — Employment type is now this
       // company's own `employment_type` reference catalog rather than a
       // hardcoded 4-value list, so a tenant that has added/renamed/retired
@@ -241,6 +249,7 @@ export function HiringWizardPage() {
         HrReferenceCatalogItemView[],
         HrReferenceCatalogItemView[]
       ]) => {
+        setLookupWarning(failed.length > 0 ? `Could not load: ${failed.join(", ")}. Those lists will look empty - reload the page to try again.` : null);
         setOptions({
           orgUnits,
           locations,
@@ -550,6 +559,11 @@ export function HiringWizardPage() {
         )}
       </div>
       <p className="text-label-tertiary text-sm mb-6 capitalize">Status: {process.status.replace(/_/g, " ")}</p>
+      {lookupWarning && (
+        <div role="alert" className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          {lookupWarning}
+        </div>
+      )}
 
       {/* kumail's own reference for this layout: CompanyDetailPage.tsx's
           section tile grid, in its own page header, rather than a tall

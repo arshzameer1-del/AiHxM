@@ -1,3 +1,4 @@
+import { localToday } from "../common/local-date";
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import type { PoolClient, QueryResult } from "pg";
 import { DatabaseService } from "../database/database.service";
@@ -267,7 +268,7 @@ export class ConfigurationRuleMappingService {
     context: ConfigurationResolutionContext,
     baseValue: Record<string, unknown> = {}
   ): Promise<ResolvedConfiguration> {
-    const asOf = context.asOf ?? new Date().toISOString().slice(0, 10);
+    const asOf = context.asOf ?? localToday();
     if (!ISO_DAY.test(asOf)) throw new BadRequestException("asOf must be YYYY-MM-DD");
     const ctx = await this.completeContext(client, companyId, context, asOf);
 

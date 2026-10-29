@@ -1,3 +1,4 @@
+import { localToday } from "../common/local-date";
 import { createHash, randomUUID } from "node:crypto";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { PoolClient } from "pg";
@@ -655,7 +656,7 @@ export class RecruitmentPipelineService {
       const money = (n: number) => n.toLocaleString("en-PK", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
       const componentsBlock = view.components.length > 0 ? ["Package breakdown:", ...view.components.map((c) => `  ${c.componentName}: ${view.currencyCode} ${money(c.amount)}`)].join("\n") : "";
       const content = renderPlaceholders(body, {
-        offer_date: new Date().toISOString().slice(0, 10),
+        offer_date: localToday(),
         candidate_name: `${d.first_name} ${d.last_name}`,
         company_name: d.company_name,
         position_title: d.title,

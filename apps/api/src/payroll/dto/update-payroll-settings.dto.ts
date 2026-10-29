@@ -1,4 +1,4 @@
-import { IsIn, IsNumber, IsOptional, Max, Min } from "class-validator";
+import { IsIn, IsInt, IsNumber, IsOptional, Max, Min } from "class-validator";
 import type { SocialSecurityScheme } from "@aihxm/shared-types";
 
 const SCHEMES: SocialSecurityScheme[] = ["none", "pessi", "sessi"];
@@ -40,4 +40,15 @@ export class UpdatePayrollSettingsDto {
   @Min(100)
   @Max(300)
   standardMonthlyHours?: number;
+
+  // R3 - loss of pay from attendance (see migration 0181).
+  @IsOptional()
+  @IsIn(["off", "absent_days"])
+  absenceDeductionMode?: "off" | "absent_days";
+
+  @IsOptional()
+  @IsInt()
+  @Min(2)
+  @Max(31)
+  lateMarksPerAbsence?: number | null;
 }

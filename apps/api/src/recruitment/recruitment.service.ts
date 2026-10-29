@@ -1,3 +1,4 @@
+import { localToday } from "../common/local-date";
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
@@ -76,6 +77,9 @@ function rowToRequisition(row: any): JobRequisitionView {
     updatedAt: toIso(row.updated_at) as string,
   };
 }
+
+/** Sanity ceiling for a monthly salary typed into an offer (a typo guard, not a business rule). */
+export const MAX_OFFER_MONTHLY_SALARY = 100_000_000;
 
 /**
  * Phase 10 (plan doc Section 7): Requisition → offer → hire, on a real
@@ -809,6 +813,15 @@ export class RecruitmentService {
     const componentTotal = components.reduce((sum, c) => sum + Number(c.amount), 0);
     const salary = input.salary ?? (components.length > 0 ? componentTotal : undefined);
     if (!salary || salary <= 0) throw new BadRequestException("An offer needs a salary or at least one compensation component with an amount");
+    if (salary > MAX_OFFER_MONTHLY_SALARY) {
+      throw new BadRequestException(`The offered monthly salary cannot exceed ${MAX_OFFER_MONTHLY_SALARY.toLocaleString("en-US")}. Check for an extra digit`);
+    }
+    if (String(input.startDate).slice(0, 10) < localToday()) {
+      throw new BadRequestException("The start date cannot be in the past");
+    }
+    if (input.expiresAt && String(input.expiresAt).slice(0, 10) > String(input.startDate).slice(0, 10)) {
+      throw new BadRequestException("The offer must expire on or before the start date");
+    }
     if (input.expiresAt && new Date(input.expiresAt).getTime() <= Date.now()) {
       throw new BadRequestException("The offer expiry must be in the future");
     }

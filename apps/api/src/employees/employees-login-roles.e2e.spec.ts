@@ -56,7 +56,7 @@ describe("Creating a login: privileged roles (e2e)", () => {
   }
 
   const makeLogin = (token: string, employeeId: string, roleKeys: string[]) =>
-    request(app.getHttpServer()).post(`/employees/${employeeId}/account`).set("Authorization", `Bearer ${token}`).send({ initialPassword: "Password@123456789", roleKeys });
+    request(app.getHttpServer()).post(`/employees/${employeeId}/account`).set("Authorization", `Bearer ${token}`).send({ initialPassword: "Quiet-River-Lantern-4821", roleKeys });
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();

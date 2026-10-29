@@ -3,12 +3,12 @@ import { Link } from "react-router-dom";
 import type { DelegateCandidateView, DelegationView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { LoadingNote, PageHeader } from "../shared/PageChrome";
-import { formatDay } from "../shared/dates";
+import { formatDay, todayIso } from "../shared/dates";
 import { delegationState } from "./delegation";
 
 const field = "w-full rounded-lg border border-black/10 px-3 py-2 text-sm";
 const label = "block text-xs font-medium text-label-secondary mb-1";
-const todayKey = () => new Date().toISOString().slice(0, 10);
+const todayKey = () => todayIso();
 
 const STATE_BADGE = {
   active: { label: "Covering now", cls: "bg-accent/10 text-accent" },

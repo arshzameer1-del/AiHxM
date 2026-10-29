@@ -1,5 +1,5 @@
 import { Type } from "class-transformer";
-import { ArrayMaxSize, IsArray, IsDateString, IsNumber, IsOptional, IsString, IsUUID, Min, ValidateNested } from "class-validator";
+import { ArrayMaxSize, Max, IsArray, IsDateString, IsNumber, IsOptional, IsString, IsUUID, Min, ValidateNested } from "class-validator";
 
 export class OfferComponentInputDto {
   @IsUUID()
@@ -7,6 +7,7 @@ export class OfferComponentInputDto {
 
   @IsNumber()
   @Min(0)
+  @Max(100_000_000)
   amount!: number;
 }
 
@@ -17,6 +18,7 @@ export class ExtendOfferDto {
   @IsOptional()
   @IsNumber()
   @Min(1)
+  @Max(100_000_000, { message: "salary cannot exceed 100,000,000 a month; check for an extra digit" })
   salary?: number;
 
   @IsDateString()

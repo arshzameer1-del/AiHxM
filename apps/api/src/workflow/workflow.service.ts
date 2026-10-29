@@ -1017,7 +1017,11 @@ export class WorkflowService {
       companyId: instance.company_id,
       action: "workflow_step.decide",
       target: stepInstanceId,
-      metadata: { decision: dto.decision, actingFor: acted.actingFor, delegationId: acted.delegationId },
+      metadata: {
+        decision: dto.decision, actingFor: acted.actingFor, delegationId: acted.delegationId,
+        // N1: approving one's own request is allowed unless the company's approval controls forbid it; when it happens it is flagged for auditors.
+        ...(dto.decision === "approved" && !opts.system && (claims.sub === instance.submitted_by_user_account_id || claims.sub === instance.subject_user_account_id) ? { selfApproved: true } : {}),
+      },
     });
 
     const def = await this.loadDefinition(client, instance);

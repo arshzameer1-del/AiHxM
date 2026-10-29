@@ -1,3 +1,4 @@
+import { localToday } from "../common/local-date";
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { DatabaseService } from "../database/database.service";
@@ -198,7 +199,7 @@ export class PayrollBenefitsService {
     return this.db.withClaims(claims, async (client) => {
       const plan = await this.loadPlan(client, planId);
       const emp = await this.loadEmployee(client, employeeId);
-      return this.evaluate(plan, emp, asOf ?? new Date().toISOString().slice(0, 10));
+      return this.evaluate(plan, emp, asOf ?? localToday());
     });
   }
 

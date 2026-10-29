@@ -1,3 +1,4 @@
+import { localToday } from "../common/local-date";
 import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Put, Query, Req, UseGuards } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 import { SessionGuard } from "../auth/session.guard";
@@ -95,7 +96,7 @@ export class AttendanceOpsController {
   // --- TLM-06 ------------------------------------------------------------
   @Get("employees/:employeeId/timesheet")
   timesheetForWeek(@CurrentClaims() claims: RequestClaims, @Param("employeeId") employeeId: string, @Query("date") date: string) {
-    return this.timesheets.getOrCreate(claims, employeeId, date || new Date().toISOString().slice(0, 10));
+    return this.timesheets.getOrCreate(claims, employeeId, date || localToday());
   }
 
   @Get("timesheets")

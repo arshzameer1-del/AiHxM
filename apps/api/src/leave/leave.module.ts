@@ -7,6 +7,7 @@ import { LeaveDurationSettingsService } from "./leave-duration-settings.service"
 import { LeaveValidationRulesService } from "./leave-validation-rules.service";
 import { LeaveRequestValidationService } from "./leave-request-validation.service";
 import { LeaveAccrualService } from "./leave-accrual.service";
+import { LeaveYearEndService } from "./leave-year-end.service";
 import { AttendanceEvaluationService } from "./attendance-evaluation.service";
 import { AttendanceDevicesService } from "./attendance-devices.service";
 import { TimesheetsService } from "./timesheets.service";
@@ -49,7 +50,7 @@ import { EffectiveDatingModule } from "../effective-dating/effective-dating.modu
     EffectiveDatingModule,
   ],
   controllers: [LeaveController, AttendanceOpsController, DeviceIngestController],
-  providers: [LeaveRequestsService, LeaveTypesService, LeaveLedgerService, LeaveDurationSettingsService, LeaveValidationRulesService, LeaveRequestValidationService, LeaveAccrualService, AttendanceEvaluationService, AttendanceDevicesService, TimesheetsService, DeviceKeyGuard, AttendanceService, AttendanceAutoCloseService, AttendanceAutoCloseScheduler, AttendanceCorrectionsService, OvertimeService, WorkProfileService, OnDutyService],
-  exports: [LeaveRequestsService, LeaveTypesService, LeaveLedgerService, LeaveDurationSettingsService, LeaveValidationRulesService, LeaveAccrualService, AttendanceEvaluationService, AttendanceDevicesService, TimesheetsService, AttendanceService, AttendanceAutoCloseService, AttendanceCorrectionsService, OvertimeService, WorkProfileService, OnDutyService],
+  providers: [LeaveRequestsService, LeaveTypesService, LeaveLedgerService, LeaveDurationSettingsService, LeaveValidationRulesService, LeaveRequestValidationService, LeaveAccrualService, LeaveYearEndService, AttendanceEvaluationService, AttendanceDevicesService, TimesheetsService, DeviceKeyGuard, AttendanceService, AttendanceAutoCloseService, AttendanceAutoCloseScheduler, AttendanceCorrectionsService, OvertimeService, WorkProfileService, OnDutyService],
+  exports: [LeaveRequestsService, LeaveTypesService, LeaveLedgerService, LeaveDurationSettingsService, LeaveValidationRulesService, LeaveAccrualService, LeaveYearEndService, AttendanceEvaluationService, AttendanceDevicesService, TimesheetsService, AttendanceService, AttendanceAutoCloseService, AttendanceCorrectionsService, OvertimeService, WorkProfileService, OnDutyService],
 })
 export class LeaveModule {}

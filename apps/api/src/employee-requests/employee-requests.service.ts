@@ -1,3 +1,4 @@
+import { localToday } from "../common/local-date";
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import type {
@@ -245,7 +246,7 @@ export class EmployeeRequestsService {
     if (row.request_kind === "letter") throw new BadRequestException("This is a letter request. Issue the letter instead.");
     const installmentsCount = input.installmentsCount ?? row.installments_count ?? undefined;
     if (installmentsCount === undefined) throw new BadRequestException("Give the number of instalments");
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localToday();
     const loan = await this.loans.create(claims, {
       employeeId: row.employee_id,
       loanType: row.request_kind,
@@ -296,6 +297,7 @@ export class EmployeeRequestsService {
     file: { originalname: string; mimetype: string; buffer: Buffer; size: number },
     note?: string
   ): Promise<EmployeeServiceRequestView> {
+    if (!file) throw new BadRequestException("Choose a file to upload");
     await this.requireManage(claims);
     if (!file) throw new BadRequestException("Choose the signed letter to upload");
     const row = await this.db.withClaims(claims, (client) => this.loadPending(client, id));

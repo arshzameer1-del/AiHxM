@@ -6188,10 +6188,19 @@ export type PayrollSettingsView = {
    * configures a different value for their own working-week convention.
    */
   standardMonthlyHours: number;
+  /**
+   * Loss of pay from attendance. `off` (default): only approved unpaid leave reduces pay. `absent_days`: each day the
+   * attendance evaluation marks absent (half a day for a half-day result) is deducted at the daily rate.
+   */
+  absenceDeductionMode: AbsenceDeductionMode;
+  /** null = late arrivals are never deducted; N = every N late marks count as one absent day. */
+  lateMarksPerAbsence: number | null;
   effectiveFrom: string;
   effectiveTo: string | null;
   updatedAt: string;
 };
+
+export type AbsenceDeductionMode = "off" | "absent_days";
 
 export type UpdatePayrollSettingsRequest = {
   eobiEmployeeRatePercent?: number;
@@ -6202,6 +6211,9 @@ export type UpdatePayrollSettingsRequest = {
   socialSecurityWageCeiling?: number | null;
   /** Sanity-bounded 100-300; see `PayrollSettingsView.standardMonthlyHours`. */
   standardMonthlyHours?: number;
+  absenceDeductionMode?: AbsenceDeductionMode;
+  /** 2-31, or null to stop deducting for late arrivals. */
+  lateMarksPerAbsence?: number | null;
 };
 
 // effectiveFrom/effectiveTo (0033_effective_dating_leave_tax.sql): every

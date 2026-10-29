@@ -339,6 +339,7 @@ export class InboxService {
     file: { originalname: string; mimetype: string; size: number; buffer: Buffer },
     visibility: "participants" | "approvers" = "participants"
   ): Promise<WorkflowAttachmentView> {
+    if (!file) throw new BadRequestException("Choose a file to upload");
     if (!claims.company_id) throw new ForbiddenException();
     if (!file) throw new BadRequestException("A file is required");
     if (file.size > MAX_ATTACHMENT_BYTES) throw new BadRequestException(`File exceeds the ${MAX_ATTACHMENT_BYTES / (1024 * 1024)}MB limit`);

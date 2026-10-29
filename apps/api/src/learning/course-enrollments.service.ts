@@ -1,3 +1,4 @@
+import { localToday } from "../common/local-date";
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { DatabaseService } from "../database/database.service";
@@ -58,7 +59,7 @@ function rowToCourse(row: any): CourseView {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function rowToEnrollment(row: any, employeeUserAccountId: string | null): CourseEnrollmentView {
   const dueDate = row.due_date ? toIsoDate(row.due_date) : null;
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = localToday();
   const status = row.status !== "completed" && dueDate !== null && dueDate < todayIso ? "overdue" : row.status;
 
   return {

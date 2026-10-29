@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import type { EmployeeWorkProfileView, SetWorkProfileRequest, TimeRecordingProfile } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
-import { formatDay } from "../shared/dates";
+import { formatDay, todayIso } from "../shared/dates";
 import { RECORDING_LABELS, workProfileProblem, workProfileSummary } from "./workProfile";
 
 const field = "w-full rounded-lg border border-black/10 px-3 py-2 text-sm";
@@ -22,7 +22,7 @@ export function WorkProfilePanel({ employeeId, canManage }: { employeeId: string
   const [monthly, setMonthly] = useState("");
   const [recording, setRecording] = useState<TimeRecordingProfile>("clock");
   const [notes, setNotes] = useState("");
-  const [from, setFrom] = useState(new Date().toISOString().slice(0, 10));
+  const [from, setFrom] = useState(todayIso());
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -41,7 +41,7 @@ export function WorkProfilePanel({ employeeId, canManage }: { employeeId: string
     setMonthly(current?.monthlyHours != null ? String(current.monthlyHours) : "");
     setRecording(current?.timeRecordingProfile ?? "clock");
     setNotes(current?.notes ?? "");
-    setFrom(new Date().toISOString().slice(0, 10));
+    setFrom(todayIso());
     setError(null);
     setEditing(true);
   }

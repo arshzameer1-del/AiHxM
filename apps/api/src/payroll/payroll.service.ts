@@ -1,3 +1,4 @@
+import { localToday } from "../common/local-date";
 import { publishEmployeesCalculated, publishPaymentStatusChanged } from "./payroll-events";
 import { payslipsHiddenFromSelf } from "./payroll-payslip-publication";
 import { sensitive } from "../crypto/sensitive-fields";
@@ -249,6 +250,8 @@ function rowToSettings(row: any): PayrollSettingsView {
     socialSecurityEmployerRatePercent: Number(row.social_security_employer_rate_percent),
     socialSecurityWageCeiling: row.social_security_wage_ceiling === null ? null : Number(row.social_security_wage_ceiling),
     standardMonthlyHours: Number(row.standard_monthly_hours),
+    absenceDeductionMode: (row.absence_deduction_mode ?? "off") as "off" | "absent_days",
+    lateMarksPerAbsence: row.late_marks_per_absence === null || row.late_marks_per_absence === undefined ? null : Number(row.late_marks_per_absence),
     effectiveFrom: toIsoDate(row.effective_from),
     effectiveTo: toIsoDateOrNull(row.effective_to),
     updatedAt: toIso(row.updated_at) as string,
@@ -475,6 +478,9 @@ export class PayrollService {
     ) {
       throw new BadRequestException("standardMonthlyHours must be between 100 and 300");
     }
+    if (patch.lateMarksPerAbsence !== undefined && patch.lateMarksPerAbsence !== null && (!Number.isInteger(patch.lateMarksPerAbsence) || patch.lateMarksPerAbsence < 2 || patch.lateMarksPerAbsence > 31)) {
+      throw new BadRequestException("lateMarksPerAbsence must be a whole number from 2 to 31, or empty to turn it off");
+    }
     return this.db.withClaims(claims, async (client) => {
       const current = await this.loadOrSeedSettings(client, claims);
       const { row } = await this.effectiveDating.applyVersionedRow(client, {
@@ -489,6 +495,8 @@ export class PayrollService {
           social_security_wage_ceiling:
             patch.socialSecurityWageCeiling === undefined ? current.socialSecurityWageCeiling : patch.socialSecurityWageCeiling,
           standard_monthly_hours: patch.standardMonthlyHours ?? current.standardMonthlyHours,
+          absence_deduction_mode: patch.absenceDeductionMode ?? current.absenceDeductionMode,
+          late_marks_per_absence: patch.lateMarksPerAbsence === undefined ? current.lateMarksPerAbsence : patch.lateMarksPerAbsence,
           updated_at: new Date(),
         },
       });
@@ -1241,8 +1249,8 @@ export class PayrollService {
          taxable_annual_income, income_tax_monthly, eobi_employee_contribution, eobi_employer_contribution,
          social_security_employer_contribution, net_pay, calculation_breakdown,
          loan_deductions, consumed_additional_payments, consumed_offcycle_payments, consumed_overtime, employer_cost,
-         arrears_amount, retro_detail
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,$18::jsonb,$19::jsonb,$20::jsonb,$21::jsonb,$22,$23,$24::jsonb)
+         arrears_amount, retro_detail, absent_days
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,$18::jsonb,$19::jsonb,$20::jsonb,$21::jsonb,$22,$23,$24::jsonb,$25)
        RETURNING id`,
       [
         claims.company_id,
@@ -1269,6 +1277,7 @@ export class PayrollService {
         row.employerCost ?? 0,
         row.arrearsAmount ?? 0,
         JSON.stringify(row.retroDetail ?? []),
+        row.absentDays ?? 0,
       ]
     );
     return {
@@ -1662,7 +1671,7 @@ export class PayrollService {
       }
       // LIVE-12: with the payroll policy switched on, payslips cannot be locked for a period that has not started.
       const periodStartDay = toIsoDateOrNull(run.period_start);
-      if (periodStartDay && periodStartDay > new Date().toISOString().slice(0, 10) && (await this.control().policy(client, claims.company_id!)).blockFinalizeBeforePeriodStart) {
+      if (periodStartDay && periodStartDay > localToday() && (await this.control().policy(client, claims.company_id!)).blockFinalizeBeforePeriodStart) {
         throw new BadRequestException(`This payroll run cannot be finalized yet: its period starts on ${periodStartDay}`);
       }
       // Phase P3 — commit the loan-repayment ledger and mark consumed
@@ -2952,8 +2961,47 @@ export class PayrollService {
         trace: { prorationDays, monthlyRate: latestTotalMonthlyRate },
       });
     }
+    // R3 - loss of pay from attendance. Opt-in (payroll_settings.absence_deduction_mode); the days come from the processed
+    // attendance results, which already exclude approved leave, holidays, rest days and on-duty days. HR reviews and can
+    // correct a result (attendance override) before the run; the pre-run validation lists who will be deducted.
+    let absenceDays = 0;
+    let absenceBasis = { absent: 0, halfDays: 0, lateMarks: 0 };
+    if (settings.absenceDeductionMode === "absent_days") {
+      const att = await client.query<{ status: string; n: string }>(
+        `SELECT status, COUNT(*)::int AS n FROM attendance_daily_results
+          WHERE employee_id = $1 AND work_date BETWEEN $2::date AND $3::date AND status IN ('absent','half_day','late','late_and_early')
+          GROUP BY status`,
+        [employee.id, windowStart, windowEnd]
+      );
+      const count = (st: string) => Number(att.rows.find((r) => r.status === st)?.n ?? 0);
+      absenceBasis = { absent: count("absent"), halfDays: count("half_day"), lateMarks: count("late") + count("late_and_early") };
+      const lateDays = settings.lateMarksPerAbsence ? Math.floor(absenceBasis.lateMarks / settings.lateMarksPerAbsence) : 0;
+      absenceDays = absenceBasis.absent + absenceBasis.halfDays * 0.5 + lateDays;
+      // Never deduct more than the days that remain after unpaid leave.
+      absenceDays = Math.max(0, Math.min(absenceDays, prorationDays - unpaidLeaveDays));
+    }
+    const absenceDeduction = absenceDays > 0 ? (latestTotalMonthlyRate * absenceDays) / prorationDays : 0;
+    if (absenceDays > 0) {
+      breakdown.push({
+        label: `Absence deduction: ${absenceDays} ${dayUnit} (${absenceBasis.absent} absent, ${absenceBasis.halfDays} half-day, ${absenceBasis.lateMarks} late mark(s)) @ ${latestTotalMonthlyRate}/mo total rate`,
+        value: -Number(absenceDeduction.toFixed(2)),
+      });
+      ledger.add({
+        key: "absence_deduction",
+        label: "Absence deduction",
+        category: "adjustment",
+        affects: "gross",
+        amount: -absenceDeduction,
+        quantity: absenceDays,
+        unit: dayUnit,
+        rate: latestTotalMonthlyRate,
+        basisAmount: latestTotalMonthlyRate,
+        sourceType: "attendance",
+        trace: { prorationDays, monthlyRate: latestTotalMonthlyRate, ...absenceBasis, lateMarksPerAbsence: settings.lateMarksPerAbsence },
+      });
+    }
     const taxableShare = earningGrossFromSegments > 0 ? earningTaxableFromSegments / earningGrossFromSegments : 0;
-    const taxableUnpaidDeduction = unpaidDeduction * taxableShare;
+    const taxableUnpaidDeduction = (unpaidDeduction + absenceDeduction) * taxableShare;
 
     // --- Approved overtime (integration gap audit item 4, 0097) ----------
     // Every APPROVED overtime claim whose work_date falls inside this
@@ -3137,8 +3185,8 @@ export class PayrollService {
       }
     }
 
-    const paidDays = Math.max(0, employmentWindowDays - unpaidLeaveDays);
-    const grossPay = Math.max(0, Math.max(0, grossFromSegments - unpaidDeduction) + overtimePay + additionalEarningsTotal + arrearsTotal);
+    const paidDays = Math.max(0, employmentWindowDays - unpaidLeaveDays - absenceDays);
+    const grossPay = Math.max(0, Math.max(0, grossFromSegments - unpaidDeduction - absenceDeduction) + overtimePay + additionalEarningsTotal + arrearsTotal);
     const taxableGrossThisPeriod = Math.max(0, Math.max(0, taxableGrossFromSegments - taxableUnpaidDeduction) + overtimePay + additionalEarningsTaxable + arrearsTaxable);
     breakdown.push({ label: "Gross pay", value: Number(grossPay.toFixed(2)) });
     breakdown.push({ label: "Of which taxable this period", value: Number(taxableGrossThisPeriod.toFixed(2)) });
@@ -3454,6 +3502,7 @@ export class PayrollService {
       daysInPeriod: prorationDays,
       paidDays: Number(paidDays.toFixed(2)),
       unpaidLeaveDays: Number(unpaidLeaveDays.toFixed(2)),
+      absentDays: Number(absenceDays.toFixed(2)),
       grossPay: Number(grossPay.toFixed(2)),
       taxableGrossThisPeriod: Number(taxableGrossThisPeriod.toFixed(2)),
       taxableAnnualIncome: Number(estimatedAnnualTaxableIncome.toFixed(2)),
@@ -3492,6 +3541,7 @@ export class PayrollService {
           note: basis.mode === "calendar" ? (basis.note ?? null) : null,
         },
         compensation: snapshotCompensation,
+        attendance: { mode: settings.absenceDeductionMode, absentDays: Number(absenceDays.toFixed(2)), ...absenceBasis },
         leave: {
           unpaidDays: Number(unpaidLeaveDays.toFixed(2)),
           segments: unpaidLeave.segments.map((seg) => ({ startDate: seg.startDate, endDate: seg.endDate, days: seg.days, leaveRequestId: seg.leaveRequestId })),

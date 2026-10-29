@@ -1,3 +1,4 @@
+import { localToday } from "../common/local-date";
 import { ForbiddenException, Injectable } from "@nestjs/common";
 import type { EmployeeView, OrgStructureNode, OrgStructureView, OrgUnitView, PositionView } from "@aihxm/shared-types";
 import { DatabaseService } from "../database/database.service";
@@ -182,6 +183,6 @@ export class OrgStructureService {
     };
 
     const roots = (childrenByParent.get(null) ?? []).slice().sort(byName).map((u) => buildUnit(u, true));
-    return { asOf: new Date().toISOString().slice(0, 10), roots, peopleVisible };
+    return { asOf: localToday(), roots, peopleVisible };
   }
 }

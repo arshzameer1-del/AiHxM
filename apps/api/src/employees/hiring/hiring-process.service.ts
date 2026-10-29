@@ -1,3 +1,4 @@
+import { localToday } from "../../common/local-date";
 import { assertValidCnic, assertValidIban } from "../../crypto/identifier-validation";
 import { decryptDraftData, encryptDraftData, scrubHireProcessDrafts } from "./draft-sensitive-data";
 import { applyPersonExtras } from "./hire-person-extras";
@@ -1018,7 +1019,7 @@ export class HiringProcessService {
         await this.shifts.assignShiftWithinTransaction(client, claims, {
           employeeId: employee.id,
           shiftId: String(workingTime.shiftId),
-          effectiveFrom: (workingTime.effectiveFrom as string | undefined) ?? (employment.dateOfJoining as string | undefined) ?? new Date().toISOString().slice(0, 10),
+          effectiveFrom: (workingTime.effectiveFrom as string | undefined) ?? (employment.dateOfJoining as string | undefined) ?? localToday(),
         });
       }
 
@@ -1054,7 +1055,7 @@ export class HiringProcessService {
         await this.compensation.setCompensationWithinTransaction(client, claims, {
           employeeId: employee.id,
           monthlySalary: Number(compensationCard.monthlySalary),
-          effectiveFrom: (compensationCard.effectiveFrom as string | undefined) ?? (employment.dateOfJoining as string | undefined) ?? new Date().toISOString().slice(0, 10),
+          effectiveFrom: (compensationCard.effectiveFrom as string | undefined) ?? (employment.dateOfJoining as string | undefined) ?? localToday(),
         });
       }
 

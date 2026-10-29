@@ -978,6 +978,7 @@ export class CompaniesService {
     slot: BrandingAssetSlot,
     file: { originalname: string; mimetype: string; buffer: Buffer; size: number }
   ): Promise<CompanyConfig> {
+    if (!file) throw new BadRequestException("Choose a file to upload");
     const MAX_BRANDING_ASSET_BYTES = 5 * 1024 * 1024;
     if (file.size > MAX_BRANDING_ASSET_BYTES) {
       throw new BadRequestException(`File exceeds the ${MAX_BRANDING_ASSET_BYTES / (1024 * 1024)}MB limit`);

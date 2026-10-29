@@ -1,3 +1,4 @@
+import { localToday } from "../common/local-date";
 import { sensitive } from "../crypto/sensitive-fields";
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import type { PoolClient } from "pg";
@@ -122,7 +123,7 @@ export type LifecycleExecOptions = {
 };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const todayIso = () => new Date().toISOString().slice(0, 10);
+const todayIso = () => localToday();
 const CORRECTABLE = new Set(["transfer", "promotion", "demotion", "manager_change", "location_change", "termination"]);
 
 /** Compact before/after picture of the columns lifecycle actions change. */

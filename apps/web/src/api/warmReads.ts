@@ -1,6 +1,6 @@
 /**
  * The reads each kind of login's screens make, recorded by opening every screen of the app once per role
- * (a temporary crawl). They are what the app loads in the background after sign-in. Screens that are not
+ * (a temporary crawl), then checked against the API so that no list contains a read that role is refused (403). They are what the app loads in the background after sign-in. Screens that are not
  * listed here still work and are learned the first time they are opened (see `noteRouteRead` in client.ts).
  */
 export const WARM_READS_BY_ROLE: Record<string, string[]> = {
@@ -44,32 +44,24 @@ export const WARM_READS_BY_ROLE: Record<string, string[]> = {
     "/expense-claims",
     "/courses",
     "/job-requisitions/mine",
-    "/interviews/mine",
-    "/review-cycles"
+    "/interviews/mine"
   ],
   "employee_self_service": [
-    "/payroll/dashboard",
-    "/payroll/runs",
-    "/payroll/areas",
     "/employees",
     "/employees/me/org-chart",
     "/expense-claims",
     "/courses",
-    "/review-cycles",
     "/payslips",
     "/payroll/my-documents",
     "/holidays",
     "/leave-types"
   ],
   "system_admin": [
-    "/starter-setup",
     "/configuration-center",
     "/workflow/templates",
     "/system-admin/roles",
     "/system-admin/assignable-users",
     "/expense-claims",
-    "/employees",
-    "/courses",
-    "/review-cycles"
+    "/employees"
   ]
 };

@@ -1,3 +1,4 @@
+import { localToday } from "../common/local-date";
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { DatabaseService } from "../database/database.service";
@@ -359,7 +360,7 @@ export class HrBusinessPolicyService {
     exceptId: string | undefined,
     newFrom: string | null
   ): Promise<void> {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localToday();
     if (newFrom && newFrom > today) {
       await client.query(
         `UPDATE hr_business_policies

@@ -13,6 +13,7 @@ import {
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import type { Response } from "express";
+import { pageOf } from "../common/paging";
 import { SessionGuard } from "../auth/session.guard";
 import { CurrentClaims } from "../auth/current-claims.decorator";
 import type { RequestClaims } from "../database/tenant-context";
@@ -37,8 +38,14 @@ export class ExpensesController {
   }
 
   @Get("expense-claims")
-  list(@CurrentClaims() claims: RequestClaims, @Query("employeeId") employeeId?: string) {
-    return this.expenseClaims.listClaims(claims, { employeeId });
+  async list(
+    @CurrentClaims() claims: RequestClaims,
+    @Res({ passthrough: true }) res: Response,
+    @Query("employeeId") employeeId?: string,
+    @Query("limit") limit?: string,
+    @Query("offset") offset?: string
+  ) {
+    return pageOf(await this.expenseClaims.listClaims(claims, { employeeId }), limit, offset, res);
   }
 
   @Get("expense-claims/:id")

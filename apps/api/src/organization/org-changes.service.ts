@@ -1,3 +1,4 @@
+import { localToday } from "../common/local-date";
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { DatabaseService } from "../database/database.service";
@@ -139,7 +140,7 @@ function rowToChange(row: OrgChangeRow, items: OrgChangeItemView[]): OrgChangeVi
 }
 
 function todayIsoDate(): string {
-  return new Date().toISOString().slice(0, 10);
+  return localToday();
 }
 
 /**

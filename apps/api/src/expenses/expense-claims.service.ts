@@ -413,6 +413,7 @@ export class ExpenseClaimsService {
     claimId: string,
     file: { originalname: string; mimetype: string; buffer: Buffer; size: number }
   ): Promise<ExpenseReceiptView> {
+    if (!file) throw new BadRequestException("Choose a file to upload");
     await this.requireExpenseModule(claims);
     if (file.size > MAX_RECEIPT_BYTES) {
       throw new BadRequestException(`File exceeds the ${MAX_RECEIPT_BYTES / (1024 * 1024)}MB limit`);

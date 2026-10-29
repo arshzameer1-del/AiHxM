@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import type { PendingEmployeeDocumentView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { EmployeeAvatar } from "../shared/EmployeeAvatar";
-import { formatDateTime, formatDay } from "../shared/dates";
+import { formatDateTime, formatDay, todayIso } from "../shared/dates";
 import { DEFAULT_DOCUMENT_TYPES, expiryState, typeLabel } from "./employeeDocuments";
 
 /** BACKLOG50 - documents employees uploaded to their own file that wait for HR. Shown on the Change Requests page. */
@@ -44,7 +44,7 @@ export function PendingDocumentsInbox() {
   }
 
   if (!items || items.length === 0) return null;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayIso();
   return (
     <section className="mb-6" aria-label="Documents waiting for review" data-testid="pending-documents">
       <h2 className="font-semibold text-sm uppercase tracking-wide text-label-tertiary mb-2">Documents waiting for review · {items.length}</h2>

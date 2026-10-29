@@ -4,7 +4,7 @@ import type { DataSubjectRequestView, EmployeeServiceRequestKind, EmployeeServic
 import { api, ApiError } from "../../api/client";
 import { EmployeeAvatar } from "../shared/EmployeeAvatar";
 import { PageHeader, LoadingNote } from "../shared/PageChrome";
-import { formatDateTime, formatDay } from "../shared/dates";
+import { formatDateTime, formatDay, todayIso } from "../shared/dates";
 import { DSR_BADGE, DSR_LABELS, STATUS_BADGE, requestTitle } from "./serviceRequests";
 
 const field = "w-full rounded-lg border border-black/10 px-3 py-1.5 text-sm";
@@ -25,7 +25,7 @@ const FILTERS: { key: EmployeeServiceRequestStatus | "all"; label: string }[] = 
 ];
 const LOAN_KINDS: EmployeeServiceRequestKind[] = ["loan", "salary_advance"];
 const LETTER_KINDS: EmployeeServiceRequestKind[] = ["letter"];
-const todayKey = () => new Date().toISOString().slice(0, 10);
+const todayKey = () => todayIso();
 
 /**
  * BACKLOG52 - HR's queue for what employees ask: loans and advances (approving creates the real loan), letters and

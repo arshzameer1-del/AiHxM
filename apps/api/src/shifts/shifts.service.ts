@@ -1,3 +1,4 @@
+import { localToday } from "../common/local-date";
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { DatabaseService } from "../database/database.service";
@@ -538,7 +539,7 @@ export class ShiftsService {
   async getCurrentShift(claims: RequestClaims, employeeId: string): Promise<ShiftAssignmentView | null> {
     return this.db.withClaims(claims, async (client) => {
       await this.requireViewAccess(claims, client, employeeId);
-      const resolved = await this.resolveForEmployeeOnDate(client, employeeId, new Date().toISOString().slice(0, 10));
+      const resolved = await this.resolveForEmployeeOnDate(client, employeeId, localToday());
       if (!resolved) return null;
       const employee = await client.query("SELECT first_name, last_name, employee_number FROM employees WHERE id = $1", [
         employeeId,

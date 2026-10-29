@@ -3,7 +3,7 @@ import { Download, FileText } from "lucide-react";
 import type { EmployeeDocumentChecklist, EmployeeDocumentView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { LoadingNote } from "../shared/PageChrome";
-import { formatDay, localDayKey } from "../shared/dates";
+import { formatDay, localDayKey, todayIso } from "../shared/dates";
 import {
   CHECKLIST_BADGE,
   DEFAULT_DOCUMENT_TYPES,
@@ -13,7 +13,7 @@ import {
   uploadProblem,
 } from "./employeeDocuments";
 
-const todayKey = () => new Date().toISOString().slice(0, 10);
+const todayKey = () => todayIso();
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;

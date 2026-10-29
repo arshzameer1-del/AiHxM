@@ -1,3 +1,4 @@
+import { localToday } from "../common/local-date";
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
@@ -653,11 +654,14 @@ export class EmployeeGroupsService {
     }
     return this.db.withClaims(claims, async (client) => {
       const employeeResult = await client.query(
-        `SELECT ${GROUP_FACT_COLUMNS} FROM employees e WHERE e.id = $1`,
+        `SELECT e.company_id AS tenant_company_id, ${GROUP_FACT_COLUMNS} FROM employees e WHERE e.id = $1`,
         [employeeId]
       );
       if (employeeResult.rowCount === 0) throw new NotFoundException("Employee not found");
       const employee = employeeResult.rows[0];
+      // Groups and the default policy are looked up for the EMPLOYEE'S company. Scheduled jobs and platform tools run with
+      // claims that row-level security lets see every tenant, so without this filter another company's group could win.
+      const tenantId: string = employee.tenant_company_id;
 
       // ORDER BY g.created_at matters, not just style: it's what makes the
       // same-specificity tie-break below deterministic (earliest-created
@@ -670,10 +674,11 @@ export class EmployeeGroupsService {
          LEFT JOIN employee_group_policy_assignments a ON a.group_id = g.id AND a.policy_type = $1
               AND (a.effective_from IS NULL OR a.effective_from <= CURRENT_DATE)
               AND (a.effective_to IS NULL OR a.effective_to >= CURRENT_DATE)
-         WHERE (g.effective_from IS NULL OR g.effective_from <= CURRENT_DATE)
+         WHERE g.company_id = $2
+           AND (g.effective_from IS NULL OR g.effective_from <= CURRENT_DATE)
            AND (g.effective_to IS NULL OR g.effective_to >= CURRENT_DATE)
          ORDER BY g.created_at ASC`,
-        [policyType]
+        [policyType, tenantId]
       );
 
       const byGroup = new Map<string, { conditions: Array<{ field: string; equals: string }>; policyId: string | null }>();
@@ -720,7 +725,7 @@ export class EmployeeGroupsService {
       if (policyType === "leave") {
         const defaultPolicy = await client.query(
           "SELECT id FROM leave_policies WHERE company_id = $1 AND is_default = true",
-          [claims.company_id]
+          [tenantId]
         );
         if ((defaultPolicy.rowCount ?? 0) > 0) {
           return { policyType, policyId: defaultPolicy.rows[0].id, groupId: null, isDefault: true };
@@ -844,7 +849,7 @@ export class EmployeeGroupsService {
       client.query("SELECT effective_from, effective_to FROM employee_groups WHERE id = $1 AND company_id = $2", [groupId, claims.company_id])
     );
     if (group.rowCount === 0) throw new NotFoundException("Employee group not found");
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localToday();
     const from = toDay(group.rows[0].effective_from);
     const to = toDay(group.rows[0].effective_to);
     const inWindow = (!from || from <= today) && (!to || to >= today);
@@ -857,7 +862,7 @@ export class EmployeeGroupsService {
       const stillOpen = new Set<string>();
       for (const row of open.rows) {
         if (row.source === "rule" && !matches.has(row.employee_id)) {
-          if (toDay(row.effective_from)! >= new Date().toISOString().slice(0, 10)) {
+          if (toDay(row.effective_from)! >= localToday()) {
             // opened today: it never took effect for a full day, so drop it
             await client.query("DELETE FROM employee_group_memberships WHERE id = $1", [row.id]);
           } else {

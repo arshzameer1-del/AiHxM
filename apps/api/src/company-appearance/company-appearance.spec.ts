@@ -103,7 +103,7 @@ describe("Company appearance and profile photo", () => {
     expect(shown.bannerMode).toBe("image");
     const served = await svc.bannerImage(ess);
     expect(served.mimeType).toBe("image/png");
-    expect(served.buffer.length).toBe(20);
+    expect(served.buffer.length).toBe(TINY_PNG.length);
     const gone = await svc.removeBannerImage(sysAdmin);
     expect(gone).toMatchObject({ hasBannerImage: false, bannerMode: "default" });
     await expect(svc.bannerImage(ess)).rejects.toThrow(/No banner picture/);

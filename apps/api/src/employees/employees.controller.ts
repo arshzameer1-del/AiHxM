@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Res,
   UploadedFile,
   UseGuards,
@@ -13,6 +14,7 @@ import {
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import type { Response } from "express";
+import { pageOf } from "../common/paging";
 import { SessionGuard } from "../auth/session.guard";
 import { MyOrgChartService } from "./my-org-chart.service";
 import { MyPersonalDataService } from "./my-personal-data.service";
@@ -50,8 +52,13 @@ export class EmployeesController {
   }
 
   @Get()
-  list(@CurrentClaims() claims: RequestClaims) {
-    return this.employees.list(claims);
+  async list(
+    @CurrentClaims() claims: RequestClaims,
+    @Res({ passthrough: true }) res: Response,
+    @Query("limit") limit?: string,
+    @Query("offset") offset?: string
+  ) {
+    return pageOf(await this.employees.list(claims), limit, offset, res);
   }
 
   // "My Org Chart" (Employee Self Service): the caller's own manager chain, peers and reports. Declared before `:id`.

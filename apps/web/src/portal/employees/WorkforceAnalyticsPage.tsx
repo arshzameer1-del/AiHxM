@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { EmployeeAnalyticsSummary, EmployeeHeadcountBreakdown } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { formatDateTime } from "../shared/dates";
+import { NO_ACCESS, PageLoadError } from "../../components/NoAccessPanel";
 
 /**
  * Core Employee Enterprise Phase 12's frontend catch-up (2026-09-27) —
@@ -56,10 +57,10 @@ export function WorkforceAnalyticsPage() {
     api
       .getWorkforceAnalyticsSummary()
       .then(setSummary)
-      .catch((err) => setError(err instanceof ApiError && err.status === 403 ? "Requires HR Admin." : "Could not load workforce analytics."));
+      .catch((err) => setError(err instanceof ApiError && err.status === 403 ? NO_ACCESS : "Could not load workforce analytics."));
   }, []);
 
-  if (error) return <div className="text-danger text-sm">{error}</div>;
+  if (error) return <PageLoadError message={error} what="Workforce analytics" />;
   if (!summary) return <LoadingNote />;
 
   return (

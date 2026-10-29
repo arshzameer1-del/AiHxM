@@ -60,6 +60,7 @@ export class PlatformBrandingService {
     claims: RequestClaims,
     file: { originalname: string; mimetype: string; buffer: Buffer; size: number }
   ): Promise<PlatformBranding> {
+    if (!file) throw new BadRequestException("Choose a file to upload");
     if (file.size > MAX_LOGO_BYTES) {
       throw new BadRequestException(`File exceeds the ${MAX_LOGO_BYTES / (1024 * 1024)}MB limit`);
     }

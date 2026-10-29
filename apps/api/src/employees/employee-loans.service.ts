@@ -1,3 +1,4 @@
+import { localToday } from "../common/local-date";
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { DatabaseService } from "../database/database.service";
@@ -522,7 +523,7 @@ export class EmployeeLoansService {
       if (!["active", "on_hold", "pending_approval"].includes(loan.status)) throw new BadRequestException(`A ${loan.status} loan cannot be given a schedule`);
       const existing = await client.query("SELECT 1 FROM loan_schedules WHERE loan_id = $1 AND status <> 'cancelled' LIMIT 1", [id]);
       if (existing.rowCount) throw new ConflictException("This loan already has a repayment schedule");
-      const start = input.startDate ?? new Date().toISOString().slice(0, 10);
+      const start = input.startDate ?? localToday();
       const rows = buildSchedule(Number(loan.outstanding_balance), Number(loan.installment_amount), start);
       if (!rows.length) throw new BadRequestException("Nothing is outstanding on this loan");
       await client.query(

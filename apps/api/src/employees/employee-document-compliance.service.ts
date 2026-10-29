@@ -1,3 +1,4 @@
+import { localToday } from "../common/local-date";
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import type {
@@ -101,6 +102,7 @@ export class EmployeeDocumentComplianceService {
     file: { originalname: string; mimetype: string; buffer: Buffer; size: number },
     extra: { expiryDate?: string | null; note?: string | null } = {}
   ): Promise<EmployeeDocumentView> {
+    if (!file) throw new BadRequestException("Choose a file to upload");
     const doc = await this.employees.addOwnDocument(claims, employeeId, documentType, file, extra);
     if (this.inbox && claims.company_id) {
       const hr = await this.inbox.hrAdminUserIds(claims.company_id);
@@ -175,7 +177,7 @@ export class EmployeeDocumentComplianceService {
            FROM employee_documents WHERE employee_id = $1 AND review_status <> 'rejected' ORDER BY created_at DESC`,
         [employeeId]
       );
-      const today = new Date().toISOString().slice(0, 10);
+      const today = localToday();
       const items: EmployeeDocumentChecklistItem[] = required.map((req) => {
         const type = req.document_type as string;
         const mine = docs.rows.filter(

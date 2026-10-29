@@ -738,6 +738,50 @@ export class PayrollRunControlService {
       findings.push({ severity: "error", code: "OVERTIME_UNPRICED", message: `Approved overtime on ${iso(r.work_date)!.slice(0, 10)} has no snapshotted amount`, employeeId: r.employee_id, employeeNumber: byId.get(r.employee_id)?.employee_number });
     }
 
+    // R3 - when the tenant deducts pay for absence, HR must see who is affected BEFORE the run (and can correct an attendance result first).
+    if (run.run_type === "regular") {
+      const mode = await client.query<{ absence_deduction_mode: string; late_marks_per_absence: number | null }>(
+        `SELECT absence_deduction_mode, late_marks_per_absence FROM payroll_settings
+          WHERE company_id = $1 AND effective_from <= $2::date AND (effective_to IS NULL OR effective_to >= $2::date)
+          ORDER BY effective_from DESC LIMIT 1`,
+        [run.company_id, periodEnd]
+      );
+      if (mode.rows[0]?.absence_deduction_mode === "absent_days") {
+        const lateN = mode.rows[0].late_marks_per_absence;
+        const rows = await client.query<{ employee_id: string; absent: string; half: string; late: string }>(
+          `SELECT employee_id,
+                  COUNT(*) FILTER (WHERE status = 'absent')::int AS absent,
+                  COUNT(*) FILTER (WHERE status = 'half_day')::int AS half,
+                  COUNT(*) FILTER (WHERE status IN ('late','late_and_early'))::int AS late
+             FROM attendance_daily_results
+            WHERE employee_id = ANY($1::uuid[]) AND work_date BETWEEN $2::date AND $3::date
+            GROUP BY employee_id`,
+          [ids, periodStart, periodEnd]
+        );
+        let affected = 0;
+        for (const r of rows.rows) {
+          const days = Number(r.absent) + Number(r.half) * 0.5 + (lateN ? Math.floor(Number(r.late) / lateN) : 0);
+          if (days <= 0) continue;
+          affected++;
+          findings.push({
+            severity: "warning",
+            code: "ABSENCE_DEDUCTION",
+            message: `${days} day(s) will be deducted for attendance (${r.absent} absent, ${r.half} half-day, ${r.late} late mark(s)). Correct the attendance first if any of these days is wrong`,
+            employeeId: r.employee_id,
+            employeeNumber: byId.get(r.employee_id)?.employee_number,
+          });
+        }
+        findings.push({ severity: "info", code: "ABSENCE_DEDUCTION_ON", message: `Attendance deduction is on: ${affected} employee(s) have days to be deducted in this period` });
+        const last = await client.query<{ d: unknown }>("SELECT MAX(work_date) AS d FROM attendance_daily_results WHERE company_id = $1", [run.company_id]);
+        const lastDay = iso(last.rows[0]?.d)?.slice(0, 10) ?? null;
+        const needed = new Date(`${periodEnd}T00:00:00Z`);
+        needed.setUTCDate(needed.getUTCDate() - 1);
+        if (!lastDay || lastDay < needed.toISOString().slice(0, 10)) {
+          findings.push({ severity: "warning", code: "ATTENDANCE_NOT_EVALUATED", message: `Attendance has been processed only up to ${lastDay ?? "(never)"}; days after that are not checked for absence, so nothing is deducted for them` });
+        }
+      }
+    }
+
     if (run.run_type === "regular" && !run.is_simulation) {
       const month = Number(periodStart.slice(5, 7));
       const taxYearStart = `${Number(periodStart.slice(0, 4)) - (month >= 7 ? 0 : 1)}-07-01`;

@@ -106,8 +106,10 @@ describe("Starter setup (e2e)", () => {
       .post("/leave-requests")
       .set("Authorization", `Bearer ${staffToken}`)
       .send({ employeeId: staffEmployeeId, leaveType: "annual", startDate: "2030-03-04", endDate: "2030-03-05" });
-    expect(res.status).toBe(404);
-    expect(res.body.message).toContain("Starter setup");
+    // Since BACKLOG58 the submission is checked first and refused with a plain "no approver" message (nothing is saved).
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("LEAVE_VALIDATION_FAILED");
+    expect(res.body.message).toContain("No approver");
     const rows = await sql("SELECT 1 FROM leave_requests WHERE company_id = $1", [companyId]);
     expect(rows).toHaveLength(0);
   });

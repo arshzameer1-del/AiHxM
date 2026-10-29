@@ -1,4 +1,4 @@
-import { Body, Controller, Get, NotFoundException, Param, Post, Put, Res, UploadedFile, UseGuards, UseInterceptors } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Put, Res, UploadedFile, UseGuards, UseInterceptors } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { ArrayMaxSize, IsArray, IsIn, IsOptional, IsString, MaxLength } from "class-validator";
 import type { Response } from "express";
@@ -72,7 +72,11 @@ export class EmployeeDocumentComplianceController {
   @Get(`${EMPLOYEE_ID}/photo`)
   async photo(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Res() res: Response) {
     const photo = await this.compliance.photo(claims, id);
-    if (!photo) throw new NotFoundException("No photo on file");
+    // No photo is a normal state (most people have none), so answer "no content" rather than a 404 that clutters every browser console.
+    if (!photo) {
+      res.status(204).end();
+      return;
+    }
     res.setHeader("Content-Type", photo.mimeType);
     res.setHeader("Cache-Control", "private, max-age=60");
     res.send(photo.buffer);

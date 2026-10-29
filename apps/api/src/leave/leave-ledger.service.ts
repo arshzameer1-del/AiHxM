@@ -1,3 +1,4 @@
+import { localToday } from "../common/local-date";
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { DatabaseService } from "../database/database.service";
@@ -146,13 +147,25 @@ export class LeaveLedgerService {
     leaveType: string,
     year: number,
     entitlement: { days: number; method: AccrualMethod },
-    asOf: string = new Date().toISOString().slice(0, 10)
+    asOf: string = localToday()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ): Promise<any> {
     const existing = await client.query("SELECT * FROM leave_balances WHERE employee_id = $1 AND leave_type = $2 AND year = $3", [employeeId, leaveType, year]);
     // LIVE-18: a row that was created at 0 before a policy gave this person an entitlement is topped up from the
     // policy now. Posting is idempotent per source key, so a balance that already has its entitlement is untouched.
-    const needsEntitlement = (existing.rowCount ?? 0) > 0 && Number(existing.rows[0].entitled_days) === 0 && entitlement.days > 0 && entitlement.method !== "none";
+    // The row can also exist because a year-end carry-forward was posted into it before the first request of the year, so
+    // "needs its entitlement" means: no opening / accrual entry has been posted for it yet (a carry-forward alone does not count).
+    let needsEntitlement = false;
+    if ((existing.rowCount ?? 0) > 0 && entitlement.days > 0 && entitlement.method !== "none") {
+      if (Number(existing.rows[0].entitled_days) === 0) needsEntitlement = true;
+      else {
+        const granted = await client.query(
+          "SELECT 1 FROM leave_ledger WHERE employee_id = $1 AND leave_type = $2 AND year = $3 AND entry_type IN ('opening','accrual') LIMIT 1",
+          [employeeId, leaveType, year]
+        );
+        needsEntitlement = (granted.rowCount ?? 0) === 0 && Number(existing.rows[0].carried_forward_days ?? 0) > 0;
+      }
+    }
     if ((existing.rowCount ?? 0) > 0 && !needsEntitlement) return existing.rows[0];
     if (entitlement.days > 0) {
       if (entitlement.method === "upfront") {
