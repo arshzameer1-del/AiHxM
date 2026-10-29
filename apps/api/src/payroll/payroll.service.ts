@@ -3238,10 +3238,13 @@ export class PayrollService {
     // must not get annualized into every remaining period's estimate.
     const recurringTaxableThisPeriod = Math.max(0, taxableGrossThisPeriod - overtimePay - additionalEarningsTaxable - arrearsTaxable);
     const dailyTaxableRate = daysInPeriod > 0 ? recurringTaxableThisPeriod / daysInPeriod : 0;
+    // (Compared by dates, not by day counts: when the period is prorated by scheduled working days, employmentWindowDays is
+    // a working-day count (23) and never equals the calendar days (31), which wrongly switched the projection to the daily-rate
+    // path and understated a July salary of 950,000 as 11,185,483.87 a year instead of 11,400,000.)
     // A full calendar month worked is projected as whole remaining months (October of a July-June year leaves 8 months), not
     // as this month's daily rate times the remaining days: with 31 days in October that gave 7.8 months of pay instead of 8,
     // and the answer changed with the length of the month the run happened to be for. Part-month periods keep the daily rate.
-    const isFullCalendarMonth = !offCycleOptions && periodStart.slice(8, 10) === "01" && employmentWindowDays === daysInPeriod &&
+    const isFullCalendarMonth = !offCycleOptions && periodStart.slice(8, 10) === "01" && windowStart === periodStart && windowEnd === periodEnd &&
       toIsoDate(new Date(Date.UTC(Number(periodEnd.slice(0, 4)), Number(periodEnd.slice(5, 7)), 0))) === periodEnd;
     const remainingWholeMonths = Math.max(0, (Number(taxYearEnd.slice(0, 4)) * 12 + Number(taxYearEnd.slice(5, 7))) - (Number(periodEnd.slice(0, 4)) * 12 + Number(periodEnd.slice(5, 7))));
     const projectedRemainingIncome = isFullCalendarMonth && daysRemaining > 0 ? recurringTaxableThisPeriod * remainingWholeMonths : dailyTaxableRate * daysRemaining;
