@@ -1,3 +1,4 @@
+import { TINY_PNG } from "../testing-tiny-png";
 import { Pool, type PoolClient } from "pg";
 import { BadRequestException, ForbiddenException } from "@nestjs/common";
 import { AuditService } from "../audit/audit.service";
@@ -10,7 +11,10 @@ import { RbacService } from "../rbac/rbac.service";
 import { CompanyAppearanceService } from "./company-appearance.service";
 
 const FIXTURE: RequestClaims = { is_platform_admin: true, company_id: null, sub: "company-appearance-spec" };
-const png = (n = 7) => ({ originalname: "banner.png", mimetype: "image/png", buffer: Buffer.alloc(n, 1), size: n });
+const png = (n = 7) => {
+  const buffer = n <= TINY_PNG.length ? TINY_PNG : Buffer.concat([TINY_PNG, Buffer.alloc(n - TINY_PNG.length, 1)]);
+  return { originalname: "banner.png", mimetype: "image/png", buffer, size: buffer.length };
+};
 
 /** BACKLOG55 against real Postgres: the company banner setting, who may change it, and the profile photo rule. */
 describe("Company appearance and profile photo", () => {

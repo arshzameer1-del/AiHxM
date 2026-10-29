@@ -10,3 +10,4 @@ import { join } from "path";
 import { loadEnvFile } from "./load-env";
 
 loadEnvFile(join(__dirname, "..", ".env"));
+process.env.OUTBOUND_ALLOW_PRIVATE ??= "true"; // tests post to 127.0.0.1 mock servers

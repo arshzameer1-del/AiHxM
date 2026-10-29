@@ -1,3 +1,4 @@
+import { assertRealImage } from "../common/image-signature";
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import {
   HOME_BANNER_PRESETS,
@@ -91,6 +92,7 @@ export class CompanyAppearanceService {
     await this.requireManage(claims);
     if (!file) throw new BadRequestException("Choose a picture to upload");
     if (!IMAGE_MIMES.includes(file.mimetype)) throw new BadRequestException("The banner picture must be a JPEG, PNG or WEBP image");
+    assertRealImage(file, ["image/png", "image/jpeg", "image/webp"], "banner picture");
     if (file.size > MAX_BANNER_BYTES) throw new BadRequestException("The banner picture must be 2 MB or smaller");
     const stored = await this.storage.save(claims.company_id!, "appearance", file.originalname, file.buffer);
     const old = await this.db.withClaims(claims, async (client) => {

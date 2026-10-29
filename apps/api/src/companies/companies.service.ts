@@ -1,3 +1,4 @@
+import { assertRealImage } from "../common/image-signature";
 import {
   BadRequestException,
   ConflictException,
@@ -981,9 +982,7 @@ export class CompaniesService {
     if (file.size > MAX_BRANDING_ASSET_BYTES) {
       throw new BadRequestException(`File exceeds the ${MAX_BRANDING_ASSET_BYTES / (1024 * 1024)}MB limit`);
     }
-    if (!file.mimetype.startsWith("image/")) {
-      throw new BadRequestException("Branding assets must be an image file");
-    }
+    assertRealImage(file, ["image/png", "image/jpeg", "image/webp"], "branding image");
 
     return this.db.withClaims(claims, async (client) => {
       const current = await client.query("SELECT * FROM company_config WHERE company_id = $1", [companyId]);

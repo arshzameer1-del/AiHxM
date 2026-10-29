@@ -1,3 +1,4 @@
+import { assertRealImage } from "../common/image-signature";
 import { assertValidCnic } from "../crypto/identifier-validation";
 import { sensitive } from "../crypto/sensitive-fields";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
@@ -1204,8 +1205,9 @@ export class EmployeesService {
       throw new ForbiddenException("You can only upload documents to your own file");
     }
     if (!file) throw new BadRequestException("Choose a file to upload");
-    if (documentType === "photograph" && !["image/jpeg", "image/png", "image/webp"].includes(file.mimetype)) {
-      throw new BadRequestException("A profile photo must be a JPEG, PNG or WEBP image");
+    if (documentType === "photograph") {
+      if (!["image/jpeg", "image/png", "image/webp"].includes(file.mimetype)) throw new BadRequestException("A profile photo must be a JPEG, PNG or WEBP image");
+      assertRealImage(file, ["image/png", "image/jpeg", "image/webp"], "profile photo");
     }
     const pending = await this.db.withClaims(claims, async (client) => {
       const r = await client.query(
@@ -1237,8 +1239,9 @@ export class EmployeesService {
     opts: { expiryDate?: string | null; note?: string | null; reviewStatus: "approved" | "pending" }
   ): Promise<EmployeeDocumentView> {
     if (!file) throw new BadRequestException("Choose a file to upload");
-    if (documentType === "photograph" && !["image/jpeg", "image/png", "image/webp"].includes(file.mimetype)) {
-      throw new BadRequestException("A profile photo must be a JPEG, PNG or WEBP image");
+    if (documentType === "photograph") {
+      if (!["image/jpeg", "image/png", "image/webp"].includes(file.mimetype)) throw new BadRequestException("A profile photo must be a JPEG, PNG or WEBP image");
+      assertRealImage(file, ["image/png", "image/jpeg", "image/webp"], "profile photo");
     }
     if (file.size > MAX_DOCUMENT_BYTES) {
       throw new BadRequestException(`File exceeds the ${MAX_DOCUMENT_BYTES / (1024 * 1024)}MB limit`);

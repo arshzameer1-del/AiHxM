@@ -3,6 +3,7 @@ import { RequestContextMiddleware } from "./common/request-context";
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
 import { DatabaseInputErrorFilter } from "./common/database-input-error.filter";
 import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
+import { AUTH_IP_LIMIT_PER_MINUTE, isAuthStepPath } from "./common/auth-throttle";
 import { RedisThrottlerStorage } from "./common/redis-throttler.storage";
 import { SIGNED_IN_LIMIT_PER_MINUTE, sessionSubject } from "./common/session-throttle";
 import { ScheduleModule } from "@nestjs/schedule";
@@ -82,6 +83,14 @@ import { HrAdministrationModule } from "./hr-administration/hr-administration.mo
           const who = sessionSubject(req);
           return who ? `user:${who}` : String(req.ip);
         },
+      },
+      // Broad per-address cap on the sign-in routes only (the per-route limits above count per address AND account).
+      {
+        name: "authIp",
+        ttl: 60_000,
+        limit: AUTH_IP_LIMIT_PER_MINUTE,
+        getTracker: (req) => `authip:${req.ip}`,
+        skipIf: (ctx) => !isAuthStepPath(ctx.switchToHttp().getRequest().path),
       },
       ],
     }),

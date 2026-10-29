@@ -1,3 +1,4 @@
+import { AUTH_ACCOUNT_LIMIT_PER_MINUTE, authAccountTracker } from "../common/auth-throttle";
 import { Body, Controller, Get, Post, Req, UseGuards } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 import type { Request } from "express";
@@ -60,7 +61,7 @@ export class AuthController {
     private readonly stepUp: StepUpService
   ) {}
 
-  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Throttle({ default: { limit: AUTH_ACCOUNT_LIMIT_PER_MINUTE, ttl: 60_000, getTracker: authAccountTracker } })
   @Post("login")
   login(@Body() dto: LoginDto, @Req() req: Request) {
     return this.auth.login(dto.email, dto.password, sessionRequestContext(req));
@@ -68,19 +69,19 @@ export class AuthController {
 
   // A tenant's own login page (leadhcm.aihxm.com/login) — see
   // AuthService.loginWithEmployeeNumber's doc comment.
-  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Throttle({ default: { limit: AUTH_ACCOUNT_LIMIT_PER_MINUTE, ttl: 60_000, getTracker: authAccountTracker } })
   @Post("login/employee")
   loginWithEmployeeNumber(@Body() dto: LoginWithEmployeeNumberDto, @Req() req: Request) {
     return this.auth.loginWithEmployeeNumber(dto.companySlug, dto.employeeNumber, dto.password, sessionRequestContext(req));
   }
 
-  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Throttle({ default: { limit: AUTH_ACCOUNT_LIMIT_PER_MINUTE, ttl: 60_000, getTracker: authAccountTracker } })
   @Post("mfa/enroll/confirm")
   confirmMfaEnrollment(@Body() dto: MfaEnrollConfirmDto, @Req() req: Request) {
     return this.auth.confirmMfaEnrollment(dto.mfaTicket, dto.code, sessionRequestContext(req));
   }
 
-  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Throttle({ default: { limit: AUTH_ACCOUNT_LIMIT_PER_MINUTE, ttl: 60_000, getTracker: authAccountTracker } })
   @Post("mfa/verify")
   verifyMfa(@Body() dto: MfaVerifyDto, @Req() req: Request) {
     return this.auth.verifyMfa(dto.mfaTicket, dto.code, sessionRequestContext(req));
@@ -90,7 +91,7 @@ export class AuthController {
   // credential for the identical login step (see AuthService's doc comment),
   // and each code is single-use regardless, so there's no extra guessing
   // surface this needs a tighter limit for.
-  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Throttle({ default: { limit: AUTH_ACCOUNT_LIMIT_PER_MINUTE, ttl: 60_000, getTracker: authAccountTracker } })
   @Post("mfa/recovery-code/verify")
   verifyMfaRecoveryCode(@Body() dto: MfaRecoveryCodeVerifyDto, @Req() req: Request) {
     return this.auth.verifyMfaRecoveryCode(dto.mfaTicket, dto.code, sessionRequestContext(req));

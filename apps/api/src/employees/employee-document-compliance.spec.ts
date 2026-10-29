@@ -1,3 +1,4 @@
+import { TINY_PNG } from "../testing-tiny-png";
 import { Pool, type PoolClient } from "pg";
 import { BadRequestException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import { AuditService } from "../audit/audit.service";
@@ -13,7 +14,7 @@ import { CONSISTENCY_CHECKS } from "./employee-data-consistency.checks";
 
 const FIXTURE: RequestClaims = { is_platform_admin: true, company_id: null, sub: "employee-document-compliance-spec" };
 const pdf = (name = "cnic.pdf") => ({ originalname: name, mimetype: "application/pdf", buffer: Buffer.from("%PDF-1.4 test"), size: 13 });
-const png = { originalname: "me.png", mimetype: "image/png", buffer: Buffer.from("fakepng"), size: 7 };
+const png = { originalname: "me.png", mimetype: "image/png", buffer: TINY_PNG, size: TINY_PNG.length };
 
 /** BACKLOG50 against real Postgres: expiry dates, employee uploads that wait for HR, the mandatory checklist and the photo. */
 describe("Employee documents - review, checklist, photo", () => {
@@ -193,10 +194,10 @@ describe("Employee documents - review, checklist, photo", () => {
     await svc.review(hr, mine.id, "approved");
     const photo = await svc.photo(hr, me);
     expect(photo!.mimeType).toBe("image/png");
-    expect(photo!.buffer.toString()).toBe("fakepng");
+    expect(photo!.buffer.toString()).toEqual(TINY_PNG.toString());
     // BACKLOG59: a photo is directory information - a colleague (no HR / manager rights) sees it too ...
     const seenByColleague = await svc.photo(other, me);
-    expect(seenByColleague!.buffer.toString()).toBe("fakepng");
+    expect(seenByColleague!.buffer.toString()).toEqual(TINY_PNG.toString());
     // ... but never across companies
     const stranger = { is_platform_admin: false, company_id: "00000000-0000-4000-8000-000000000001", sub: other.sub } as RequestClaims;
     await expect(svc.photo(stranger, me)).rejects.toBeInstanceOf(NotFoundException);

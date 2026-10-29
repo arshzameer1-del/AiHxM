@@ -1,3 +1,4 @@
+import { IsStrongPassword } from "../../auth/password-policy";
 import { ArrayUnique, IsArray, IsEmail, IsIn, IsOptional, IsString, MinLength } from "class-validator";
 import type { PlatformAdminAccessLevel } from "@aihxm/shared-types";
 
@@ -12,7 +13,7 @@ export class CreatePlatformAdminDto {
   email!: string;
 
   @IsString()
-  @MinLength(10, { message: "initialPassword must be at least 10 characters" })
+  @IsStrongPassword()
   initialPassword!: string;
 
   // Phase 2 gap-fill item #7 — Platform Admin delegation. Omitted = "full",

@@ -12,7 +12,7 @@ import type { LoginResult, MeResponse, PasswordResetRequestResult, TenantRoleKey
 import { normalizeEmail } from "./email.util";
 import { generateRecoveryCodes, normalizeRecoveryCode } from "./mfa-recovery-codes.util";
 import { decryptMfaSecret, encryptMfaSecret } from "./mfa-secret-crypto";
-import { hashPassword, verifyPassword } from "./password";
+import { hashPassword, verifyAgainstDummy, verifyPassword } from "./password";
 import { signMfaTicket, verifyMfaTicket } from "./tickets";
 
 // Phase 2 gap-fill items #1/#4 replaced these two flat constants with
@@ -168,7 +168,10 @@ export class AuthService {
     // which case it was.
     const invalidCredentials = () => new UnauthorizedException(opts.invalidCredentialsMessage);
 
-    if (!account) throw invalidCredentials();
+    if (!account) {
+      await verifyAgainstDummy(password);
+      throw invalidCredentials();
+    }
 
     if (account.status === "locked") {
       throw new UnauthorizedException("This account has been locked. Contact your Platform Admin.");

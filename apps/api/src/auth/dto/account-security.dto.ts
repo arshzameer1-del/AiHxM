@@ -1,3 +1,4 @@
+import { IsStrongPassword } from "../password-policy";
 import { IsOptional, IsString, Length, MaxLength, MinLength } from "class-validator";
 
 export class ChangePasswordDto {
@@ -6,7 +7,7 @@ export class ChangePasswordDto {
   currentPassword!: string;
 
   @IsString()
-  @MinLength(10, { message: "newPassword must be at least 10 characters" })
+  @IsStrongPassword()
   @MaxLength(200)
   newPassword!: string;
 }

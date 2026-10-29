@@ -1,3 +1,4 @@
+import { IsStrongPassword } from "../password-policy";
 import { IsEmail, IsString, MinLength } from "class-validator";
 
 export class PasswordResetRequestDto {
@@ -10,6 +11,6 @@ export class PasswordResetConfirmDto {
   token!: string;
 
   @IsString()
-  @MinLength(10, { message: "newPassword must be at least 10 characters" })
+  @IsStrongPassword()
   newPassword!: string;
 }

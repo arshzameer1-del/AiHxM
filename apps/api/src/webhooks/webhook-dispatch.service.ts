@@ -1,3 +1,4 @@
+import { safePost } from "../common/safe-outbound";
 import { ExclusiveCron } from "../common/cron-lock";
 import { redactPayload } from "../domain-events/payload-redaction";
 import { decryptIntegrationConfig } from "../crypto/integration-secrets";
@@ -206,17 +207,17 @@ export class WebhookDispatchService {
     const signature = createHmac("sha256", target.signingSecret).update(body).digest("hex");
 
     try {
-      const response = await fetch(target.url, {
-        method: "POST",
-        headers: {
+      const response = await safePost(
+        target.url,
+        {
           "Content-Type": "application/json",
           "X-AIHXM-Signature": `sha256=${signature}`,
           "X-AIHXM-Event": row.event_type,
           "X-AIHXM-Delivery": row.id,
         },
         body,
-        signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
-      });
+        DELIVERY_TIMEOUT_MS
+      );
       if (response.ok) {
         await this.markDelivered(row.id, response.status);
         return "delivered";

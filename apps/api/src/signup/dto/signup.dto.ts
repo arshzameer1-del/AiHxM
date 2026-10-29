@@ -1,3 +1,4 @@
+import { IsStrongPassword } from "../../auth/password-policy";
 import { IsEmail, IsIn, IsOptional, IsString, Matches, MinLength } from "class-validator";
 import type { PackageTier } from "@aihxm/shared-types";
 
@@ -34,6 +35,6 @@ export class SignupDto {
   adminEmail!: string;
 
   @IsString()
-  @MinLength(10, { message: "adminPassword must be at least 10 characters" })
+  @IsStrongPassword()
   adminPassword!: string;
 }

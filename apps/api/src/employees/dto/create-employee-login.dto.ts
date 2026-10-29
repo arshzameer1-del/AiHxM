@@ -1,3 +1,4 @@
+import { IsStrongPassword } from "../../auth/password-policy";
 import { ArrayMinSize, IsArray, IsIn, MinLength } from "class-validator";
 import type { TenantRoleKey } from "@aihxm/shared-types";
 
@@ -7,7 +8,7 @@ import type { TenantRoleKey } from "@aihxm/shared-types";
 export const CREATE_LOGIN_ROLE_KEYS: TenantRoleKey[] = ["hr_admin", "line_manager", "employee_self_service", "ess_portal", "system_admin", "payroll_approver"];
 
 export class CreateEmployeeLoginDto {
-  @MinLength(8)
+  @IsStrongPassword()
   initialPassword!: string;
 
   @IsArray()

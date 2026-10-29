@@ -1,3 +1,4 @@
+import { assertSafeOutboundUrl, UnsafeOutboundUrlError } from "../common/safe-outbound";
 import { decryptIntegrationConfig } from "../crypto/integration-secrets";
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomBytes, randomUUID } from "crypto";
@@ -162,6 +163,13 @@ export class SsoService {
   }
 
   private async buildClient(config: OidcSsoConfig) {
+    // The server fetches the identity provider's discovery document itself: refuse private/internal addresses (SSRF).
+    try {
+      await assertSafeOutboundUrl(config.issuerUrl);
+    } catch (err) {
+      if (err instanceof UnsafeOutboundUrlError) throw new BadRequestException(`Single sign-on issuer address rejected: ${err.message}`);
+      throw err;
+    }
     const client = await loadOpenidClient();
     return client.discovery(
       new URL(config.issuerUrl),

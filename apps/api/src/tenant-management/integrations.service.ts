@@ -1,3 +1,4 @@
+import { assertSafeOutboundUrl, UnsafeOutboundUrlError } from "../common/safe-outbound";
 import { sensitive } from "../crypto/sensitive-fields";
 import { fieldCrypto } from "../crypto/field-crypto";
 import { encryptIntegrationConfig } from "../crypto/integration-secrets";
@@ -128,6 +129,15 @@ export class IntegrationsService {
   ): Promise<TenantIntegration> {
     if (!PROVIDER_KEYS.includes(providerKey)) {
       throw new BadRequestException(`Unknown integration provider "${providerKey}"`);
+    }
+    // A webhook target is called by the server itself, so refuse addresses on the server's own network (SSRF).
+    if (providerKey === "webhook" && typeof patch.config?.url === "string" && patch.config.url.trim() !== "") {
+      try {
+        await assertSafeOutboundUrl(patch.config.url.trim());
+      } catch (err) {
+        if (err instanceof UnsafeOutboundUrlError) throw new BadRequestException(`Webhook address rejected: ${err.message}`);
+        throw err;
+      }
     }
     return this.db.withClaims(claims, async (client) => {
       const companyCheck = await client.query("SELECT id FROM companies WHERE id = $1", [companyId]);

@@ -1,3 +1,4 @@
+import { assertRealImage } from "../common/image-signature";
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
@@ -62,9 +63,7 @@ export class PlatformBrandingService {
     if (file.size > MAX_LOGO_BYTES) {
       throw new BadRequestException(`File exceeds the ${MAX_LOGO_BYTES / (1024 * 1024)}MB limit`);
     }
-    if (!file.mimetype.startsWith("image/")) {
-      throw new BadRequestException("The platform logo must be an image file");
-    }
+    assertRealImage(file, ["image/png", "image/jpeg", "image/webp"], "platform logo");
 
     return this.db.withClaims(claims, async (client) => {
       const stored = await this.fileStorage.save("platform", "branding", `logo-${file.originalname}`, file.buffer);

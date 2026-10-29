@@ -1,3 +1,4 @@
+import { IsStrongPassword } from "../../auth/password-policy";
 import { IsString, MinLength } from "class-validator";
 
 // Platform Admin's "this admin forgot their password" fix, alongside
@@ -9,6 +10,6 @@ import { IsString, MinLength } from "class-validator";
 // AuthService.requestPasswordReset).
 export class ResetAdminPasswordDto {
   @IsString()
-  @MinLength(10, { message: "newPassword must be at least 10 characters" })
+  @IsStrongPassword()
   newPassword!: string;
 }

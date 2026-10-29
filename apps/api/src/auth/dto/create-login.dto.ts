@@ -1,8 +1,9 @@
+import { IsStrongPassword } from "../password-policy";
 import { IsOptional, IsString, Matches, MinLength } from "class-validator";
 
 export class CreateLoginDto {
   @IsString()
-  @MinLength(10, { message: "initialPassword must be at least 10 characters" })
+  @IsStrongPassword()
   initialPassword!: string;
 
   // Only used by the Company Admin login route (CompaniesService.createAdminLogin)
