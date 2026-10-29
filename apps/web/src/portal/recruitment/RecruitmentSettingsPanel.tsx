@@ -12,6 +12,11 @@ export function RecruitmentSettingsPanel() {
   const [consent, setConsent] = useState(false);
   const [validity, setValidity] = useState("");
   const [template, setTemplate] = useState("");
+  const [careersOn, setCareersOn] = useState(false);
+  const [intro, setIntro] = useState("");
+  const [mailReceipt, setMailReceipt] = useState(true);
+  const [mailInterview, setMailInterview] = useState(true);
+  const [mailReject, setMailReject] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -22,6 +27,11 @@ export function RecruitmentSettingsPanel() {
       setConsent(s.consentRequired);
       setValidity(s.offerValidityDays === null ? "" : String(s.offerValidityDays));
       setTemplate(s.offerLetterTemplateKey ?? "");
+      setCareersOn(s.careersEnabled);
+      setIntro(s.careersIntro ?? "");
+      setMailReceipt(s.sendApplicationReceipt);
+      setMailInterview(s.sendInterviewEmails);
+      setMailReject(s.sendRejectionEmails);
       setLoaded(true);
     }).catch((err) => setError(describeError(err)));
   }, []);
@@ -34,6 +44,11 @@ export function RecruitmentSettingsPanel() {
         consentRequired: consent,
         offerValidityDays: validity === "" ? null : Number(validity),
         offerLetterTemplateKey: template.trim() === "" ? null : template.trim(),
+        careersEnabled: careersOn,
+        careersIntro: intro.trim() === "" ? null : intro.trim(),
+        sendApplicationReceipt: mailReceipt,
+        sendInterviewEmails: mailInterview,
+        sendRejectionEmails: mailReject,
       });
       setSaved(true);
       setError(null);
@@ -64,6 +79,20 @@ export function RecruitmentSettingsPanel() {
         <input id="rs-tpl" className={`${inputCls} max-w-xs`} value={template} onChange={(e) => setTemplate(e.target.value)} />
         <p className="text-xs text-label-tertiary mt-1">The key of one of your document templates. Leave empty to use the standard wording.</p>
       </div>
+      <fieldset className="border-t border-black/5 pt-4 space-y-2">
+        <legend className="text-sm font-semibold pr-2">Public careers page</legend>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={careersOn} onChange={(e) => setCareersOn(e.target.checked)} /> Show a public careers page for this company</label>
+        <label className="block text-sm font-medium" htmlFor="rs-intro">Introduction shown above the jobs</label>
+        <textarea id="rs-intro" rows={3} maxLength={2000} className={inputCls} value={intro} onChange={(e) => setIntro(e.target.value)} />
+        <p className="text-xs text-label-tertiary">Choose which requisitions appear on the page in the Careers page tab.</p>
+      </fieldset>
+      <fieldset className="border-t border-black/5 pt-4 space-y-2">
+        <legend className="text-sm font-semibold pr-2">E-mails to candidates</legend>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={mailReceipt} onChange={(e) => setMailReceipt(e.target.checked)} /> Confirm receipt when someone applies</label>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={mailInterview} onChange={(e) => setMailInterview(e.target.checked)} /> Send an invitation when an interview is scheduled</label>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={mailReject} onChange={(e) => setMailReject(e.target.checked)} /> Tell the candidate when their application is rejected</label>
+        <p className="text-xs text-label-tertiary">E-mails go out only when the company&apos;s outgoing mail is set up. Every message is recorded either way.</p>
+      </fieldset>
       <div className="flex items-center gap-3">
         <button type="submit" className={primaryBtn}>Save settings</button>
         {saved && <span className="text-sm text-green-700">Saved</span>}

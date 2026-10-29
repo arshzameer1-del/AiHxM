@@ -10,6 +10,7 @@ import {
 import { Layout } from "./platform-admin/Layout";
 import { LoginPage } from "./auth/LoginPage";
 import { SignupPage } from "./auth/SignupPage";
+import { CareersJobPage, CareersListPage } from "./auth/CareersPublicPage";
 import { PortalLayout } from "./portal/PortalLayout";
 import { PortalHomePage } from "./portal/PortalHomePage";
 import { RequireHrAdmin } from "./portal/shared/RequireHrAdmin";
@@ -404,6 +405,9 @@ export default function App() {
             {/* Self-service signup (signup.controller.ts) — public, no
               ProtectedRoute, same tree level as /login. */}
             <Route path="/signup" element={<SignupPage />} />
+            {/* Public careers page and application form: no session, by design (careers.controller.ts). */}
+            <Route path="/careers/:slug" element={<CareersListPage />} />
+            <Route path="/careers/:slug/:jobId" element={<CareersJobPage />} />
             {/* Phase 3 item #1 (OIDC slice) — the fixed landing point every
               tenant's IdP redirect reaches (SsoService.handleCallback);
               public/no ProtectedRoute for the same reason /login is: a

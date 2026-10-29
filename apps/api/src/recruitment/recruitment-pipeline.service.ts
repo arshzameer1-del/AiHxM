@@ -29,6 +29,7 @@ import { AuditService } from "../audit/audit.service";
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
 import { EntitlementsService } from "../entitlements/entitlements.service";
+import { CandidateMailService } from "./candidate-mail.service";
 import { FILE_STORAGE, type FileStorageService } from "../file-storage/file-storage.interface";
 import { RbacService } from "../rbac/rbac.service";
 import { renderPlaceholders } from "../payroll/payroll-documents.service";
@@ -164,7 +165,9 @@ export class RecruitmentPipelineService {
     private readonly rbac: RbacService,
     private readonly entitlements: EntitlementsService,
     private readonly audit: AuditService,
-    @Inject(FILE_STORAGE) private readonly fileStorage: FileStorageService
+    @Inject(FILE_STORAGE) private readonly fileStorage: FileStorageService,
+    // Candidate e-mails (careers batch): optional so positional spec constructions keep working.
+    private readonly candidateMail?: CandidateMailService
   ) {}
 
   // --- settings --------------------------------------------------------------
@@ -190,13 +193,19 @@ export class RecruitmentPipelineService {
         const t = await client.query(`SELECT 1 FROM document_templates WHERE key = $1`, [next.offerLetterTemplateKey]);
         if (t.rowCount === 0) throw new BadRequestException("That offer letter template does not exist");
       }
+      if (next.careersIntro && next.careersIntro.length > 2000) throw new BadRequestException("Keep the careers page introduction under 2000 characters");
       await client.query(
-        `INSERT INTO recruitment_settings (company_id, candidate_retention_months, consent_required, offer_validity_days, offer_letter_template_key, updated_by, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, now())
+        `INSERT INTO recruitment_settings (company_id, candidate_retention_months, consent_required, offer_validity_days, offer_letter_template_key, updated_by, updated_at,
+           careers_enabled, careers_intro, send_application_receipt, send_interview_emails, send_rejection_emails)
+         VALUES ($1, $2, $3, $4, $5, $6, now(), $7, $8, $9, $10, $11)
          ON CONFLICT (company_id) DO UPDATE SET candidate_retention_months = EXCLUDED.candidate_retention_months,
            consent_required = EXCLUDED.consent_required, offer_validity_days = EXCLUDED.offer_validity_days,
-           offer_letter_template_key = EXCLUDED.offer_letter_template_key, updated_by = EXCLUDED.updated_by, updated_at = now()`,
-        [companyId, next.candidateRetentionMonths, next.consentRequired, next.offerValidityDays, next.offerLetterTemplateKey || null, claims.sub]
+           offer_letter_template_key = EXCLUDED.offer_letter_template_key, updated_by = EXCLUDED.updated_by, updated_at = now(),
+           careers_enabled = EXCLUDED.careers_enabled, careers_intro = EXCLUDED.careers_intro,
+           send_application_receipt = EXCLUDED.send_application_receipt, send_interview_emails = EXCLUDED.send_interview_emails,
+           send_rejection_emails = EXCLUDED.send_rejection_emails`,
+        [companyId, next.candidateRetentionMonths, next.consentRequired, next.offerValidityDays, next.offerLetterTemplateKey || null, claims.sub,
+          !!next.careersEnabled, next.careersIntro?.trim() || null, next.sendApplicationReceipt !== false, next.sendInterviewEmails !== false, !!next.sendRejectionEmails]
       );
       await this.audit.record(client, claims, { companyId, action: "recruitment.settings_update", target: companyId, before: { ...before }, after: { ...next } });
       return next;
@@ -357,7 +366,7 @@ export class RecruitmentPipelineService {
     const start = new Date(input.scheduledStart);
     const end = new Date(input.scheduledEnd);
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) throw new BadRequestException("The interview must end after it starts");
-    return this.db.withClaims(claims, async (client) => {
+    const scheduled = await this.db.withClaims(claims, async (client) => {
       const companyId = claims.company_id as string;
       const app = await client.query(`SELECT * FROM applications WHERE id = $1 FOR UPDATE`, [input.applicationId]);
       if (app.rowCount === 0) throw new NotFoundException("Application not found");
@@ -387,6 +396,8 @@ export class RecruitmentPipelineService {
       });
       return (await this.loadInterviews(client, `i.id = $1`, [id]))[0];
     });
+    await this.candidateMail?.send("interview_invitation", input.applicationId, { interviewId: scheduled.id });
+    return scheduled;
   }
 
   async updateInterview(claims: RequestClaims, id: string, input: UpdateInterviewRequest): Promise<InterviewView> {

@@ -23,6 +23,7 @@ import { EntitlementsModule } from "./entitlements/entitlements.module";
 import { demoFixtureModules } from "./dummy/demo-fixtures.gate";
 import { WorkflowModule } from "./workflow/workflow.module";
 import { CustomFieldsModule } from "./custom-fields/custom-fields.module";
+import { CareersModule } from "./careers/careers.module";
 import { AnnouncementsModule } from "./announcements/announcements.module";
 import { MessagingModule } from "./messaging/messaging.module";
 import { NotificationsModule } from "./notifications/notifications.module";
@@ -113,6 +114,7 @@ import { HrAdministrationModule } from "./hr-administration/hr-administration.mo
     WorkflowModule,
     CustomFieldsModule,
     AnnouncementsModule,
+    CareersModule,
     MessagingModule,
     NotificationsModule,
     RemindersModule,

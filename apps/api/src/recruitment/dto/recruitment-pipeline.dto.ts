@@ -1,6 +1,6 @@
 import { Type } from "class-transformer";
 import {
-  ArrayMaxSize, IsArray, IsBoolean, IsDateString, IsIn, IsInt, IsOptional, IsString, IsUUID, IsUrl, Max, Min, MinLength, ValidateNested,
+  ArrayMaxSize, IsArray, IsBoolean, IsDateString, IsIn, IsInt, IsOptional, IsString, IsUUID, IsUrl, Max, MaxLength, Min, MinLength, ValidateNested,
 } from "class-validator";
 
 const INTERVIEW_TYPES = ["phone", "video", "onsite", "technical", "hr", "panel", "other"] as const;
@@ -86,6 +86,11 @@ export class UpdateRecruitmentSettingsDto {
   @IsOptional() @IsBoolean() consentRequired?: boolean;
   @IsOptional() @IsInt() @Min(1) @Max(365) offerValidityDays?: number | null;
   @IsOptional() @IsString() offerLetterTemplateKey?: string | null;
+  @IsOptional() @IsBoolean() careersEnabled?: boolean;
+  @IsOptional() @IsString() @MaxLength(2000) careersIntro?: string | null;
+  @IsOptional() @IsBoolean() sendApplicationReceipt?: boolean;
+  @IsOptional() @IsBoolean() sendInterviewEmails?: boolean;
+  @IsOptional() @IsBoolean() sendRejectionEmails?: boolean;
 }
 
 export class UploadCandidateDocumentDto {

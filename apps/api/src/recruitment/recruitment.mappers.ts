@@ -150,5 +150,10 @@ export async function loadRecruitmentSettings(client: PoolClient, companyId: str
     consentRequired: row?.consent_required ?? false,
     offerValidityDays: row?.offer_validity_days ?? null,
     offerLetterTemplateKey: row?.offer_letter_template_key ?? null,
+    careersEnabled: row?.careers_enabled ?? false,
+    careersIntro: row?.careers_intro ?? null,
+    sendApplicationReceipt: row?.send_application_receipt ?? true,
+    sendInterviewEmails: row?.send_interview_emails ?? true,
+    sendRejectionEmails: row?.send_rejection_emails ?? false,
   };
 }

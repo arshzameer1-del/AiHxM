@@ -4972,6 +4972,13 @@ export type RecruitmentSettingsView = {
   consentRequired: boolean;
   offerValidityDays: number | null;
   offerLetterTemplateKey: string | null;
+  /** The public careers page exists only when this is on. */
+  careersEnabled: boolean;
+  careersIntro: string | null;
+  /** Candidate e-mails: a receipt when they apply, an invitation for an interview, a no-thanks on rejection. */
+  sendApplicationReceipt: boolean;
+  sendInterviewEmails: boolean;
+  sendRejectionEmails: boolean;
 };
 
 export type UpdateRecruitmentSettingsRequest = Partial<RecruitmentSettingsView>;
@@ -10333,4 +10340,49 @@ export type AnnouncementReceiptView = {
   employeeName: string;
   readAt: string | null;
   acknowledgedAt: string | null;
+};
+
+
+// ---- Public careers page
+export type CareersEmploymentType = "full_time" | "part_time" | "contract" | "internship";
+
+/** What a requisition shows to the public once HR publishes it. Never salary band, justification or headcount. */
+export type CareersJobView = {
+  id: string;
+  title: string;
+  department: string | null;
+  location: string | null;
+  employmentType: CareersEmploymentType | null;
+  description: string | null;
+  closesOn: string | null;
+  postedOn: string | null;
+};
+
+export type CareersPageView = {
+  companyName: string;
+  slug: string;
+  intro: string | null;
+  jobs: CareersJobView[];
+};
+
+/** HR's view of a requisition's careers settings. */
+export type RequisitionCareersView = {
+  requisitionId: string;
+  title: string;
+  status: RequisitionStatus;
+  published: boolean;
+  description: string | null;
+  location: string | null;
+  employmentType: CareersEmploymentType | null;
+  closesOn: string | null;
+  publishedAt: string | null;
+  applicationCount: number;
+};
+
+export type SaveRequisitionCareersRequest = {
+  publish: boolean;
+  description?: string | null;
+  location?: string | null;
+  employmentType?: CareersEmploymentType | null;
+  closesOn?: string | null;
 };

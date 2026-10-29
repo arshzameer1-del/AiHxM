@@ -7,8 +7,9 @@ import { ChecksPanel } from "./ChecksPanel";
 import { OffersPanel } from "./OffersPanel";
 import { EventsPanel } from "./EventsPanel";
 import { RecruitmentSettingsPanel } from "./RecruitmentSettingsPanel";
+import { CareersPanel } from "./CareersPanel";
 
-type Tab = "requisitions" | "candidates" | "pipeline" | "interviews" | "checks" | "offers" | "events" | "settings";
+type Tab = "requisitions" | "candidates" | "pipeline" | "interviews" | "checks" | "offers" | "events" | "careers" | "settings";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "requisitions", label: "Requisitions" },
@@ -18,6 +19,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "checks", label: "Checks" },
   { key: "offers", label: "Offers" },
   { key: "events", label: "Events" },
+  { key: "careers", label: "Careers page" },
   { key: "settings", label: "Settings" },
 ];
 
@@ -56,6 +58,7 @@ export function RecruitmentPage() {
       {tab === "checks" && <ChecksPanel />}
       {tab === "offers" && <OffersPanel />}
       {tab === "events" && <EventsPanel />}
+      {tab === "careers" && <CareersPanel />}
       {tab === "settings" && <RecruitmentSettingsPanel />}
     </div>
   );

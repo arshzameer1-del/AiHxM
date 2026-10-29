@@ -1,6 +1,7 @@
 import { localToday } from "../common/local-date";
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { DatabaseService } from "../database/database.service";
+import { CandidateMailService } from "./candidate-mail.service";
 import type { RequestClaims } from "../database/tenant-context";
 import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RbacService } from "../rbac/rbac.service";
@@ -109,7 +110,9 @@ export class RecruitmentService {
     // TAL-03: optional so positional spec constructions keep working.
     private readonly compensation?: EmployeeCompensationService,
     // LIVE-15: optional so positional spec constructions keep working.
-    private readonly onboarding?: OnboardingService
+    private readonly onboarding?: OnboardingService,
+    // Candidate e-mails (careers batch): optional so positional spec constructions keep working.
+    private readonly candidateMail?: CandidateMailService
   ) {
     this.workflow?.adapters?.register({
       objectKey: WORKFLOW_OBJECT_KEY,
@@ -714,7 +717,7 @@ export class RecruitmentService {
     if (newStage === "rejected" && !trimmedReason) {
       throw new BadRequestException("A rejection reason is required.");
     }
-    return this.db.withClaims(claims, async (client) => {
+    const moved = await this.db.withClaims(claims, async (client) => {
       const companyId = claims.company_id as string;
       const result = await client.query(`SELECT * FROM applications WHERE id = $1 FOR UPDATE`, [id]);
       if (result.rowCount === 0) throw new NotFoundException("Application not found");
@@ -758,6 +761,8 @@ export class RecruitmentService {
       });
       return rowToApplication(updated.rows[0]);
     });
+    if (newStage === "rejected") await this.candidateMail?.send("application_rejected", id);
+    return moved;
   }
 
   // --- Offers -----------------------------------------------------------

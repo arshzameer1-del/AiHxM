@@ -3,6 +3,10 @@ import { createResponseCache, isCacheablePath } from "./responseCache";
 import { WARM_READS_BY_ROLE } from "./warmReads";
 import { createForegroundGate } from "./foregroundGate";
 import type {
+  CareersJobView,
+  CareersPageView,
+  RequisitionCareersView,
+  SaveRequisitionCareersRequest,
   BuilderCatalogResponse,
   DashboardData,
   DashboardDetail,
@@ -3361,6 +3365,29 @@ export const api = {
   },
   deleteCandidateDocument: (candidateId: string, documentId: string) =>
     request<void>(`/candidates/${candidateId}/documents/${documentId}`, { method: "DELETE" }),
+  // --- Careers page: HR side, then the public side (no session, no token) ---
+  listCareersRequisitions: () => request<RequisitionCareersView[]>("/recruitment/careers"),
+  saveRequisitionCareers: (requisitionId: string, input: SaveRequisitionCareersRequest) =>
+    request<RequisitionCareersView>(`/recruitment/careers/${requisitionId}`, { method: "PUT", body: JSON.stringify(input) }),
+  getPublicCareers: (slug: string) => request<CareersPageView>(`/public/careers/${encodeURIComponent(slug)}`),
+  getPublicCareersJob: (slug: string, jobId: string) =>
+    request<CareersJobView & { companyName: string }>(`/public/careers/${encodeURIComponent(slug)}/jobs/${jobId}`),
+  async applyToJob(slug: string, jobId: string, fields: Record<string, string>, resume: File | null): Promise<void> {
+    const formData = new FormData();
+    for (const [k, v] of Object.entries(fields)) formData.append(k, v);
+    if (resume) formData.append("resume", resume);
+    const res = await fetch(`${API_PREFIX}/public/careers/${encodeURIComponent(slug)}/jobs/${jobId}/apply`, { method: "POST", body: formData });
+    if (!res.ok) {
+      let message = res.status === 429 ? "Too many attempts. Please wait a minute and try again." : `Request failed (${res.status})`;
+      try {
+        const body = await res.json();
+        if (body.message) message = Array.isArray(body.message) ? body.message.join(", ") : body.message;
+      } catch {
+        // not JSON — keep the generic message
+      }
+      throw new ApiError(res.status, message);
+    }
+  },
   getRecruitmentSettings: () => request<RecruitmentSettingsView>("/recruitment/settings"),
   updateRecruitmentSettings: (input: UpdateRecruitmentSettingsRequest) =>
     request<RecruitmentSettingsView>("/recruitment/settings", { method: "PUT", body: JSON.stringify(input) }),

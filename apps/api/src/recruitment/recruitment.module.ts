@@ -2,6 +2,8 @@ import { Module } from "@nestjs/common";
 import { RecruitmentController } from "./recruitment.controller";
 import { RecruitmentService } from "./recruitment.service";
 import { RecruitmentPipelineService } from "./recruitment-pipeline.service";
+import { CandidateMailService } from "./candidate-mail.service";
+import { MailerModule } from "../mailer/mailer.module";
 import { RecruitmentScheduler } from "./recruitment.scheduler";
 import { FileStorageModule } from "../file-storage/file-storage.module";
 import { RbacModule } from "../rbac/rbac.module";
@@ -14,9 +16,9 @@ import { OnboardingOffboardingModule } from "../onboarding-offboarding/onboardin
 import { OrgOccupancyModule } from "../organization/occupancy/org-occupancy.module";
 
 @Module({
-  imports: [RbacModule, EntitlementsModule, AuditModule, WorkflowModule, EmployeesModule, HrAdministrationModule, OrgOccupancyModule, FileStorageModule, OnboardingOffboardingModule],
+  imports: [RbacModule, EntitlementsModule, AuditModule, WorkflowModule, EmployeesModule, HrAdministrationModule, OrgOccupancyModule, FileStorageModule, OnboardingOffboardingModule, MailerModule],
   controllers: [RecruitmentController],
-  providers: [RecruitmentService, RecruitmentPipelineService, RecruitmentScheduler],
-  exports: [RecruitmentService, RecruitmentPipelineService],
+  providers: [RecruitmentService, RecruitmentPipelineService, RecruitmentScheduler, CandidateMailService],
+  exports: [RecruitmentService, RecruitmentPipelineService, CandidateMailService],
 })
 export class RecruitmentModule {}
