@@ -163,7 +163,7 @@ test.describe("System Admin Portal (Task #52)", () => {
     });
     expect(created.status).toBe(201);
     const employee = (await created.json()) as { id: string };
-    const login = await fetch(`${API_BASE_URL}/employees/${employee.id}/account`, { method: "POST", headers: hr, body: JSON.stringify({ initialPassword: "Password@123456789", roleKeys: ["employee_self_service"] }) });
+    const login = await fetch(`${API_BASE_URL}/employees/${employee.id}/account`, { method: "POST", headers: hr, body: JSON.stringify({ initialPassword: "Quiet-River-Lantern-4821", roleKeys: ["employee_self_service"] }) });
     expect(login.status).toBe(201);
 
     await loginAsSystemAdmin(page);

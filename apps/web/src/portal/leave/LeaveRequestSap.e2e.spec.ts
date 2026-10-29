@@ -216,7 +216,10 @@ test("calendar: pick two days to open the create form filled in, then submit", a
   const nextMonday = plus(wednesday, 5);
   const nextTuesday = plus(nextMonday, 1);
   // Walk the two-month calendar forward until both days are on screen.
-  for (let i = 0; i < 4 && (await page.getByRole("button", { name: new RegExp(`^${shown(nextMonday)}`) }).count()) === 0; i += 1) {
+  const bothShown = async () =>
+    (await page.getByRole("button", { name: new RegExp(`^${shown(nextMonday)}`) }).count()) > 0 &&
+    (await page.getByRole("button", { name: new RegExp(`^${shown(nextTuesday)}`) }).count()) > 0;
+  for (let i = 0; i < 4 && !(await bothShown()); i += 1) {
     await page.getByRole("button", { name: "Next month" }).click();
   }
   await page.getByRole("button", { name: new RegExp(`^${shown(nextMonday)}`) }).first().click();
