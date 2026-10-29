@@ -1,3 +1,4 @@
+import { ExclusiveCron } from "../common/cron-lock";
 import { Injectable, Logger } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import { DatabaseService } from "../database/database.service";
@@ -20,6 +21,7 @@ export class PayrollInputImportWorker {
   ) {}
 
   @Cron(CronExpression.EVERY_10_SECONDS)
+  @ExclusiveCron("PayrollInputImportWorker.tick")
   async tick(): Promise<void> {
     if (this.busy || process.env.IMPORT_WORKER_DISABLED === "true") return;
     this.busy = true;
@@ -35,6 +37,7 @@ export class PayrollInputImportWorker {
   }
 
   @Cron(CronExpression.EVERY_DAY_AT_4AM)
+  @ExclusiveCron("PayrollInputImportWorker.hygiene")
   async hygiene(): Promise<void> {
     await this.imports.expireStaleBatches();
   }

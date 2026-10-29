@@ -1,3 +1,4 @@
+import { ExclusiveCron } from "../common/cron-lock";
 import { Injectable, Logger, Module } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import { OrgUnitsController } from "./org-units.controller";
@@ -51,6 +52,7 @@ class OrgChangeExecutionScheduler {
   constructor(private readonly orgChanges: OrgChangesService) {}
 
   @Cron(CronExpression.EVERY_HOUR)
+  @ExclusiveCron("OrganizationModule.handleExecutionSweep")
   async handleExecutionSweep() {
     const count = await this.orgChanges.executeDueChanges();
     if (count > 0) {

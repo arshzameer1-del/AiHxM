@@ -1,3 +1,4 @@
+import { ExclusiveCron } from "../common/cron-lock";
 import { Injectable, Logger } from "@nestjs/common";
 import { Cron } from "@nestjs/schedule";
 import { DatabaseService } from "../database/database.service";
@@ -24,6 +25,7 @@ export class RecruitmentScheduler {
   ) {}
 
   @Cron("30 2 * * *")
+  @ExclusiveCron("RecruitmentScheduler.run")
   async run(onlyCompanyIds?: string[]): Promise<{ expired: number; anonymised: number }> {
     const companyIds = onlyCompanyIds ?? (await this.db.withClaims(SYSTEM_CLAIMS, async (client) =>
       (await client.query<{ id: string }>(`SELECT id FROM companies WHERE status NOT IN ('draft', 'archived') ORDER BY id`)).rows.map((r) => r.id)

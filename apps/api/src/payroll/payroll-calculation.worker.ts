@@ -1,3 +1,4 @@
+import { ExclusiveCron } from "../common/cron-lock";
 import { Injectable, Logger } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import { DatabaseService } from "../database/database.service";
@@ -28,6 +29,7 @@ export class PayrollCalculationWorker {
   ) {}
 
   @Cron(CronExpression.EVERY_10_SECONDS)
+  @ExclusiveCron("PayrollCalculationWorker.tick")
   async tick(): Promise<void> {
     if (this.busy || process.env.PAYROLL_WORKER_DISABLED === "true") return;
     this.busy = true;

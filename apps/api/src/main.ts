@@ -12,8 +12,21 @@ import { ValidationPipe } from "@nestjs/common";
 import helmet from "helmet";
 import compression from "compression";
 import { AppModule } from "./app.module";
+import { checkRuntimeEnv } from "./common/env-validation";
+import { installProcessGuards, requestLogging } from "./common/http-logging";
 
 async function bootstrap() {
+  installProcessGuards();
+  // Refuse to start with missing required settings (a mis-configured deploy used to boot "healthy" and then fail every call).
+  const envReport = checkRuntimeEnv(process.env);
+  for (const w of envReport.warnings) console.warn(`[config warning] ${w}`);
+  if (envReport.errors.length > 0) {
+    for (const e of envReport.errors) console.error(`[config error] ${e}`);
+    if (process.env.NODE_ENV === "production") {
+      console.error("Refusing to start: fix the settings above.");
+      process.exit(1);
+    }
+  }
   const app = await NestFactory.create(AppModule);
 
   // Render (and Netlify's proxying to it) sits in front of this API as a
@@ -24,7 +37,11 @@ async function bootstrap() {
   // INestApplication doesn't expose Express's own `.set()`, so this reaches
   // through to the underlying Express instance, same as any Express-only
   // config Nest itself doesn't wrap.
-  app.getHttpAdapter().getInstance().set("trust proxy", 1);
+  // TRUST_PROXY_HOPS: how many proxies sit in front (Render alone = 1; Cloudflare in front of Render = 2). Too low makes
+  // req.ip a proxy address (breaks IP allow-lists and per-address limits); too high lets a caller spoof X-Forwarded-For.
+  const hops = Number(process.env.TRUST_PROXY_HOPS ?? 1);
+  app.getHttpAdapter().getInstance().set("trust proxy", Number.isInteger(hops) && hops >= 0 ? hops : 1);
+  app.use(requestLogging());
 
   // Standard security headers (HSTS, no-sniff, frame-deny, etc.) — cheap,
   // framework-agnostic, and there was previously nothing here at all.

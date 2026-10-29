@@ -1,3 +1,4 @@
+import { ExclusiveCron } from "../../common/cron-lock";
 import { Injectable, Logger, OnApplicationBootstrap } from "@nestjs/common";
 import { Cron } from "@nestjs/schedule";
 import type { RequestClaims } from "../../database/tenant-context";
@@ -22,6 +23,7 @@ export class DataQualitySnapshotService implements OnApplicationBootstrap {
   }
 
   @Cron("30 2 * * *")
+  @ExclusiveCron("DataQualitySnapshotService.nightly")
   async nightly(): Promise<void> {
     if (process.env.REPORT_SCHEDULER_DISABLED === "true") return;
     try {

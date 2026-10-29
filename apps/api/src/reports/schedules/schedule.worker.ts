@@ -1,3 +1,4 @@
+import { ExclusiveCron } from "../../common/cron-lock";
 import { Injectable, Logger } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import { SchedulesService } from "./schedules.service";
@@ -10,6 +11,7 @@ export class ReportScheduleWorker {
   constructor(private readonly schedules: SchedulesService) {}
 
   @Cron(CronExpression.EVERY_5_MINUTES)
+  @ExclusiveCron("ReportScheduleWorker.tick")
   async tick(): Promise<void> {
     if (process.env.REPORT_SCHEDULER_DISABLED === "true" || this.busy) return;
     this.busy = true;
@@ -24,6 +26,7 @@ export class ReportScheduleWorker {
   }
 
   @Cron(CronExpression.EVERY_DAY_AT_4AM)
+  @ExclusiveCron("ReportScheduleWorker.purge")
   async purge(): Promise<void> {
     if (process.env.REPORT_SCHEDULER_DISABLED === "true") return;
     try {

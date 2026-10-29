@@ -1,3 +1,4 @@
+import { ExclusiveCron } from "../common/cron-lock";
 import { Injectable, Logger } from "@nestjs/common";
 import { Cron } from "@nestjs/schedule";
 import { randomUUID } from "node:crypto";
@@ -19,6 +20,7 @@ export class PerformanceScheduler {
   ) {}
 
   @Cron("45 2 * * *")
+  @ExclusiveCron("PerformanceScheduler.nightly")
   async nightly(): Promise<void> {
     try {
       const r = await this.run();

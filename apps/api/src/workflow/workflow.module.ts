@@ -1,3 +1,4 @@
+import { ExclusiveCron } from "../common/cron-lock";
 import { Module } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import { Injectable, Logger } from "@nestjs/common";
@@ -23,6 +24,7 @@ class WorkflowEscalationScheduler {
   constructor(private readonly workflow: WorkflowService) {}
 
   @Cron(CronExpression.EVERY_5_MINUTES)
+  @ExclusiveCron("WorkflowModule.handleEscalationSweep")
   async handleEscalationSweep() {
     const count = await this.workflow.escalateOverdue();
     if (count > 0) {

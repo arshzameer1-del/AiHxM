@@ -1,3 +1,4 @@
+import { ExclusiveCron } from "../../common/cron-lock";
 import { Injectable, Logger } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import { DatabaseService } from "../../database/database.service";
@@ -23,6 +24,7 @@ export class HireDraftHygieneScheduler {
   ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_3AM)
+  @ExclusiveCron("HireDraftHygieneScheduler.run")
   async run(): Promise<number> {
     // CFG-09: drafts past their expires_at are cancelled (scrubbed, number voided) first.
     const expired = (await this.hiring?.expireStaleDrafts()) ?? 0;

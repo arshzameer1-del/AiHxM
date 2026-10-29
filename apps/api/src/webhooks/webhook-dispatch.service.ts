@@ -1,3 +1,4 @@
+import { ExclusiveCron } from "../common/cron-lock";
 import { redactPayload } from "../domain-events/payload-redaction";
 import { decryptIntegrationConfig } from "../crypto/integration-secrets";
 import { BadRequestException, Injectable, Logger, NotFoundException } from "@nestjs/common";
@@ -166,6 +167,7 @@ export class WebhookDispatchService {
    * often it meaningfully loads the database between real deliveries.
    */
   @Cron(CronExpression.EVERY_MINUTE)
+  @ExclusiveCron("WebhookDispatchService.handleDeliverySweep")
   async handleDeliverySweep(): Promise<void> {
     const due = await this.db.withClaims(SERVICE_CLAIMS, (client) =>
       client.query(

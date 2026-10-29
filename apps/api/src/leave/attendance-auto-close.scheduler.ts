@@ -1,3 +1,4 @@
+import { ExclusiveCron } from "../common/cron-lock";
 import { Injectable, Logger } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import { AttendanceAutoCloseService } from "./attendance-auto-close.service";
@@ -9,6 +10,7 @@ export class AttendanceAutoCloseScheduler {
   constructor(private readonly autoClose: AttendanceAutoCloseService) {}
 
   @Cron(CronExpression.EVERY_HOUR)
+  @ExclusiveCron("AttendanceAutoCloseScheduler.handleSweep")
   async handleSweep(): Promise<void> {
     try {
       const closed = await this.autoClose.closeAllDue();

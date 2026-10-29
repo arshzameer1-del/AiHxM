@@ -1,3 +1,4 @@
+import { ExclusiveCron } from "../common/cron-lock";
 import { Injectable, Logger } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import type { PoolClient } from "pg";
@@ -82,6 +83,7 @@ export class OrgEventConsumerService {
   }
 
   @Cron(CronExpression.EVERY_MINUTE)
+  @ExclusiveCron("OrgEventConsumerService.sweep")
   async sweep(): Promise<void> {
     if (this.running) return;
     this.running = true;

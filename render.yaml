@@ -22,10 +22,10 @@ services:
     # between this service and the database is paid on each of them. Create the service in `region: singapore` (the closest Render
     # region; the region of an existing service cannot be changed, so a new service is needed) and use a paid plan: the free plan
     # sleeps after 15 minutes without traffic (the first click then waits 30-60 seconds) and has a fraction of a CPU.
-    plan: free
+    plan: free   # switch to a paid plan before real customers (free sleeps after 15 min idle)
     buildCommand: npm install && npx turbo run build --filter=@ai-hxm/api
     startCommand: node apps/api/dist/main.js
-    healthCheckPath: /health
+    healthCheckPath: /health/ready
     envVars:
       - key: NODE_VERSION
         value: "20"
@@ -63,3 +63,34 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
+      # Required by the running API: it now refuses to start in production without these (see apps/api/src/common/env-validation.ts).
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: SMTP_SECURE
+        sync: false
+      # Encrypts tenant data exports (EXPORT_ENCRYPTION_KEY) -- keep a copy outside Render.
+      - key: EXPORT_ENCRYPTION_KEY
+        sync: false
+      # Shared cache and shared rate-limit counters; needed as soon as more than one instance runs.
+      - key: REDIS_URL
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        sync: false
+      - key: PLATFORM_DATA_REGION
+        sync: false
+      # Supabase requires TLS; set to "true" unless the database is on the same private network.
+      - key: DATABASE_SSL
+        sync: false
+      # Proxies in front of the API: 1 = Render only, 2 = Cloudflare proxying api.aihxm.com in front of Render.
+      - key: TRUST_PROXY_HOPS
+        value: "1"
+      - key: LOG_REQUESTS
+        value: "on"

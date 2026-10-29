@@ -1,3 +1,4 @@
+import { ExclusiveCron } from "../common/cron-lock";
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { Cron } from "@nestjs/schedule";
 import type { PoolClient } from "pg";
@@ -126,6 +127,7 @@ export class AttendanceEvaluationService {
 
   /** Nightly: re-evaluates the last three days (yesterday plus a late-punch / late-approval lookback). */
   @Cron("0 30 1 * * *")
+  @ExclusiveCron("AttendanceEvaluationService.sweep")
   async sweep(): Promise<void> {
     if (this.running) return;
     this.running = true;

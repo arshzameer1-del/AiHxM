@@ -1,3 +1,4 @@
+import { ExclusiveCron } from "../common/cron-lock";
 import { Injectable, Logger, Module } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import { CompaniesController } from "./companies.controller";
@@ -24,6 +25,7 @@ class CompaniesLifecycleScheduler {
   constructor(private readonly companies: CompaniesService) {}
 
   @Cron(CronExpression.EVERY_HOUR)
+  @ExclusiveCron("CompaniesModule.handleDeletionGraceSweep")
   async handleDeletionGraceSweep() {
     const count = await this.companies.purgeExpiredDeletions(SWEEP_CLAIMS);
     if (count > 0) {

@@ -1,3 +1,4 @@
+import { ExclusiveCron } from "../common/cron-lock";
 import { Injectable, Logger } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import { HealthService } from "./health.service";
@@ -36,6 +37,7 @@ export class HealthSweepScheduler {
   ) {}
 
   @Cron(CronExpression.EVERY_HOUR)
+  @ExclusiveCron("HealthSweepScheduler.handleSweep")
   async handleSweep(): Promise<void> {
     const companyIds = await this.listEligibleCompanyIds();
     let failures = 0;

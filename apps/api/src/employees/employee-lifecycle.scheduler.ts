@@ -1,3 +1,4 @@
+import { ExclusiveCron } from "../common/cron-lock";
 import { Injectable, Logger } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import { EmployeeLifecycleService } from "./employee-lifecycle.service";
@@ -13,6 +14,7 @@ export class EmployeeLifecycleScheduler {
   constructor(private readonly lifecycle: EmployeeLifecycleService) {}
 
   @Cron(CronExpression.EVERY_HOUR)
+  @ExclusiveCron("EmployeeLifecycleScheduler.handleSweep")
   async handleSweep(): Promise<void> {
     const applied = await this.lifecycle.executeDueEvents();
     if (applied > 0) this.logger.log(`Applied ${applied} scheduled lifecycle action(s)`);

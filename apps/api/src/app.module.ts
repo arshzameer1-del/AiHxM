@@ -3,6 +3,7 @@ import { RequestContextMiddleware } from "./common/request-context";
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
 import { DatabaseInputErrorFilter } from "./common/database-input-error.filter";
 import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
+import { RedisThrottlerStorage } from "./common/redis-throttler.storage";
 import { SIGNED_IN_LIMIT_PER_MINUTE, sessionSubject } from "./common/session-throttle";
 import { ScheduleModule } from "@nestjs/schedule";
 import { AppController } from "./app.controller";
@@ -70,7 +71,9 @@ import { HrAdministrationModule } from "./hr-administration/hr-administration.mo
  */
 @Module({
   imports: [
-    ThrottlerModule.forRoot([
+    ThrottlerModule.forRoot({
+      ...(process.env.REDIS_URL ? { storage: new RedisThrottlerStorage(process.env.REDIS_URL) } : {}),
+      throttlers: [
       {
         name: "default",
         ttl: 60_000,
@@ -80,7 +83,8 @@ import { HrAdministrationModule } from "./hr-administration/hr-administration.mo
           return who ? `user:${who}` : String(req.ip);
         },
       },
-    ]),
+      ],
+    }),
     ScheduleModule.forRoot(),
     DatabaseModule,
     CacheModule,

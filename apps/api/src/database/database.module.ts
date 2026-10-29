@@ -1,8 +1,9 @@
-import { Global, Module, OnModuleDestroy } from "@nestjs/common";
+import { Global, Logger, Module, OnModuleDestroy } from "@nestjs/common";
 import { Pool } from "pg";
 import { DatabaseService } from "./database.service";
 import { PG_POOL } from "./pg-pool.token";
 import { resolveSslConfig } from "./db-connection.util";
+import { registerCronLockPool } from "../common/cron-lock";
 
 /**
  * Global module so every feature module can inject DatabaseService
@@ -27,18 +28,32 @@ import { resolveSslConfig } from "./db-connection.util";
         // for five minutes when idle (the default 10 seconds closed them between clicks) and kept alive at the TCP level.
         // PG_POOL_MAX raises the ceiling if the database host allows more connections.
         const max = Number(process.env.PG_POOL_MAX);
-        return new Pool({
+        const pool = new Pool({
           connectionString,
           ssl: resolveSslConfig(connectionString),
           idleTimeoutMillis: 300_000,
           keepAlive: true,
           ...(Number.isInteger(max) && max > 0 ? { max } : {}),
         });
+        // An idle connection can be dropped by the database at any time (restart, failover, maintenance). pg reports that
+        // as an 'error' event on the pool; with no listener Node treats it as fatal and the whole API exits. Log it and let
+        // the pool open a fresh connection on the next query instead.
+        const logger = new Logger("DatabasePool");
+        let lastLogged = 0;
+        pool.on("error", (err) => {
+          const now = Date.now();
+          if (now - lastLogged > 10_000) {
+            lastLogged = now;
+            logger.error(`Idle database connection error (pool keeps running): ${err.message}`);
+          }
+        });
+        registerCronLockPool(pool);
+        return pool;
       },
     },
     DatabaseService,
   ],
-  exports: [DatabaseService],
+  exports: [DatabaseService, PG_POOL],
 })
 export class DatabaseModule implements OnModuleDestroy {
   constructor(private readonly db: DatabaseService) {}

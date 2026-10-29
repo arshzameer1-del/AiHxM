@@ -1,3 +1,4 @@
+import { ExclusiveCron } from "../common/cron-lock";
 import { Injectable, Logger } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import { DatabaseService } from "../database/database.service";
@@ -34,6 +35,7 @@ export class LeaveAccrualService {
   ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_2AM)
+  @ExclusiveCron("LeaveAccrualService.sweep")
   async sweep(): Promise<void> {
     if (this.running) return;
     this.running = true;
