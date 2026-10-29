@@ -21,6 +21,7 @@ export const KIND_LABELS: Record<EmployeeServiceRequestKind, string> = {
   loan: "Loan",
   salary_advance: "Salary advance",
   letter: "Letter or certificate",
+  leave_encashment: "Leave encashment",
 };
 
 export const DSR_LABELS: Record<DataSubjectRequestType, string> = {
@@ -50,17 +51,23 @@ export type RequestFormValues = {
   loanTypeId: string;
   letterType: EmployeeLetterType;
   addressedTo: string;
+  leaveType: string;
+  leaveDays: string;
   neededBy: string;
   purpose: string;
 };
 
 export const emptyRequestForm = (kind: EmployeeServiceRequestKind): RequestFormValues => ({
-  kind, amount: "", installments: "", loanTypeId: "", letterType: "employment_letter", addressedTo: "", neededBy: "", purpose: "",
+  kind, amount: "", installments: "", loanTypeId: "", letterType: "employment_letter", addressedTo: "", leaveType: "", leaveDays: "", neededBy: "", purpose: "",
 });
 
 /** The first thing wrong with the form, in the employee's words; null when it can be sent. */
 export function requestFormProblem(v: RequestFormValues): string | null {
-  if (v.kind !== "letter") {
+  if (v.kind === "leave_encashment") {
+    if (!v.leaveType) return "Choose which leave you want to encash.";
+    const d = Number(v.leaveDays);
+    if (!v.leaveDays.trim() || !Number.isFinite(d) || d <= 0 || Math.round(d * 2) !== d * 2) return "Enter the days to encash, in whole or half days.";
+  } else if (v.kind !== "letter") {
     const amount = Number(v.amount);
     if (!v.amount.trim() || !Number.isFinite(amount) || amount <= 0) return "Enter the amount you need.";
     if (v.installments.trim()) {
@@ -75,6 +82,7 @@ export function requestFormProblem(v: RequestFormValues): string | null {
 
 export function buildServiceRequest(v: RequestFormValues): SubmitEmployeeServiceRequest {
   const base: SubmitEmployeeServiceRequest = { kind: v.kind, purpose: v.purpose.trim(), ...(v.neededBy ? { neededBy: v.neededBy } : {}) };
+  if (v.kind === "leave_encashment") return { ...base, leaveType: v.leaveType, leaveDays: Number(v.leaveDays) };
   if (v.kind === "letter") return { ...base, letterType: v.letterType, ...(v.addressedTo.trim() ? { addressedTo: v.addressedTo.trim() } : {}) };
   return {
     ...base,
@@ -85,7 +93,8 @@ export function buildServiceRequest(v: RequestFormValues): SubmitEmployeeService
 }
 
 /** What a request is, in one line, for lists. */
-export function requestTitle(r: { kind: EmployeeServiceRequestKind; letterType: EmployeeLetterType | null; amount: number | null }): string {
+export function requestTitle(r: { kind: EmployeeServiceRequestKind; letterType: EmployeeLetterType | null; amount: number | null; leaveDays?: number | null; leaveTypeName?: string | null }): string {
+  if (r.kind === "leave_encashment") return `Encash ${r.leaveDays ?? 0} day${r.leaveDays === 1 ? "" : "s"}${r.leaveTypeName ? ` of ${r.leaveTypeName}` : ""}`;
   if (r.kind === "letter") return LETTER_LABELS[r.letterType ?? "other"];
   return `${KIND_LABELS[r.kind]} of ${(r.amount ?? 0).toLocaleString("en-PK")}`;
 }

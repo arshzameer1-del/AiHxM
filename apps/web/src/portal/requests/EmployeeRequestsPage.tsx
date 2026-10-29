@@ -11,10 +11,11 @@ const field = "w-full rounded-lg border border-black/10 px-3 py-1.5 text-sm";
 const btn = "px-3 py-1.5 rounded-lg bg-accent text-white text-sm font-medium disabled:opacity-50";
 const quiet = "px-3 py-1.5 rounded-lg bg-black/5 text-sm font-medium disabled:opacity-50";
 
-type Tab = "loans" | "letters" | "privacy";
+type Tab = "loans" | "letters" | "encashment" | "privacy";
 const TABS: { key: Tab; label: string }[] = [
   { key: "loans", label: "Loans and advances" },
   { key: "letters", label: "Letters and certificates" },
+  { key: "encashment", label: "Leave encashment" },
   { key: "privacy", label: "Privacy requests" },
 ];
 const FILTERS: { key: EmployeeServiceRequestStatus | "all"; label: string }[] = [
@@ -25,6 +26,7 @@ const FILTERS: { key: EmployeeServiceRequestStatus | "all"; label: string }[] = 
 ];
 const LOAN_KINDS: EmployeeServiceRequestKind[] = ["loan", "salary_advance"];
 const LETTER_KINDS: EmployeeServiceRequestKind[] = ["letter"];
+const ENCASH_KINDS: EmployeeServiceRequestKind[] = ["leave_encashment"];
 const todayKey = () => todayIso();
 
 /**
@@ -33,7 +35,7 @@ const todayKey = () => todayIso();
  */
 export function EmployeeRequestsPage() {
   const [params, setParams] = useSearchParams();
-  const tab: Tab = params.get("tab") === "letters" ? "letters" : params.get("tab") === "privacy" ? "privacy" : "loans";
+  const tab: Tab = params.get("tab") === "letters" ? "letters" : params.get("tab") === "privacy" ? "privacy" : params.get("tab") === "encashment" ? "encashment" : "loans";
   const [filter, setFilter] = useState<EmployeeServiceRequestStatus | "all">("pending");
 
   return (
@@ -55,7 +57,7 @@ export function EmployeeRequestsPage() {
             className={`px-2.5 py-1 rounded-full text-xs font-medium ${filter === f.key ? "bg-label-primary text-white" : "bg-black/5"}`}>{f.label}</button>
         ))}
       </div>
-      {tab === "privacy" ? <PrivacyQueue filter={filter} /> : <ServiceQueue key={tab} kinds={tab === "loans" ? LOAN_KINDS : LETTER_KINDS} filter={filter} />}
+      {tab === "privacy" ? <PrivacyQueue filter={filter} /> : <ServiceQueue key={tab} kinds={tab === "loans" ? LOAN_KINDS : tab === "encashment" ? ENCASH_KINDS : LETTER_KINDS} filter={filter} />}
     </div>
   );
 }
@@ -86,7 +88,7 @@ function ServiceQueue({ kinds, filter }: { kinds: EmployeeServiceRequestKind[]; 
 }
 
 function ServiceCard({ r, types, onChanged }: { r: EmployeeServiceRequestView; types: RequestableLoanTypeView[]; onChanged: () => void }) {
-  const [action, setAction] = useState<null | "approve" | "reject" | "upload">(null);
+  const [action, setAction] = useState<null | "approve" | "reject" | "upload" | "encash">(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
@@ -97,6 +99,8 @@ function ServiceCard({ r, types, onChanged }: { r: EmployeeServiceRequestView; t
   const [start, setStart] = useState("");
   const [guarantor, setGuarantor] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [encAmount, setEncAmount] = useState("");
+  const [payDate, setPayDate] = useState(todayKey());
   const fileRef = useRef<HTMLInputElement>(null);
   const badge = STATUS_BADGE[r.status];
   const choices = types.filter((t) => t.kind === r.kind);
@@ -128,6 +132,16 @@ function ServiceCard({ r, types, onChanged }: { r: EmployeeServiceRequestView; t
       })
     );
   };
+  const approveEncashment = (e: FormEvent) => {
+    e.preventDefault();
+    return run(() =>
+      api.approveLeaveEncashmentRequest(r.id, {
+        amount: encAmount.trim() ? Number(encAmount) : undefined,
+        effectiveDate: payDate || undefined,
+        note: note.trim() || undefined,
+      })
+    );
+  };
   const reject = (e: FormEvent) => {
     e.preventDefault();
     if (!note.trim()) return setError("Tell the employee why it is not approved.");
@@ -150,6 +164,7 @@ function ServiceCard({ r, types, onChanged }: { r: EmployeeServiceRequestView; t
           </div>
           <div className="text-sm mt-1">{r.purpose}</div>
           {r.addressedTo && <div className="text-xs text-label-tertiary mt-0.5">Addressed to: {r.addressedTo}</div>}
+          {r.kind === "leave_encashment" && r.amount !== null && <div className="text-xs text-label-tertiary mt-0.5">Paid: PKR {r.amount.toLocaleString("en-PK")}</div>}
           {r.installmentsCount && <div className="text-xs text-label-tertiary mt-0.5">Wants to pay back over {r.installmentsCount} months</div>}
           {r.decisionNote && <div className="text-xs mt-1">Note: {r.decisionNote}</div>}
         </div>
@@ -158,7 +173,8 @@ function ServiceCard({ r, types, onChanged }: { r: EmployeeServiceRequestView; t
 
       {r.status === "pending" && !action && (
         <div className="flex flex-wrap gap-2 mt-3">
-          {r.kind !== "letter" && <button className={btn} onClick={() => setAction("approve")}>Approve and create loan</button>}
+          {(r.kind === "loan" || r.kind === "salary_advance") && <button className={btn} onClick={() => setAction("approve")}>Approve and create loan</button>}
+          {r.kind === "leave_encashment" && <button className={btn} onClick={() => setAction("encash")}>Approve and pay with salary</button>}
           {r.letterType === "salary_certificate" && (
             <button className={btn} disabled={busy} onClick={() => run(() => api.issueSalaryCertificateForRequest(r.id))}>{busy ? "Working…" : "Generate and issue from payroll"}</button>
           )}
@@ -183,6 +199,17 @@ function ServiceCard({ r, types, onChanged }: { r: EmployeeServiceRequestView; t
           <label className="text-xs sm:col-span-3">Note to the employee (optional)<input className={field} value={note} onChange={(e) => setNote(e.target.value)} /></label>
           <div className="sm:col-span-3 flex gap-2">
             <button type="submit" className={btn} disabled={busy}>{busy ? "Creating…" : "Create the loan"}</button>
+            <button type="button" className={quiet} onClick={() => setAction(null)}>Cancel</button>
+          </div>
+        </form>
+      )}
+      {action === "encash" && (
+        <form onSubmit={approveEncashment} className="mt-3 grid sm:grid-cols-3 gap-3" aria-label="Approve leave encashment">
+          <label className="text-xs">Amount (PKR). Leave empty to use days x daily rate<input className={field} inputMode="decimal" value={encAmount} onChange={(e) => setEncAmount(e.target.value)} /></label>
+          <label className="text-xs">Pay with the payroll covering<input type="date" className={field} value={payDate} onChange={(e) => setPayDate(e.target.value)} /></label>
+          <label className="text-xs">Note to the employee (optional)<input className={field} value={note} onChange={(e) => setNote(e.target.value)} /></label>
+          <div className="sm:col-span-3 flex gap-2">
+            <button type="submit" className={btn} disabled={busy}>{busy ? "Approving…" : "Approve"}</button>
             <button type="button" className={quiet} onClick={() => setAction(null)}>Cancel</button>
           </div>
         </form>

@@ -8,6 +8,7 @@ import { MyAttendanceCard } from "./AttendanceCards";
 import { useMyAttendance } from "./useMyAttendance";
 import { MyTimesheet } from "./MyTimesheet";
 import { TeamAttendancePage } from "./TeamAttendancePage";
+import { WorkAwayApprovals, WorkAwayPanel } from "./WorkAwayRequests";
 
 /**
  * Time & Attendance is its own module: it opens on tiles and every tile is its own page.
@@ -18,6 +19,8 @@ import { TeamAttendancePage } from "./TeamAttendancePage";
  *   /app/attendance/timesheet        weekly timesheet
  *   /app/attendance/corrections      request and follow attendance corrections
  *   /app/attendance/approvals        attendance corrections waiting for the signed-in approver
+ *   /app/attendance/work-away        work-from-home and on-duty requests
+ *   /app/attendance/work-away-approvals  those requests waiting for the signed-in approver
  *   /app/attendance/team             how the signed-in manager's reports did (Line Manager)
  *
  * Which actions exist is decided by the roles plus the server; the client only chooses what to show.
@@ -33,6 +36,8 @@ export function AttendanceRoutes() {
         <Route path="timesheet" element={<TimesheetPage />} />
         <Route path="corrections" element={<CorrectionsPage />} />
         <Route path="approvals" element={<CorrectionApprovalsPage />} />
+        <Route path="work-away" element={<WorkAwayPage />} />
+        <Route path="work-away-approvals" element={<WorkAwayApprovalsPage />} />
         <Route path="team" element={<TeamAttendancePage />} />
       </Route>
     </Routes>
@@ -110,6 +115,32 @@ function CorrectionApprovalsPage() {
       <BackLink to="/app/attendance">Back to Time & Attendance</BackLink>
       <PageHeader title="Correction Approvals" subtitle="Attendance corrections you can decide." />
       <PendingCorrectionsSection refreshKey={refreshKey} onChanged={bump} standalone />
+    </div>
+  );
+}
+
+function WorkAwayPage() {
+  const { employeeId, refreshKey, bump } = useModuleContext();
+  return (
+    <div>
+      <BackLink to="/app/attendance">Back to Time & Attendance</BackLink>
+      <PageHeader title="Work-away Requests" subtitle="Ask to work from home, or to be away on official work." />
+      {employeeId ? <WorkAwayPanel employeeId={employeeId} refreshKey={refreshKey} onChanged={bump} /> : <NoRecord />}
+    </div>
+  );
+}
+
+function WorkAwayApprovalsPage() {
+  const { refreshKey, bump, canDecide } = useModuleContext();
+  return (
+    <div>
+      <BackLink to="/app/attendance">Back to Time & Attendance</BackLink>
+      <PageHeader title="Work-away Approvals" subtitle="Work-from-home and on-duty requests you can decide." />
+      {canDecide ? (
+        <WorkAwayApprovals refreshKey={refreshKey} onChanged={bump} />
+      ) : (
+        <p className="text-sm text-label-secondary">Only approvers can use this page. Your own requests are under Work-away Requests.</p>
+      )}
     </div>
   );
 }

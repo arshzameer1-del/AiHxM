@@ -7589,8 +7589,12 @@ export type DecideOvertimeClaimRequest = {
 
 export type OnDutyRequestStatus = "pending" | "approved" | "rejected" | "returned" | "cancelled";
 
+export type OnDutyDutyType = "on_duty" | "work_from_home";
+
 export type OnDutyRequestView = {
   id: string;
+  /** "on_duty" (official work away from the office) or "work_from_home". */
+  dutyType: OnDutyDutyType;
   employeeId: string;
   employeeNumber: string;
   employeeName: string;
@@ -7615,6 +7619,8 @@ export type SubmitOnDutyRequestRequest = {
   /** TLM-11 - a configured location; `location` stays as a free-text note. */
   locationId?: string;
   reason?: string;
+  /** Defaults to "on_duty". */
+  dutyType?: OnDutyDutyType;
 };
 
 // --- Phase 2 gap-fill item #5: data subject request queue --------------
@@ -10017,7 +10023,7 @@ export type UserNotificationView = {
 export type UserNotificationInbox = { items: UserNotificationView[]; unreadCount: number };
 
 // ---- BACKLOG52 - what an employee can ask HR for (loan / salary advance / letter or certificate)
-export type EmployeeServiceRequestKind = "loan" | "salary_advance" | "letter";
+export type EmployeeServiceRequestKind = "loan" | "salary_advance" | "letter" | "leave_encashment";
 export type EmployeeServiceRequestStatus = "pending" | "fulfilled" | "rejected" | "cancelled";
 export type EmployeeLetterType = "salary_certificate" | "employment_letter" | "experience_letter" | "noc" | "address_proof" | "other";
 
@@ -10044,6 +10050,12 @@ export type EmployeeServiceRequestView = {
   generatedDocumentId: string | null;
   /** The letter HR uploaded to the employee's documents. */
   employeeDocumentId: string | null;
+  /** Leave encashment: the leave type code and the days asked for. */
+  leaveType: string | null;
+  leaveTypeName: string | null;
+  leaveDays: number | null;
+  /** Leave encashment: the payslip payment HR queued when approving. */
+  additionalPaymentId: string | null;
   createdAt: string;
 };
 
@@ -10056,6 +10068,23 @@ export type SubmitEmployeeServiceRequest = {
   loanTypeId?: string;
   letterType?: EmployeeLetterType;
   addressedTo?: string;
+  /** Leave encashment: which leave and how many days. */
+  leaveType?: string;
+  leaveDays?: number;
+};
+
+/** What an employee can encash now: the leave types that allow it and the days left. */
+export type EncashableLeaveView = {
+  enabled: boolean;
+  /** How one day's pay is worked out is set in the settlement settings; empty until HR sets it. */
+  items: Array<{ code: string; name: string; remainingDays: number }>;
+};
+
+/** HR approves a leave encashment. The amount defaults to days x the daily rate from the settlement settings. */
+export type ApproveLeaveEncashmentInput = {
+  amount?: number;
+  effectiveDate?: string;
+  note?: string;
 };
 
 /** What HR may change while approving a loan or advance. Anything left out is taken from the request. */

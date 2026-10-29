@@ -131,6 +131,24 @@ describe("OnDutyService", () => {
     ).rejects.toThrow(ForbiddenException);
   });
 
+  describe("work from home", () => {
+    it("defaults to on_duty and keeps work_from_home when asked, using the same approval", async () => {
+      const od = await onDuty.submit(staffClaims, { employeeId: staffEmployeeId, startDate: "2026-09-01", endDate: "2026-09-01" });
+      expect(od.dutyType).toBe("on_duty");
+      await onDuty.decide(hrAdminClaims, od.id, { decision: "rejected" });
+
+      const wfh = await onDuty.submit(staffClaims, { employeeId: staffEmployeeId, startDate: "2026-09-02", endDate: "2026-09-03", dutyType: "work_from_home", reason: "Internet installer visit" });
+      expect(wfh).toMatchObject({ dutyType: "work_from_home", status: "pending" });
+      // a work-from-home day and an on-duty day cannot overlap each other
+      await expect(onDuty.submit(staffClaims, { employeeId: staffEmployeeId, startDate: "2026-09-03", endDate: "2026-09-04" })).rejects.toThrow(ConflictException);
+
+      const listed = await onDuty.listForEmployee(staffClaims, staffEmployeeId);
+      expect(listed.find((r) => r.id === wfh.id)?.dutyType).toBe("work_from_home");
+      const decided = await onDuty.decide(managerClaims, wfh.id, { decision: "approved" });
+      expect(decided).toMatchObject({ status: "approved", dutyType: "work_from_home" });
+    });
+  });
+
   describe("self-submission", () => {
     let requestId: string;
 

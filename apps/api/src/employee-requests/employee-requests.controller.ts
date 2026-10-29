@@ -10,7 +10,7 @@ import { EmployeeRequestsService } from "./employee-requests.service";
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 class SubmitDto {
-  @IsIn(["loan", "salary_advance", "letter"])
+  @IsIn(["loan", "salary_advance", "letter", "leave_encashment"])
   kind!: EmployeeServiceRequestKind;
 
   @IsString()
@@ -44,6 +44,32 @@ class SubmitDto {
   @IsString()
   @MaxLength(200)
   addressedTo?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  leaveType?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0.5)
+  leaveDays?: number;
+}
+
+class ApproveEncashmentDto {
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  amount?: number;
+
+  @IsOptional()
+  @Matches(DATE)
+  effectiveDate?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  note?: string;
 }
 
 class RejectDto {
@@ -107,6 +133,16 @@ export class EmployeeRequestsController {
   @Get("mine")
   mine(@CurrentClaims() claims: RequestClaims) {
     return this.requests.listMine(claims);
+  }
+
+  @Get("encashable-leave")
+  encashableLeave(@CurrentClaims() claims: RequestClaims) {
+    return this.requests.encashableLeave(claims);
+  }
+
+  @Post(":id/approve-encashment")
+  approveEncashment(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: ApproveEncashmentDto) {
+    return this.requests.approveEncashment(claims, id, dto);
   }
 
   @Get("loan-types")

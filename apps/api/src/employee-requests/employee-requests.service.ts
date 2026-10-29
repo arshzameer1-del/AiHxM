@@ -3,6 +3,8 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import type { PoolClient } from "pg";
 import type {
   ApproveEmployeeLoanRequestInput,
+  ApproveLeaveEncashmentInput,
+  EncashableLeaveView,
   EmployeeLetterType,
   EmployeeServiceRequestKind,
   EmployeeServiceRequestStatus,
@@ -14,7 +16,10 @@ import type {
 import { AuditService } from "../audit/audit.service";
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
+import { EmployeeAdditionalPaymentsService } from "../employees/employee-additional-payments.service";
 import { EmployeeLoansService } from "../employees/employee-loans.service";
+import { LeaveLedgerService } from "../leave/leave-ledger.service";
+import { loadSettlementSettings } from "../payroll/payroll-schemes.service";
 import { EmployeesService } from "../employees/employees.service";
 import { EntitlementsService } from "../entitlements/entitlements.service";
 import { UserNotificationsService } from "../notifications/user-notifications.service";
@@ -24,7 +29,7 @@ import { RbacService } from "../rbac/rbac.service";
 const MODULE_KEY = "employee" as const;
 const MANAGE_PERMISSION = "employee.manage.all";
 const MAX_PENDING_PER_EMPLOYEE = 5;
-const KINDS: EmployeeServiceRequestKind[] = ["loan", "salary_advance", "letter"];
+const KINDS: EmployeeServiceRequestKind[] = ["loan", "salary_advance", "letter", "leave_encashment"];
 const STATUSES: EmployeeServiceRequestStatus[] = ["pending", "fulfilled", "rejected", "cancelled"];
 export const LETTER_TYPES: Record<EmployeeLetterType, string> = {
   salary_certificate: "Salary certificate",
@@ -62,20 +67,29 @@ function rowToView(r: any): EmployeeServiceRequestView {
     loanId: r.loan_id ?? null,
     generatedDocumentId: r.generated_document_id ?? null,
     employeeDocumentId: r.employee_document_id ?? null,
+    leaveType: r.leave_type ?? null,
+    leaveTypeName: r.leave_type_name ?? null,
+    leaveDays: r.leave_days === null || r.leave_days === undefined ? null : Number(r.leave_days),
+    additionalPaymentId: r.additional_payment_id ?? null,
     createdAt: iso(r.created_at) as string,
   };
 }
 
 const SELECT = `
-  SELECT r.*, e.employee_number, e.first_name, e.last_name, lt.name AS loan_type_name
+  SELECT r.*, e.employee_number, e.first_name, e.last_name, lt.name AS loan_type_name, lvt.name AS leave_type_name
     FROM employee_service_requests r
     JOIN employees e ON e.id = r.employee_id
-    LEFT JOIN loan_types lt ON lt.id = r.loan_type_id`;
+    LEFT JOIN loan_types lt ON lt.id = r.loan_type_id
+    LEFT JOIN leave_types lvt ON lvt.company_id = r.company_id AND lvt.code = r.leave_type`;
 
-const labelOf = (r: { request_kind: string; letter_type?: string | null; amount?: unknown }) =>
+const labelOf = (r: { request_kind: string; letter_type?: string | null; amount?: unknown; leave_days?: unknown }) =>
   r.request_kind === "letter"
     ? LETTER_TYPES[(r.letter_type ?? "other") as EmployeeLetterType]
-    : `${r.request_kind === "loan" ? "Loan" : "Salary advance"} of ${Number(r.amount).toLocaleString("en-PK")}`;
+    : r.request_kind === "leave_encashment"
+      ? `Leave encashment of ${Number(r.leave_days)} day${Number(r.leave_days) === 1 ? "" : "s"}`
+      : `${r.request_kind === "loan" ? "Loan" : "Salary advance"} of ${Number(r.amount).toLocaleString("en-PK")}`;
+
+const r2 = (n: number) => Math.round(n * 100) / 100;
 
 /**
  * BACKLOG52 - employee requests to HR: a loan or salary advance, and a letter or certificate. The employee asks through
@@ -94,7 +108,9 @@ export class EmployeeRequestsService {
     private readonly loans: EmployeeLoansService,
     private readonly employees: EmployeesService,
     private readonly payrollDocs: PayrollDocumentsService,
-    private readonly inbox?: UserNotificationsService
+    private readonly inbox?: UserNotificationsService,
+    private readonly additionalPayments?: EmployeeAdditionalPaymentsService,
+    private readonly leaveLedger?: LeaveLedgerService
   ) {}
 
   // ------------------------------------------------------------------ employee side
@@ -118,6 +134,29 @@ export class EmployeeRequestsService {
     });
   }
 
+  /** What the signed-in employee can encash: encashable leave types with days left this year. */
+  async encashableLeave(claims: RequestClaims): Promise<EncashableLeaveView> {
+    await this.requireModule(claims);
+    await this.requireSelf(claims);
+    return this.db.withClaims(claims, async (client) => {
+      const emp = await this.myEmployee(client, claims);
+      return this.encashableFor(client, emp.id);
+    });
+  }
+
+  private async encashableFor(client: PoolClient, employeeId: string): Promise<EncashableLeaveView> {
+    const settings = await loadSettlementSettings(client);
+    if (!settings.leaveEncashmentEnabled) return { enabled: false, items: [] };
+    const r = await client.query(
+      `SELECT t.code, t.name, (b.entitled_days - b.used_days) AS remaining
+         FROM leave_balances b JOIN leave_types t ON t.company_id = b.company_id AND t.code = b.leave_type
+        WHERE b.employee_id = $1 AND b.year = $2 AND t.encashable AND t.is_active AND (b.entitled_days - b.used_days) > 0
+        ORDER BY t.name`,
+      [employeeId, Number(localToday().slice(0, 4))]
+    );
+    return { enabled: true, items: r.rows.map((x) => ({ code: x.code, name: x.name, remainingDays: Number(x.remaining) })) };
+  }
+
   async submit(claims: RequestClaims, input: SubmitEmployeeServiceRequest): Promise<EmployeeServiceRequestView> {
     await this.requireModule(claims);
     await this.requireSelf(claims);
@@ -127,13 +166,18 @@ export class EmployeeRequestsService {
     if (purpose.length > 1000) throw new BadRequestException("Keep the reason under 1000 characters");
     if (input.neededBy && !/^\d{4}-\d{2}-\d{2}$/.test(input.neededBy)) throw new BadRequestException("Needed-by must be a valid date");
 
-    const isLoan = input.kind !== "letter";
-    if (isLoan) {
+    const isEncashment = input.kind === "leave_encashment";
+    const isLoan = input.kind === "loan" || input.kind === "salary_advance";
+    if (isEncashment) {
+      if (!input.leaveType) throw new BadRequestException("Choose which leave you want to encash");
+      const d = Number(input.leaveDays);
+      if (!(d > 0) || Math.round(d * 2) !== d * 2) throw new BadRequestException("Enter the days to encash, in whole or half days");
+    } else if (isLoan) {
       if (!(Number(input.amount) > 0)) throw new BadRequestException("Enter the amount you need");
       if (input.installmentsCount !== undefined && (!Number.isInteger(input.installmentsCount) || input.installmentsCount < 1 || input.installmentsCount > 600)) {
         throw new BadRequestException("Instalments must be a whole number between 1 and 600");
       }
-    } else if (!input.letterType || !(input.letterType in LETTER_TYPES)) {
+    } else if (input.kind === "letter" && (!input.letterType || !(input.letterType in LETTER_TYPES))) {
       throw new BadRequestException("Choose which letter or certificate you need");
     }
 
@@ -143,6 +187,18 @@ export class EmployeeRequestsService {
       if (pending.rows[0].n >= MAX_PENDING_PER_EMPLOYEE) {
         throw new BadRequestException(`You already have ${MAX_PENDING_PER_EMPLOYEE} requests waiting for HR. Wait for a decision or withdraw one first.`);
       }
+      if (isEncashment) {
+        const opts = await this.encashableFor(client, emp.id);
+        if (!opts.enabled) throw new BadRequestException("Leave encashment is not switched on for your company");
+        const item = opts.items.find((i) => i.code === input.leaveType);
+        if (!item) throw new BadRequestException("That leave type cannot be encashed");
+        const waiting = await client.query(
+          "SELECT COALESCE(SUM(leave_days), 0) AS d FROM employee_service_requests WHERE employee_id = $1 AND status = 'pending' AND request_kind = 'leave_encashment' AND leave_type = $2",
+          [emp.id, input.leaveType]
+        );
+        const free = r2(item.remainingDays - Number(waiting.rows[0].d));
+        if (Number(input.leaveDays) > free) throw new BadRequestException(`You can ask for at most ${free} day${free === 1 ? "" : "s"} of ${item.name} (days already requested are counted)`);
+      }
       if (isLoan && input.loanTypeId) {
         const t = await client.query("SELECT kind, is_active FROM loan_types WHERE id = $1", [input.loanTypeId]);
         if (!t.rowCount || !t.rows[0].is_active) throw new BadRequestException("That loan type is not available");
@@ -150,17 +206,19 @@ export class EmployeeRequestsService {
       }
       const ins = await client.query(
         `INSERT INTO employee_service_requests
-           (company_id, employee_id, request_kind, loan_type_id, amount, installments_count, letter_type, addressed_to, purpose, needed_by, requested_by_user_account_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+           (company_id, employee_id, request_kind, loan_type_id, amount, installments_count, letter_type, addressed_to, purpose, needed_by, requested_by_user_account_id, leave_type, leave_days)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
          RETURNING id`,
         [
           emp.company_id, emp.id, input.kind,
           isLoan ? input.loanTypeId ?? null : null,
           isLoan ? Number(input.amount) : null,
           isLoan ? input.installmentsCount ?? null : null,
-          isLoan ? null : input.letterType,
-          isLoan ? null : (input.addressedTo ?? "").trim().slice(0, 200) || null,
+          input.kind === "letter" ? input.letterType : null,
+          input.kind === "letter" ? (input.addressedTo ?? "").trim().slice(0, 200) || null : null,
           purpose, input.neededBy ?? null, claims.sub,
+          isEncashment ? input.leaveType : null,
+          isEncashment ? Number(input.leaveDays) : null,
         ]
       );
       const view = await this.view(client, ins.rows[0].id);
@@ -168,7 +226,7 @@ export class EmployeeRequestsService {
         companyId: emp.company_id,
         action: "employee_service_request.submit",
         target: view.id,
-        metadata: { kind: input.kind, letterType: input.letterType ?? null, amount: isLoan ? Number(input.amount) : null },
+        metadata: { kind: input.kind, letterType: input.letterType ?? null, amount: isLoan ? Number(input.amount) : null, leaveType: input.leaveType ?? null, leaveDays: isEncashment ? Number(input.leaveDays) : null },
       });
       return view;
     });
@@ -178,7 +236,7 @@ export class EmployeeRequestsService {
         companyId: claims.company_id,
         userAccountIds: await this.inbox.hrAdminUserIds(claims.company_id),
         category: "hr_inbox",
-        title: `${result.employeeName} asked for ${result.kind === "letter" ? `a ${LETTER_TYPES[result.letterType!].toLowerCase()}` : result.kind === "loan" ? "a loan" : "a salary advance"}`,
+        title: `${result.employeeName} asked for ${result.kind === "letter" ? `a ${LETTER_TYPES[result.letterType!].toLowerCase()}` : result.kind === "loan" ? "a loan" : result.kind === "leave_encashment" ? `leave encashment (${result.leaveDays} day${result.leaveDays === 1 ? "" : "s"})` : "a salary advance"}`,
         body: result.purpose,
         link: "/app/employees/requests",
       });
@@ -244,6 +302,7 @@ export class EmployeeRequestsService {
     await this.requireManage(claims);
     const row = await this.db.withClaims(claims, (client) => this.loadPending(client, id));
     if (row.request_kind === "letter") throw new BadRequestException("This is a letter request. Issue the letter instead.");
+    if (row.request_kind === "leave_encashment") throw new BadRequestException("This is a leave encashment request. Approve it as an encashment instead.");
     const installmentsCount = input.installmentsCount ?? row.installments_count ?? undefined;
     if (installmentsCount === undefined) throw new BadRequestException("Give the number of instalments");
     const today = localToday();
@@ -278,6 +337,86 @@ export class EmployeeRequestsService {
     }
     await this.tellEmployee(claims, id, true);
     return view;
+  }
+
+  /**
+   * Approving a leave encashment queues a payslip payment for the employee and takes the days off the balance.
+   * The amount is days x the daily rate from the settlement settings unless HR types one. If the payment cannot be
+   * queued the request stays open.
+   */
+  async approveEncashment(claims: RequestClaims, id: string, input: ApproveLeaveEncashmentInput = {}): Promise<EmployeeServiceRequestView> {
+    await this.requireManage(claims);
+    if (!this.additionalPayments || !this.leaveLedger) throw new BadRequestException("Leave encashment is not available");
+    const ledger = this.leaveLedger;
+    const today = localToday();
+    if (input.effectiveDate && !/^\d{4}-\d{2}-\d{2}$/.test(input.effectiveDate)) throw new BadRequestException("Pay date must be a valid date");
+    const prep = await this.db.withClaims(claims, async (client) => {
+      const row = await this.loadPending(client, id);
+      if (row.request_kind !== "leave_encashment") throw new BadRequestException("This is not a leave encashment request");
+      const days = Number(row.leave_days);
+      const year = Number((input.effectiveDate ?? today).slice(0, 4));
+      const bal = await client.query(
+        "SELECT (entitled_days - used_days) AS remaining FROM leave_balances WHERE employee_id = $1 AND leave_type = $2 AND year = $3",
+        [row.employee_id, row.leave_type, year]
+      );
+      const remaining = bal.rowCount ? Number(bal.rows[0].remaining) : 0;
+      if (remaining < days) throw new BadRequestException(`The employee now has only ${remaining} day${remaining === 1 ? "" : "s"} of this leave left. Reject the request or ask for fewer days.`);
+      const settings = await loadSettlementSettings(client);
+      if (!settings.leaveEncashmentEnabled) throw new BadRequestException("Leave encashment is not switched on in the settlement settings");
+      let amount = input.amount;
+      if (amount === undefined || amount === null) {
+        const rate = await this.dailyRate(client, row.employee_id, settings, today);
+        if (rate === null) throw new BadRequestException("Enter the amount: the daily rate cannot be worked out (set the daily-rate base and divisor in the settlement settings, or type the amount)");
+        amount = r2(days * rate);
+      }
+      if (!(Number(amount) > 0)) throw new BadRequestException("The amount must be more than zero");
+      return { row, days, year, amount: r2(Number(amount)), taxable: settings.leaveEncashmentTaxable };
+    });
+    const pay = await this.additionalPayments.create(claims, {
+      employeeId: prep.row.employee_id,
+      paymentType: "earning",
+      label: `Leave encashment (${prep.days} day${prep.days === 1 ? "" : "s"})`,
+      amount: prep.amount,
+      isTaxable: prep.taxable,
+      effectiveDate: input.effectiveDate ?? today,
+      reasonNote: prep.row.purpose,
+    });
+    const view = await this.db.withClaims(claims, async (client) => {
+      const upd = await client.query(
+        `UPDATE employee_service_requests
+            SET status = 'fulfilled', amount = $2, additional_payment_id = $3, decided_by_user_account_id = $4, decided_at = now(), decision_note = $5, updated_at = now()
+          WHERE id = $1 AND status = 'pending'`,
+        [id, prep.amount, pay.id, claims.sub, input.note?.trim().slice(0, 1000) || null]
+      );
+      if (!upd.rowCount) return null;
+      await ledger.post(client, {
+        companyId: prep.row.company_id, employeeId: prep.row.employee_id, leaveType: prep.row.leave_type, year: prep.year, entryType: "encashment", days: -prep.days,
+        effectiveDate: input.effectiveDate ?? today, sourceType: "leave_encashment_request", sourceId: id, sourceKey: `encash:${id}`, reason: "Encashed on request", createdBy: claims.sub,
+      });
+      await this.audit.record(client, claims, {
+        companyId: prep.row.company_id, action: "employee_service_request.approve_encashment", target: id, metadata: { days: prep.days, amount: prep.amount, additionalPaymentId: pay.id },
+      });
+      return this.view(client, id);
+    });
+    if (!view) {
+      await this.additionalPayments.cancel(claims, pay.id);
+      throw new ConflictException("This request was already decided by someone else");
+    }
+    await this.tellEmployee(claims, id, true);
+    return view;
+  }
+
+  /** One day's pay from the settlement settings: the monthly figure the tenant chose, over its divisor. */
+  private async dailyRate(client: PoolClient, employeeId: string, settings: { dailyRateBase: string | null; dailyRateDivisor: number | null }, onDate: string): Promise<number | null> {
+    if (!settings.dailyRateBase || !settings.dailyRateDivisor) return null;
+    const where = settings.dailyRateBase === "gross_earnings" ? "cc.component_type = 'earning'" : "cc.key = 'basic_salary'";
+    const r = await client.query(
+      `SELECT COUNT(*)::int AS n, COALESCE(SUM(ecc.amount), 0) AS total
+         FROM employee_compensation_components ecc JOIN compensation_components cc ON cc.id = ecc.component_id
+        WHERE ecc.employee_id = $1 AND ecc.effective_from <= $2::date AND (ecc.effective_to IS NULL OR ecc.effective_to >= $2::date) AND ${where}`,
+      [employeeId, onDate]
+    );
+    return r.rows[0].n > 0 ? Number(r.rows[0].total) / settings.dailyRateDivisor : null;
   }
 
   /** Generates the salary certificate from the employee's current earnings and publishes it to their payroll documents. */

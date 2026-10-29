@@ -26,3 +26,14 @@ test("requestTitle names the request", () => {
   assert.equal(requestTitle({ kind: "letter", letterType: "salary_certificate", amount: null }), "Salary certificate");
   assert.match(requestTitle({ kind: "loan", letterType: null, amount: 60000 }), /^Loan of 60[,.]?000$/);
 });
+
+test("a leave encashment needs a leave type and whole or half days", () => {
+  const f = { ...emptyRequestForm("leave_encashment"), purpose: "Eid" };
+  assert.match(requestFormProblem(f) ?? "", /leave/);
+  assert.match(requestFormProblem({ ...f, leaveType: "annual" }) ?? "", /days/);
+  assert.match(requestFormProblem({ ...f, leaveType: "annual", leaveDays: "0" }) ?? "", /days/);
+  assert.match(requestFormProblem({ ...f, leaveType: "annual", leaveDays: "1.3" }) ?? "", /days/);
+  assert.equal(requestFormProblem({ ...f, leaveType: "annual", leaveDays: "2.5" }), null);
+  assert.deepEqual(buildServiceRequest({ ...f, leaveType: "annual", leaveDays: "2.5" }), { kind: "leave_encashment", purpose: "Eid", leaveType: "annual", leaveDays: 2.5 });
+  assert.equal(requestTitle({ kind: "leave_encashment", letterType: null, amount: null, leaveDays: 1, leaveTypeName: "Annual leave" }), "Encash 1 day of Annual leave");
+});

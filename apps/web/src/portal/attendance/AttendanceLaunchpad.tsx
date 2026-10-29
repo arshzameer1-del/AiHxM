@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CalendarCheck, ClipboardList, Clock, FileClock, Hourglass, Timer, Users } from "lucide-react";
+import { CalendarCheck, ClipboardList, Clock, FileClock, Hourglass, House, Timer, Users } from "lucide-react";
 import { useAuth } from "../../auth/AuthContext";
 import { api } from "../../api/client";
 import { useModuleContext } from "../shared/ModuleContext";
@@ -38,11 +38,13 @@ export function AttendanceLaunchpad() {
       { to: "/app/attendance/days", title: "My Attendance", description: "Your last 14 days, day by day", icon: CalendarCheck, testId: "tile-days" },
       { to: "/app/attendance/timesheet", title: "Timesheet", description: "Fill in and submit your weekly hours", icon: Timer, testId: "tile-timesheet" },
       { to: "/app/attendance/corrections", title: "Attendance Corrections", description: "Fix a missed or wrong punch", icon: FileClock, testId: "tile-corrections" },
+      { to: "/app/attendance/work-away", title: "Work-away Requests", description: "Work from home or be away on duty", icon: House, testId: "tile-work-away" },
     );
   }
   const manage: TileSpec[] = [];
   if (canDecide) {
     manage.push({ to: "/app/attendance/approvals", title: "Correction Approvals", description: "Corrections waiting for your decision", icon: ClipboardList, badge: waiting, testId: "tile-correction-approvals" });
+    manage.push({ to: "/app/attendance/work-away-approvals", title: "Work-away Approvals", description: "Work-from-home and on-duty requests to decide", icon: House, testId: "tile-work-away-approvals" });
   }
 
   if (identity?.roleKeys.includes("line_manager")) {

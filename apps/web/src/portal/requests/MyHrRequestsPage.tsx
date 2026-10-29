@@ -4,6 +4,7 @@ import type {
   DataSubjectRequestType,
   DataSubjectRequestView,
   EmployeeServiceRequestKind,
+  EncashableLeaveView,
   EmployeeServiceRequestView,
   GeneratedDocumentView,
   RequestableLoanTypeView,
@@ -21,7 +22,7 @@ import {
 const field = "w-full rounded-lg border border-black/10 px-3 py-2 text-sm";
 const label = "block text-xs font-medium text-label-secondary mb-1";
 
-type Mode = "loan" | "letter" | "privacy";
+type Mode = "loan" | "letter" | "privacy" | "encashment";
 type Row =
   | { type: "service"; at: string; r: EmployeeServiceRequestView }
   | { type: "privacy"; at: string; r: DataSubjectRequestView };
@@ -34,7 +35,7 @@ export function MyHrRequestsPage() {
   const { identity } = useAuth();
   const [params, setParams] = useSearchParams();
   const requested = params.get("new");
-  const [mode, setMode] = useState<Mode | null>(requested === "loan" || requested === "letter" || requested === "privacy" ? requested : null);
+  const [mode, setMode] = useState<Mode | null>(requested === "loan" || requested === "letter" || requested === "privacy" || requested === "encashment" ? requested : null);
   const [service, setService] = useState<EmployeeServiceRequestView[] | null>(null);
   const [privacy, setPrivacy] = useState<DataSubjectRequestView[] | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -104,12 +105,15 @@ export function MyHrRequestsPage() {
       <div className="flex flex-wrap gap-2 mb-5">
         <button className="px-3 py-1.5 rounded-lg bg-accent text-white text-sm font-medium" onClick={() => open("loan")}>Loan or salary advance</button>
         <button className="px-3 py-1.5 rounded-lg bg-accent text-white text-sm font-medium" onClick={() => open("letter")}>Letter or certificate</button>
+        <button className="px-3 py-1.5 rounded-lg bg-accent text-white text-sm font-medium" onClick={() => open("encashment")}>Leave encashment</button>
         <button className="px-3 py-1.5 rounded-lg bg-black/5 text-sm font-medium" onClick={() => open("privacy")}>Privacy request</button>
       </div>
       {notice && <div className="text-sm text-accent mb-3" role="status">{notice}</div>}
       {error && <div className="text-sm text-danger mb-3" role="alert">{error}</div>}
       {mode === "privacy" ? (
         <PrivacyForm employeeId={identity?.employeeId ?? null} onClose={() => open(null)} onSent={() => { open(null); setNotice("Your privacy request was sent to HR."); load(); }} />
+      ) : mode === "encashment" ? (
+        <EncashmentForm onClose={() => open(null)} onSent={() => { open(null); setNotice("Your request was sent to HR."); load(); }} />
       ) : mode ? (
         <RequestForm key={mode} kind={mode === "loan" ? "loan" : "letter"} onClose={() => open(null)} onSent={() => { open(null); setNotice("Your request was sent to HR."); load(); }} />
       ) : null}
@@ -150,6 +154,7 @@ function ServiceRow({ r, onWithdraw, onCertificate, onLetter }: {
           {r.neededBy ? ` · needed by ${formatDay(r.neededBy)}` : ""}
         </div>
         {r.decisionNote && <div className="text-xs mt-1">HR: {r.decisionNote}</div>}
+        {r.status === "fulfilled" && r.additionalPaymentId && <div className="text-xs mt-1 text-accent">HR approved this. The amount will be added to your next payslip and the days were taken off your leave balance.</div>}
         {r.status === "fulfilled" && r.loanId && <div className="text-xs mt-1 text-accent">HR approved this and set up the loan. Instalments are deducted from your pay.</div>}
         <div className="flex gap-3 mt-1">
           {r.generatedDocumentId && <button className="text-xs font-medium text-accent hover:underline" onClick={() => onCertificate(r.generatedDocumentId!)}>Open certificate</button>}
@@ -272,6 +277,73 @@ function RequestForm({ kind, onClose, onSent }: { kind: EmployeeServiceRequestKi
       {error && <div className="text-xs text-danger" role="alert">{error}</div>}
       <div className="flex gap-2">
         <button type="submit" disabled={busy} className="px-3 py-1.5 rounded-lg bg-accent text-white text-sm font-medium disabled:opacity-50">{busy ? "Sending…" : "Send to HR"}</button>
+        <button type="button" onClick={onClose} className="px-3 py-1.5 rounded-lg bg-black/5 text-sm font-medium">Cancel</button>
+      </div>
+    </form>
+  );
+}
+
+function EncashmentForm({ onClose, onSent }: { onClose: () => void; onSent: () => void }) {
+  const [v, setV] = useState<RequestFormValues>(emptyRequestForm("leave_encashment"));
+  const [options, setOptions] = useState<EncashableLeaveView | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const set = <K extends keyof RequestFormValues>(key: K, value: RequestFormValues[K]) => setV((x) => ({ ...x, [key]: value }));
+  useEffect(() => {
+    api.listEncashableLeave().then(setOptions).catch(() => setOptions({ enabled: false, items: [] }));
+  }, []);
+  const chosen = options?.items.find((i) => i.code === v.leaveType);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    const problem = requestFormProblem(v);
+    if (problem) return setError(problem);
+    setBusy(true);
+    setError(null);
+    try {
+      await api.submitEmployeeServiceRequest(buildServiceRequest(v));
+      onSent();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not send the request.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="bg-card rounded-card p-5 shadow-sm mb-5 space-y-3" aria-label="Request leave encashment">
+      <h2 className="font-semibold text-sm">Encash unused leave</h2>
+      {options === null ? (
+        <LoadingNote what="your leave" />
+      ) : !options.enabled ? (
+        <p className="text-sm text-label-tertiary">Leave encashment is not switched on for your company. Ask HR.</p>
+      ) : options.items.length === 0 ? (
+        <p className="text-sm text-label-tertiary">You have no leave that can be encashed right now.</p>
+      ) : (
+        <>
+          <div className="grid sm:grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="req-enc-type" className={label}>Which leave?</label>
+              <select id="req-enc-type" className={field} value={v.leaveType} onChange={(e) => set("leaveType", e.target.value)}>
+                <option value="">Choose</option>
+                {options.items.map((i) => <option key={i.code} value={i.code}>{i.name} ({i.remainingDays} days left)</option>)}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="req-enc-days" className={label}>Days to encash{chosen ? ` (up to ${chosen.remainingDays})` : ""}</label>
+              <input id="req-enc-days" className={field} inputMode="decimal" value={v.leaveDays} onChange={(e) => set("leaveDays", e.target.value)} />
+            </div>
+            <div className="sm:col-span-2">
+              <label htmlFor="req-enc-note" className={label}>Note for HR</label>
+              <textarea id="req-enc-note" className={field} rows={2} maxLength={1000} value={v.purpose} onChange={(e) => set("purpose", e.target.value)} />
+            </div>
+          </div>
+          <p className="text-xs text-label-tertiary">HR works out the amount. If approved, it is paid with your salary and the days are taken off your balance.</p>
+        </>
+      )}
+      {error && <div className="text-xs text-danger" role="alert">{error}</div>}
+      <div className="flex gap-2">
+        {options?.enabled && options.items.length > 0 && <button type="submit" disabled={busy} className="px-3 py-1.5 rounded-lg bg-accent text-white text-sm font-medium disabled:opacity-50">{busy ? "Sending…" : "Send to HR"}</button>}
         <button type="button" onClick={onClose} className="px-3 py-1.5 rounded-lg bg-black/5 text-sm font-medium">Cancel</button>
       </div>
     </form>

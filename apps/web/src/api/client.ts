@@ -123,6 +123,9 @@ import type {
   AssignEmployeePayrollAreaRequest,
   AssignSystemAdminRoleRequest,
   AttendanceCorrectionRequestView,
+  DecideOnDutyRequestRequest,
+  OnDutyRequestView,
+  SubmitOnDutyRequestRequest,
   AttendanceRecordView,
   AuditLogEntry,
   AuditLogFilters,
@@ -560,6 +563,8 @@ import type {
   DelegationView,
   ProfileCompleteness,
   ApproveEmployeeLoanRequestInput,
+  ApproveLeaveEncashmentInput,
+  EncashableLeaveView,
   DataSubjectRequestType,
   DataSubjectRequestView,
   EmployeeServiceRequestKind,
@@ -2507,6 +2512,9 @@ export const api = {
     if (kind) qs.set("kind", kind);
     return request<EmployeeServiceRequestView[]>(`/employee-requests${qs.toString() ? `?${qs}` : ""}`);
   },
+  listEncashableLeave: () => request<EncashableLeaveView>("/employee-requests/encashable-leave"),
+  approveLeaveEncashmentRequest: (id: string, input: ApproveLeaveEncashmentInput) =>
+    request<EmployeeServiceRequestView>(`/employee-requests/${id}/approve-encashment`, { method: "POST", body: JSON.stringify(input) }),
   rejectEmployeeServiceRequest: (id: string, note: string) =>
     request<EmployeeServiceRequestView>(`/employee-requests/${id}/reject`, { method: "POST", body: JSON.stringify({ note }) }),
   approveEmployeeLoanRequest: (id: string, input: ApproveEmployeeLoanRequestInput) =>
@@ -3094,6 +3102,17 @@ export const api = {
 
   listAttendanceCorrections: (employeeId: string) =>
     request<AttendanceCorrectionRequestView[]>(`/employees/${employeeId}/attendance-corrections`),
+
+  // On-duty and work-from-home requests share one record and one approval route.
+  submitOnDutyRequest: (input: SubmitOnDutyRequestRequest) =>
+    request<OnDutyRequestView>("/on-duty-requests", { method: "POST", body: JSON.stringify(input) }),
+
+  listPendingOnDutyRequests: () => request<OnDutyRequestView[]>("/on-duty-requests/pending"),
+
+  decideOnDutyRequest: (id: string, input: DecideOnDutyRequestRequest) =>
+    request<OnDutyRequestView>(`/on-duty-requests/${id}/decision`, { method: "PATCH", body: JSON.stringify(input) }),
+
+  listOnDutyRequests: (employeeId: string) => request<OnDutyRequestView[]>(`/employees/${employeeId}/on-duty-requests`),
 
   // --- Expense Management (UI re-skin ESS build-out, 2026-10, Part 2
   // category 6) — same "server already RBAC-scopes it" shape as Leave

@@ -1,4 +1,4 @@
-import { IsDateString, IsOptional, IsString, IsUUID, MinLength } from "class-validator";
+import { IsDateString, IsIn, IsOptional, IsString, IsUUID, MinLength } from "class-validator";
 
 export class SubmitOnDutyRequestDto {
   @IsUUID()
@@ -23,4 +23,8 @@ export class SubmitOnDutyRequestDto {
   @IsString()
   @MinLength(1)
   reason?: string;
+
+  @IsOptional()
+  @IsIn(["on_duty", "work_from_home"])
+  dutyType?: "on_duty" | "work_from_home";
 }

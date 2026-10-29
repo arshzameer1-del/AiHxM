@@ -13,6 +13,11 @@ const LEAVE_MODULE_KEY = "leave" as const;
 const WORKFLOW_OBJECT_KEY = "on_duty_request";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+function dutyLabel(dutyType: string | null | undefined): string {
+  return dutyType === "work_from_home" ? "Work from home" : "On-duty";
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toIso(value: any): string | null {
   return value?.toISOString ? value.toISOString() : value;
 }
@@ -31,6 +36,7 @@ function rowToView(row: any, employeeUserAccountId: string | null): OnDutyReques
     employeeName: `${row.first_name} ${row.last_name}`,
     startDate: toIsoDate(row.start_date),
     endDate: toIsoDate(row.end_date),
+    dutyType: row.duty_type === "work_from_home" ? "work_from_home" : "on_duty",
     location: row.location,
     locationId: row.location_id ?? null,
     // a configured location keeps its name in `location` (snapshot at submission)
@@ -80,13 +86,13 @@ export class OnDutyService {
       canSendBack: true,
       describe: async (client, recordId) => {
         const r = await client.query(
-          `SELECT odr.start_date, odr.end_date, odr.location, e.first_name, e.last_name
+          `SELECT odr.start_date, odr.end_date, odr.location, odr.duty_type, e.first_name, e.last_name
              FROM on_duty_requests odr JOIN employees e ON e.id = odr.employee_id WHERE odr.id = $1`,
           [recordId]
         );
         if (!r.rowCount) return null;
         const x = r.rows[0];
-        return { title: `On-duty: ${x.first_name} ${x.last_name}`, summary: `${toIsoDate(x.start_date)} to ${toIsoDate(x.end_date)}${x.location ? ` at ${x.location}` : ""}`, deepLink: "/attendance/on-duty" };
+        return { title: `${dutyLabel(x.duty_type)}: ${x.first_name} ${x.last_name}`, summary: `${toIsoDate(x.start_date)} to ${toIsoDate(x.end_date)}${x.location ? ` at ${x.location}` : ""}`, deepLink: "/attendance/work-away" };
       },
       onOutcome: async (ctx) => {
         const status = statusForOutcome(ctx.event);
@@ -163,7 +169,7 @@ export class OnDutyService {
         [employee.id, input.endDate, input.startDate]
       );
       if ((overlap.rowCount ?? 0) > 0) {
-        throw new ConflictException("This employee already has a pending or approved on-duty request overlapping these dates");
+        throw new ConflictException("This employee already has a pending or approved on-duty / work-from-home request overlapping these dates");
       }
 
       // TLM-11: a configured location, when given, must exist and be active in this company; its
@@ -176,10 +182,10 @@ export class OnDutyService {
       }
       let result = await client.query(
         `INSERT INTO on_duty_requests
-           (company_id, employee_id, start_date, end_date, location, location_id, reason, submitted_by_user_account_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           (company_id, employee_id, start_date, end_date, location, location_id, reason, submitted_by_user_account_id, duty_type)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          RETURNING *`,
-        [employee.company_id, employee.id, input.startDate, input.endDate, locationText, input.locationId ?? null, input.reason ?? null, claims.sub]
+        [employee.company_id, employee.id, input.startDate, input.endDate, locationText, input.locationId ?? null, input.reason ?? null, claims.sub, input.dutyType ?? "on_duty"]
       );
       // WFL-01: when the tenant has an active template the request is approved through the engine.
       const instanceId = await submitToEngineIfConfigured(this.workflow, client, claims, {
@@ -188,7 +194,7 @@ export class OnDutyService {
         recordId: result.rows[0].id,
         record: { employeeId: employee.id, startDate: input.startDate, endDate: input.endDate, location: locationText, locationId: input.locationId ?? null },
         subjectUserAccountId: employee.user_account_id,
-        title: `On-duty: ${employee.first_name} ${employee.last_name}`,
+        title: `${dutyLabel(input.dutyType)}: ${employee.first_name} ${employee.last_name}`,
       });
       if (instanceId) result = await client.query("SELECT * FROM on_duty_requests WHERE id = $1", [result.rows[0].id]);
 
@@ -196,7 +202,7 @@ export class OnDutyService {
         companyId: employee.company_id,
         action: "on_duty.submit",
         target: result.rows[0].id,
-        metadata: { employeeId: employee.id, startDate: input.startDate, endDate: input.endDate },
+        metadata: { employeeId: employee.id, startDate: input.startDate, endDate: input.endDate, dutyType: input.dutyType ?? "on_duty" },
       });
 
       return rowToView(
