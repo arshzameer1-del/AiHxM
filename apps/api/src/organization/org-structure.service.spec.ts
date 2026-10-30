@@ -11,6 +11,7 @@ import { OrgUnitsService } from "./org-units.service";
 import { PositionsService } from "./positions.service";
 import { OrgStructureService } from "./org-structure.service";
 import type { OrgStructureNode } from "@aihxm/shared-types";
+import { localToday } from "../common/local-date";
 
 const FIXTURE_CLAIMS: RequestClaims = { is_platform_admin: true, company_id: null, sub: "org-structure-spec-fixtures" };
 
@@ -113,7 +114,7 @@ describe("OrgStructureService", () => {
   });
 
   it("gives every row an object id with its type letter, and today's date as valid-from with no end", async () => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localToday();
     const nodes = walk((await structure.getStructure(hrClaims)).roots);
     for (const n of nodes) {
       expect(n.objectId).toMatch(n.kind === "unit" ? /^O [0-9A-F]{8}$/ : n.kind === "position" ? /^S [0-9A-F]{8}$/ : /^P [0-9A-F]{8}$/);

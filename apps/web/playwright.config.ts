@@ -37,6 +37,8 @@ export default defineConfig({
   reporter: "html",
   use: {
     baseURL: "http://localhost:5173",
+    // The business zone: tests run as a Pakistani user would, so "today" in the browser matches "today" on the server in the evening too.
+    timezoneId: "Asia/Karachi",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
   },
