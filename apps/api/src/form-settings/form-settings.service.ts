@@ -70,6 +70,15 @@ export class FormSettingsService {
     return { formKey: form.key, title: form.title, fields: form.fields.map((f) => effective(f, rows.get(`${form.key}.${f.key}`))) };
   }
 
+  /** For the Configuration Center card: how many fields this company has changed (0 = every form still uses its defaults). */
+  async countCustomised(claims: RequestClaims): Promise<number> {
+    await this.requireManage(claims);
+    return this.db.withClaims(claims, async (c) => {
+      const r = await c.query("SELECT count(*)::int AS n FROM form_field_settings WHERE company_id = $1", [claims.company_id]);
+      return r.rows[0].n as number;
+    });
+  }
+
   /** Every screen asks for its own form's settings; any signed-in company user may read them. */
   async forms(claims: RequestClaims): Promise<FormSettingsView[]> {
     if (!claims.company_id) return [];

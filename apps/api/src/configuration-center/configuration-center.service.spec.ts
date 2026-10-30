@@ -21,6 +21,7 @@ import { EmployeesService } from "../employees/employees.service";
 import { HiringProcessService } from "../employees/hiring/hiring-process.service";
 import { LocalFileStorageService } from "../file-storage/local-file-storage.service";
 import { OnboardingService } from "../onboarding-offboarding/onboarding.service";
+import { FormSettingsService } from "../form-settings/form-settings.service";
 import { PayslipDesignService } from "../payroll/payslip-design.service";
 import { EmployeeNumberingService } from "../employees/employee-numbering.service";
 import { OffboardingService } from "../onboarding-offboarding/offboarding.service";
@@ -92,7 +93,8 @@ describe("ConfigurationCenterService", () => {
       onboarding,
       offboarding,
       new EmployeeNumberingService(db, rbac, entitlements, audit),
-      new PayslipDesignService(db, rbac, entitlements, audit)
+      new PayslipDesignService(db, rbac, entitlements, audit),
+      new FormSettingsService(db, rbac, entitlements, audit)
     );
   });
 
@@ -200,6 +202,8 @@ describe("ConfigurationCenterService", () => {
 
       expect(byKey.leave_policy).toBeDefined();
       expect(byKey.leave_policy.count).toBeGreaterThanOrEqual(1);
+      expect(byKey.form_settings).toBeDefined();
+      expect(byKey.form_settings.adminRoute).toBe("/app/configuration-center/form-settings");
       expect(byKey.holiday).toBeDefined();
       expect(byKey.holiday.count).toBeGreaterThanOrEqual(1);
       expect(byKey.employee_group).toBeDefined();
@@ -288,6 +292,7 @@ describe("ConfigurationCenterService", () => {
       expect(domainKeys).not.toContain("onboarding_checklist_template");
       expect(domainKeys).not.toContain("offboarding_checklist_template");
       expect(domainKeys).not.toContain("employee_numbering");
+      expect(domainKeys).not.toContain("form_settings");
       expect(domainKeys).toEqual(expect.arrayContaining(["holiday", "custom_field"]));
     });
 

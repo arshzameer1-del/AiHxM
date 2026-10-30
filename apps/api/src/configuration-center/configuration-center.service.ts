@@ -16,6 +16,7 @@ import { HiringProcessService } from "../employees/hiring/hiring-process.service
 import { OnboardingService } from "../onboarding-offboarding/onboarding.service";
 import { PayslipDesignService } from "../payroll/payslip-design.service";
 import { EmployeeNumberingService } from "../employees/employee-numbering.service";
+import { FormSettingsService } from "../form-settings/form-settings.service";
 import { OffboardingService } from "../onboarding-offboarding/offboarding.service";
 import type { ConfigurationDomainSummary } from "@aihxm/shared-types";
 
@@ -63,7 +64,8 @@ export class ConfigurationCenterService {
     private readonly onboarding: OnboardingService,
     private readonly offboarding: OffboardingService,
     private readonly numbering: EmployeeNumberingService,
-    private readonly payslipDesign: PayslipDesignService
+    private readonly payslipDesign: PayslipDesignService,
+    private readonly formSettings: FormSettingsService
   ) {}
 
   async getSummary(claims: RequestClaims): Promise<ConfigurationDomainSummary[]> {
@@ -232,6 +234,9 @@ export class ConfigurationCenterService {
         case "payslip_print_design":
           // 1 when the company saved its own design, 0 while the built-in default is in use.
           return await this.payslipDesign.countCustomised(claims);
+        case "form_settings":
+          // How many fields the company has changed from the built-in defaults.
+          return await this.formSettings.countCustomised(claims);
         default:
           return null;
       }
