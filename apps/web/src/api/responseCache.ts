@@ -39,7 +39,7 @@ export interface CacheEnv {
 }
 
 /** Paths that must never be served from a cache: credentials, files, exports, one-time values. */
-const NEVER_CACHE = /\/(download|downloads|export|exports|backups|documents|receipts|asset|step-up|mfa|password|password-reset|token|tokens|secrets?|api-keys?|recovery-codes?|logout|sessions|inbox|preferences|employee-requests|announcements|data-subject-requests|delegations|completeness|medical|disciplinary|languages|appearance|careers|asset-register|travel|attendance-policy|attendance-penalties|learning-paths|exam|certificate|key-results|goal-alignment|smart-checks)(\/|\?|$)/i;
+const NEVER_CACHE = /\/(download|downloads|export|exports|backups|documents|receipts|asset|step-up|mfa|password|password-reset|token|tokens|secrets?|api-keys?|recovery-codes?|logout|sessions|inbox|preferences|employee-requests|announcements|surveys|data-subject-requests|delegations|completeness|medical|disciplinary|languages|appearance|careers|asset-register|travel|attendance-policy|attendance-penalties|learning-paths|exam|certificate|key-results|goal-alignment|smart-checks)(\/|\?|$)/i;
 
 export function isCacheablePath(pathWithQuery: string): boolean {
   const path = pathWithQuery.split("?")[0] ?? "";

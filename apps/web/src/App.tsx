@@ -182,6 +182,8 @@ const AnnouncementsPage = lazy(() =>
 const AnnouncementsAdminPage = lazy(() =>
   import("./portal/announcements/AnnouncementsAdminPage").then((m) => ({ default: m.AnnouncementsAdminPage }))
 );
+const SurveysPage = lazy(() => import("./portal/surveys/SurveysPage").then((m) => ({ default: m.SurveysPage })));
+const SurveysAdminPage = lazy(() => import("./portal/surveys/SurveysAdminPage").then((m) => ({ default: m.SurveysAdminPage })));
 const MyHrRequestsPage = lazy(() =>
   import("./portal/requests/MyHrRequestsPage").then((m) => ({
     default: m.MyHrRequestsPage,
@@ -466,6 +468,7 @@ export default function App() {
                   <Route path="ess/paystubs" element={<MyPaystubsPage />} />
                   <Route path="ess/requests" element={<MyHrRequestsPage />} />
                   <Route path="ess/announcements" element={<AnnouncementsPage />} />
+                  <Route path="ess/surveys" element={<SurveysPage />} />
                   <Route path="ess/assets" element={<MyAssetsPage />} />
                   <Route path="assets" element={<AssetRegisterPage />} />
                   <Route path="travel" element={<TravelPage />} />
@@ -496,6 +499,7 @@ export default function App() {
                   <Route path="employees/change-requests" element={<EmployeeChangeRequestsPage />} />
                   <Route path="employees/requests" element={<EmployeeRequestsPage />} />
                   <Route path="employees/announcements" element={<AnnouncementsAdminPage />} />
+                  <Route path="employees/surveys" element={<SurveysAdminPage />} />
                   <Route path="reports" element={<ReportsShell />}>
                     <Route index element={<ReportsOverviewPage />} />
                     <Route path="library" element={<ReportsLibraryPage />} />

@@ -592,6 +592,11 @@ import type {
   ProfileCompleteness,
   AnnouncementAdminView,
   AnnouncementReceiptView,
+  MySurveyView,
+  SaveSurveyRequest,
+  SubmitSurveyRequest,
+  SurveyAdminView,
+  SurveyResultsView,
   AnnouncementView,
   MessagingChannelsView,
   SaveAnnouncementRequest,
@@ -3155,6 +3160,18 @@ export const api = {
   publishAnnouncement: (id: string) => request<AnnouncementAdminView>(`/announcements/${id}/publish`, { method: "POST" }),
   archiveAnnouncement: (id: string) => request<AnnouncementAdminView>(`/announcements/${id}/archive`, { method: "POST" }),
   announcementReceipts: (id: string) => request<AnnouncementReceiptView[]>(`/announcements/${id}/receipts`),
+
+  // Pulse surveys (anonymous)
+  listMySurveys: () => request<MySurveyView[]>("/surveys/mine"),
+  mySurveyCount: () => request<{ waiting: number }>("/surveys/mine/count"),
+  respondToSurvey: (id: string, input: SubmitSurveyRequest) => request<{ ok: true }>(`/surveys/${id}/respond`, { method: "POST", body: JSON.stringify(input) }),
+  listSurveysAdmin: () => request<SurveyAdminView[]>("/surveys"),
+  createSurvey: (input: SaveSurveyRequest) => request<SurveyAdminView>("/surveys", { method: "POST", body: JSON.stringify(input) }),
+  updateSurvey: (id: string, input: SaveSurveyRequest) => request<SurveyAdminView>(`/surveys/${id}`, { method: "PUT", body: JSON.stringify(input) }),
+  openSurvey: (id: string) => request<SurveyAdminView>(`/surveys/${id}/open`, { method: "POST" }),
+  closeSurvey: (id: string) => request<SurveyAdminView>(`/surveys/${id}/close`, { method: "POST" }),
+  deleteSurvey: (id: string) => request<{ ok: true }>(`/surveys/${id}`, { method: "DELETE" }),
+  surveyResults: (id: string) => request<SurveyResultsView>(`/surveys/${id}/results`),
 
   // On-duty and work-from-home requests share one record and one approval route.
   submitOnDutyRequest: (input: SubmitOnDutyRequestRequest) =>

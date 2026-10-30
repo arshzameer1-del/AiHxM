@@ -10740,3 +10740,86 @@ export type SmartCheckFinding = {
 };
 export type SmartCheckReport = { ranAt: string; totalOpen: number; high: number; medium: number; findings: SmartCheckFinding[] };
 export type DismissSmartCheckRequest = { ruleKey: string; subjectKey: string; reason: string };
+
+// ---- Pulse surveys (anonymous: answers carry no employee and no time; results appear once enough people answered)
+export type SurveyStatus = "draft" | "open" | "closed";
+/** rating = 1 to 5, nps = 0 to 10 ("how likely are you to recommend ..."), yes_no, text = free comment */
+export type SurveyQuestionKind = "rating" | "nps" | "yes_no" | "text";
+
+export type SurveyQuestionInput = { kind: SurveyQuestionKind; prompt: string; required?: boolean };
+
+export type SaveSurveyRequest = {
+  title: string;
+  description?: string | null;
+  audienceType?: AnnouncementAudienceType;
+  audienceIds?: string[];
+  closesOn?: string | null;
+  questions: SurveyQuestionInput[];
+  /** open it for answers straight after saving */
+  open?: boolean;
+};
+
+export type SurveyQuestionView = { id: string; position: number; kind: SurveyQuestionKind; prompt: string; required: boolean };
+
+export type SurveyAdminView = {
+  id: string;
+  title: string;
+  description: string | null;
+  status: SurveyStatus;
+  audienceType: AnnouncementAudienceType;
+  audienceIds: string[];
+  audienceNames: string[];
+  /** how many active people can answer */
+  audienceCount: number;
+  /** how many have answered (a number only, never who) */
+  responseCount: number;
+  closesOn: string | null;
+  minResponses: number;
+  openedAt: string | null;
+  closedAt: string | null;
+  questions: SurveyQuestionView[];
+};
+
+export type SurveyQuestionResult = {
+  questionId: string;
+  position: number;
+  kind: SurveyQuestionKind;
+  prompt: string;
+  answered: number;
+  /** rating and nps */
+  average?: number;
+  /** rating: counts for 1..5; nps: counts for 0..10 */
+  distribution?: number[];
+  /** yes_no */
+  yes?: number;
+  no?: number;
+  /** nps: promoters 9-10, passives 7-8, detractors 0-6; enps = % promoters minus % detractors */
+  promoters?: number;
+  passives?: number;
+  detractors?: number;
+  enps?: number;
+  /** text answers, in a shuffled order */
+  texts?: string[];
+};
+
+export type SurveyResultsView = {
+  surveyId: string;
+  status: SurveyStatus;
+  audienceCount: number;
+  responseCount: number;
+  minResponses: number;
+  /** false while fewer than minResponses people have answered; no answer is shown then */
+  visible: boolean;
+  message: string | null;
+  questions: SurveyQuestionResult[];
+};
+
+export type MySurveyView = {
+  id: string;
+  title: string;
+  description: string | null;
+  closesOn: string | null;
+  questions: SurveyQuestionView[];
+};
+
+export type SubmitSurveyRequest = { answers: Array<{ questionId: string; value?: number | boolean; text?: string }> };

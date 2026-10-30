@@ -110,6 +110,7 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[], p
               { to: "/app/employees/change-requests", label: "Change Requests" },
               { to: "/app/employees/requests", label: "Employee Requests" },
               { to: "/app/employees/announcements", label: "Announcements" },
+              { to: "/app/employees/surveys", label: "Surveys" },
               { to: "/app/employees/data-consistency", label: "Data Consistency" },
               { to: "/app/employees/smart-checks", label: "Smart Checks" },
             ],
