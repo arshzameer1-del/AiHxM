@@ -117,4 +117,22 @@ describe("Form settings: the other forms", () => {
     await expect(svc.update(f.hr, "travel_request", "advanceRequested", { required: true })).rejects.toBeInstanceOf(BadRequestException);
     await svc.update(f.hr, "travel_request", "advanceRequested", { hidden: true });
   });
+
+  it("employee record edits send only what changed, so a required field is refused only when it is emptied", async () => {
+    await svc.update(f.hr, "employee_profile", "phone", { required: true });
+    await svc.update(f.hr, "employee_profile", "cnic", { required: true, maxLength: 15 });
+    // a field the request does not mention stays as it was
+    await expect(svc.enforce(f.hr, "employee_profile", { firstName: "Ali" })).resolves.toBeUndefined();
+    // an explicit blank, or an explicit clear, of a required field is refused
+    await expect(svc.enforce(f.hr, "employee_profile", { phone: "  " })).rejects.toThrow("Phone is required");
+    await expect(svc.enforce(f.hr, "employee_profile", {}, { clear: ["phone"] })).rejects.toThrow("Phone is required");
+    await expect(svc.enforce(f.hr, "employee_profile", { cnic: "x".repeat(16) })).rejects.toThrow("at most 15");
+    await expect(svc.enforce(f.hr, "employee_profile", { phone: "0300", cnic: "35202-1234567-1" })).resolves.toBeUndefined();
+    // names and joining date are always needed: renamed at most, never hidden or optional
+    await expect(svc.update(f.hr, "employee_profile", "firstName", { hidden: true })).rejects.toBeInstanceOf(BadRequestException);
+    await expect(svc.update(f.hr, "employee_profile", "dateOfJoining", { label: "Joined on" })).resolves.toBeTruthy();
+    await svc.reset(f.hr, "employee_profile", "phone");
+    await svc.reset(f.hr, "employee_profile", "cnic");
+    await svc.reset(f.hr, "employee_profile", "dateOfJoining");
+  });
 });

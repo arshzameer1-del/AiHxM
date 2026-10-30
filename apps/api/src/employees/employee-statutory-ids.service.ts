@@ -30,6 +30,7 @@ const FIELDS: Array<[keyof UpsertEmployeeStatutoryIdsRequest, string, boolean]> 
   ["workPermitExpiryDate", "work_permit_expiry_date", false],
 ];
 
+const ID_NUMBER_KEYS = new Set(["eobiNumber", "socialSecurityNumber", "providentFundNumber", "workPermitNumber"]);
 const day = (v: unknown): string | null => (v == null ? null : v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10));
 const text = (v: unknown): string | null => {
   if (v == null) return null;
@@ -95,6 +96,10 @@ export class EmployeeStatutoryIdsService {
       for (const [key, column, encrypted] of FIELDS) {
         if (body[key] === undefined) continue;
         let v: unknown = typeof body[key] === "string" ? text(body[key]) : body[key];
+        // Registration numbers are letters, digits and the usual separators; anything else is a typing or paste mistake.
+        if (typeof v === "string" && ID_NUMBER_KEYS.has(String(key)) && !/^[A-Za-z0-9][A-Za-z0-9 ./_-]*$/.test(v)) {
+          throw new BadRequestException({ message: "Use only letters, digits, spaces and - / . _ in this number.", field: String(key) });
+        }
         if (v !== null && encrypted) v = sensitive.encrypt(companyId, String(v));
         values.push(v);
         sets.push(`${column} = $${values.length + 2}`);

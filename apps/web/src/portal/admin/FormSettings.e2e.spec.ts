@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { getSharedSession, loginToApp } from "../../e2e-support/real-session";
 
 /** Form settings: HR changes a field, the employee's form follows it, and the server holds the rule too. */
-const TOUCHED = ["helpdesk_ticket/body", "leave_request/reason", "travel_request/destination", "travel_request/estOtherCost"];
+const TOUCHED = ["helpdesk_ticket/body", "leave_request/reason", "travel_request/destination", "travel_request/estOtherCost", "employee_profile/phone", "employee_profile/salaryBand", "employee_profile/cnic"];
 
 test.describe("Form settings", () => {
   // These settings live on the shared test company, so put them back even when a test fails half way.
@@ -86,5 +86,46 @@ test.describe("Form settings", () => {
     await ess.getByRole("button", { name: "Ask to travel" }).click();
     await expect(ess.getByLabel("Destination")).toBeVisible();
     await expect(ess.getByLabel("Other expected costs (PKR)")).toBeVisible();
+  });
+
+  test("employee record: HR hides one field, renames and requires another, and the edit form and the server follow", async ({ browser, request }) => {
+    const hr = await (await browser.newContext()).newPage();
+    await loginToApp(hr, getSharedSession("hr_admin"));
+    await hr.goto("/app/configuration-center/form-settings");
+    const band = hr.getByTestId("fs-employee_profile-salaryBand");
+    await band.getByLabel("Hide this field").check();
+    await band.getByRole("button", { name: /^Save / }).click();
+    await expect(hr.getByRole("status")).toContainText("Saved");
+    const phone = hr.getByTestId("fs-employee_profile-phone");
+    await phone.getByLabel("Label shown").fill("Mobile number");
+    await phone.getByLabel("Required").check();
+    await phone.getByRole("button", { name: /^Save / }).click();
+    await expect(hr.getByTestId("fs-employee_profile-phone")).toContainText("Changed");
+
+    const meRes = await request.get("http://localhost:4000/auth/me", { headers: { Authorization: `Bearer ${getSharedSession("employee_self_service")}` } });
+    const { employeeId } = (await meRes.json()) as { employeeId: string };
+    await hr.goto(`/app/employees/${employeeId}`);
+    await hr.getByRole("button", { name: "Edit" }).click();
+    await expect(hr.getByLabel("Mobile number")).toBeVisible();
+    await expect(hr.getByLabel("Mobile number")).toHaveAttribute("required", "");
+    await expect(hr.getByLabel("Salary band")).toHaveCount(0);
+
+    // the server holds the same rule: emptying the required phone is refused, an unrelated change is not
+    const emptied = await request.patch(`http://localhost:4000/employees/${employeeId}`, {
+      headers: { Authorization: `Bearer ${getSharedSession("hr_admin")}` },
+      data: { phone: "" },
+    });
+    expect(emptied.status()).toBe(400);
+    expect(await emptied.text()).toContain("Mobile number is required");
+    const cleared = await request.patch(`http://localhost:4000/employees/${employeeId}`, {
+      headers: { Authorization: `Bearer ${getSharedSession("hr_admin")}` },
+      data: { clearFields: ["phone"] },
+    });
+    expect(cleared.status()).toBe(400);
+
+    await hr.goto("/app/configuration-center/form-settings");
+    await hr.getByTestId("fs-employee_profile-phone").getByRole("button", { name: "Back to default" }).click();
+    await hr.getByTestId("fs-employee_profile-salaryBand").getByRole("button", { name: "Back to default" }).click();
+    await expect(hr.getByTestId("fs-employee_profile-phone")).not.toContainText("Changed");
   });
 });

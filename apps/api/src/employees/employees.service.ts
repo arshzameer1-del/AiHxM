@@ -1,5 +1,6 @@
 import { assertRealImage } from "../common/image-signature";
 import { assertValidCnic } from "../crypto/identifier-validation";
+import { assertValidEmail, assertValidEmploymentDates, assertValidPersonName, assertValidPhone } from "./employee-input-rules";
 import { sensitive } from "../crypto/sensitive-fields";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { isOwnEmployee } from "./employee-self-read";
@@ -563,6 +564,11 @@ export class EmployeesService {
       // (findOrCreateForHire()'s own doc comment covers why: a confirmed
       // CNIC match is a rehire of the same person, not a new one).
       assertValidCnic(input.cnic);
+      assertValidPersonName(input.firstName, "firstName", "First name");
+      assertValidPersonName(input.lastName, "lastName", "Last name");
+      assertValidEmail(input.email);
+      assertValidPhone(input.phone);
+      assertValidEmploymentDates({ dateOfBirth: input.dateOfBirth, dateOfJoining: input.dateOfJoining }, { birth: true, joining: true });
       const personId = await this.persons.findOrCreateForHire(client, claims.company_id!, {
         firstName: input.firstName,
         lastName: input.lastName,
@@ -795,6 +801,15 @@ export class EmployeesService {
   }
 
   async list(claims: RequestClaims): Promise<EmployeeView[]> {
+    return (await this.listPage(claims)).items;
+  }
+
+  /**
+   * One page of the employee list, cut in the database: who the caller may see (all, own record, or their direct reports) is part
+   * of the query itself, so LIMIT/OFFSET and the total are exact and only the requested rows are read and mapped.
+   * Without a page it returns every visible row, exactly as `list()` always has.
+   */
+  async listPage(claims: RequestClaims, page?: { limit: number; offset: number }): Promise<{ items: EmployeeView[]; total: number }> {
     if (!(await this.entitlements.isModuleEnabled(claims, MODULE_KEY))) {
       throw new NotFoundException();
     }
@@ -808,17 +823,41 @@ export class EmployeesService {
       // target (the record's own manager's login identity, resolved via
       // a self-join so RbacService never needs to know employees have
       // managers at all).
-      const [scope, fieldRules, floorDefaults, result] = await Promise.all([
+      const [scope, fieldRules, floorDefaults] = await Promise.all([
         this.rbac.resolveViewScope(claims, VIEW_PERMISSION),
         this.rbac.loadFieldPermissionRules(claims, OBJECT_KEY, SENSITIVE_FIELDS),
         this.resolveSensitivityFloor(claims),
-        client.query(
-          `SELECT e.*, mgr.user_account_id AS manager_user_account_id
-           FROM employees e
-           LEFT JOIN employees mgr ON mgr.id = e.manager_id
-           ORDER BY e.created_at ASC`
-        ),
       ]);
+
+      // Same visibility rule filterRecordFieldsWithScope applies per row, written as SQL so paging counts only visible rows.
+      const subParams: unknown[] = !scope.hasAll && (scope.hasSelf || scope.hasTeam) ? [claims.sub] : [];
+      const visible = scope.hasAll
+        ? "TRUE"
+        : `(${scope.hasSelf ? "e.user_account_id = $1" : "FALSE"} OR ${scope.hasTeam ? "mgr.user_account_id = $1" : "FALSE"})`;
+      const params: unknown[] = [...subParams];
+      let paging = "";
+      if (page) {
+        params.push(page.limit, page.offset);
+        paging = `LIMIT $${params.length - 1} OFFSET $${params.length}`;
+      }
+      const result = await client.query(
+        `SELECT e.*, mgr.user_account_id AS manager_user_account_id, COUNT(*) OVER() AS total_visible
+         FROM employees e
+         LEFT JOIN employees mgr ON mgr.id = e.manager_id
+         WHERE ${visible}
+         ORDER BY e.created_at ASC, e.id ASC
+         ${paging}`,
+        params
+      );
+      let total = result.rows.length > 0 ? Number(result.rows[0].total_visible) : 0;
+      if (page && result.rows.length === 0 && page.offset > 0) {
+        // asked for a page past the end: the total still has to be right
+        const c = await client.query(
+          `SELECT COUNT(*)::int AS n FROM employees e LEFT JOIN employees mgr ON mgr.id = e.manager_id WHERE ${visible}`,
+          subParams
+        );
+        total = c.rows[0].n;
+      }
 
       const out: EmployeeView[] = [];
       for (const row of result.rows) {
@@ -835,7 +874,7 @@ export class EmployeesService {
         );
         if (filtered) out.push(filtered as EmployeeView);
       }
-      return out;
+      return { items: out, total };
     });
   }
 
@@ -989,6 +1028,15 @@ export class EmployeesService {
       const beforeDateOfBirth = sensitive.readDob(companyIdForCrypto, before.date_of_birth_enc, before.date_of_birth);
       const beforeBankAccount = sensitive.decrypt(companyIdForCrypto, before.bank_account_number);
       assertValidCnic(patch.cnic);
+      // Only what is being changed is judged, so an old stored value never blocks an unrelated edit.
+      assertValidPersonName(patch.firstName, "firstName", "First name");
+      assertValidPersonName(patch.lastName, "lastName", "Last name");
+      assertValidEmail(patch.email);
+      assertValidPhone(patch.phone);
+      assertValidEmploymentDates(
+        { dateOfBirth: patch.dateOfBirth ?? beforeDateOfBirth, dateOfJoining: patch.dateOfJoining ?? toIsoDate(before.date_of_joining) },
+        { birth: patch.dateOfBirth !== undefined, joining: patch.dateOfJoining !== undefined }
+      );
       const nextCnic = patch.cnic ?? beforeCnic;
       const nextDateOfBirth = patch.dateOfBirth ?? beforeDateOfBirth;
       const nextGender = patch.gender ?? before.gender;

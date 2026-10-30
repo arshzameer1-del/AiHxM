@@ -181,7 +181,7 @@ export class FormSettingsService {
    * Refuses a request that breaks the company's settings for this form: a required field left empty, or text longer than the limit.
    * A hidden field is not asked for. Called by the server before the request is acted on, so an API caller is held to the same rules as the screen.
    */
-  async enforce(claims: RequestClaims, formKey: string, payload: Record<string, unknown>): Promise<void> {
+  async enforce(claims: RequestClaims, formKey: string, payload: Record<string, unknown>, opts: { clear?: readonly string[] } = {}): Promise<void> {
     const form = formByKey(formKey);
     if (!form || !claims.company_id) return;
     const settings = this.view(form, await this.rows(claims, formKey));
@@ -190,7 +190,10 @@ export class FormSettingsService {
       const v = payload[f.fieldKey];
       const text = typeof v === "string" ? v.trim() : v;
       const blank = text === undefined || text === null || text === "";
-      if (f.canRequire && f.required && !f.hidden && blank) problems.push(`${f.label} is required`);
+      // A form that edits a saved record sends only what changed: a field it does not mention stays as it was, so only an
+      // explicit blank or an explicit clear of a required field is refused.
+      const mentioned = !form.partial || f.fieldKey in payload || (opts.clear ?? []).includes(f.fieldKey);
+      if (f.canRequire && f.required && !f.hidden && mentioned && (blank || (opts.clear ?? []).includes(f.fieldKey))) problems.push(`${f.label} is required`);
       if (!blank && f.maxLength && typeof v === "string" && v.length > f.maxLength) problems.push(`${f.label} can be at most ${f.maxLength} characters`);
     }
     if (problems.length) throw new BadRequestException(problems.join("; "));

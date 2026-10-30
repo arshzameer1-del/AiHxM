@@ -83,7 +83,7 @@ describe("Employee lifecycle HTTP surface — reasonCode (e2e)", () => {
     const res = await request(app.getHttpServer())
       .post("/employees")
       .set("Authorization", `Bearer ${hrAdminToken}`)
-      .send({ firstName: "Reason", lastName: `Code-${Math.random().toString(36).slice(2, 8)}` });
+      .send({ firstName: "Reason", lastName: `Code-${Math.random().toString(36).slice(2, 8)}`, dateOfJoining: "2026-01-01" });
     expect(res.status).toBe(201);
     return res.body.id as string;
   }

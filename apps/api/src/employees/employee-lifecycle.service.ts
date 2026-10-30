@@ -464,7 +464,18 @@ export class EmployeeLifecycleService {
       client,
       _companyId,
       before
-    ) => ({
+    ) => {
+      // A correction re-runs the termination on an already terminated record on purpose; a first termination is checked.
+      if (!opts.correctsEventId) {
+        if (before.employment_status === "terminated") {
+          throw new BadRequestException(`This employee is already terminated${toIsoDate(before.termination_date) ? ` (since ${toIsoDate(before.termination_date)})` : ""}. To change the date or reason, correct the termination event instead.`);
+        }
+        const joined = toIsoDate(before.date_of_joining);
+        if (joined && input.terminationDate.slice(0, 10) < joined) {
+          throw new BadRequestException(`The termination date cannot be before the joining date (${joined}).`);
+        }
+      }
+      return {
       setClause: "employment_status = 'terminated', termination_date = $2, termination_reason = $3",
       params: [input.terminationDate, input.terminationReason ?? null],
       historyFields: { department: before.department, designation: before.designation, salaryBand: before.salary_band },
@@ -484,7 +495,8 @@ export class EmployeeLifecycleService {
           source,
         });
       },
-    }));
+    };
+    });
     if (result.event.status !== "applied") return result; // scheduled: nothing has happened yet
     // Backward compatibility — every existing integration listening for
     // the pre-existing `employee.terminated` event (fired until now only

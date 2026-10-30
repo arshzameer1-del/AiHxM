@@ -148,6 +148,8 @@ describe("EmployeeLifecycleService", () => {
       orgUnitId: orgUnitAId,
       locationId: locationAId,
       salaryBand: "E3",
+      // these tests use fixed 2026 dates, so the person joined before all of them
+      dateOfJoining: "2026-01-01",
       ...overrides,
     } as never);
     return created.id;

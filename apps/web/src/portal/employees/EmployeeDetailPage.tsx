@@ -1,3 +1,4 @@
+import { useFormSettings } from "../shared/useFormSettings";
 import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, ReactNode, useEffect, useId, useState } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -223,6 +224,7 @@ export function EmployeeDetailPage() {
           <button
             key={t}
             onClick={() => setTab(t)}
+            aria-current={tab === t ? "true" : undefined}
             className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap ${
               tab === t ? "border-accent text-accent" : "border-transparent text-label-tertiary hover:text-label-secondary"
             }`}
@@ -454,6 +456,25 @@ function EditForm({
   const [unitNames, setUnitNames] = useState<string[]>([]);
   const [jobTitles, setJobTitles] = useState<string[]>([]);
   const listId = useId();
+  // The company's own wording, hidden fields and required fields for this form (Configuration Center > Form settings).
+  const fset = useFormSettings("employee_profile");
+  const S = (key: string, label: string) => fset(key, { label });
+  const s_firstName = S("firstName", "First name");
+  const s_lastName = S("lastName", "Last name");
+  const s_email = S("email", "Email");
+  const s_phone = S("phone", "Phone");
+  const s_department = S("department", "Department");
+  const s_designation = S("designation", "Designation");
+  const s_location = S("location", "Location");
+  const s_employmentType = S("employmentType", "Employment type");
+  const s_employmentStatus = S("employmentStatus", "Status");
+  const s_gender = S("gender", "Gender");
+  const s_maritalStatus = S("maritalStatus", "Marital status");
+  const s_dateOfBirth = S("dateOfBirth", "Date of birth");
+  const s_dateOfJoining = S("dateOfJoining", "Date of joining");
+  const s_cnic = S("cnic", "CNIC");
+  const s_salaryBand = S("salaryBand", "Salary band");
+  const s_bankAccountNumber = S("bankAccountNumber", "Bank account");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   // Date of birth is hidden by field rules from some callers: when the API did not send it, it is not offered either.
@@ -506,7 +527,7 @@ function EditForm({
   return (
     <form onSubmit={handleSubmit} className="bg-card rounded-card p-5 shadow-sm space-y-4 mb-6">
       <div className="grid grid-cols-2 gap-4">
-        <Field label="First name">
+        <Field label={s_firstName.label} hint={s_firstName.helpText ?? undefined}>
           <input
             required
             value={firstName}
@@ -514,7 +535,7 @@ function EditForm({
             className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
           />
         </Field>
-        <Field label="Last name">
+        <Field label={s_lastName.label} hint={s_lastName.helpText ?? undefined}>
           <input
             required
             value={lastName}
@@ -522,22 +543,26 @@ function EditForm({
             className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
           />
         </Field>
-        <Field label="Email">
-          <input
+        {!s_email.hidden && (
+        <Field label={s_email.label} hint={s_email.helpText ?? undefined}>
+          <input required={s_email.required} maxLength={s_email.maxLength ?? undefined}
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
           />
         </Field>
-        <Field label="Phone">
-          <input
+        )}
+        {!s_phone.hidden && (
+        <Field label={s_phone.label} hint={s_phone.helpText ?? undefined}>
+          <input required={s_phone.required} maxLength={s_phone.maxLength ?? undefined}
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
             className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
           />
         </Field>
-        <Field label="Department" hint={employee.orgUnitId ? "Comes from the organization unit. Move the employee to change it." : undefined}>
+        )}
+        <Field label={s_department.label} hint={s_department.helpText ?? (employee.orgUnitId ? "Comes from the organization unit. Move the employee to change it." : undefined)}>
           <input
             disabled={!!employee.orgUnitId}
             list={`${listId}-dept`}
@@ -546,7 +571,7 @@ function EditForm({
             className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
           />
         </Field>
-        <Field label="Designation" hint={employee.positionId ? "Comes from the position's title. Change the position to change it." : undefined}>
+        <Field label={s_designation.label} hint={s_designation.helpText ?? (employee.positionId ? "Comes from the position's title. Change the position to change it." : undefined)}>
           <input
             disabled={!!employee.positionId}
             list={`${listId}-job`}
@@ -555,15 +580,17 @@ function EditForm({
             className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
           />
         </Field>
-        <Field label="Location" hint={employee.locationId ? "Comes from the linked location." : undefined}>
-          <input
+        {!s_location.hidden && (
+        <Field label={s_location.label} hint={s_location.helpText ?? (employee.locationId ? "Comes from the linked location." : undefined)}>
+          <input required={s_location.required} maxLength={s_location.maxLength ?? undefined}
             disabled={!!employee.locationId}
             value={location}
             onChange={(e) => setLocation(e.target.value)}
             className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
           />
         </Field>
-        <Field label="Employment type">
+        )}
+        <Field label={s_employmentType.label} hint={s_employmentType.helpText ?? undefined}>
           <select
             value={employmentType}
             onChange={(e) => setEmploymentType(e.target.value as EmploymentType)}
@@ -586,7 +613,7 @@ function EditForm({
                 ))}
           </select>
         </Field>
-        <Field label="Status">
+        <Field label={s_employmentStatus.label} hint={s_employmentStatus.helpText ?? undefined}>
           <select
             value={employmentStatus}
             onChange={(e) => setEmploymentStatus(e.target.value as EmploymentStatus)}
@@ -618,8 +645,9 @@ function EditForm({
             <option key={n} value={n} />
           ))}
         </datalist>
-        <Field label="Gender">
-          <select value={gender} onChange={(e) => setGender(e.target.value)} className="w-full rounded-lg border border-black/10 px-3 py-2 capitalize focus:outline-none focus:ring-2 focus:ring-accent">
+        {!s_gender.hidden && (
+        <Field label={s_gender.label} hint={s_gender.helpText ?? undefined}>
+          <select required={s_gender.required} value={gender} onChange={(e) => setGender(e.target.value)} className="w-full rounded-lg border border-black/10 px-3 py-2 capitalize focus:outline-none focus:ring-2 focus:ring-accent">
             <option value="">—</option>
             {["male", "female", "other"].map((g) => (
               <option key={g} value={g}>
@@ -628,8 +656,10 @@ function EditForm({
             ))}
           </select>
         </Field>
-        <Field label="Marital status">
-          <select value={maritalStatus} onChange={(e) => setMaritalStatus(e.target.value)} className="w-full rounded-lg border border-black/10 px-3 py-2 capitalize focus:outline-none focus:ring-2 focus:ring-accent">
+        )}
+        {!s_maritalStatus.hidden && (
+        <Field label={s_maritalStatus.label} hint={s_maritalStatus.helpText ?? undefined}>
+          <select required={s_maritalStatus.required} value={maritalStatus} onChange={(e) => setMaritalStatus(e.target.value)} className="w-full rounded-lg border border-black/10 px-3 py-2 capitalize focus:outline-none focus:ring-2 focus:ring-accent">
             <option value="">—</option>
             {(maritalOptions.length > 0
               ? maritalOptions.map((m) => ({ value: m.code, label: m.label }))
@@ -642,35 +672,42 @@ function EditForm({
             {maritalStatus && maritalOptions.length > 0 && !maritalOptions.some((m) => m.code === maritalStatus) && <option value={maritalStatus}>{maritalStatus}</option>}
           </select>
         </Field>
-        {canEditBirth && (
-          <Field label="Date of birth">
-            <input type="date" value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent" />
+        )}
+        {canEditBirth && !s_dateOfBirth.hidden && (
+          <Field label={s_dateOfBirth.label} hint={s_dateOfBirth.helpText ?? undefined}>
+            <input required={s_dateOfBirth.required} type="date" value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent" />
           </Field>
         )}
-        <Field label="Date of joining">
+        <Field label={s_dateOfJoining.label} hint={s_dateOfJoining.helpText ?? undefined}>
           <input type="date" value={dateOfJoining} onChange={(e) => setDateOfJoining(e.target.value)} className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent" />
         </Field>
-        <Field label="CNIC">
-          <input
+        {!s_cnic.hidden && (
+        <Field label={s_cnic.label} hint={s_cnic.helpText ?? undefined}>
+          <input required={s_cnic.required} maxLength={s_cnic.maxLength ?? undefined}
             value={cnic}
             onChange={(e) => setCnic(e.target.value)}
             className="w-full rounded-lg border border-black/10 px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-accent"
           />
         </Field>
-        <Field label="Salary band">
-          <input
+        )}
+        {!s_salaryBand.hidden && (
+        <Field label={s_salaryBand.label} hint={s_salaryBand.helpText ?? undefined}>
+          <input required={s_salaryBand.required} maxLength={s_salaryBand.maxLength ?? undefined}
             value={salaryBand}
             onChange={(e) => setSalaryBand(e.target.value)}
             className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
           />
         </Field>
-        <Field label="Bank account">
-          <input
+        )}
+        {!s_bankAccountNumber.hidden && (
+        <Field label={s_bankAccountNumber.label} hint={s_bankAccountNumber.helpText ?? undefined}>
+          <input required={s_bankAccountNumber.required} maxLength={s_bankAccountNumber.maxLength ?? undefined}
             value={bankAccountNumber}
             onChange={(e) => setBankAccountNumber(e.target.value)}
             className="w-full rounded-lg border border-black/10 px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-accent"
           />
         </Field>
+        )}
       </div>
 
       {error && <div className="text-danger text-sm">{error}</div>}

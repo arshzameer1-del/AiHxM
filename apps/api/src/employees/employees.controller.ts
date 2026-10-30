@@ -14,7 +14,8 @@ import {
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import type { Response } from "express";
-import { pageOf } from "../common/paging";
+import { pageParams, setTotalCount } from "../common/paging";
+import { FormSettingsService } from "../form-settings/form-settings.service";
 import { SessionGuard } from "../auth/session.guard";
 import { MyOrgChartService } from "./my-org-chart.service";
 import { MyPersonalDataService } from "./my-personal-data.service";
@@ -43,7 +44,8 @@ export class EmployeesController {
   constructor(
     private readonly employees: EmployeesService,
     private readonly myOrgChartService: MyOrgChartService,
-    private readonly myPersonalData: MyPersonalDataService
+    private readonly myPersonalData: MyPersonalDataService,
+    private readonly formSettings: FormSettingsService
   ) {}
 
   @Post()
@@ -58,7 +60,9 @@ export class EmployeesController {
     @Query("limit") limit?: string,
     @Query("offset") offset?: string
   ) {
-    return pageOf(await this.employees.list(claims), limit, offset, res);
+    const page = await this.employees.listPage(claims, pageParams(limit, offset));
+    setTotalCount(res, page.total);
+    return page.items;
   }
 
   // "My Org Chart" (Employee Self Service): the caller's own manager chain, peers and reports. Declared before `:id`.
@@ -99,7 +103,8 @@ export class EmployeesController {
   }
 
   @Patch(`${EMPLOYEE_ID}`)
-  update(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: UpdateEmployeeDto) {
+  async update(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: UpdateEmployeeDto) {
+    await this.formSettings.enforce(claims, "employee_profile", dto as unknown as Record<string, unknown>, { clear: dto.clearFields });
     return this.employees.update(claims, id, dto);
   }
 

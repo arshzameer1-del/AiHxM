@@ -162,6 +162,7 @@ export function MyProfilePage() {
             key={tab}
             type="button"
             onClick={() => setActiveTab(tab)}
+            aria-current={activeTab === tab ? "true" : undefined}
             className={`px-3 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 -mb-px transition-colors ${
               activeTab === tab
                 ? "border-accent text-accent"

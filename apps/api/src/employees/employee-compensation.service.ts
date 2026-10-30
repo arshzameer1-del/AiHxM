@@ -74,6 +74,8 @@ function toIso(value: any): string | null {
   return value?.toISOString ? value.toISOString() : value;
 }
 
+const MAX_COMPONENT_AMOUNT = 1_000_000_000;
+
 function toIsoDate(value: unknown): string {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const v = value as any;
@@ -546,9 +548,12 @@ export class EmployeeCompensationService {
       if (reason.rowCount === 0) throw new BadRequestException("The compensation change reason does not exist");
     }
 
+    await this.assertSaneEffectiveDate(client, args.employeeId, args.effectiveFrom);
+
     for (const entry of args.entries) {
       const def = byId.get(entry.componentId);
       if (!def) throw new BadRequestException(`Unknown compensation component: ${entry.componentId}`);
+      if ((entry.amount ?? 0) > MAX_COMPONENT_AMOUNT) throw new BadRequestException(`The amount for "${def.name}" is too large. Check the figure.`);
       if (!def.isActive) throw new BadRequestException(`Compensation component "${def.name}" is not active`);
       if (def.componentType === "non_cash_benefit") {
         throw new BadRequestException(`"${def.name}" is a non-cash benefit; its tax treatment needs your accountant's rule before it can be paid through payroll`);
@@ -856,6 +861,16 @@ export class EmployeeCompensationService {
       claims.company_id,
     ]);
     return retry.rows.map(rowToComponent);
+  }
+
+  /** A pay change cannot take effect after the person has left, or at an absurd date. */
+  private async assertSaneEffectiveDate(client: PoolClient, employeeId: string, effectiveFrom: string): Promise<void> {
+    const day = effectiveFrom.slice(0, 10);
+    if (day < "1960-01-01") throw new BadRequestException("The effective date is too far in the past. Check the year.");
+    if (day > "2500-12-31") throw new BadRequestException("The effective date is too far ahead. Check the year.");
+    const row = await client.query("SELECT termination_date::text AS left_on FROM employees WHERE id = $1", [employeeId]);
+    const leftOn: string | null = row.rows[0]?.left_on ?? null;
+    if (leftOn && day > leftOn) throw new BadRequestException(`The employee left on ${leftOn}. A pay change cannot take effect after that date.`);
   }
 
   private async loadEmployee(client: PoolClient, employeeId: string): Promise<{ id: string } | null> {

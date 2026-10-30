@@ -1,4 +1,4 @@
-import { ReactNode, useState } from "react";
+import { ReactNode, useEffect, useId, useRef, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 /**
@@ -68,17 +68,53 @@ export function SapFooter({ children }: { children: ReactNode }) {
   );
 }
 
-/** Small modal question with two buttons ("Cancel and discard all changes?" in the reference app). */
+/**
+ * Small modal question with two buttons ("Cancel and discard all changes?" in the reference app).
+ * Keyboard and screen reader behaviour: it is named and described, focus moves to the safe choice (Cancel) when it opens,
+ * Tab and Shift+Tab stay inside it, Escape is the same as Cancel, and focus goes back to the button that opened it.
+ */
 export function SapConfirm({ message, confirmLabel = "OK", cancelLabel = "Cancel", onConfirm, onCancel }: { message: string; confirmLabel?: string; cancelLabel?: string; onConfirm: () => void; onCancel: () => void }) {
+  const id = useId();
+  const box = useRef<HTMLDivElement>(null);
+  const cancelBtn = useRef<HTMLButtonElement>(null);
+  const cancelRef = useRef(onCancel);
+  cancelRef.current = onCancel;
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    cancelBtn.current?.focus();
+    return () => {
+      if (opener && opener.isConnected) opener.focus();
+    };
+  }, []);
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      cancelRef.current();
+      return;
+    }
+    if (e.key !== "Tab") return;
+    const stops = Array.from(box.current?.querySelectorAll<HTMLElement>("button:not([disabled])") ?? []);
+    if (stops.length === 0) return;
+    const first = stops[0];
+    const last = stops[stops.length - 1];
+    const here = document.activeElement;
+    if (e.shiftKey && (here === first || !box.current?.contains(here))) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && (here === last || !box.current?.contains(here))) {
+      e.preventDefault();
+      first.focus();
+    }
+  };
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/30" role="alertdialog" aria-modal="true" aria-label="Confirmation">
-      <div className="bg-white rounded-md shadow-lg w-[min(420px,92vw)] p-4">
-        <p className="text-sm mb-4">{message}</p>
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/30" role="alertdialog" aria-modal="true" aria-label="Confirmation" aria-describedby={`${id}-msg`} onKeyDown={onKeyDown}>
+      <div ref={box} className="bg-white rounded-md shadow-lg w-[min(420px,92vw)] p-4">
+        <p id={`${id}-msg`} className="text-sm mb-4">{message}</p>
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onConfirm} className="bg-accent text-white rounded px-4 py-1.5 text-sm font-semibold">
             {confirmLabel}
           </button>
-          <button type="button" onClick={onCancel} className="border border-accent text-accent rounded px-4 py-1.5 text-sm font-semibold">
+          <button ref={cancelBtn} type="button" onClick={onCancel} className="border border-accent text-accent rounded px-4 py-1.5 text-sm font-semibold">
             {cancelLabel}
           </button>
         </div>

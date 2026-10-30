@@ -16,3 +16,19 @@ export function pageOf<T>(items: T[], limit: string | undefined, offset: string 
   res.setHeader("Access-Control-Expose-Headers", "X-Total-Count");
   return items.slice(skip, skip + take);
 }
+
+/** The `?limit=&offset=` a list endpoint cuts in SQL: same defaults and cap as pageOf. */
+export function pageParams(limit: string | undefined, offset: string | undefined): { limit: number; offset: number } {
+  const parsedLimit = Number.parseInt(limit ?? "", 10);
+  const parsedOffset = Number.parseInt(offset ?? "", 10);
+  return {
+    limit: Number.isFinite(parsedLimit) && parsedLimit > 0 ? Math.min(parsedLimit, MAX_PAGE_SIZE) : MAX_PAGE_SIZE,
+    offset: Number.isFinite(parsedOffset) && parsedOffset > 0 ? parsedOffset : 0,
+  };
+}
+
+/** Sets the total-count headers for a page that was already cut in SQL. */
+export function setTotalCount(res: Response, total: number): void {
+  res.setHeader("X-Total-Count", String(total));
+  res.setHeader("Access-Control-Expose-Headers", "X-Total-Count");
+}

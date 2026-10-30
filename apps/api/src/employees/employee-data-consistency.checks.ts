@@ -308,4 +308,14 @@ export const CONSISTENCY_CHECKS: ConsistencyCheck[] = [
               AND NOT EXISTS (SELECT 1 FROM employee_documents n WHERE n.employee_id = e.id AND n.document_type = d.document_type AND n.review_status = 'approved'
                               AND (n.expiry_date IS NULL OR n.expiry_date >= CURRENT_DATE)))`,
   },
+  {
+    id: "same_person_two_active_records",
+    label: "The same person has two active records",
+    explanation:
+      "Two employee records that are both active belong to one person (same CNIC or person record). That is right for a genuine second role, but it also means two payslips, so check it is not a duplicate hire.",
+    severity: "medium",
+    fixable: false,
+    where: `e.person_id IS NOT NULL AND ${LIVE} AND EXISTS (SELECT 1 FROM employees o WHERE o.company_id = e.company_id AND o.person_id = e.person_id AND o.id <> e.id AND o.employment_status <> 'terminated')`,
+    detail: "'also active as ' || (SELECT string_agg(o.employee_number, ', ') FROM employees o WHERE o.company_id = e.company_id AND o.person_id = e.person_id AND o.id <> e.id AND o.employment_status <> 'terminated')",
+  },
 ];

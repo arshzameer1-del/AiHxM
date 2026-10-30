@@ -15,7 +15,16 @@ export type CatalogField = {
   /** Hard limit the form can never exceed, whatever a setting says. */
   hardMaxLength?: number;
 };
-export type CatalogForm = { key: string; title: string; fields: CatalogField[] };
+export type CatalogForm = {
+  key: string;
+  title: string;
+  fields: CatalogField[];
+  /**
+   * A form that edits a saved record and sends only what changed. "Required" there means a required field can never be emptied
+   * (a blank value or an explicit clear is refused); a field the request does not mention stays as it was.
+   */
+  partial?: boolean;
+};
 
 const fixed = (key: string, label: string, extra: Partial<CatalogField> = {}): CatalogField => ({
   key,
@@ -96,6 +105,29 @@ export const FORM_CATALOG: CatalogForm[] = [
       optional("estDistanceKm", "Expected distance (km)", { canSetMaxLength: false }),
       optional("estOtherCost", "Other expected costs (PKR)", { canSetMaxLength: false }),
       optional("advanceRequested", "Advance you would like (PKR)", { canSetMaxLength: false, canRequire: false }),
+    ],
+  },
+  {
+    key: "employee_profile",
+    title: "Employee record: edit details (HR)",
+    partial: true,
+    fields: [
+      fixed("firstName", "First name"),
+      fixed("lastName", "Last name"),
+      optional("email", "Email", { canSetMaxLength: true, hardMaxLength: 200 }),
+      optional("phone", "Phone", { canSetMaxLength: true, hardMaxLength: 40 }),
+      fixed("department", "Department"),
+      fixed("designation", "Designation"),
+      optional("location", "Location", { canSetMaxLength: true, hardMaxLength: 200 }),
+      fixed("employmentType", "Employment type"),
+      fixed("employmentStatus", "Status"),
+      optional("gender", "Gender", { canSetMaxLength: false }),
+      optional("maritalStatus", "Marital status", { canSetMaxLength: false }),
+      optional("dateOfBirth", "Date of birth", { canSetMaxLength: false }),
+      fixed("dateOfJoining", "Date of joining"),
+      optional("cnic", "CNIC", { canSetMaxLength: true, hardMaxLength: 30 }),
+      optional("salaryBand", "Salary band", { canSetMaxLength: true, hardMaxLength: 60 }),
+      optional("bankAccountNumber", "Bank account", { canSetMaxLength: true, hardMaxLength: 60 }),
     ],
   },
 ];

@@ -43,6 +43,33 @@ function toIsoDate(value: unknown): string {
 
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
+const MAX_LOAN_AMOUNT = 1_000_000_000;
+/** Common-sense limits on a new loan or advance, so a typing mistake cannot create a schedule that makes no sense. */
+function assertSaneLoanTerms(input: CreateEmployeeLoanRequest): void {
+  const cents = (n: number) => Math.abs(n * 100 - Math.round(n * 100)) < 1e-6;
+  if (input.principalAmount > MAX_LOAN_AMOUNT) throw new BadRequestException("principalAmount is too large. Check the amount.");
+  if (!cents(input.principalAmount)) throw new BadRequestException("principalAmount can have at most two decimal places (paisa).");
+  if (input.installmentAmount !== undefined) {
+    if (!cents(input.installmentAmount)) throw new BadRequestException("installmentAmount can have at most two decimal places (paisa).");
+    if (Math.ceil(input.principalAmount / input.installmentAmount - 1e-9) > 600) {
+      throw new BadRequestException("That instalment would take more than 600 instalments to repay. Raise the instalment.");
+    }
+  }
+  const issued = input.issuedDate.slice(0, 10);
+  const plus = (iso: string, days: number) => {
+    const d = new Date(`${iso}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  };
+  if (issued < "2000-01-01") throw new BadRequestException("issuedDate is too far in the past. Check the year.");
+  if (issued > "2500-12-31") throw new BadRequestException("issuedDate is too far ahead. Check the year.");
+  if (input.deductionStartDate) {
+    const start = input.deductionStartDate.slice(0, 10);
+    if (start < issued) throw new BadRequestException("Deductions cannot start before the loan is issued.");
+    if (start > plus(issued, 366)) throw new BadRequestException("Deductions start more than a year after the loan is issued. Check the date.");
+  }
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function rowToView(row: any): EmployeeLoanView {
   return {
@@ -319,11 +346,17 @@ export class EmployeeLoansService {
     if (input.installmentsCount !== undefined && (!Number.isInteger(input.installmentsCount) || input.installmentsCount < 1 || input.installmentsCount > 600)) {
       throw new BadRequestException("installmentsCount must be a whole number between 1 and 600");
     }
+    assertSaneLoanTerms(input);
     const installment = round2(input.installmentAmount ?? installmentFor(input.principalAmount, input.installmentsCount!));
     const startDate = input.deductionStartDate ?? input.issuedDate;
     const schedule = buildSchedule(input.principalAmount, installment, startDate);
     return this.db.withClaims(claims, async (client) => {
       await this.mustExistEmployee(client, claims.company_id!, input.employeeId);
+      // Money lent to someone who has already left cannot be recovered through payroll.
+      const status = await client.query("SELECT employment_status FROM employees WHERE id = $1 AND company_id = $2", [input.employeeId, claims.company_id]);
+      if (status.rows[0]?.employment_status === "terminated") {
+        throw new BadRequestException("This employee has left the company. A loan or salary advance cannot be given to a terminated employee.");
+      }
       let type: LoanTypeView | null = null;
       if (input.loanTypeId) {
         const t = await client.query("SELECT * FROM loan_types WHERE id = $1", [input.loanTypeId]);
