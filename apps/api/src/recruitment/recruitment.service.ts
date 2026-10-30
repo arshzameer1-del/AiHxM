@@ -118,6 +118,11 @@ export class RecruitmentService {
       objectKey: WORKFLOW_OBJECT_KEY,
       label: "Job requisition",
       legacyDecide: (c, id, dto) => this.decideRequisition(c, id, dto),
+      // Commits with the workflow decision (also an automatic one after an escalation).
+      onOutcome: async (ctx) => {
+        if (ctx.event !== "approved" && ctx.event !== "rejected") return;
+        await ctx.client.query(`UPDATE job_requisitions SET status = $2, updated_at = now() WHERE id = $1 AND status = 'pending_approval'`, [ctx.recordId, ctx.event]);
+      },
     });
     this.registerOfferAdapter();
   }
@@ -456,22 +461,24 @@ export class RecruitmentService {
 
     const instance = await this.workflow.getInstance(claims, requisition.workflow_instance_id);
     const pendingStep = instance.steps.find((s) => s.status === "pending");
-    if (!pendingStep) throw new BadRequestException("No pending approval step found on this requisition");
-    const decidedInstance = await this.workflow.decide(claims, pendingStep.id, dto);
+    let workflowStatus: string = instance.status;
+    if (pendingStep) {
+      workflowStatus = (await this.workflow.decide(claims, pendingStep.id, dto)).status; // onOutcome writes the status in the same transaction
+    } else if (instance.status !== "approved" && instance.status !== "rejected") {
+      throw new BadRequestException("No pending approval step found on this requisition");
+    }
+    // else: the workflow had finished but the requisition still waits (an older decision whose second step never ran): bring it in line.
 
     return this.db.withClaims(claims, async (client) => {
-      let newStatus = requisition.status;
-      if (decidedInstance.status === "approved") newStatus = "approved";
-      else if (decidedInstance.status === "rejected") newStatus = "rejected";
-      const result = await client.query(
-        `UPDATE job_requisitions SET status = $2, updated_at = now() WHERE id = $1 RETURNING *`,
-        [id, newStatus]
-      );
+      if (workflowStatus === "approved" || workflowStatus === "rejected") {
+        await client.query(`UPDATE job_requisitions SET status = $2, updated_at = now() WHERE id = $1 AND status = 'pending_approval'`, [id, workflowStatus]);
+      }
+      const result = await client.query(`SELECT * FROM job_requisitions WHERE id = $1`, [id]);
       await this.audit.record(client, claims, {
         companyId: claims.company_id ?? null,
-        action: "job_requisition.decide",
+        action: pendingStep ? "job_requisition.decide" : "job_requisition.reconcile",
         target: id,
-        metadata: { decision: dto.decision },
+        metadata: { decision: dto.decision, workflowStatus },
       });
       return rowToRequisition(result.rows[0]);
     });

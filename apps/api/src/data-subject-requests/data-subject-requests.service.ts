@@ -312,10 +312,12 @@ export class DataSubjectRequestsService {
     // approver on the current step.
     const instance = await this.workflow.getInstance(claims, row.workflow_instance_id);
     const pendingStep = instance.steps.find((s) => s.status === "pending");
-    if (!pendingStep) {
+    // A workflow that already finished while the request still says "pending" (an older decision whose second step never ran)
+    // is brought in line with that decision rather than left stuck.
+    if (!pendingStep && instance.status !== "approved" && instance.status !== "rejected") {
       throw new BadRequestException("No pending approval step found on this data subject request");
     }
-    const decidedInstance = await this.workflow.decide(claims, pendingStep.id, input);
+    const decidedInstance = pendingStep ? await this.workflow.decide(claims, pendingStep.id, input) : instance;
 
     const finalRow = await this.db.withClaims(claims, async (client) => {
       if (decidedInstance.status === "approved") {

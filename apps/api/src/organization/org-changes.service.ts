@@ -664,10 +664,12 @@ export class OrgChangesService {
 
     const instance = await this.workflow.getInstance(claims, change.workflow_instance_id);
     const pendingStep = instance.steps.find((s) => s.status === "pending");
-    if (!pendingStep) {
+    // A workflow that already finished while the change still says "pending approval" (an older decision whose second step never ran)
+    // is brought in line with that decision rather than left stuck.
+    if (!pendingStep && instance.status !== "approved" && instance.status !== "rejected") {
       throw new BadRequestException("No pending approval step found on this change");
     }
-    const decidedInstance = await this.workflow.decide(claims, pendingStep.id, dto);
+    const decidedInstance = pendingStep ? await this.workflow.decide(claims, pendingStep.id, dto) : instance;
 
     const updatedView = await this.db.withClaims(claims, async (client) => {
       if (decidedInstance.status === "approved") {

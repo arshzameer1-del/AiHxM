@@ -141,6 +141,16 @@ describe("RecruitmentService", () => {
       expect(decided.status).toBe("rejected");
     });
 
+    it("a requisition left waiting after its workflow was approved is brought in line when decided again", async () => {
+      const requisition = await recruitment.createRequisition(hrAdminClaims, { title: "Stuck After Approval" });
+      await recruitment.submitRequisition(hrAdminClaims, requisition.id);
+      await recruitment.decideRequisition(approverClaims, requisition.id, { decision: "approved" });
+      // the old failure: the workflow finished but the requisition itself still said "pending approval"
+      await db.withClaims(FIXTURE_CLAIMS, (c) => c.query("UPDATE job_requisitions SET status = 'pending_approval' WHERE id = $1", [requisition.id]));
+      const healed = await recruitment.decideRequisition(approverClaims, requisition.id, { decision: "approved" });
+      expect(healed.status).toBe("approved");
+    });
+
     it("denies an outsider with no recruitment.manage.all", async () => {
       await expect(recruitment.createRequisition(outsiderClaims, { title: "Nope" })).rejects.toThrow(ForbiddenException);
     });

@@ -1847,8 +1847,12 @@ export class PayrollService {
 
     const instance = await this.workflow.getInstance(claims, run.workflow_instance_id);
     const pendingStep = instance.steps.find((s) => s.status === "pending");
-    if (!pendingStep) throw new BadRequestException("No pending approval step found on this payroll run");
-    const decidedInstance = await this.workflow.decide(claims, pendingStep.id, dto);
+    // A workflow that already finished while the run still says "pending approval" (an older decision whose second step never ran)
+    // is brought in line with that decision instead of leaving the run stuck. Nothing new is approved by this: the recorded decision is applied.
+    if (!pendingStep && instance.status !== "approved" && instance.status !== "rejected") {
+      throw new BadRequestException("No pending approval step found on this payroll run");
+    }
+    const decidedInstance = pendingStep ? await this.workflow.decide(claims, pendingStep.id, dto) : instance;
 
     return this.db.withClaims(claims, async (client) => {
       let newStatus = run.status;

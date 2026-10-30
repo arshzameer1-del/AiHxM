@@ -139,11 +139,12 @@ function MyTrips({ employeeId }: { employeeId: string | null }) {
   );
 }
 
-function Approvals() {
+function Approvals({ ownEmployeeId }: { ownEmployeeId: string | null }) {
   const [rows, setRows] = useState<TravelRequestView[] | null>(null);
   const [comment, setComment] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
-  const load = useCallback(() => { api.listPendingTravel().then(setRows).catch(() => setRows([])); }, []);
+  // Your own request is not yours to decide (the server refuses it), so it is not offered here.
+  const load = useCallback(() => { api.listPendingTravel().then((r) => setRows(r.filter((t) => !ownEmployeeId || t.employeeId !== ownEmployeeId))).catch(() => setRows([])); }, [ownEmployeeId]);
   useEffect(load, [load]);
   async function decide(id: string, decision: "approved" | "rejected") {
     setError(null);
@@ -324,7 +325,7 @@ export function TravelPage() {
         ))}
       </div>
       {tab === "mine" && <MyTrips employeeId={identity?.employeeId ?? null} />}
-      {tab === "approvals" && <Approvals />}
+      {tab === "approvals" && <Approvals ownEmployeeId={identity?.employeeId ?? null} />}
       {tab === "manage" && (
         <div>
           <div className="flex gap-3 mb-3 text-sm">

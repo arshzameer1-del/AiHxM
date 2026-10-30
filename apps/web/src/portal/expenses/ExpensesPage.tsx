@@ -315,7 +315,7 @@ function ClaimRow({
 
   return (
     <div className="bg-card rounded-card p-4 shadow-sm">
-      <button onClick={() => setExpanded((v) => !v)} className="w-full flex items-start justify-between gap-4 text-left">
+      <button type="button" aria-expanded={expanded} aria-label={`${employeeName}, ${EXPENSE_CATEGORY_LABELS[claim.category]}, ${formatAmount(claim.amount, claim.currency)}, ${EXPENSE_STATUS_LABELS[claim.status]}`} onClick={() => setExpanded((v) => !v)} className="w-full flex items-start justify-between gap-4 text-left">
         <div>
           <div className="font-medium text-sm">
             {employeeName}
