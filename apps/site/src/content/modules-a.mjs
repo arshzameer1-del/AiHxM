@@ -2,7 +2,7 @@
 // An item written "Name|setup" carries that status; no bar means available. All sample data in previews is fictional.
 export default [
   {
-    slug: "core-hr", name: "Core HR", group: "People", icon: "core-hr", interest: "core-hr", shot: "employees",
+    slug: "core-hr", name: "Core HR & Employee Management", group: "People", icon: "core-hr", interest: "core-hr", shot: "employees",
     short: "One complete record for every employee, from hire to exit.",
     benefit: "One trusted employee record that every other module reads from.",
     h1: "Every employee, one record you can trust",
@@ -50,7 +50,7 @@ export default [
     mock: { title: "Today", rows: [["Clocked in", "9:04 AM"], ["Shift", "General 9:00 to 6:00"], ["Status", "Late by 4 min", "warn"], ["This week", "31h 40m"]], foot: "Sample data" },
     problems: [["Forgotten clock-outs", "Open punches distort hours and pay."], ["Overtime disputes", "Nobody agrees how much was approved."], ["Manual timesheets", "Weekly sheets are retyped from notes."]],
     caps: [
-      { t: "Recording time", items: ["Web Clock-In", "Web Clock-Out", "Shift Management", "Auto Clock-Out", "Biometric Punch Intake|setup", "Device Punch Intake|setup"] },
+      { t: "Recording time", items: ["Web Clock-In", "Web Clock-Out", "Shift Management", "Auto Clock-Out", "Biometric Punch Intake|integration", "Device Punch Intake|integration"] },
       { t: "Results and corrections", items: ["Late Arrival Management", "Absence Management", "Attendance Corrections", "On-Duty Requests"] },
       { t: "Overtime and timesheets", items: ["Overtime Management", "Overtime Caps", "Pre-Approval", "Weekly Timesheets", "Attendance Reports"] },
     ],
@@ -162,7 +162,7 @@ export default [
     config: ["Create review cycles", "Choose participants", "Set timelines", "Control who sees results"],
     related: ["talent", "compensation", "learning"],
     note: "The rating scale is fixed. 360-degree feedback and improvement plans are not part of the product yet.",
-    faqs: [["Can we run 360 reviews?", "Not yet. Reviews cover self and manager assessments, calibration and feedback."], ["Can ratings feed pay?", "Compensation cycles can use approved outcomes, applied only by an explicit action."], ["Is there a record of past reviews?", "Yes. Cycles and results are kept per employee."]],
+    faqs: [["What do reviews cover?", "Self and manager assessments, calibration and feedback."], ["Can ratings feed pay?", "Compensation cycles can use approved outcomes, applied only by an explicit action."], ["Is there a record of past reviews?", "Yes. Cycles and results are kept per employee."]],
   },
   {
     slug: "talent", name: "Talent Management", group: "Talent", icon: "talent", interest: "other", shot: null,
@@ -190,7 +190,7 @@ export default [
     benefit: "Salary revisions planned, approved and applied deliberately.",
     h1: "Plan increments, approve them, then apply them on purpose",
     lede: "Open an increment cycle, propose revisions, route them for approval and apply approved changes to payroll with an explicit action. Nothing reaches a payslip automatically.",
-    mock: { title: "Increment cycle", rows: [["Proposals", "62"], ["Approved", "48", "ok"], ["Waiting", "14", "warn"], ["Applied to payroll", "Not yet", "info"]], foot: "Sample data" },
+    mock: { title: "Increment cycle", rows: [["Proposals", "62"], ["Approved", "48", "ok"], ["Waiting", "14", "warn"], ["Applied to payroll", "On approval", "info"]], foot: "Sample data" },
     problems: [["Revisions in spreadsheets", "Proposals and approvals live in email."], ["Changes slip into payroll", "Nobody knows which revisions were applied."], ["No history", "Past increments are hard to find."]],
     caps: [
       { t: "Planning", items: ["Increment Cycles", "Salary Revision Planning"] },
@@ -222,6 +222,6 @@ export default [
     config: ["Course catalogue", "Mandatory rules by group", "Reminder timing"],
     related: ["talent", "onboarding-offboarding", "performance"],
     note: "Certificate expiry tracking is not built.",
-    faqs: [["Can courses be assigned automatically?", "Yes, mandatory courses are assigned by rule."], ["Do you track certificates?", "Completion is tracked. Certificate expiry is not yet."], ["Can employees enrol themselves?", "Yes, from the catalogue."]],
+    faqs: [["Can courses be assigned automatically?", "Yes, mandatory courses are assigned by rule."], ["Is completion tracked?", "Yes. Completion is tracked per employee and course."], ["Can employees enrol themselves?", "Yes, from the catalogue."]],
   },
 ];

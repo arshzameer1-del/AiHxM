@@ -45,6 +45,6 @@ export const pakistan = [
     blocks: [
       { t: "Payments", items: ["Payment batches", "Company-defined bank file formats", "Payment reconciliation", "Accounting journal export"] },
     ],
-    notes: ["AiHxM does not include ready-made layouts for named banks or instant-payment schemes. Your company defines the layout its bank accepts.", "Only the last four digits of an account number appear in payment advice reports."],
+    notes: ["Your company defines the file layout its bank accepts, so payments follow your bank's requirements.", "Only the last four digits of an account number appear in payment advice reports."],
     cards: ["pakistan-hrms", "pakistan-payroll", "pakistan-attendance-holidays"], module: "payroll" },
 ];

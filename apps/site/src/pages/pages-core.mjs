@@ -1,8 +1,9 @@
 // Product, hub, solution, industry, service and Pakistan pages. All content comes from src/content.
+import { supportTiersBlock } from "./pages-trust.mjs";
 import { site } from "../site.config.mjs";
 import { icon } from "../lib/icons.mjs";
 import { esc, btn, demoCta, breadcrumbs, breadcrumbLd, frame, mock, featureGrid, statusLegend, faqBlock, faqLd, cardGrid, linkCard, pairCards, steps, ticks, section, ctaBand, notice } from "../lib/ui.mjs";
-import { modules, moduleGroups, groupBlurb, modulePath, solutions, industries, services, pakistan, solutionPath, industryPath, servicePath } from "../content/catalog.mjs";
+import { modules, moduleGroups, groupBlurb, modulePath, parseItem, solutions, industries, services, pakistan, solutionPath, industryPath, servicePath } from "../content/catalog.mjs";
 import { servicesIntro } from "../content/services.mjs";
 import { flags } from "../content/flags.mjs";
 
@@ -20,7 +21,7 @@ export function modulePage(m, i, A) {
   <div class="btn-row">${demoCta("Book a Personalized Demo", m.interest)}${btn("#capabilities", "See capabilities", "ghost")}</div></div>
   ${visual}</div></section>
 ${section({ eyebrow: "The problem", title: "What this solves", body: pairCards(m.problems) })}
-${section({ cls: "alt", id: "capabilities", eyebrow: "Capabilities", title: `What ${m.name} includes`, intro: "Every capability is labelled with its status so you know what works today.", wide: true, body: `${featureGrid(m.caps)}${statusLegend()}${m.note ? notice(`<strong>Good to know.</strong> ${esc(m.note)}`) : ""}` })}
+${section({ cls: "alt", id: "capabilities", eyebrow: "Capabilities", title: `What ${m.name} includes`, intro: "What the module covers, grouped by the job it does.", wide: true, body: featureGrid(m.caps) })}
 ${section({ eyebrow: "How it works", title: m.flowTitle, body: steps(m.flow, m.flowTitle) })}
 ${section({ cls: "alt", eyebrow: "In practice", title: "Practical use cases", body: pairCards(m.cases, "cases") })}
 <section class="section"><div class="wrap two-col"><div><p class="eyebrow">Business benefits</p><h2 class="reveal">Why it matters</h2>${pairCards(m.benefits, "stack").replace("grid g3", "stack")}</div><div><p class="eyebrow">Configuration</p><h2 class="reveal">Set it up your way</h2>${ticks(m.config)}</div></div></section>
@@ -46,7 +47,7 @@ export function platformPage(A) {
     title: "Complete HRMS Platform | HR, Payroll and Attendance Software | AiHxM",
     description: `One connected HRMS with ${modules.length} product areas: core HR, leave, attendance, payroll, workflows, recruitment, performance, talent, learning, reports and a configuration centre.`,
     body: `<section class="phero t-purple v-a"><div class="bg-grid" aria-hidden="true"></div><div class="wrap phero-grid"><div class="phero-copy">${breadcrumbs(trail)}<p class="eyebrow">Complete HRMS</p><h1>One employee record. ${modules.length} connected product areas.</h1><p class="lead">AiHxM brings the whole employee lifecycle into one platform. Change a fact once and leave, attendance, payroll, approvals and reports all see it.</p><div class="btn-row">${demoCta()}${btn("/pakistan-hrms/", "HRMS for Pakistan", "ghost")}</div></div><div class="hero-visual">${frame({ ...A.shot("employees"), alt: "The AiHxM employee workspace from a demonstration company", eager: true })}</div></div></section>
-${groups}${section({ eyebrow: "Honest labels", title: "Every capability shows its status", intro: "Some features work as soon as you start, some need your own data or devices, and some are still being built. The product pages say which.", body: statusLegend() })}${ctaBand()}`,
+${groups}${ctaBand()}`,
     jsonld: [breadcrumbLd(trail, site), { "@context": "https://schema.org", "@type": "SoftwareApplication", name: "AiHxM", applicationCategory: "BusinessApplication", operatingSystem: "Web", description: site.description }],
   };
 }
@@ -93,6 +94,7 @@ export function servicePageFor(s) {
     body: `<section class="phero t-plum v-a"><div class="bg-grid" aria-hidden="true"></div><div class="wrap phero-grid"><div class="phero-copy">${breadcrumbs(trail)}<p class="eyebrow">Services · ${esc(s.name)}</p><h1>${esc(s.h1)}</h1><p class="lead">${esc(s.lede)}</p><div class="btn-row">${btn("/book-a-demo/?type=consultation", "Request a Consultation", "primary")}${btn("/services/", "All services", "ghost")}</div></div><div class="hero-visual solo"><div class="big-ico" aria-hidden="true">${icon(s.icon)}</div></div></div></section>
 ${section({ eyebrow: "What this covers", title: "Activities in this service", body: ticks(s.items) })}
 ${section({ cls: "alt", eyebrow: "How it runs", title: "Typical stages", body: steps(s.steps, "Service stages") })}
+${s.slug === "support" ? supportTiersBlock() : ""}
 ${section({ eyebrow: "Related", title: "Related product areas", body: cardGrid(s.related) })}
 ${section({ cls: "alt", body: notice(`<strong>Scope and fees.</strong> ${esc(servicesIntro)}`) })}
 ${ctaBand({ title: "Talk to us about this service", text: "Tell us about your organisation and what you want to achieve." })}`, jsonld: [breadcrumbLd(trail, site)] };
@@ -105,7 +107,8 @@ export function pakistanPageFor(p, A) {
   const body = `
 <section class="phero t-plum v-a pk-hero"><div class="bg-grid" aria-hidden="true"></div><div class="wrap phero-grid"><div class="phero-copy">${breadcrumbs(trail)}<p class="eyebrow">Pakistan · ${esc(p.name)}</p><h1>${esc(p.h1)}</h1><p class="lead">${esc(p.lede)}</p><div class="btn-row">${demoCta("Book a Personalized Demo", "pakistan-payroll")}${p.module ? btn(`/platform/${p.module}/`, `${modules.find((m) => m.slug === p.module).name} module`, "ghost") : ""}</div></div>${shot ? `<div class="hero-visual">${frame({ ...shot, alt: "A demonstration-company screen from AiHxM", eager: true })}</div>` : `<div class="hero-visual solo"><div class="big-ico" aria-hidden="true">${icon(p.icon)}</div></div>`}</div></section>
 ${p.blocks.map((b, i) => section({ cls: i % 2 ? "alt" : "", eyebrow: "In the product", title: b.t, body: ticks(b.items) })).join("")}
-${p.notes ? section({ cls: "alt", eyebrow: "Honest notes", title: "What AiHxM does and does not do", body: p.notes.map((n) => notice(esc(n))).join("") }) : ""}
+${p.slug === "pakistan-payroll" ? section({ eyebrow: "Implementation", title: "Setting it up properly", body: `<p class="lead reveal">Payroll is where mistakes are expensive. See how a Pakistan payroll project runs, who provides which figures and how the parallel check works.</p><div class="btn-row reveal">${btn("/pakistan-hrms/payroll-implementation/", "Pakistan payroll implementation", "primary")}</div>` }) : ""}
+${p.notes ? section({ cls: "alt", eyebrow: "Scope", title: "How AiHxM fits your process", body: p.notes.map((n) => notice(esc(n))).join("") }) : ""}
 ${section({ eyebrow: "Keep exploring", title: "More for Pakistan", body: cardGrid(p.cards) })}
 ${ctaBand({ title: "Run payroll the Pakistani way", interest: "pakistan-payroll" })}`;
   return { path: p.path, title: p.title, description: p.desc, body, jsonld: [breadcrumbLd(trail, site)] };

@@ -1,0 +1,48 @@
+// Pakistan Payroll Implementation service. No statutory rate, slab, wage base or date is stated: the customer's accountant
+// confirms each figure and AiHxM enters it. No filing with FBR, EOBI or a provincial body is claimed.
+export const pkWorkstreams = [
+  { name: "Tax year setup", status: "available",
+    ours: "Create the July-to-June tax year in the payroll calendar and open the periods.",
+    you: "Confirm the first payroll period and any mid-year start.",
+    acct: "Confirm the year and any opening balances carried in from a previous system." },
+  { name: "Salary structures", status: "available",
+    ours: "Build salary components, formulas, allowances and deductions from your pay policy.",
+    you: "Provide current structures, grades and sample payslips.",
+    acct: "Confirm which components are taxable and which are exempt." },
+  { name: "Salary tax configuration", status: "setup",
+    ours: "Enter the tax slabs, profiles and exemptions you provide, with effective dates, and set up cumulative calculation.",
+    you: "Provide the figures your accountant confirms.",
+    acct: "Supply and own the slabs, rates and exemptions for each tax year." },
+  { name: "EOBI configuration", status: "setup",
+    ours: "Enter the wage base and rates you provide as dated settings and calculate employee and employer amounts.",
+    you: "Provide the settings and each employee's EOBI information.",
+    acct: "Confirm the current wage base and rates." },
+  { name: "Provincial social security", status: "setup",
+    ours: "Enter the contribution settings for the province or provinces you operate in.",
+    you: "Tell us which locations fall under which scheme.",
+    acct: "Confirm the applicable scheme, rates and thresholds." },
+  { name: "Bank payment file", status: "partial",
+    ours: "Set up a company-defined file layout that matches what your bank accepts, and reconcile payments.",
+    you: "Obtain the file format from your bank and test it with the bank.",
+    acct: "" },
+  { name: "Parallel testing", status: "service",
+    ours: "Run payroll in AiHxM alongside your current process and show every difference with its calculation.",
+    you: "Provide the current payroll's results and decide which differences are right.",
+    acct: "Review the differences that involve tax or contributions." },
+  { name: "Accountant validation", status: "service",
+    ours: "Prepare the calculation evidence your accountant needs: payslips with stored calculations and statutory reports.",
+    you: "Arrange the review and share the questions it raises.",
+    acct: "Validate tax and contribution results before you go live. This is your accountant's sign-off, not ours." },
+  { name: "Annual statutory review", status: "setup",
+    ours: "At each tax-year change, update the dated settings you provide and re-check a sample payroll.",
+    you: "Tell us when rates or rules change.",
+    acct: "Provide the new year's figures and confirm the result." },
+];
+export const pkStatusLabel = { service: ["Service step", "setup"] };
+
+export const pkLimits = [
+  "AiHxM does not give tax or legal advice. Your accountant or tax adviser confirms every rate and rule.",
+  "AiHxM does not file returns or statements with FBR, EOBI or any provincial body. Reports are produced as files for you to use.",
+  "The payment file layout is defined with your bank, so it follows what your bank accepts.",
+  "No rates are pre-loaded. A new company starts empty and enters its own, so nothing can silently go out of date.",
+];

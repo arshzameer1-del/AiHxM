@@ -2,13 +2,14 @@
 // module, article or service appears in navigation, cards, related links, sitemap and search without editing templates.
 import a from "./modules-a.mjs";
 import b from "./modules-b.mjs";
+import c from "./modules-c.mjs";
 import { solutions, industries } from "./audiences.mjs";
 import { services } from "./services.mjs";
 import { pakistan } from "./pakistan.mjs";
 import { articles, categories } from "./articles.mjs";
 import { flags, statusOf } from "./flags.mjs";
 
-export const modules = [...a, ...b];
+export const modules = [...a, ...b, ...c];
 export const moduleGroups = ["People", "Time", "Pay", "Talent", "Experience", "Platform", "Insight"];
 export const groupBlurb = {
   People: "Records, structure and the employee journey",

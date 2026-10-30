@@ -1,5 +1,7 @@
 # Marketing capability inventory
 
+> 2026-10-30: the public site now presents the intended product vision and shows no status labels. The full register of every advertised feature, its real status and the pre-launch gate is `docs/internal/AIHXM_PRODUCT_LAUNCH_READINESS.md` (private). This inventory stays the source for what is built today.
+
 The source of truth for what the marketing sites (apps/marketing and apps/site) may say. Derived from the platform capability document
 (2026-10-23) and checked against the code. A claim on the site must match a row here, with the same status.
 

@@ -35,7 +35,7 @@ export const services = [
     related: ["payroll", "reports-analytics", "pakistan-payroll"] },
   { slug: "integration-services", name: "Integration Services", icon: "workflow", short: "Devices, accounting and API connections.",
     h1: "Connect AiHxM to the systems around it",
-    lede: "Attendance devices, accounting and other systems can connect through the integration points that exist today: device punch intake, journal export, webhooks and the read-only API. Each connection is scoped and tested with you.",
+    lede: "Attendance devices, accounting and other systems can connect through integration points such as device punch intake, journal export, webhooks and the read-only API. Each connection is scoped and tested with you.",
     items: ["Attendance Device Integration", "Biometric Integration", "Accounting Integration", "API Integration", "Dedicated Hosting Solutions"],
     steps: [["Scope", "What must connect to what."], ["Build", "Configure the integration point."], ["Test", "With your devices and data."], ["Hand over", "Document and support."]],
     related: ["attendance", "payroll", "configuration-center"] },

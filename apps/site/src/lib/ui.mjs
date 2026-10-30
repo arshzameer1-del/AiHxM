@@ -1,6 +1,6 @@
 // Shared building blocks. Every function returns an HTML string. Text is escaped with esc() unless a function says it takes HTML.
 import { icon } from "./icons.mjs";
-import { STATUS, flags } from "../content/flags.mjs";
+import { STATUS, STATUS_ORDER, flags } from "../content/flags.mjs";
 import { resolve, parseItem } from "../content/catalog.mjs";
 
 export const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -9,13 +9,14 @@ export const logoMark = (id = "m") => `<svg viewBox="0 0 32 32" fill="none" aria
 export const brandLink = (id, cls = "") => `<a class="brand ${cls}" href="/" aria-label="AI HXM home">${logoMark(id)}<span>AI HXM</span></a>`;
 
 export const chip = (status) => {
+  if (!flags.showStatusLabels) return "";
   const s = STATUS[status] || STATUS.available;
   return `<span class="chip ${s.tone}">${s.label}</span>`;
 };
 
-export const statusLegend = () =>
-  `<ul class="legend" aria-label="What the status labels mean">${["available", "setup", "partial", ...(flags.showUpcoming ? ["upcoming"] : [])]
-    .map((k) => `<li>${chip(k)}<span>${{ available: "works in the product today", setup: "works once your company enters its own data, rates or devices", partial: "some of it works", upcoming: "planned, not in the product yet" }[k]}</span></li>`)
+export const statusLegend = (only) =>
+  !flags.showStatusLabels ? "" : `<ul class="legend" aria-label="What the status labels mean">${STATUS_ORDER.filter((k) => (!only || only.includes(k)) && (k !== "upcoming" || flags.showUpcoming))
+    .map((k) => `<li>${chip(k)}<span>${esc(STATUS[k].means)}</span></li>`)
     .join("")}</ul>`;
 
 export const btn = (href, label, kind = "primary", extra = "") => `<a class="btn btn-${kind}" href="${esc(href)}"${extra}>${esc(label)}</a>`;
@@ -75,8 +76,8 @@ export const ticks = (items) => `<ul class="ticks">${items.map((i) => `<li>${ico
 export const section = ({ id, cls = "", eyebrow, title, srTitle, intro, body, wide = false }) =>
   `<section class="section ${cls}"${id ? ` id="${id}"` : ""}><div class="wrap${wide ? " wide" : ""}">${eyebrow ? `<p class="eyebrow">${esc(eyebrow)}</p>` : ""}${title ? `<h2 class="reveal">${esc(title)}</h2>` : srTitle ? `<h2 class="sr">${esc(srTitle)}</h2>` : ""}${intro ? `<p class="lead reveal">${esc(intro)}</p>` : ""}${body || ""}</div></section>`;
 
-export const ctaBand = ({ title = "Ready to Transform Your HR Operations?", text = "Book a personalised demo and see AiHxM set up around the way your business works.", interest = "" } = {}) =>
-  `<section class="section"><div class="wrap"><div class="cta-band reveal"><div class="orb o1" aria-hidden="true"></div><div class="orb o2" aria-hidden="true"></div><div class="cta-copy"><h2>${esc(title)}</h2><p>${esc(text)}</p></div><div class="btn-row">${btn(`/book-a-demo/${interest ? `?interest=${interest}` : ""}`, "Book Your AIHXM Demo", "light")}${btn("/platform/", "Explore the Platform", "outline-light")}</div></div></div></section>`;
+export const ctaBand = ({ title = "Ready to Transform Your HR Operations?", text = "Book a personalised demo and see AiHxM set up around the way your business works.", interest = "", primary = "Book Your AIHXM Demo", primaryHref = "", second = ["/platform/", "Explore the Platform"] } = {}) =>
+  `<section class="section"><div class="wrap"><div class="cta-band reveal"><div class="orb o1" aria-hidden="true"></div><div class="orb o2" aria-hidden="true"></div><div class="cta-copy"><h2>${esc(title)}</h2><p>${esc(text)}</p></div><div class="btn-row">${btn(primaryHref || `/book-a-demo/${interest ? `?interest=${interest}` : ""}`, primary, "light")}${btn(second[0], second[1], "outline-light")}</div></div></div></section>`;
 
 export const notice = (html, tone = "info") => `<aside class="notice ${tone}" role="note">${html}</aside>`;
 

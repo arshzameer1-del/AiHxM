@@ -137,6 +137,11 @@ for (const f of htmlFiles) {
       fail(page, `${label}: "…${claimText.slice(Math.max(0, at - 50), at + 70)}…"`);
     }
   }
+  // Readiness stays internal: no public page may show a development-status label or an engineering limitation.
+  for (const [re, label] of [[/\b(?:in development|partially available|partly built|partially implemented|requires external integration|coming soon)\b/i, "internal status wording"], [/class="chip (?:soon|part|dev|integ)"/, "status chip"], [/\b(?:not built|not yet built|no provider is connected|is not implemented|under construction)\b/i, "engineering limitation wording"]]) {
+    const mm = visible.match(re) || html.match(re);
+    if (mm) fail(page, `${label}: "${mm[0]}"`);
+  }
   for (const re of [RATE, RATE_AFTER]) {
     const mm = visible.match(re);
     if (mm) fail(page, `statutory rate stated: "${mm[0].slice(0, 120)}"`);
@@ -150,6 +155,7 @@ const sitemap = readFileSync(join(dist, "sitemap.xml"), "utf8");
 const locs = (sitemap.match(/<loc>/g) || []).length;
 if (locs !== htmlFiles.length - 1) problems.push(`sitemap has ${locs} URLs for ${htmlFiles.length - 1} pages`);
 try { JSON.parse(readFileSync(join(dist, "search-index.json"), "utf8")); } catch { problems.push("search-index.json is not valid JSON"); }
+if (walk(dist).some((f) => /LAUNCH_READINESS/i.test(f))) problems.push("internal readiness register found in dist");
 const headers = readFileSync(join(dist, "_headers"), "utf8");
 if (!/Content-Security-Policy/.test(headers) || /script-src[^;]*unsafe-inline/.test(headers)) problems.push("CSP missing or allows inline scripts");
 

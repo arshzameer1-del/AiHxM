@@ -10,6 +10,7 @@ import { modules, solutions, industries, services, pakistan, articles } from "..
 import home from "../src/pages/home.mjs";
 import * as core from "../src/pages/pages-core.mjs";
 import * as ps from "../src/pages/pages-site.mjs";
+import * as tr from "../src/pages/pages-trust.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const src = join(root, "src");
@@ -47,7 +48,16 @@ const jsBuf = readFileSync(join(src, "app.js"));
 const jsHash = createHash("sha256").update(jsBuf).digest("hex").slice(0, 10);
 writeFileSync(join(dist, `assets/app.${jsHash}.js`), jsBuf);
 
+function addScript(name) {
+  const buf = readFileSync(join(src, name));
+  const hash = createHash("sha256").update(buf).digest("hex").slice(0, 10);
+  const base = name.replace(/\.js$/, "");
+  writeFileSync(join(dist, `assets/${base}.${hash}.js`), buf);
+  return `/assets/${base}.${hash}.js`;
+}
 const shared = {
+  estimatorJs: addScript("estimator.js"),
+  playgroundJs: addScript("playground.js"),
   css: `/assets/site.${cssHash}.css`,
   js: `/assets/app.${jsHash}.js`,
   font,
@@ -83,12 +93,18 @@ const pages = [
   ...ps.categoryKeys().map((k) => ps.categoryPageFor(k)),
   ps.knowledgeCenter(),
   ps.faqPage(),
-  ps.pricingPage(),
+  tr.pricingPage(),
+  tr.estimatorPage(A),
+  tr.trustCenter(),
+  tr.implementationPage(),
+  tr.pkImplementationPage(A),
+  tr.playgroundPage(A),
+  ...(tr.publishedCaseStudies().length ? [tr.caseStudiesIndex(), ...tr.publishedCaseStudies().map(tr.caseStudyPage)] : []),
   ps.integrationsPage(),
   ps.aboutPage(),
   ps.contactPage(),
   ps.demoPage(),
-  ps.securityPage(),
+  tr.securityPage(),
   ps.privacyPage(),
   ps.termsPage(),
 ];
@@ -109,7 +125,7 @@ writeFileSync(join(dist, "404.html"), renderPage(ps.notFound(), shared));
 
 // ---- search index (used by the site search dialog) ----
 const kind = (path) =>
-  path.startsWith("/platform/") ? "Product" : path.startsWith("/solutions/") ? "Solution" : path.startsWith("/industries/") ? "Industry" : path.startsWith("/services/") ? "Service" : path.startsWith("/pakistan-hrms/") ? "Pakistan" : path.startsWith("/resources/blog/") ? "Article" : path.startsWith("/resources/") ? "Resource" : "Page";
+  path.startsWith("/platform/") ? "Product" : path.startsWith("/solutions/") ? "Solution" : path.startsWith("/industries/") ? "Industry" : path.startsWith("/services/") ? "Service" : path.startsWith("/pakistan-hrms/") ? "Pakistan" : path.startsWith("/resources/blog/") ? "Article" : path.startsWith("/resources/") ? "Resource" : ["/trust/", "/security/"].includes(path) ? "Trust" : ["/pricing/", "/pricing/estimator/", "/implementation/", "/playground/"].includes(path) ? "Guide" : "Page";
 const searchable = pages.filter((p) => !p.noindex && !["/privacy/", "/terms/"].includes(p.path) && !p.path.includes("/category/"));
 writeFileSync(join(dist, "search-index.json"), JSON.stringify(searchable.map((p) => ({ t: p.title.replace(/ \| AiHxM$/, ""), u: p.path, d: p.description, k: kind(p.path) }))));
 

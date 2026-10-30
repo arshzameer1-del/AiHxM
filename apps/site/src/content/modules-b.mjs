@@ -18,7 +18,7 @@ export default [
     config: ["Approval steps", "Currency", "Who can approve travel"],
     related: ["workflows", "payroll", "core-hr"],
     note: "Expense categories are free text for now, with no per-category limits or mileage rules.",
-    faqs: [["Can expenses be reimbursed through payroll?", "Yes. An approved claim can be marked to reimburse in payroll."], ["Are receipts required?", "Receipts can be uploaded with each claim."], ["Are there spending limits per category?", "Not yet."]],
+    faqs: [["Can expenses be reimbursed through payroll?", "Yes. An approved claim can be marked to reimburse in payroll."], ["Are receipts required?", "Receipts can be uploaded with each claim."]],
   },
   {
     slug: "onboarding-offboarding", name: "Onboarding & Offboarding", group: "People", icon: "onboarding", interest: "other", shot: null,
@@ -38,7 +38,7 @@ export default [
     config: ["Checklist templates", "Task owners", "Exit finalisation rules"],
     related: ["recruitment", "asset-management", "documents-agreements"],
     note: "Multi-step clearance chains are not built; clearance is tracked as checklist items.",
-    faqs: [["Can we have different checklists for different roles?", "Yes, with separate templates."], ["Does offboarding track assets?", "Assigned assets appear in the asset register so they can be recovered."], ["Is there a multi-department clearance chain?", "Not yet. Clearance items are tracked on the checklist."]],
+    faqs: [["Can we have different checklists for different roles?", "Yes, with separate templates."], ["Does offboarding track assets?", "Assigned assets appear in the asset register so they can be recovered."]],
   },
   {
     slug: "surveys-engagement", name: "Surveys & Engagement", group: "Experience", icon: "surveys", interest: "other", shot: null,
@@ -96,7 +96,7 @@ export default [
     config: ["Categories", "First-reply targets", "Who handles each"],
     related: ["employee-self-service", "workflows", "documents-agreements"],
     note: "Full SLA escalation rules are not built; clocks and ageing are tracked.",
-    faqs: [["Are there response-time targets?", "You set a first-reply target per category. The product tracks it; it is your own target."], ["Can requests be categorised?", "Yes."], ["Does it escalate automatically?", "Not yet."]],
+    faqs: [["Are there response-time targets?", "You set a first-reply target per category. The product tracks it; it is your own target."], ["Can requests be categorised?", "Yes."]],
   },
   {
     slug: "documents-agreements", name: "Documents & Agreements", group: "Platform", icon: "documents", interest: "other", shot: null,
@@ -192,7 +192,7 @@ export default [
     config: ["What employees can see", "Home page tiles", "Language"],
     related: ["manager-self-service", "core-hr", "leave"],
     note: "Installable on Android and iPhone as a web app (PWA). Native app-store apps are not built. The interface has an English and Urdu switcher; many screens are still English.",
-    faqs: [["Can employees view payslips?", "Yes, once payslips are published."], ["Is there a mobile app?", "An installable web app is available. Native store apps are not yet."], ["Is Urdu supported?", "Navigation and main screens can be switched to Urdu; many pages are English only."]],
+    faqs: [["Can employees view payslips?", "Yes, once payslips are published."], ["Is there a mobile app?", "Yes. AiHxM installs on Android and iPhone from the browser and works like an app."], ["Is Urdu supported?", "The interface includes an English and Urdu switcher on main screens."]],
   },
   {
     slug: "manager-self-service", name: "Manager Self-Service", group: "Experience", icon: "manager", interest: "self-service", shot: null,

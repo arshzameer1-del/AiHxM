@@ -6,7 +6,10 @@ const clean = (v) => (v || "").trim();
 export const site = {
   name: "AiHxM",
   display: "AI HXM",
-  legalName: "AiHxM", // replace with the registered company name once confirmed
+  legalName: clean(env.MARKETING_LEGAL_NAME) || "AiHxM", // set MARKETING_LEGAL_NAME to the registered company name once confirmed
+  regNo: clean(env.MARKETING_REG_NO),
+  address: clean(env.MARKETING_ADDRESS),
+  founder: { name: clean(env.MARKETING_FOUNDER_NAME), role: clean(env.MARKETING_FOUNDER_ROLE), bio: clean(env.MARKETING_FOUNDER_BIO) },
   url: (env.MARKETING_SITE_URL || "https://aihxm.com").replace(/\/+$/, ""),
   appUrl: (env.MARKETING_APP_URL || "https://app.aihxm.com").replace(/\/+$/, ""),
   apiUrl: (env.MARKETING_API_URL || "https://api.aihxm.com").replace(/\/+$/, ""),

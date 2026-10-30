@@ -285,7 +285,15 @@
     $$(".prose h2[id]").forEach(function (h) { so.observe(h); });
   }
 
-  /* ---------- lead form (demo, contact, consultation) ---------- */
+  /* ---------- contextual calls to action: tell the form which page the visitor came from ---------- */
+  $$('a[href^="/book-a-demo/"]').forEach(function (a) {
+    if (location.pathname.indexOf("/book-a-demo/") === 0 || location.pathname === "/contact/") return;
+    var href = a.getAttribute("href");
+    if (href.indexOf("from=") >= 0) return;
+    a.setAttribute("href", href + (href.indexOf("?") >= 0 ? "&" : "?") + "from=" + encodeURIComponent(location.pathname));
+  });
+
+  /* ---------- lead form (demo, contact, consultation, quote) ---------- */
   var form = $("#lead-form");
   if (!form) return;
   var api = form.getAttribute("data-api");
@@ -296,12 +304,21 @@
   var submit = $("#form-submit");
   var params = new URLSearchParams(location.search);
 
-  if (kind === "demo" && params.get("type") === "consultation") {
+  var type = params.get("type");
+  var heading = $("#form-title");
+  if (kind === "demo" && type === "consultation") {
     kind = "consultation";
     submit.textContent = "Request consultation";
-    var h = $("#form-title");
-    if (h) h.textContent = "Request a consultation";
+    if (heading) heading.textContent = "Request a consultation";
+  } else if (kind === "demo" && type === "quote") {
+    kind = "quote";
+    submit.textContent = "Request my quote";
+    if (heading) heading.textContent = "Request a quote";
   }
+  // Where the visitor came from and what they built, so the team can reply with context. Plain text only.
+  var from = (params.get("from") || "").replace(/[^a-z0-9\/_.-]/gi, "").slice(0, 120);
+  var scope = (params.get("scope") || "").replace(/[\u0000-\u001f<>]/g, " ").slice(0, 600);
+  if (scope && form.message) form.message.value = scope;
   params.getAll("interest").forEach(function (v) {
     var box = form.querySelector('input[name="interests"][value="' + v.replace(/[^a-z-]/g, "") + '"]');
     if (box) box.checked = true;
@@ -353,7 +370,8 @@
     var interests = $$('input[name="interests"]:checked', form).map(function (c) { return c.value; });
     var extra = $$('input[name="extra"]:checked', form).map(function (c) { return c.value; });
     var method = ($('input[name="method"]:checked', form) || {}).value || "";
-    var lines = ["Request type: " + { demo: "Demo", contact: "Contact message", consultation: "Consultation" }[kind]];
+    var lines = ["Request type: " + { demo: "Demo", contact: "Contact message", consultation: "Consultation", quote: "Quote" }[kind]];
+    if (from) lines.push("Came from: " + from);
     if (form.industry.value) lines.push("Industry: " + form.industry.value);
     if (method) lines.push("Preferred contact: " + method);
     if (extra.length) lines.push("Also interested in: " + extra.join(", "));
@@ -365,7 +383,7 @@
       companyName: v.companyName,
       consentPrivacy: true,
       website: form.website.value,
-      sourcePage: location.pathname,
+      sourcePage: from ? from : location.pathname,
       message: lines.join("\n").slice(0, 2000),
     };
     if (v.phone) body.phone = v.phone;
