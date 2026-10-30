@@ -100,7 +100,7 @@ export function renderPage(p, shared) {
 <link rel="canonical" href="${esc(url)}"><meta name="theme-color" content="#6c5e98">
 <meta property="og:type" content="${p.ogType || "website"}"><meta property="og:site_name" content="${esc(site.name)}"><meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(p.description)}"><meta property="og:url" content="${esc(url)}"><meta property="og:image" content="${esc(ogImg)}"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${esc(title)}"><meta name="twitter:description" content="${esc(p.description)}">
 <link rel="icon" href="${shared.favicon}" type="image/png"><link rel="apple-touch-icon" href="${shared.touch}">
-<link rel="preload" href="${shared.fontBody}" as="font" type="font/woff2" crossorigin><link rel="preload" href="${shared.fontDisplay}" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="${shared.font}" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="${shared.css}">${ld.map(jsonLd).join("")}
 </head><body><script>document.documentElement.classList.add("js")</script>
 <a class="skip" href="#main">Skip to content</a>

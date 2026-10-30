@@ -1,6 +1,5 @@
 /* AiHxM brand website. Tokens first; everything below reads them. Brand colours come from the product itself. */
-@font-face{font-family:"Inter";src:url("/assets/fonts/inter-var.woff2") format("woff2");font-weight:100 900;font-style:normal;font-display:swap}
-@font-face{font-family:"Bricolage";src:url("/assets/fonts/bricolage-var.woff2") format("woff2");font-weight:200 800;font-style:normal;font-display:swap}
+@font-face{font-family:"DM Sans";src:url("/assets/fonts/dm-sans-var.woff2") format("woff2");font-weight:100 1000;font-style:normal;font-display:swap}
 
 :root{
   color-scheme:light;
@@ -14,7 +13,7 @@
   --tone:var(--purple);--tone-2:#8f80c0;--tone-soft:#efeaf7;
   --ok:#0c6b60;--ok-bg:#e1f3f0;--warn:#8a5a00;--warn-bg:#fff2d6;--info:#393b8c;--info-bg:#e8e8f8;--bad:#a3262a;--bad-bg:#fde8e8;
   --r:14px;--r-lg:22px;--shadow:0 1px 2px rgba(42,31,39,.06),0 8px 28px rgba(66,43,60,.09);--shadow-lg:0 18px 60px rgba(66,43,60,.22);
-  --display:"Bricolage","Inter",system-ui,sans-serif;--body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --display:"DM Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--body:"DM Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   --gut:clamp(16px,4vw,32px);--sec:clamp(56px,8vw,104px);--head:68px;
   --ico-fill:#fff;
 }

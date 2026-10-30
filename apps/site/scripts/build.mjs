@@ -31,8 +31,7 @@ function addAsset(absPath, name) {
 }
 
 const dims = JSON.parse(readFileSync(join(src, "assets/screens/dims.json"), "utf8"));
-const fontBody = addAsset(join(src, "assets/fonts/inter-var.woff2"), "inter-var");
-const fontDisplay = addAsset(join(src, "assets/fonts/bricolage-var.woff2"), "bricolage-var");
+const font = addAsset(join(src, "assets/fonts/dm-sans-var.woff2"), "dm-sans-var");
 // Icon motion: each "@IA@ .selector{animation:ia-x ...}" rule runs once when its section scrolls in (.in) and again on hover or
 // keyboard focus of the card it sits in. A hover rule needs a differently named (identical) keyframe so the browser restarts it.
 const HOSTS = ":is(.card,.mm-link,.tile,.life-btn,.plain,.sec-item):is(:hover,:focus-visible)";
@@ -41,7 +40,7 @@ function expandMotion(text) {
   out = out.replace(/^@keyframes (ia-[\w-]+)\{(.*)\}$/gm, (m, name, body) => `${m}\n@keyframes ${name}-h{${body}}`);
   return out;
 }
-const css = expandMotion(readFileSync(join(src, "styles.css"), "utf8")).replace("/assets/fonts/inter-var.woff2", fontBody).replace("/assets/fonts/bricolage-var.woff2", fontDisplay);
+const css = expandMotion(readFileSync(join(src, "styles.css"), "utf8")).replace("/assets/fonts/dm-sans-var.woff2", font);
 const cssHash = createHash("sha256").update(css).digest("hex").slice(0, 10);
 writeFileSync(join(dist, `assets/site.${cssHash}.css`), css);
 const jsBuf = readFileSync(join(src, "app.js"));
@@ -51,8 +50,7 @@ writeFileSync(join(dist, `assets/app.${jsHash}.js`), jsBuf);
 const shared = {
   css: `/assets/site.${cssHash}.css`,
   js: `/assets/app.${jsHash}.js`,
-  fontBody,
-  fontDisplay,
+  font,
   favicon: addAsset(join(src, "assets/brand/favicon-32.png"), "favicon"),
   touch: addAsset(join(src, "assets/brand/apple-touch-icon.png"), "apple-touch-icon"),
   logo: addAsset(join(src, "assets/brand/logo-512.png"), "aihxm-logo"),
