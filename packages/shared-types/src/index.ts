@@ -10881,3 +10881,99 @@ export interface AnnualSalaryStatementView {
   missingCnicCount: number;
   note: string;
 }
+
+// ---------------------------------------------------------------------------
+// Recognition feed, HR help desk and headcount plans (GAPC3)
+// ---------------------------------------------------------------------------
+export interface RecognitionView {
+  id: string;
+  fromName: string;
+  toName: string;
+  toEmployeeId: string;
+  message: string;
+  valueTag: string | null;
+  givenOn: string;
+  createdAt: string;
+  mine: boolean;
+}
+export interface GiveRecognitionRequest {
+  toEmployeeId: string;
+  message: string;
+  valueTag?: string | null;
+}
+export interface ColleagueView {
+  id: string;
+  name: string;
+  employeeNumber: string;
+}
+
+export type HelpdeskTicketStatus = "open" | "waiting_on_employee" | "resolved";
+export interface HelpdeskCategoryView {
+  id: string;
+  name: string;
+  slaHours: number | null;
+  isActive: boolean;
+}
+export interface HelpdeskMessageView {
+  id: string;
+  fromHr: boolean;
+  authorName: string;
+  body: string;
+  createdAt: string;
+}
+export interface HelpdeskTicketView {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  categoryName: string | null;
+  subject: string;
+  status: HelpdeskTicketStatus;
+  slaHours: number | null;
+  respondBy: string | null;
+  firstResponseAt: string | null;
+  /** waiting for a first reply and past the target time */
+  responseOverdue: boolean;
+  /** whole hours since it was raised (still open) or until it was resolved */
+  ageHours: number;
+  createdAt: string;
+  resolvedAt: string | null;
+  messages?: HelpdeskMessageView[];
+}
+export interface RaiseHelpdeskTicketRequest {
+  categoryId?: string | null;
+  subject: string;
+  body: string;
+}
+export interface HelpdeskSummaryView {
+  open: number;
+  waitingOnEmployee: number;
+  overdue: number;
+  resolvedLast30Days: number;
+  averageFirstResponseHours: number | null;
+}
+
+export interface HeadcountPlanLineView {
+  orgUnitId: string;
+  orgUnitName: string;
+  plannedCount: number;
+  actualCount: number;
+  difference: number;
+  openRequisitionPositions: number;
+  note: string | null;
+}
+export interface HeadcountPlanView {
+  id: string;
+  name: string;
+  fiscalYear: string;
+  note: string | null;
+  createdAt: string;
+  lines: HeadcountPlanLineView[];
+  totalPlanned: number;
+  totalActual: number;
+}
+export interface SaveHeadcountPlanRequest {
+  name: string;
+  fiscalYear: string;
+  note?: string | null;
+  lines: Array<{ orgUnitId: string; plannedCount: number; note?: string | null }>;
+}

@@ -595,6 +595,15 @@ import type {
   MySurveyView,
   SaveSurveyRequest,
   SubmitSurveyRequest,
+  ColleagueView,
+  GiveRecognitionRequest,
+  HeadcountPlanView,
+  HelpdeskCategoryView,
+  HelpdeskSummaryView,
+  HelpdeskTicketView,
+  RaiseHelpdeskTicketRequest,
+  RecognitionView,
+  SaveHeadcountPlanRequest,
   AnnualSalaryStatementView,
   LevyWorksheetView,
   MinimumWageRateView,
@@ -3175,6 +3184,32 @@ export const api = {
   finalizeLevyWorksheet: (id: string) => request<LevyWorksheetView>(`/compliance/levies/${id}/finalize`, { method: "POST" }),
   deleteLevyWorksheet: (id: string) => request<void>(`/compliance/levies/${id}`, { method: "DELETE" }),
   getAnnualSalaryStatement: (year: number) => request<AnnualSalaryStatementView>(`/compliance/annual-salary-statement?year=${year}`),
+
+  // Recognition feed
+  getRecognitionFeed: () => request<RecognitionView[]>("/recognition"),
+  searchColleagues: (q: string) => request<ColleagueView[]>(`/recognition/colleagues?q=${encodeURIComponent(q)}`),
+  canModerateRecognition: () => request<{ canModerate: boolean }>("/recognition/can-moderate"),
+  giveRecognition: (input: GiveRecognitionRequest) => request<{ ok: true }>("/recognition", { method: "POST", body: JSON.stringify(input) }),
+  hideRecognition: (id: string) => request<{ ok: true }>(`/recognition/${id}/hide`, { method: "POST" }),
+
+  // HR help desk
+  listHelpdeskCategories: () => request<HelpdeskCategoryView[]>("/helpdesk/categories"),
+  listMyHelpdeskTickets: () => request<HelpdeskTicketView[]>("/helpdesk/mine"),
+  raiseHelpdeskTicket: (input: RaiseHelpdeskTicketRequest) => request<HelpdeskTicketView>("/helpdesk/tickets", { method: "POST", body: JSON.stringify(input) }),
+  getMyHelpdeskTicket: (id: string) => request<HelpdeskTicketView>(`/helpdesk/tickets/${id}/mine`),
+  replyHelpdeskTicket: (id: string, body: string) => request<HelpdeskTicketView>(`/helpdesk/tickets/${id}/reply`, { method: "POST", body: JSON.stringify({ body }) }),
+  resolveHelpdeskTicket: (id: string) => request<HelpdeskTicketView>(`/helpdesk/tickets/${id}/resolve`, { method: "POST" }),
+  getHelpdeskQueue: (status?: string) => request<HelpdeskTicketView[]>(`/helpdesk/queue${status ? `?status=${status}` : ""}`),
+  getHelpdeskTicket: (id: string) => request<HelpdeskTicketView>(`/helpdesk/tickets/${id}`),
+  getHelpdeskSummary: () => request<HelpdeskSummaryView>("/helpdesk/summary"),
+  listHelpdeskCategoriesAdmin: () => request<HelpdeskCategoryView[]>("/helpdesk/categories/admin"),
+  saveHelpdeskCategory: (input: { id?: string; name: string; slaHours?: number | null; isActive?: boolean }) => request<HelpdeskCategoryView[]>("/helpdesk/categories", { method: "POST", body: JSON.stringify(input) }),
+  addStarterHelpdeskCategories: () => request<HelpdeskCategoryView[]>("/helpdesk/categories/starter", { method: "POST" }),
+
+  // Headcount plans
+  listHeadcountPlans: () => request<HeadcountPlanView[]>("/headcount-plans"),
+  createHeadcountPlan: (input: SaveHeadcountPlanRequest) => request<HeadcountPlanView>("/headcount-plans", { method: "POST", body: JSON.stringify(input) }),
+  deleteHeadcountPlan: (id: string) => request<void>(`/headcount-plans/${id}`, { method: "DELETE" }),
 
   // Pulse surveys (anonymous)
   listMySurveys: () => request<MySurveyView[]>("/surveys/mine"),

@@ -183,6 +183,10 @@ const AnnouncementsAdminPage = lazy(() =>
   import("./portal/announcements/AnnouncementsAdminPage").then((m) => ({ default: m.AnnouncementsAdminPage }))
 );
 const SurveysPage = lazy(() => import("./portal/surveys/SurveysPage").then((m) => ({ default: m.SurveysPage })));
+const RecognitionPage = lazy(() => import("./portal/recognition/RecognitionPage").then((m) => ({ default: m.RecognitionPage })));
+const HelpdeskPage = lazy(() => import("./portal/helpdesk/HelpdeskPage").then((m) => ({ default: m.HelpdeskPage })));
+const HelpdeskAdminPage = lazy(() => import("./portal/helpdesk/HelpdeskAdminPage").then((m) => ({ default: m.HelpdeskAdminPage })));
+const HeadcountPlansPage = lazy(() => import("./portal/headcount/HeadcountPlansPage").then((m) => ({ default: m.HeadcountPlansPage })));
 const SurveysAdminPage = lazy(() => import("./portal/surveys/SurveysAdminPage").then((m) => ({ default: m.SurveysAdminPage })));
 const MyHrRequestsPage = lazy(() =>
   import("./portal/requests/MyHrRequestsPage").then((m) => ({
@@ -469,6 +473,8 @@ export default function App() {
                   <Route path="ess/requests" element={<MyHrRequestsPage />} />
                   <Route path="ess/announcements" element={<AnnouncementsPage />} />
                   <Route path="ess/surveys" element={<SurveysPage />} />
+                  <Route path="ess/recognition" element={<RecognitionPage />} />
+                  <Route path="ess/helpdesk" element={<HelpdeskPage />} />
                   <Route path="ess/assets" element={<MyAssetsPage />} />
                   <Route path="assets" element={<AssetRegisterPage />} />
                   <Route path="travel" element={<TravelPage />} />
@@ -500,6 +506,8 @@ export default function App() {
                   <Route path="employees/requests" element={<EmployeeRequestsPage />} />
                   <Route path="employees/announcements" element={<AnnouncementsAdminPage />} />
                   <Route path="employees/surveys" element={<SurveysAdminPage />} />
+                  <Route path="employees/helpdesk" element={<HelpdeskAdminPage />} />
+                  <Route path="employees/headcount" element={<HeadcountPlansPage />} />
                   <Route path="reports" element={<ReportsShell />}>
                     <Route index element={<ReportsOverviewPage />} />
                     <Route path="library" element={<ReportsLibraryPage />} />

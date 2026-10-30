@@ -31,6 +31,9 @@ import { AttendancePenaltiesModule } from "./attendance-penalties/attendance-pen
 import { AnnouncementsModule } from "./announcements/announcements.module";
 import { SurveysModule } from "./surveys/surveys.module";
 import { ComplianceModule } from "./compliance/compliance.module";
+import { RecognitionModule } from "./recognition/recognition.module";
+import { HelpdeskModule } from "./helpdesk/helpdesk.module";
+import { HeadcountModule } from "./headcount/headcount.module";
 import { MessagingModule } from "./messaging/messaging.module";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { RemindersModule } from "./reminders/reminders.module";
@@ -122,6 +125,9 @@ import { HrAdministrationModule } from "./hr-administration/hr-administration.mo
     AnnouncementsModule,
     SurveysModule,
     ComplianceModule,
+    RecognitionModule,
+    HelpdeskModule,
+    HeadcountModule,
     CareersModule,
     AssetsModule,
     TravelModule,

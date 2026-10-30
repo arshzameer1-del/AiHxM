@@ -111,6 +111,8 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[], p
               { to: "/app/employees/requests", label: "Employee Requests" },
               { to: "/app/employees/announcements", label: "Announcements" },
               { to: "/app/employees/surveys", label: "Surveys" },
+              { to: "/app/employees/helpdesk", label: "HR help desk" },
+              { to: "/app/employees/headcount", label: "Headcount plans" },
               { to: "/app/employees/data-consistency", label: "Data Consistency" },
               { to: "/app/employees/smart-checks", label: "Smart Checks" },
             ],
