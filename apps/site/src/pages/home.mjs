@@ -39,10 +39,10 @@ export default function home(A) {
     <div class="orb o1" data-depth="18" aria-hidden="true"></div><div class="orb o2" data-depth="34" aria-hidden="true"></div><div class="orb o3" data-depth="10" aria-hidden="true"></div><div class="sphere" data-depth="26" aria-hidden="true"></div>
     <svg class="net" viewBox="0 0 600 420" aria-hidden="true" focusable="false"><g stroke="currentColor" stroke-width="1" fill="none" opacity=".45"><path class="ia-draw" pathLength="1" d="M70 80L250 150L420 60M250 150L330 300L520 250M70 300L250 150"/></g><g fill="currentColor"><circle cx="70" cy="80" r="3"/><circle cx="250" cy="150" r="4"/><circle cx="420" cy="60" r="3"/><circle cx="330" cy="300" r="3"/><circle cx="520" cy="250" r="3"/><circle cx="70" cy="300" r="3"/></g></svg>
     <div class="stage-main" data-depth="6">${frame({ ...hero, alt: "The AiHxM home page for HR, showing today's attendance, leave balance and pending requests, drawn from a demonstration company", eager: true })}</div>
-    <div class="glass g-a float f1" data-depth="22"><span class="g-ico">${icon("payroll")}</span><div><strong>Payroll run</strong><small>Step 4 of 6 · Approved</small></div></div>
+    <div class="glass g-a float f1" data-depth="22"><span class="g-ico">${icon("payroll")}</span><div><strong>Payroll run</strong><small>Step 4 of 6 · Sample data</small></div></div>
     <div class="glass g-b float f2" data-depth="30"><span class="g-ico">${icon("leave")}</span><div><strong>Leave approved</strong><small>3 days · Sample data</small></div></div>
-    <div class="glass g-c float f3" data-depth="16"><span class="g-ico">${icon("attendance")}</span><div><strong>184 of 190</strong><small>clocked in today</small></div></div>
-    <div class="glass g-d float f4" data-depth="26"><span class="g-ico">${icon("core-hr")}</span><div><strong>2 documents</strong><small>expiring this month</small></div></div>
+    <div class="glass g-c float f3" data-depth="16"><span class="g-ico">${icon("attendance")}</span><div><strong>184 of 190</strong><small>clocked in · Sample data</small></div></div>
+    <div class="glass g-d float f4" data-depth="26"><span class="g-ico">${icon("core-hr")}</span><div><strong>2 documents</strong><small>expiring · Sample data</small></div></div>
   </div>`;
 
   const lifeBtns = lifecycle.map((s, i) => `<button type="button" class="life-btn${i === 0 ? " on" : ""}" role="tab" id="lt-${s.key}" aria-controls="lp-${s.key}" aria-selected="${i === 0}" tabindex="${i === 0 ? 0 : -1}"><span class="life-ico">${icon(s.key)}</span><span>${s.label}</span></button>`).join("");

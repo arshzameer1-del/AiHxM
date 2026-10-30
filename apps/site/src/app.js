@@ -431,3 +431,65 @@
       .then(function () { submit.disabled = false; submit.textContent = label; });
   });
 })();
+
+/* ---- SITE3: reading progress, back to top, link prefetch, image placeholders ---- */
+(function () {
+  "use strict";
+  var doc = document;
+  var bar = doc.getElementById("read-bar");
+  var top = doc.getElementById("to-top");
+  var ticking = false;
+  var longPage = false;
+  function measure() { longPage = doc.documentElement.scrollHeight > (window.innerHeight || 800) * 2.2; }
+  function update() {
+    ticking = false;
+    var y = window.scrollY || 0;
+    var max = doc.documentElement.scrollHeight - (window.innerHeight || 800);
+    if (bar) {
+      bar.classList.toggle("on", longPage && y > 80);
+      bar.firstElementChild.style.setProperty("--p", max > 0 ? Math.min(1, y / max).toFixed(4) : 0);
+    }
+    var past = y > (window.innerHeight || 800) * 1.2;
+    if (top) { top.hidden = false; top.classList.toggle("on", past); top.tabIndex = past ? 0 : -1; top.setAttribute("aria-hidden", past ? "false" : "true"); }
+  }
+  function queue() { if (!ticking) { ticking = true; window.requestAnimationFrame(update); } }
+  measure();
+  update();
+  window.addEventListener("scroll", queue, { passive: true });
+  window.addEventListener("resize", function () { measure(); queue(); });
+  window.addEventListener("load", function () { measure(); queue(); });
+  if (top) top.addEventListener("click", function () {
+    var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    window.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
+    var main = doc.getElementById("main"); if (main) { main.setAttribute("tabindex", "-1"); main.focus({ preventScroll: true }); }
+  });
+
+  /* Fetch a page a moment before it is opened: on hover or keyboard focus (desktop) or first touch. Same-site links only. */
+  var seen = {};
+  var conn = navigator.connection || {};
+  var saveData = conn.saveData || /(^|-)2g$/.test(conn.effectiveType || "");
+  function prefetch(a) {
+    if (saveData || !a || !a.href) return;
+    var u;
+    try { u = new URL(a.href); } catch (e) { return; }
+    if (u.origin !== location.origin || u.pathname === location.pathname || seen[u.pathname] || a.hasAttribute("download") || (a.target && a.target !== "_self")) return;
+    if (!/\/$/.test(u.pathname)) return;
+    seen[u.pathname] = true;
+    var l = doc.createElement("link");
+    l.rel = "prefetch"; l.href = u.pathname; l.as = "document";
+    doc.head.appendChild(l);
+  }
+  var timer = null;
+  function fromEvent(e) { var a = e.target && e.target.closest ? e.target.closest("a") : null; return a; }
+  doc.addEventListener("mouseover", function (e) { var a = fromEvent(e); if (!a) return; clearTimeout(timer); timer = setTimeout(function () { prefetch(a); }, 90); }, { passive: true });
+  doc.addEventListener("mouseout", function () { clearTimeout(timer); }, { passive: true });
+  doc.addEventListener("focusin", function (e) { var a = fromEvent(e); if (a) prefetch(a); });
+  doc.addEventListener("touchstart", function (e) { var a = fromEvent(e); if (a) prefetch(a); }, { passive: true });
+
+  /* Lazy screenshots show a soft placeholder until they arrive; stop the shimmer once loaded. */
+  Array.prototype.forEach.call(doc.querySelectorAll(".frame img"), function (img) {
+    if (img.complete) { img.classList.add("ld"); return; }
+    img.addEventListener("load", function () { img.classList.add("ld"); });
+    img.addEventListener("error", function () { img.classList.add("ld"); });
+  });
+})();

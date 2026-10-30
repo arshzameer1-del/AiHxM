@@ -545,7 +545,7 @@ html:not(.js) .pay-panel[hidden]{display:block;margin-bottom:10px}
   .card,.stage-main{transform:none!important}
   .js .reveal.pre{opacity:1;transform:none}
 }
-@media print{.site-header,.site-footer,.cta-band,.search-dialog{display:none}.reveal{opacity:1!important;transform:none!important}}
+@media print{.site-header,.site-footer,.cta-band,.search-dialog,.to-top,.read-bar,.skip,.filters,.hero .bg-grid,.stage .orb,.stage .sphere,.glass{display:none!important}.reveal,.js .reveal.pre{opacity:1!important;transform:none!important}body{background:#fff;color:#000}a[href^="http"]::after,a[href^="/"]:not(.btn):not(.card):not(.pill)::after{content:""}main a{text-decoration:underline}.frame,.card,.tile,.plain{break-inside:avoid;box-shadow:none!important}h1,h2,h3{break-after:avoid}}
 @media (max-width:560px){.mods .benefit{display:none}.mods .card{padding:18px}.mods .card h3{margin-top:10px}}
 
 /* ---- trust, readiness, pricing, implementation, playground (SITE2) ---- */
@@ -761,3 +761,25 @@ html:not(.js) .pay-panel[hidden]{display:block;margin-bottom:10px}
 }
 @keyframes ab-linev{to{transform:scaleY(1)}}
 @media (max-width:560px){.ab-orbit ul,.ab-areas{grid-template-columns:1fr}.float{display:none}.ab-panel-shot.crop .frame img{height:260px}}
+
+/* ---- SITE3: reading progress, back to top, image placeholders ---- */
+.read-bar{position:fixed;inset:0 0 auto 0;height:3px;z-index:60;pointer-events:none;opacity:0;transition:opacity .2s}
+.read-bar.on{opacity:1}
+.read-bar i{display:block;height:100%;width:100%;transform-origin:0 50%;transform:scaleX(var(--p,0));background:linear-gradient(90deg,var(--purple),var(--magenta))}
+.to-top{position:fixed;right:18px;bottom:18px;z-index:55;width:46px;height:46px;border-radius:50%;border:1px solid var(--line-2);background:#fff;color:var(--plum-d);box-shadow:var(--shadow);display:grid;place-items:center;cursor:pointer;opacity:0;transform:translateY(10px);pointer-events:none;transition:opacity .2s,transform .2s,border-color .2s}
+.to-top.on{opacity:1;transform:none;pointer-events:auto}
+.to-top:hover{border-color:var(--purple)}
+.to-top:focus-visible{outline:3px solid var(--purple);outline-offset:3px}
+.to-top svg{width:18px;height:18px;transform:rotate(-90deg)}
+.frame img{background:linear-gradient(110deg,#f1edf2 30%,#faf8fa 50%,#f1edf2 70%);background-size:200% 100%}
+@media (prefers-reduced-motion:no-preference){.frame img[loading=lazy]:not(.ld){animation:shimmer 1.4s linear infinite}}
+@keyframes shimmer{to{background-position:-200% 0}}
+@media (prefers-reduced-motion:reduce){.to-top,.read-bar{transition:none}}
+.to-top[hidden],.read-bar[hidden]{display:none}
+@media (max-width:560px){
+  .grid.mods{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .mods .card{padding:14px;border-radius:16px}
+  .mods .card p,.mods .card .more{display:none}
+  .mods .card h3{margin:10px 0 0;font-size:.95rem;line-height:1.25}
+  .mods .card .card-ico{width:36px;height:36px}
+}

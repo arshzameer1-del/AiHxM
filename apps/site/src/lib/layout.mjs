@@ -88,6 +88,9 @@ function footer() {
     <p class="foot-bottom">© ${new Date().getFullYear()} ${esc(site.legalName)}. All rights reserved.</p></div></footer>`;
 }
 
+// Floating helper: a "back to top" button. It stays hidden until app.js shows it.
+const floating = () => `<button type="button" class="to-top" id="to-top" aria-label="Back to top" hidden>${icon("arrow")}</button>`;
+
 export function renderPage(p, shared) {
   const url = site.url + p.path;
   const robots = p.noindex || !site.indexable ? '<meta name="robots" content="noindex, nofollow">' : "";
@@ -104,8 +107,10 @@ export function renderPage(p, shared) {
 <link rel="stylesheet" href="${shared.css}">${ld.map(jsonLd).join("")}
 </head><body><script>document.documentElement.classList.add("js")</script>
 <a class="skip" href="#main">Skip to content</a>
+<div class="read-bar" id="read-bar" aria-hidden="true"><i></i></div>
 ${header(p.path)}
 <main id="main">${p.body}</main>
 ${footer()}
+${floating()}
 <script src="${shared.js}" defer></script>${(p.scripts || []).map((u) => `<script src="${u}" defer></script>`).join("")}</body></html>`;
 }
