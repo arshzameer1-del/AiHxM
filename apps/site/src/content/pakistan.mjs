@@ -1,0 +1,50 @@
+// The Pakistan HRMS and payroll experience. Statutory rates are NEVER stated here: they change, they differ by province and
+// tax year, and AiHxM takes them from the company (confirmed with its accountant). No government filing, certification or
+// ready-made named-bank file is claimed.
+export const pakistan = [
+  { slug: "pakistan-hrms", path: "/pakistan-hrms/", name: "HRMS for Pakistan", icon: "core-hr",
+    title: "HRMS Software for Pakistan | AiHxM",
+    desc: "HR, payroll and attendance software built for Pakistani businesses: July-to-June tax year, CNIC and NTN records, EOBI and provincial social security settings, local holiday calendars and PKR payroll.",
+    h1: "HR and payroll built around how Pakistani businesses work",
+    lede: "AiHxM understands the tax year, the identity numbers, the holidays and the payment habits of Pakistani companies. The rules that change each year stay in your hands, confirmed with your accountant, so the system never drifts out of date silently.",
+    blocks: [
+      { t: "Records that fit", items: ["CNIC and NTN records with format checks", "EOBI information on the employee file", "PKR salary processing", "Asia/Karachi time for attendance"] },
+      { t: "Payroll", items: ["July-to-June tax year", "Cumulative salary tax calculation", "Tax profiles and exemptions", "Annual tax certificates and salary statements", "EOBI and PESSI/SESSI settings entered by you", "WWF and WPPF worksheets", "Minimum wage checking"] },
+      { t: "Time and holidays", items: ["Local holiday calendars", "Gazetted holidays", "Moon-dependent holidays with tentative dates", "Location-based calendars"] },
+      { t: "Banking and language", items: ["Payment batches with your own bank file layout", "Payment reconciliation", "English with an Urdu interface switcher on main screens"] },
+    ],
+    cards: ["pakistan-payroll", "pakistan-attendance-holidays", "pakistan-banking-payments"] },
+  { slug: "pakistan-payroll", path: "/pakistan-hrms/payroll/", name: "Pakistan Payroll", icon: "payroll",
+    title: "Payroll Software Pakistan | Salary Tax, EOBI, Payslips | AiHxM",
+    desc: "Run Pakistan payroll with a July-to-June tax year, cumulative salary tax, EOBI and provincial social security settings, WWF and WPPF worksheets, minimum wage checks, payslips and tax certificates.",
+    h1: "Pakistan payroll, with the rules in your hands",
+    lede: "Salary tax by tax year, cumulative calculation, EOBI and provincial social security, WWF and WPPF, and the documents employees ask for at year end, all in a six-step run your finance team can review.",
+    blocks: [
+      { t: "Tax", items: ["Tax-year-based salary tax calculation", "July-to-June tax year", "Cumulative tax calculation", "Tax profiles", "Tax exemptions", "Annual tax certificates", "Annual salary statements"] },
+      { t: "Statutory contributions", items: ["EOBI configuration", "PESSI and SESSI configurable rates", "WWF and WPPF worksheets", "Minimum wage checking"] },
+      { t: "Identity and reporting", items: ["CNIC validation", "NTN records", "PKR salary processing", "Payroll reporting"] },
+    ],
+    notes: ["Slabs and rates are entered and maintained by your company with its accountant. AiHxM does not ship numbers it cannot verify.", "The WWF and WPPF worksheets calculate from a base and a rate you enter, with dates; nothing is pre-filled.", "Statutory reports (tax withheld, EOBI, social security) are provided as statements and CSV from finalised payslips. AiHxM does not file with any government body, and no government certification is claimed.", "A minimum wage table is kept by you and a check flags anyone below it."],
+    cards: ["pakistan-hrms", "pakistan-banking-payments", "pakistan-attendance-holidays"], module: "payroll" },
+  { slug: "pakistan-attendance-holidays", path: "/pakistan-hrms/attendance-and-holidays/", name: "Attendance & Holidays", icon: "attendance",
+    title: "Attendance and Holiday Calendars for Pakistan | AiHxM",
+    desc: "Attendance in Asia/Karachi time with local holiday calendars, gazetted holidays and moon-dependent dates kept as tentative until confirmed.",
+    h1: "Attendance and holidays that match the Pakistani calendar",
+    lede: "Times are in Pakistan time, holidays are kept in calendars by location, and moon-dependent holidays can be entered as tentative and confirmed once the date is announced.",
+    blocks: [
+      { t: "Time", items: ["Asia/Karachi timezone", "Shifts and work profiles", "Overtime caps and pre-approval"] },
+      { t: "Holidays", items: ["Local holiday calendars", "Gazetted holidays", "Moon-dependent holidays", "Tentative lunar dates pending confirmation", "Location-based calendars"] },
+    ],
+    notes: ["The starter setup includes fixed-date public holidays for 2026 and 2027. Holidays that depend on moon sighting are added by HR once known.", "Copying a year forward keeps fixed dates and marks lunar ones as tentative."],
+    cards: ["pakistan-hrms", "pakistan-payroll", "pakistan-banking-payments"], module: "attendance" },
+  { slug: "pakistan-banking-payments", path: "/pakistan-hrms/banking-and-payments/", name: "Banking & Payments", icon: "expenses",
+    title: "Salary Payment Batches and Bank Reconciliation | AiHxM",
+    desc: "Create salary payment batches in a bank file layout your company defines, then reconcile what was paid against payroll.",
+    h1: "From finalised payroll to a reconciled payment",
+    lede: "Payment batches turn a finalised run into the file your bank expects, in a layout your company defines, and reconciliation checks what was paid against what was calculated.",
+    blocks: [
+      { t: "Payments", items: ["Payment batches", "Company-defined bank file formats", "Payment reconciliation", "Accounting journal export"] },
+    ],
+    notes: ["AiHxM does not include ready-made layouts for named banks or instant-payment schemes. Your company defines the layout its bank accepts.", "Only the last four digits of an account number appear in payment advice reports."],
+    cards: ["pakistan-hrms", "pakistan-payroll", "pakistan-attendance-holidays"], module: "payroll" },
+];

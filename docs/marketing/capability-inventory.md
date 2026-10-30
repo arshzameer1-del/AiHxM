@@ -1,6 +1,6 @@
 # Marketing capability inventory
 
-The source of truth for what the marketing site (apps/marketing) may say. Derived from the platform capability document
+The source of truth for what the marketing sites (apps/marketing and apps/site) may say. Derived from the platform capability document
 (2026-10-23) and checked against the code. A claim on the site must match a row here, with the same status.
 
 Status: **Available** works today. **Needs setup** works once the company enters its own data or configures a service.
@@ -48,3 +48,5 @@ proven live; the site does not claim it.
 | Optional email to the sales inbox for new demo requests | Needs setup | `DEMO_NOTIFY_EMAIL` plus SMTP |
 | Customer logos, testimonials, statistics, ratings | Not claimed | None exist to show |
 | Prices | Not published | Quoted on request |
+| Form designer on the Employee form (sections, order, custom fields, show-when and required-when rules, draft, publish, versions) | Available | `apps/api/src/form-settings`, `FormDesignerPage.tsx`, migrations 0196-0202 (2026-10-30) |
+| Capability statuses for the brand website (apps/site) | Source of truth moved | `apps/site/src/content/flags.mjs` and the module content files; keep this table in step |

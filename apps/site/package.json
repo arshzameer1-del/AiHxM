@@ -1,0 +1,12 @@
+{
+  "name": "@ai-hxm/site",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The AiHxM public brand website (multi-page, data-driven, static). No framework, no runtime dependencies. Separate from the older apps/marketing and from the authenticated app.",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/build.mjs && node scripts/serve.mjs",
+    "check": "node scripts/check.mjs",
+    "test": "node scripts/build.mjs && node scripts/check.mjs"
+  }
+}
