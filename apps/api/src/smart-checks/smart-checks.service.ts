@@ -22,6 +22,23 @@ type Rule = { key: string; title: string; severity: SmartCheckSeverity; why: str
  */
 export const RULES: Rule[] = [
   {
+    key: "below_minimum_wage", title: "Monthly pay is below the minimum wage you recorded", severity: "high", link: "/app/payroll/compliance",
+    why: "Active employees whose current monthly pay is under the minimum wage recorded in Payroll, Compliance for their location's province (or for 'All' when no province matches). The table is typed in by your company; check it against the latest notification.",
+    sql: `WITH pay AS (
+            SELECT e.id AS employee_id, COALESCE(
+                     (SELECT sum(cc.amount) FROM employee_compensation_components cc WHERE cc.employee_id = e.id AND cc.effective_to IS NULL AND cc.effective_from <= $1::date),
+                     (SELECT c.monthly_salary FROM employee_compensation c WHERE c.employee_id = e.id AND c.effective_to IS NULL AND c.effective_from <= $1::date ORDER BY c.effective_from DESC LIMIT 1)) AS monthly
+              FROM employees e WHERE e.employment_status = 'active')
+          SELECT e.id::text AS subject_key, e.id AS employee_id, ${WHO} AS label,
+                 'Paid ' || to_char(pay.monthly, 'FM999,999,990') || ' a month; minimum for ' || m.province || ' is ' || to_char(m.monthly_amount, 'FM999,999,990') AS detail
+            FROM pay JOIN employees e ON e.id = pay.employee_id
+            LEFT JOIN locations l ON l.id = e.location_id
+            JOIN LATERAL (SELECT * FROM minimum_wage_rates w
+                           WHERE w.effective_from <= $1::date AND (regexp_replace(lower(btrim(w.province)), '\\s+', '_', 'g') = COALESCE(l.statutory_jurisdiction, '') OR lower(btrim(w.province)) = 'all')
+                           ORDER BY (lower(btrim(w.province)) <> 'all') DESC, w.effective_from DESC LIMIT 1) m ON true
+           WHERE pay.monthly IS NOT NULL AND pay.monthly < m.monthly_amount`,
+  },
+  {
     key: "shared_bank_account", title: "Two or more people paid into the same bank account", severity: "high", link: "/app/employees",
     why: "Active employees whose payment accounts have the same account number. Sometimes it is family; sometimes it is a duplicate or ghost employee.",
     sql: `SELECT a.account_number_bidx AS subject_key, NULL::uuid AS employee_id,

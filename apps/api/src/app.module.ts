@@ -30,6 +30,7 @@ import { AssetsModule } from "./assets/assets.module";
 import { AttendancePenaltiesModule } from "./attendance-penalties/attendance-penalties.module";
 import { AnnouncementsModule } from "./announcements/announcements.module";
 import { SurveysModule } from "./surveys/surveys.module";
+import { ComplianceModule } from "./compliance/compliance.module";
 import { MessagingModule } from "./messaging/messaging.module";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { RemindersModule } from "./reminders/reminders.module";
@@ -120,6 +121,7 @@ import { HrAdministrationModule } from "./hr-administration/hr-administration.mo
     CustomFieldsModule,
     AnnouncementsModule,
     SurveysModule,
+    ComplianceModule,
     CareersModule,
     AssetsModule,
     TravelModule,

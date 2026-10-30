@@ -10823,3 +10823,61 @@ export type MySurveyView = {
 };
 
 export type SubmitSurveyRequest = { answers: Array<{ questionId: string; value?: number | boolean; text?: string }> };
+
+// ---------------------------------------------------------------------------
+// Statutory working papers (GAPC2): minimum wage table, WWF / WPPF worksheets, annual salary statement
+// ---------------------------------------------------------------------------
+export interface MinimumWageRateView {
+  id: string;
+  province: string;
+  monthlyAmount: number;
+  effectiveFrom: string;
+  sourceNote: string | null;
+}
+export interface SaveMinimumWageRequest {
+  province: string;
+  monthlyAmount: number;
+  effectiveFrom: string;
+  sourceNote?: string | null;
+}
+export type LevyKind = "wwf" | "wppf";
+export interface LevyWorksheetView {
+  id: string;
+  kind: LevyKind;
+  fiscalYear: string;
+  baseLabel: string;
+  baseAmount: number;
+  ratePercent: number;
+  amount: number;
+  notes: string | null;
+  status: "draft" | "final";
+  finalizedAt: string | null;
+  createdAt: string;
+}
+export interface SaveLevyWorksheetRequest {
+  kind: LevyKind;
+  fiscalYear: string;
+  baseLabel: string;
+  baseAmount: number;
+  ratePercent: number;
+  notes?: string | null;
+}
+export interface AnnualSalaryStatementRow {
+  employeeNumber: string;
+  employeeName: string;
+  cnic: string | null;
+  monthsPaid: number;
+  grossPay: number;
+  taxableIncome: number;
+  taxWithheld: number;
+  eobiEmployee: number;
+}
+export interface AnnualSalaryStatementView {
+  taxYearStart: string;
+  taxYearEnd: string;
+  runCount: number;
+  rows: AnnualSalaryStatementRow[];
+  totals: { grossPay: number; taxableIncome: number; taxWithheld: number; eobiEmployee: number };
+  missingCnicCount: number;
+  note: string;
+}

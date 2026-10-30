@@ -595,6 +595,11 @@ import type {
   MySurveyView,
   SaveSurveyRequest,
   SubmitSurveyRequest,
+  AnnualSalaryStatementView,
+  LevyWorksheetView,
+  MinimumWageRateView,
+  SaveLevyWorksheetRequest,
+  SaveMinimumWageRequest,
   SurveyAdminView,
   SurveyResultsView,
   AnnouncementView,
@@ -3160,6 +3165,16 @@ export const api = {
   publishAnnouncement: (id: string) => request<AnnouncementAdminView>(`/announcements/${id}/publish`, { method: "POST" }),
   archiveAnnouncement: (id: string) => request<AnnouncementAdminView>(`/announcements/${id}/archive`, { method: "POST" }),
   announcementReceipts: (id: string) => request<AnnouncementReceiptView[]>(`/announcements/${id}/receipts`),
+
+  // Statutory working papers (minimum wage table, WWF / WPPF worksheets, annual salary statement)
+  listMinimumWages: () => request<MinimumWageRateView[]>("/compliance/minimum-wages"),
+  addMinimumWage: (input: SaveMinimumWageRequest) => request<MinimumWageRateView[]>("/compliance/minimum-wages", { method: "POST", body: JSON.stringify(input) }),
+  deleteMinimumWage: (id: string) => request<MinimumWageRateView[]>(`/compliance/minimum-wages/${id}`, { method: "DELETE" }),
+  listLevyWorksheets: () => request<LevyWorksheetView[]>("/compliance/levies"),
+  createLevyWorksheet: (input: SaveLevyWorksheetRequest) => request<LevyWorksheetView>("/compliance/levies", { method: "POST", body: JSON.stringify(input) }),
+  finalizeLevyWorksheet: (id: string) => request<LevyWorksheetView>(`/compliance/levies/${id}/finalize`, { method: "POST" }),
+  deleteLevyWorksheet: (id: string) => request<void>(`/compliance/levies/${id}`, { method: "DELETE" }),
+  getAnnualSalaryStatement: (year: number) => request<AnnualSalaryStatementView>(`/compliance/annual-salary-statement?year=${year}`),
 
   // Pulse surveys (anonymous)
   listMySurveys: () => request<MySurveyView[]>("/surveys/mine"),

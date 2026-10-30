@@ -1,3 +1,4 @@
+import { AnnualSalaryStatementPanel, LevyWorksheetsPanel, MinimumWagePanel } from "./PayrollCompliancePanels";
 import { LoadingNote } from "../shared/PageChrome";
 import { useEffect, useRef, useState } from "react";
 import { hasAnyRoleKey, isSelfService as isSelfServiceRole } from "../shared/roles";
@@ -845,6 +846,9 @@ const SECTION_TAB: Record<string, string> = {
   "statutory-reports": "payments",
   "disbursement-settings": "payments",
   "bank-file-formats": "payments",
+  "annual-salary-statement": "compliance",
+  "levy-worksheets": "compliance",
+  "minimum-wage": "compliance",
   "payroll-areas": "setup",
   "payroll-periods": "setup",
   "tax-slabs": "setup",
@@ -887,6 +891,7 @@ export function PayrollPage() {
     { key: "inputs", label: "Pay inputs", hint: "Things that change what people are paid: bulk uploads of pay inputs and benefit plans." },
     { key: "settlements", label: "Settlements", hint: "Final settlements for people who are leaving, and the rules they follow.", visible: isHrAdmin || isPayrollApprover },
     { key: "payments", label: "Payments & accounting", hint: "Paying people and posting to the books: journals, costing, bank files and their layouts." },
+    { key: "compliance", label: "Compliance", hint: "Working papers for the authorities: the annual salary statement, WWF and WPPF worksheets, and the minimum wage table.", visible: isHrAdmin },
     { key: "setup", label: "Setup", hint: "Set up once and review rarely: payroll areas, calendars, tax slabs and statutory settings." },
   ];
   const visibleTabs = tabs.filter((t) => t.visible !== false);
@@ -1027,6 +1032,19 @@ export function PayrollPage() {
               </>
             )}
 
+            {activeTab.key === "compliance" && isHrAdmin && (
+              <>
+                <CollapsibleSection title="Annual salary statement" defaultOpen forceOpen={focusSection === "annual-salary-statement"} sectionId="annual-salary-statement">
+                  <AnnualSalaryStatementPanel />
+                </CollapsibleSection>
+                <CollapsibleSection title="WWF and WPPF worksheets" forceOpen={focusSection === "levy-worksheets"} sectionId="levy-worksheets">
+                  <LevyWorksheetsPanel />
+                </CollapsibleSection>
+                <CollapsibleSection title="Minimum wage table" forceOpen={focusSection === "minimum-wage"} sectionId="minimum-wage">
+                  <MinimumWagePanel />
+                </CollapsibleSection>
+              </>
+            )}
             {activeTab.key === "setup" && (
               <>
                 {/* Payroll Areas (0101_payroll_areas.sql). hr_admin holds `payroll_area.manage.all`; any payroll staff can read the list. */}
