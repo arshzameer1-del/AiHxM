@@ -67,6 +67,37 @@ export const FORM_CATALOG: CatalogForm[] = [
       optional("categoryId", "About", { canSetMaxLength: false }),
     ],
   },
+  {
+    key: "on_duty_request",
+    title: "Work away request (on duty / work from home)",
+    fields: [
+      fixed("startDate", "First day"),
+      fixed("endDate", "Last day"),
+      optional("location", "Where will you be?", { hardMaxLength: 200 }),
+      optional("reason", "Reason", { hardMaxLength: 1000 }),
+    ],
+  },
+  {
+    key: "attendance_correction",
+    title: "Attendance correction",
+    fields: [
+      fixed("requestedDate", "Date"),
+      fixed("reason", "Reason", { canSetMaxLength: true, hardMaxLength: 1000 }),
+    ],
+  },
+  {
+    key: "travel_request",
+    title: "Travel request",
+    fields: [
+      fixed("destination", "Destination", { canSetMaxLength: true, hardMaxLength: 160 }),
+      fixed("purpose", "What is the trip for?", { canSetMaxLength: true, hardMaxLength: 1000 }),
+      fixed("startDate", "From"),
+      fixed("endDate", "To"),
+      optional("estDistanceKm", "Expected distance (km)", { canSetMaxLength: false }),
+      optional("estOtherCost", "Other expected costs (PKR)", { canSetMaxLength: false }),
+      optional("advanceRequested", "Advance you would like (PKR)", { canSetMaxLength: false, canRequire: false }),
+    ],
+  },
 ];
 
 export const formByKey = (key: string): CatalogForm | undefined => FORM_CATALOG.find((f) => f.key === key);

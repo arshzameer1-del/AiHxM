@@ -1,5 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import type { TravelMode, TravelRateKind, TravelRateView, TravelRequestView, TravelSettlementView, TravelTripType } from "@aihxm/shared-types";
+import { useFormSettings } from "../shared/useFormSettings";
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { LoadingNote, PageHeader } from "../shared/PageChrome";
@@ -22,6 +23,14 @@ function RequestForm({ employeeId, onDone, onCancel }: { employeeId: string; onD
   const [f, setF] = useState({ destination: "", purpose: "", tripType: "domestic" as TravelTripType, travelMode: "car" as TravelMode, startDate: "", endDate: "", estDistanceKm: "", estOtherCost: "", advanceRequested: "" });
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const fs = useFormSettings("travel_request");
+  const sDest = fs("destination", { label: "Destination", required: true });
+  const sFrom = fs("startDate", { label: "From", required: true });
+  const sTo = fs("endDate", { label: "To", required: true });
+  const sKm = fs("estDistanceKm", { label: "Expected distance (km)" });
+  const sOther = fs("estOtherCost", { label: "Other expected costs (PKR)" });
+  const sAdv = fs("advanceRequested", { label: "Advance you would like (PKR)" });
+  const sPurpose = fs("purpose", { label: "What is the trip for?", required: true });
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF((x) => ({ ...x, [k]: e.target.value }));
   const n = (v: string) => (v.trim() === "" ? null : Number(v));
 
@@ -45,9 +54,9 @@ function RequestForm({ employeeId, onDone, onCancel }: { employeeId: string; onD
       <h2 className="text-base font-semibold">Ask to travel</h2>
       {err && <div role="alert" className="text-sm text-danger bg-danger/10 rounded p-2">{err}</div>}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div><label className={lbl} htmlFor="tr-dest">Destination</label><input id="tr-dest" required maxLength={160} className={field} value={f.destination} onChange={set("destination")} /></div>
-        <div><label className={lbl} htmlFor="tr-from">From</label><input id="tr-from" type="date" required className={field} value={f.startDate} onChange={set("startDate")} /></div>
-        <div><label className={lbl} htmlFor="tr-to">To</label><input id="tr-to" type="date" required className={field} value={f.endDate} onChange={set("endDate")} /></div>
+        <div><label className={lbl} htmlFor="tr-dest">{sDest.label}</label><input id="tr-dest" required maxLength={sDest.maxLength ?? 160} placeholder={sDest.placeholder ?? undefined} className={field} value={f.destination} onChange={set("destination")} />{sDest.helpText && <p className="text-xs text-label-secondary mt-1">{sDest.helpText}</p>}</div>
+        <div><label className={lbl} htmlFor="tr-from">{sFrom.label}</label><input id="tr-from" type="date" required className={field} value={f.startDate} onChange={set("startDate")} /></div>
+        <div><label className={lbl} htmlFor="tr-to">{sTo.label}</label><input id="tr-to" type="date" required className={field} value={f.endDate} onChange={set("endDate")} /></div>
         <div>
           <label className={lbl} htmlFor="tr-type">Trip</label>
           <select id="tr-type" className={field} value={f.tripType} onChange={set("tripType")}>{(Object.keys(TRIP_LABEL) as TravelTripType[]).map((k) => <option key={k} value={k}>{TRIP_LABEL[k]}</option>)}</select>
@@ -56,11 +65,11 @@ function RequestForm({ employeeId, onDone, onCancel }: { employeeId: string; onD
           <label className={lbl} htmlFor="tr-mode">Travelling by</label>
           <select id="tr-mode" className={field} value={f.travelMode} onChange={set("travelMode")}>{(Object.keys(MODE_LABEL) as TravelMode[]).map((k) => <option key={k} value={k}>{MODE_LABEL[k]}</option>)}</select>
         </div>
-        <div><label className={lbl} htmlFor="tr-km">Expected distance (km)</label><input id="tr-km" inputMode="decimal" className={field} value={f.estDistanceKm} onChange={set("estDistanceKm")} /></div>
-        <div><label className={lbl} htmlFor="tr-other">Other expected costs (PKR)</label><input id="tr-other" inputMode="decimal" className={field} value={f.estOtherCost} onChange={set("estOtherCost")} placeholder="Tickets, hotel" /></div>
-        <div><label className={lbl} htmlFor="tr-adv">Advance you would like (PKR)</label><input id="tr-adv" inputMode="decimal" className={field} value={f.advanceRequested} onChange={set("advanceRequested")} /></div>
+        {!sKm.hidden && <div><label className={lbl} htmlFor="tr-km">{sKm.label}{sKm.required && <span className="text-danger">*</span>}</label><input id="tr-km" inputMode="decimal" required={sKm.required} placeholder={sKm.placeholder ?? undefined} className={field} value={f.estDistanceKm} onChange={set("estDistanceKm")} />{sKm.helpText && <p className="text-xs text-label-secondary mt-1">{sKm.helpText}</p>}</div>}
+        {!sOther.hidden && <div><label className={lbl} htmlFor="tr-other">{sOther.label}{sOther.required && <span className="text-danger">*</span>}</label><input id="tr-other" inputMode="decimal" required={sOther.required} className={field} value={f.estOtherCost} onChange={set("estOtherCost")} placeholder={sOther.placeholder ?? "Tickets, hotel"} />{sOther.helpText && <p className="text-xs text-label-secondary mt-1">{sOther.helpText}</p>}</div>}
+        {!sAdv.hidden && <div><label className={lbl} htmlFor="tr-adv">{sAdv.label}</label><input id="tr-adv" inputMode="decimal" placeholder={sAdv.placeholder ?? undefined} className={field} value={f.advanceRequested} onChange={set("advanceRequested")} />{sAdv.helpText && <p className="text-xs text-label-secondary mt-1">{sAdv.helpText}</p>}</div>}
       </div>
-      <div><label className={lbl} htmlFor="tr-purpose">What is the trip for?</label><textarea id="tr-purpose" required rows={2} maxLength={1000} className={field} value={f.purpose} onChange={set("purpose")} /></div>
+      <div><label className={lbl} htmlFor="tr-purpose">{sPurpose.label}</label><textarea id="tr-purpose" required rows={2} maxLength={sPurpose.maxLength ?? 1000} placeholder={sPurpose.placeholder ?? undefined} className={field} value={f.purpose} onChange={set("purpose")} />{sPurpose.helpText && <p className="text-xs text-label-secondary mt-1">{sPurpose.helpText}</p>}</div>
       <div className="flex gap-2">
         <button type="submit" disabled={busy} className={`${btn} bg-accent text-white disabled:opacity-50`}>{busy ? "Sending…" : "Send request"}</button>
         <button type="button" onClick={onCancel} className={`${btn} bg-black/5`}>Cancel</button>

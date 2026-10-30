@@ -6,6 +6,7 @@ import { formatRange, todayIso } from "../shared/dates";
 import { EmployeeAvatar } from "../shared/EmployeeAvatar";
 import { SapSection } from "../shared/FormSections";
 import { LoadingNote } from "../shared/PageChrome";
+import { useFormSettings } from "../shared/useFormSettings";
 
 export const DUTY_TYPE_LABELS: Record<OnDutyDutyType, string> = {
   work_from_home: "Work from home",
@@ -34,6 +35,9 @@ function WorkAwayForm({ employeeId, onSubmitted, onCancel }: { employeeId: strin
   const [endDate, setEndDate] = useState(todayIso());
   const [location, setLocation] = useState("");
   const [reason, setReason] = useState("");
+  const fs = useFormSettings("on_duty_request");
+  const sLoc = fs("location", { label: "Where will you be?" });
+  const sReason = fs("reason", { label: "Reason" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -82,20 +86,29 @@ function WorkAwayForm({ employeeId, onSubmitted, onCancel }: { employeeId: strin
           <input id="work-away-end" type="date" value={endDate} min={startDate} onChange={(e) => setEndDate(e.target.value)} required className={input} />
         </label>
       </div>
-      <label className="block text-xs text-label-tertiary">
-        {dutyType === "on_duty" ? "Where will you be?" : "Where will you work from? (optional)"}
-        <input
-          id="work-away-location"
-          value={location}
-          onChange={(e) => setLocation(e.target.value)}
-          placeholder={dutyType === "on_duty" ? "e.g. Client site, Karachi" : "e.g. Home"}
-          className={input}
-        />
-      </label>
-      <label className="block text-xs text-label-tertiary">
-        Reason
-        <input id="work-away-reason" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Short note for your approver" className={input} />
-      </label>
+      {!sLoc.hidden && (
+        <label className="block text-xs text-label-tertiary">
+          {sLoc.label !== "Where will you be?" ? sLoc.label : dutyType === "on_duty" ? "Where will you be?" : "Where will you work from? (optional)"}
+          {sLoc.required && <span className="text-danger">*</span>}
+          <input
+            id="work-away-location"
+            value={location}
+            required={sLoc.required}
+            maxLength={sLoc.maxLength ?? undefined}
+            onChange={(e) => setLocation(e.target.value)}
+            placeholder={sLoc.placeholder ?? (dutyType === "on_duty" ? "e.g. Client site, Karachi" : "e.g. Home")}
+            className={input}
+          />
+          {sLoc.helpText && <span className="block text-label-secondary mt-1">{sLoc.helpText}</span>}
+        </label>
+      )}
+      {!sReason.hidden && (
+        <label className="block text-xs text-label-tertiary">
+          {sReason.label}{sReason.required && <span className="text-danger">*</span>}
+          <input id="work-away-reason" value={reason} required={sReason.required} maxLength={sReason.maxLength ?? undefined} onChange={(e) => setReason(e.target.value)} placeholder={sReason.placeholder ?? "Short note for your approver"} className={input} />
+          {sReason.helpText && <span className="block text-label-secondary mt-1">{sReason.helpText}</span>}
+        </label>
+      )}
       {error && <p className="text-xs text-danger">{error}</p>}
       <div className="flex gap-3 items-center">
         <button type="submit" disabled={busy} className="text-sm font-semibold rounded-lg px-3 py-1.5 bg-accent text-white disabled:opacity-50">

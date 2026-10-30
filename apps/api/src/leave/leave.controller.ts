@@ -250,7 +250,8 @@ export class LeaveController {
   }
 
   @Post("attendance-corrections")
-  submitCorrection(@CurrentClaims() claims: RequestClaims, @Body() dto: SubmitAttendanceCorrectionDto) {
+  async submitCorrection(@CurrentClaims() claims: RequestClaims, @Body() dto: SubmitAttendanceCorrectionDto) {
+    await this.formSettings.enforce(claims, "attendance_correction", dto as unknown as Record<string, unknown>);
     return this.attendanceCorrections.submit(claims, dto);
   }
 
@@ -365,7 +366,8 @@ export class LeaveController {
   }
 
   @Post("on-duty-requests")
-  submitOnDutyRequest(@CurrentClaims() claims: RequestClaims, @Body() dto: SubmitOnDutyRequestDto) {
+  async submitOnDutyRequest(@CurrentClaims() claims: RequestClaims, @Body() dto: SubmitOnDutyRequestDto) {
+    await this.formSettings.enforce(claims, "on_duty_request", dto as unknown as Record<string, unknown>);
     return this.onDuty.submit(claims, dto);
   }
 

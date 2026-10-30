@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { AttendanceCorrectionRequestView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
+import { useFormSettings } from "../shared/useFormSettings";
 
 /**
  * Attendance Policies increment 1 (see the project roadmap doc's Part 4)
@@ -22,6 +23,8 @@ export function AttendanceCorrectionForm({
   const [clockIn, setClockIn] = useState("");
   const [clockOut, setClockOut] = useState("");
   const [reason, setReason] = useState("");
+  const fs = useFormSettings("attendance_correction");
+  const sReason = fs("reason", { label: "Reason", required: true });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -75,15 +78,17 @@ export function AttendanceCorrectionForm({
         </label>
       </div>
       <label className="block text-xs text-label-tertiary">
-        Reason
+        {sReason.label}
         <input
           value={reason}
           onChange={(e) => setReason(e.target.value)}
           required
           minLength={3}
-          placeholder="e.g. Biometric device was down that morning"
+          maxLength={sReason.maxLength ?? undefined}
+          placeholder={sReason.placeholder ?? "e.g. Biometric device was down that morning"}
           className="mt-1 w-full rounded-lg border border-black/10 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
         />
+        {sReason.helpText && <span className="block text-label-secondary mt-1">{sReason.helpText}</span>}
       </label>
       {error && <p className="text-xs text-danger">{error}</p>}
       <div className="flex gap-3 items-center">

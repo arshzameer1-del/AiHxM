@@ -3,6 +3,7 @@ import { IsBoolean, IsIn, IsInt, IsNumber, IsOptional, IsString, IsUUID, Matches
 import { SessionGuard } from "../auth/session.guard";
 import { CurrentClaims } from "../auth/current-claims.decorator";
 import type { RequestClaims } from "../database/tenant-context";
+import { FormSettingsService } from "../form-settings/form-settings.service";
 import { TravelService } from "./travel.service";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -43,7 +44,7 @@ class SettleDto {
 @Controller("travel")
 @UseGuards(SessionGuard)
 export class TravelController {
-  constructor(private readonly travel: TravelService) {}
+  constructor(private readonly travel: TravelService, private readonly formSettings: FormSettingsService) {}
 
   @Get("rates")
   rates(@CurrentClaims() claims: RequestClaims) {
@@ -61,7 +62,8 @@ export class TravelController {
   }
 
   @Post("requests")
-  submit(@CurrentClaims() claims: RequestClaims, @Body() dto: SubmitDto) {
+  async submit(@CurrentClaims() claims: RequestClaims, @Body() dto: SubmitDto) {
+    await this.formSettings.enforce(claims, "travel_request", dto as unknown as Record<string, unknown>);
     return this.travel.submit(claims, dto);
   }
 

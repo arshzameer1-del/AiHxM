@@ -31,7 +31,7 @@ function FieldEditor({ formKey, field, onSaved, onError }: { formKey: string; fi
     api.updateFormField(formKey, field.fieldKey, body).then(onSaved).catch(fail);
   }
   return (
-    <div className="border-t border-black/5 py-3" data-testid={`fs-${field.fieldKey}`}>
+    <div className="border-t border-black/5 py-3" data-testid={`fs-${formKey}-${field.fieldKey}`}>
       <div className="flex items-center gap-2 mb-2">
         <h3 className="text-sm font-semibold">{field.defaultLabel}</h3>
         {field.customised && <span className="text-[11px] rounded-full bg-accent/10 text-accent px-2 py-0.5">Changed</span>}

@@ -88,3 +88,33 @@ describe("Form settings", () => {
     await expect(svc.history(staff)).rejects.toBeInstanceOf(ForbiddenException);
   });
 });
+
+describe("Form settings: the other forms", () => {
+  let f: PayrollFixture;
+  let svc: FormSettingsService;
+  beforeAll(async () => {
+    f = await buildPayrollFixture("fset3");
+    svc = new FormSettingsService(f.db, f.rbac, f.entitlements, f.audit);
+  }, 120000);
+  afterAll(async () => {
+    await f.cleanup();
+  }, 60000);
+
+  it("work away, attendance correction and travel follow the same rules", async () => {
+    await svc.update(f.hr, "on_duty_request", "reason", { required: true });
+    await expect(svc.enforce(f.hr, "on_duty_request", { reason: "" })).rejects.toThrow("Reason is required");
+    await svc.update(f.hr, "on_duty_request", "location", { hidden: true });
+    await expect(svc.enforce(f.hr, "on_duty_request", { reason: "Client visit" })).resolves.toBeUndefined();
+
+    await svc.update(f.hr, "attendance_correction", "reason", { maxLength: 30 });
+    await expect(svc.enforce(f.hr, "attendance_correction", { reason: "x".repeat(31) })).rejects.toThrow("at most 30");
+    await expect(svc.update(f.hr, "attendance_correction", "reason", { hidden: true })).rejects.toBeInstanceOf(BadRequestException);
+
+    await svc.update(f.hr, "travel_request", "estOtherCost", { required: true });
+    await expect(svc.enforce(f.hr, "travel_request", { estOtherCost: null })).rejects.toThrow("Other expected costs (PKR) is required");
+    await expect(svc.enforce(f.hr, "travel_request", { estOtherCost: 0 })).resolves.toBeUndefined();
+    // the advance is always sent as a number, so "required" would mean nothing there and is not offered
+    await expect(svc.update(f.hr, "travel_request", "advanceRequested", { required: true })).rejects.toBeInstanceOf(BadRequestException);
+    await svc.update(f.hr, "travel_request", "advanceRequested", { hidden: true });
+  });
+});
