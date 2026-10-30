@@ -13,6 +13,7 @@ import { AttendanceService } from "./attendance.service";
 import { AttendanceCorrectionsService } from "./attendance-corrections.service";
 import { OvertimeService } from "./overtime.service";
 import { OnDutyService } from "./on-duty.service";
+import { FormSettingsService } from "../form-settings/form-settings.service";
 import { SubmitLeaveRequestDto } from "./dto/submit-leave-request.dto";
 import { UpdateLeaveRequestDto } from "./dto/update-leave-request.dto";
 import { TeamCalendarQueryDto } from "./dto/team-calendar-query.dto";
@@ -48,7 +49,8 @@ export class LeaveController {
     private readonly leaveTypes: LeaveTypesService,
     private readonly ledger: LeaveLedgerService,
     private readonly durationSettings: LeaveDurationSettingsService,
-    private readonly validationRules: LeaveValidationRulesService
+    private readonly validationRules: LeaveValidationRulesService,
+    private readonly formSettings: FormSettingsService
   ) {}
 
   // --- TLM-01: leave type catalogue --------------------------------------
@@ -177,7 +179,8 @@ export class LeaveController {
   }
 
   @Post("leave-requests")
-  submit(@CurrentClaims() claims: RequestClaims, @Body() dto: SubmitLeaveRequestDto) {
+  async submit(@CurrentClaims() claims: RequestClaims, @Body() dto: SubmitLeaveRequestDto) {
+    await this.formSettings.enforce(claims, "leave_request", dto as unknown as Record<string, unknown>);
     return this.leaveRequests.submit(claims, dto);
   }
 

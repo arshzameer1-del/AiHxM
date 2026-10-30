@@ -596,7 +596,7 @@ import type {
   SaveSurveyRequest,
   SubmitSurveyRequest,
   ApiKeyScope,
-  ApiKeyView,
+  FormSettingsView, UpdateFormFieldSettingRequest, FormSettingHistoryView, ApiKeyView,
   AssistantAnswer,
   CreateEsignRequest,
   CreatedApiKey,
@@ -3271,6 +3271,13 @@ export const api = {
   cancelEsign: (id: string) => request<EsignRequestView>(`/esign/${id}/cancel`, { method: "POST" }),
   verifyEsign: (id: string) => request<{ valid: boolean }>(`/esign/${id}/verify`),
 
+  // Form settings (FORMCFG1)
+  getFormSettings: (formKey: string) => request<FormSettingsView>(`/form-settings/${formKey}`),
+  listFormSettings: () => request<FormSettingsView[]>("/form-settings"),
+  updateFormField: (formKey: string, fieldKey: string, body: UpdateFormFieldSettingRequest) => request<FormSettingsView>(`/form-settings/${formKey}/${fieldKey}`, { method: "PUT", body: JSON.stringify(body) }),
+  resetFormField: (formKey: string, fieldKey: string) => request<FormSettingsView>(`/form-settings/${formKey}/${fieldKey}`, { method: "DELETE" }),
+  formSettingsHistory: (formKey?: string) => request<FormSettingHistoryView[]>(`/form-settings/history${formKey ? `?form=${formKey}` : ""}`),
+  restoreFormSetting: (historyId: string) => request<FormSettingsView>(`/form-settings/history/${historyId}/restore`, { method: "POST" }),
   // Developer: API keys, quick answers, resume reader
   listApiKeys: () => request<ApiKeyView[]>("/developer/api-keys"),
   createApiKey: (name: string, scopes: ApiKeyScope[]) => request<CreatedApiKey>("/developer/api-keys", { method: "POST", body: JSON.stringify({ name, scopes }) }),

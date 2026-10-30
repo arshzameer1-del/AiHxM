@@ -33,6 +33,7 @@ import { SurveysModule } from "./surveys/surveys.module";
 import { ComplianceModule } from "./compliance/compliance.module";
 import { RecognitionModule } from "./recognition/recognition.module";
 import { HelpdeskModule } from "./helpdesk/helpdesk.module";
+import { FormSettingsModule } from "./form-settings/form-settings.module";
 import { HeadcountModule } from "./headcount/headcount.module";
 import { TalentModule } from "./talent/talent.module";
 import { EsignModule } from "./esign/esign.module";
@@ -132,6 +133,7 @@ import { HrAdministrationModule } from "./hr-administration/hr-administration.mo
     ComplianceModule,
     RecognitionModule,
     HelpdeskModule,
+    FormSettingsModule,
     HeadcountModule,
     TalentModule,
     EsignModule,

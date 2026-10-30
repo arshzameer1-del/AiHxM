@@ -18,6 +18,7 @@ import { pageOf } from "../common/paging";
 import { SessionGuard } from "../auth/session.guard";
 import { CurrentClaims } from "../auth/current-claims.decorator";
 import type { RequestClaims } from "../database/tenant-context";
+import { FormSettingsService } from "../form-settings/form-settings.service";
 import { ExpenseClaimsService } from "./expense-claims.service";
 import { SubmitExpenseClaimDto } from "./dto/submit-expense-claim.dto";
 import { DecideExpenseClaimDto } from "./dto/decide-expense-claim.dto";
@@ -31,10 +32,11 @@ import { DecideExpenseClaimDto } from "./dto/decide-expense-claim.dto";
 @Controller()
 @UseGuards(SessionGuard)
 export class ExpensesController {
-  constructor(private readonly expenseClaims: ExpenseClaimsService) {}
+  constructor(private readonly expenseClaims: ExpenseClaimsService, private readonly formSettings: FormSettingsService) {}
 
   @Post("expense-claims")
-  submit(@CurrentClaims() claims: RequestClaims, @Body() dto: SubmitExpenseClaimDto) {
+  async submit(@CurrentClaims() claims: RequestClaims, @Body() dto: SubmitExpenseClaimDto) {
+    await this.formSettings.enforce(claims, "expense_claim", dto as unknown as Record<string, unknown>);
     return this.expenseClaims.submit(claims, dto);
   }
 

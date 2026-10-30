@@ -2,6 +2,7 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import type { HelpdeskCategoryView, HelpdeskTicketView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { LoadingNote, PageHeader } from "../shared/PageChrome";
+import { useFormSettings } from "../shared/useFormSettings";
 import { formatDateTime } from "../shared/dates";
 
 const field = "w-full rounded-lg border border-black/10 px-3 py-2 text-sm";
@@ -45,6 +46,10 @@ export function HelpdeskPage() {
   const [cats, setCats] = useState<HelpdeskCategoryView[]>([]);
   const [open, setOpen] = useState<HelpdeskTicketView | null>(null);
   const [form, setForm] = useState({ categoryId: "", subject: "", body: "" });
+  const fs = useFormSettings("helpdesk_ticket");
+  const fsCat = fs("categoryId", { label: "About" });
+  const fsSubject = fs("subject", { label: "Title", required: true });
+  const fsBody = fs("body", { label: "Your question", required: true });
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(() => { api.listMyHelpdeskTickets().then(setTickets).catch((e) => { setTickets([]); setError(e instanceof ApiError ? e.message : "Could not load your questions."); }); }, []);
   useEffect(() => { load(); api.listHelpdeskCategories().then(setCats).catch(() => setCats([])); }, [load]);
@@ -68,14 +73,14 @@ export function HelpdeskPage() {
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="space-y-4">
           <form onSubmit={raise} className="bg-card rounded-card p-4 shadow-sm space-y-3">
-            {cats.length > 0 && (
-              <div><label htmlFor="hd-cat" className="block text-xs font-medium text-label-secondary mb-1">About</label>
-                <select id="hd-cat" className={field} value={form.categoryId} onChange={(e) => setForm({ ...form, categoryId: e.target.value })}>
+            {cats.length > 0 && !fsCat.hidden && (
+              <div><label htmlFor="hd-cat" className="block text-xs font-medium text-label-secondary mb-1">{fsCat.label}{fsCat.required && <span className="text-danger">*</span>}</label>
+                <select id="hd-cat" className={field} required={fsCat.required} value={form.categoryId} onChange={(e) => setForm({ ...form, categoryId: e.target.value })}>
                   <option value="">Not sure</option>{cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select></div>
+                </select>{fsCat.helpText && <p className="text-xs text-label-secondary mt-1">{fsCat.helpText}</p>}</div>
             )}
-            <div><label htmlFor="hd-subject" className="block text-xs font-medium text-label-secondary mb-1">Title</label><input id="hd-subject" className={field} maxLength={200} value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} required /></div>
-            <div><label htmlFor="hd-body" className="block text-xs font-medium text-label-secondary mb-1">Your question</label><textarea id="hd-body" className={field} rows={4} maxLength={4000} value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} required /></div>
+            <div><label htmlFor="hd-subject" className="block text-xs font-medium text-label-secondary mb-1">{fsSubject.label}</label><input id="hd-subject" className={field} placeholder={fsSubject.placeholder ?? undefined} maxLength={fsSubject.maxLength ?? 200} value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} required />{fsSubject.helpText && <p className="text-xs text-label-secondary mt-1">{fsSubject.helpText}</p>}</div>
+            <div><label htmlFor="hd-body" className="block text-xs font-medium text-label-secondary mb-1">{fsBody.label}</label><textarea id="hd-body" className={field} rows={4} placeholder={fsBody.placeholder ?? undefined} maxLength={fsBody.maxLength ?? 4000} value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} required />{fsBody.helpText && <p className="text-xs text-label-secondary mt-1">{fsBody.helpText}</p>}</div>
             <button type="submit" className={btn}>Send to HR</button>
           </form>
           {tickets === null ? <LoadingNote what="your questions" /> : tickets.length === 0 ? <p className="text-sm text-label-tertiary">You have not asked anything yet.</p> : (

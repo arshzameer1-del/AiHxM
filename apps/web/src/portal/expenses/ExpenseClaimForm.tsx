@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import type { EmployeeView, ExpenseCategory, ExpenseClaimView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
+import { useFormSettings } from "../shared/useFormSettings";
 import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_LABELS } from "./expenseLabels";
 
 /**
@@ -26,6 +27,8 @@ export function ExpenseClaimForm({
   const [expenseDate, setExpenseDate] = useState("");
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
+  const fs = useFormSettings("expense_claim");
+  const fsDesc = fs("description", { label: "Description" });
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -121,15 +124,21 @@ export function ExpenseClaimForm({
         </div>
       </div>
 
-      <div>
-        <label className="block text-sm font-medium mb-1">Description (optional)</label>
-        <input
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="What was this for?"
-          className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
-        />
-      </div>
+      {!fsDesc.hidden && (
+        <div>
+          <label htmlFor="expense-description" className="block text-sm font-medium mb-1">{fsDesc.label}{fsDesc.required ? <span className="text-danger">*</span> : " (optional)"}</label>
+          <input
+            id="expense-description"
+            value={description}
+            maxLength={fsDesc.maxLength ?? undefined}
+            required={fsDesc.required}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder={fsDesc.placeholder ?? "What was this for?"}
+            className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+          />
+          {fsDesc.helpText && <p className="text-xs text-label-secondary mt-1">{fsDesc.helpText}</p>}
+        </div>
+      )}
 
       {error && <div className="text-danger text-sm">{error}</div>}
 

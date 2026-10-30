@@ -21,6 +21,8 @@ import { join, relative } from "path";
  *   display  - shows or reports the value; staleness is cosmetic
  */
 const MANAGER_ID_READERS: Record<string, "writer" | "decision" | "display"> = {
+  // GAPC5 quick answers: shows the employee's own manager's name; cosmetic if stale
+  "assistant/assistant.service.ts": "display",
   "database/seed-pilot-company.ts": "display",
   "employees/employee-data-consistency.checks.ts": "display",
   "employees/employee-lifecycle.service.ts": "writer",
@@ -61,6 +63,8 @@ const MANAGER_ID_READERS: Record<string, "writer" | "decision" | "display"> = {
 };
 
 const DEPARTMENT_READERS: Record<string, "writer" | "decision" | "display"> = {
+  // GAPC3 headcount plans: matches the department text on approved requisitions (job_requisitions.department), shown beside real headcount
+  "headcount/headcount.service.ts": "display",
   "careers/careers.service.ts": "display",
   "employee-groups/employee-groups.service.ts": "decision",
   "employees/employee-analytics.service.ts": "display",

@@ -121,6 +121,7 @@ const PayslipDesignPage = lazy(() =>
     default: m.PayslipDesignPage,
   })),
 );
+const FormSettingsPage = lazy(() => import("./portal/admin/FormSettingsPage").then((m) => ({ default: m.FormSettingsPage })));
 const EmployeeNumberingPage = lazy(() =>
   import("./portal/admin/EmployeeNumberingPage").then((m) => ({
     default: m.EmployeeNumberingPage,
@@ -613,6 +614,7 @@ export default function App() {
                     DomainCard renders, driven entirely from that DB row,
                     not from anything in this file. */}
                   <Route path="configuration-center/employee-numbering" element={<EmployeeNumberingPage />} />
+                  <Route path="configuration-center/form-settings" element={<FormSettingsPage />} />
                   <Route path="configuration-center/payslip-design" element={<PayslipDesignPage />} />
                   <Route path="configuration-center/hiring" element={<HiringCardDesignerPage />} />
                   {/* Hiring Card Field Configuration (2026-09-27) — see

@@ -11141,3 +11141,39 @@ export interface AssistantAnswer {
   link: string | null;
   linkLabel: string | null;
 }
+
+// ---------------------------------------------------------------- FORMCFG1: form field settings
+export type FormFieldSettingView = {
+  fieldKey: string;
+  defaultLabel: string;
+  label: string;
+  helpText: string | null;
+  placeholder: string | null;
+  hidden: boolean;
+  required: boolean;
+  maxLength: number | null;
+  /** What the person who edits settings may change for this field. */
+  canHide: boolean;
+  canRequire: boolean;
+  canSetMaxLength: boolean;
+  customised: boolean;
+};
+export type FormSettingsView = { formKey: string; title: string; fields: FormFieldSettingView[] };
+export type UpdateFormFieldSettingRequest = {
+  label?: string | null;
+  helpText?: string | null;
+  placeholder?: string | null;
+  hidden?: boolean;
+  required?: boolean | null;
+  maxLength?: number | null;
+};
+export type FormSettingHistoryView = {
+  id: string;
+  formKey: string;
+  fieldKey: string;
+  action: "change" | "reset" | "restore";
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  changedAt: string;
+  changedBy: string | null;
+};

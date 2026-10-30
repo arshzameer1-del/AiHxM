@@ -3,6 +3,7 @@ import { IsBoolean, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min } f
 import { SessionGuard } from "../auth/session.guard";
 import { CurrentClaims } from "../auth/current-claims.decorator";
 import type { RequestClaims } from "../database/tenant-context";
+import { FormSettingsService } from "../form-settings/form-settings.service";
 import { HelpdeskService } from "./helpdesk.service";
 
 class RaiseDto {
@@ -23,12 +24,12 @@ class CategoryDto {
 @Controller("helpdesk")
 @UseGuards(SessionGuard)
 export class HelpdeskController {
-  constructor(private readonly helpdesk: HelpdeskService) {}
+  constructor(private readonly helpdesk: HelpdeskService, private readonly formSettings: FormSettingsService) {}
 
   // employee
   @Get("categories") categories(@CurrentClaims() claims: RequestClaims) { return this.helpdesk.categoriesForEmployee(claims); }
   @Get("mine") mine(@CurrentClaims() claims: RequestClaims) { return this.helpdesk.mine(claims); }
-  @Post("tickets") @HttpCode(200) raise(@CurrentClaims() claims: RequestClaims, @Body() dto: RaiseDto) { return this.helpdesk.raise(claims, dto); }
+  @Post("tickets") @HttpCode(200) async raise(@CurrentClaims() claims: RequestClaims, @Body() dto: RaiseDto) { await this.formSettings.enforce(claims, "helpdesk_ticket", dto as unknown as Record<string, unknown>); return this.helpdesk.raise(claims, dto); }
   @Get("tickets/:id/mine") getMine(@CurrentClaims() claims: RequestClaims, @Param("id", ParseUUIDPipe) id: string) { return this.helpdesk.getMine(claims, id); }
 
   // HR (static paths first)

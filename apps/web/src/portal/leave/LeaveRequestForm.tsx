@@ -5,6 +5,7 @@ import { LEAVE_TYPES, leaveTypeLabel } from "./leaveLabels";
 import { countCalendarDays, countWorkingDays, formatDisplayDate, returnDateAfter } from "./leaveCalendar";
 import { approverStepLabel, groupApprovalSteps } from "./leaveApprovals";
 import { TeamCalendar } from "./TeamCalendar";
+import { useFormSettings } from "../shared/useFormSettings";
 import { SapConfirm, SapField, SapFooter, SapSection } from "../shared/FormSections";
 import { formatPeriod } from "../shared/dates";
 import { findingsFor, formatMinutes, formatUnits, isTimeMode, isTimeOnly, pruneAcks, toggleAck } from "./leaveUnits";
@@ -49,6 +50,9 @@ export function LeaveRequestForm({
   const [endDate, setEndDate] = useState(seedEnd ?? "");
   const [delegateEmployeeId, setDelegateEmployeeId] = useState(editing?.delegateEmployeeId ?? "");
   const [reason, setReason] = useState(editing?.reason ?? "");
+  const fs = useFormSettings("leave_request");
+  const fsReason = fs("reason", { label: "New Note" });
+  const fsRelief = fs("delegateEmployeeId", { label: "Relief person" });
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
@@ -559,17 +563,19 @@ export function LeaveRequestForm({
           ))}
         </div>
 
-        <SapField label="New Note" htmlFor="leave-reason">
-          <textarea id="leave-reason" rows={4} value={reason} onChange={(e) => setReason(e.target.value)} className={fieldClass} />
-        </SapField>
+        {!fsReason.hidden && (
+          <SapField label={fsReason.label} htmlFor="leave-reason" required={fsReason.required} hint={fsReason.helpText}>
+            <textarea id="leave-reason" rows={4} value={reason} maxLength={fsReason.maxLength ?? undefined} placeholder={fsReason.placeholder ?? undefined} required={fsReason.required} onChange={(e) => setReason(e.target.value)} className={fieldClass} />
+          </SapField>
+        )}
       </SapSection>
 
       </div>
       <div className="min-w-0">
       <SapSection title="Additional Data" collapsible={false}>
-        {reliefCandidates.length > 0 && (
-          <SapField label="Relief person" htmlFor="leave-relief">
-            <select id="leave-relief" value={delegateEmployeeId} onChange={(e) => setDelegateEmployeeId(e.target.value)} className={fieldClass} aria-label="Relief person (optional)">
+        {reliefCandidates.length > 0 && !fsRelief.hidden && (
+          <SapField label={fsRelief.label} htmlFor="leave-relief" required={fsRelief.required} hint={fsRelief.helpText}>
+            <select id="leave-relief" value={delegateEmployeeId} onChange={(e) => setDelegateEmployeeId(e.target.value)} className={fieldClass} aria-label={fsRelief.required ? fsRelief.label : `${fsRelief.label} (optional)`} required={fsRelief.required}>
               <option value="">No relief person</option>
               {reliefCandidates.map((emp) => (
                 <option key={emp.employeeId} value={emp.employeeId}>
