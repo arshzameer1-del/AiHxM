@@ -69,6 +69,21 @@ function CandidateForm({ onCancel, onSaved }: { onCancel: () => void; onSaved: (
     }
   }
 
+  const [paste, setPaste] = useState("");
+  const [showPaste, setShowPaste] = useState(false);
+  const [readNote, setReadNote] = useState<string | null>(null);
+  async function readResume() {
+    setReadNote(null);
+    try {
+      const r = await api.parseResumeText(paste);
+      setValue((cur) => ({ ...cur, firstName: r.firstName ?? cur.firstName, lastName: r.lastName ?? cur.lastName, email: r.email ?? cur.email, phone: r.phone ?? cur.phone }));
+      const found = [r.firstName ? "name" : null, r.email ? "email" : null, r.phone ? "phone" : null].filter(Boolean).join(", ") || "nothing";
+      setReadNote(`Filled in: ${found}.${r.yearsExperience ? ` Mentions ${r.yearsExperience} years of experience.` : ""}${r.matchedSkills.length ? ` Skills found: ${r.matchedSkills.join(", ")}.` : ""} Check every value before saving.`);
+    } catch (err) {
+      setReadNote(err instanceof ApiError ? err.message : "Could not read the text.");
+    }
+  }
+
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setMatches(null);
@@ -77,6 +92,18 @@ function CandidateForm({ onCancel, onSaved }: { onCancel: () => void; onSaved: (
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4 bg-black/5 rounded-lg p-4">
+      <div>
+        <button type="button" onClick={() => setShowPaste(!showPaste)} className="text-sm font-medium text-accent">{showPaste ? "Hide resume reader" : "Fill from resume text"}</button>
+        {showPaste && (
+          <div className="mt-2 space-y-2">
+            <label htmlFor="resume-text" className="block text-sm font-medium">Paste the resume text</label>
+            <textarea id="resume-text" rows={5} value={paste} onChange={(e) => setPaste(e.target.value)} className={inputCls} />
+            <button type="button" onClick={() => void readResume()} disabled={!paste.trim()} className="px-3 py-1.5 rounded-lg bg-accent text-white text-sm font-medium disabled:opacity-50">Read it</button>
+            {readNote && <p className="text-xs text-label-secondary" role="status">{readNote}</p>}
+            <p className="text-xs text-label-tertiary">This reads text with simple rules, it is not an AI parser, and it only fills the boxes below. Nothing is saved until you press Add.</p>
+          </div>
+        )}
+      </div>
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-medium mb-1">First name</label>

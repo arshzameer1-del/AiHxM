@@ -189,6 +189,10 @@ const HelpdeskAdminPage = lazy(() => import("./portal/helpdesk/HelpdeskAdminPage
 const HeadcountPlansPage = lazy(() => import("./portal/headcount/HeadcountPlansPage").then((m) => ({ default: m.HeadcountPlansPage })));
 const TalentPage = lazy(() => import("./portal/talent/TalentPage").then((m) => ({ default: m.TalentPage })));
 const MySkillsPage = lazy(() => import("./portal/talent/MySkillsPage").then((m) => ({ default: m.MySkillsPage })));
+const SignPage = lazy(() => import("./portal/esign/SignPage").then((m) => ({ default: m.SignPage })));
+const EsignAdminPage = lazy(() => import("./portal/esign/EsignAdminPage").then((m) => ({ default: m.EsignAdminPage })));
+const DeveloperPage = lazy(() => import("./portal/developer/DeveloperPage").then((m) => ({ default: m.DeveloperPage })));
+const AssistantPage = lazy(() => import("./portal/assistant/AssistantPage").then((m) => ({ default: m.AssistantPage })));
 const SurveysAdminPage = lazy(() => import("./portal/surveys/SurveysAdminPage").then((m) => ({ default: m.SurveysAdminPage })));
 const MyHrRequestsPage = lazy(() =>
   import("./portal/requests/MyHrRequestsPage").then((m) => ({
@@ -477,6 +481,8 @@ export default function App() {
                   <Route path="ess/surveys" element={<SurveysPage />} />
                   <Route path="ess/recognition" element={<RecognitionPage />} />
                   <Route path="ess/skills" element={<MySkillsPage />} />
+                  <Route path="ess/sign" element={<SignPage />} />
+                  <Route path="ess/assistant" element={<AssistantPage />} />
                   <Route path="ess/helpdesk" element={<HelpdeskPage />} />
                   <Route path="ess/assets" element={<MyAssetsPage />} />
                   <Route path="assets" element={<AssetRegisterPage />} />
@@ -512,6 +518,8 @@ export default function App() {
                   <Route path="employees/helpdesk" element={<HelpdeskAdminPage />} />
                   <Route path="employees/headcount" element={<HeadcountPlansPage />} />
                   <Route path="employees/talent" element={<TalentPage />} />
+                  <Route path="employees/esign" element={<EsignAdminPage />} />
+                  <Route path="employees/developer" element={<DeveloperPage />} />
                   <Route path="reports" element={<ReportsShell />}>
                     <Route index element={<ReportsOverviewPage />} />
                     <Route path="library" element={<ReportsLibraryPage />} />

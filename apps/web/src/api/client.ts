@@ -595,6 +595,13 @@ import type {
   MySurveyView,
   SaveSurveyRequest,
   SubmitSurveyRequest,
+  ApiKeyScope,
+  ApiKeyView,
+  AssistantAnswer,
+  CreateEsignRequest,
+  CreatedApiKey,
+  EsignRequestView,
+  ParsedResume,
   CompCycleView,
   JobSkillRequirementView,
   MySkillView,
@@ -3253,6 +3260,24 @@ export const api = {
   saveCompCycleItems: (id: string, input: SaveCompCycleItemsRequest) => request<CompCycleView>(`/compensation-cycles/${id}/items`, { method: "PUT", body: JSON.stringify(input) }),
   compCycleAction: (id: string, action: "submit" | "withdraw" | "approve" | "apply" | "cancel", body?: { samePersonConfirmed?: boolean }) =>
     request<CompCycleView>(`/compensation-cycles/${id}/${action}`, { method: "POST", body: JSON.stringify(body ?? {}) }),
+
+  // Documents to sign
+  listMyEsign: () => request<EsignRequestView[]>("/esign/mine"),
+  myEsignCount: () => request<{ waiting: number }>("/esign/mine/count"),
+  signEsign: (id: string, name: string) => request<EsignRequestView>(`/esign/${id}/sign`, { method: "POST", body: JSON.stringify({ name }) }),
+  declineEsign: (id: string, reason: string) => request<EsignRequestView>(`/esign/${id}/decline`, { method: "POST", body: JSON.stringify({ reason }) }),
+  listEsign: (status?: string) => request<EsignRequestView[]>(`/esign${status ? `?status=${status}` : ""}`),
+  createEsign: (input: CreateEsignRequest) => request<{ created: number }>("/esign", { method: "POST", body: JSON.stringify(input) }),
+  cancelEsign: (id: string) => request<EsignRequestView>(`/esign/${id}/cancel`, { method: "POST" }),
+  verifyEsign: (id: string) => request<{ valid: boolean }>(`/esign/${id}/verify`),
+
+  // Developer: API keys, quick answers, resume reader
+  listApiKeys: () => request<ApiKeyView[]>("/developer/api-keys"),
+  createApiKey: (name: string, scopes: ApiKeyScope[]) => request<CreatedApiKey>("/developer/api-keys", { method: "POST", body: JSON.stringify({ name, scopes }) }),
+  revokeApiKey: (id: string) => request<ApiKeyView[]>(`/developer/api-keys/${id}`, { method: "DELETE" }),
+  getPublicApiSpec: () => request<Record<string, unknown>>("/public-api/v1/openapi.json"),
+  askAssistant: (question: string) => request<AssistantAnswer>("/assistant/ask", { method: "POST", body: JSON.stringify({ question }) }),
+  parseResumeText: (text: string) => request<ParsedResume>("/recruitment/careers/parse-resume", { method: "POST", body: JSON.stringify({ text }) }),
 
   // Pulse surveys (anonymous)
   listMySurveys: () => request<MySurveyView[]>("/surveys/mine"),

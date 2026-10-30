@@ -1,3 +1,4 @@
+import { useT } from "../../i18n/i18n";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { LucideIcon } from "lucide-react";
@@ -26,6 +27,7 @@ export type TileSpec = {
 };
 
 function TileBody({ spec }: { spec: TileSpec }) {
+  const t = useT();
   const Icon = spec.icon;
   const dim = spec.comingSoon || !spec.to;
   return (
@@ -49,8 +51,8 @@ function TileBody({ spec }: { spec: TileSpec }) {
             {spec.figureLabel && <span className="ml-1.5 text-xs text-label-tertiary">{spec.figureLabel}</span>}
           </div>
         )}
-        <h2 className={`text-sm font-bold ${dim ? "text-label-secondary" : "group-hover:text-accent"}`}>{spec.title}</h2>
-        <p className="text-xs text-label-secondary mt-0.5">{spec.description}</p>
+        <h2 className={`text-sm font-bold ${dim ? "text-label-secondary" : "group-hover:text-accent"}`}>{t(spec.title)}</h2>
+        <p className="text-xs text-label-secondary mt-0.5">{t(spec.description)}</p>
         {spec.note && <p className="text-xs text-label-tertiary mt-1">{spec.note}</p>}
       </div>
     </>
@@ -89,9 +91,10 @@ export function TileGrid({ tiles, label }: { tiles: TileSpec[]; label: string })
 }
 
 export function TileGroup({ title, children }: { title: string; children: ReactNode }) {
+  const t = useT();
   return (
     <section className="mb-6">
-      <h2 className="text-xs font-bold uppercase tracking-wide text-label-tertiary mb-2">{title}</h2>
+      <h2 className="text-xs font-bold uppercase tracking-wide text-label-tertiary mb-2">{t(title)}</h2>
       {children}
     </section>
   );

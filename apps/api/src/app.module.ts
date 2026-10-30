@@ -35,6 +35,9 @@ import { RecognitionModule } from "./recognition/recognition.module";
 import { HelpdeskModule } from "./helpdesk/helpdesk.module";
 import { HeadcountModule } from "./headcount/headcount.module";
 import { TalentModule } from "./talent/talent.module";
+import { EsignModule } from "./esign/esign.module";
+import { PublicApiModule } from "./public-api/public-api.module";
+import { AssistantModule } from "./assistant/assistant.module";
 import { CompensationCyclesModule } from "./compensation-cycles/compensation-cycles.module";
 import { MessagingModule } from "./messaging/messaging.module";
 import { NotificationsModule } from "./notifications/notifications.module";
@@ -131,6 +134,9 @@ import { HrAdministrationModule } from "./hr-administration/hr-administration.mo
     HelpdeskModule,
     HeadcountModule,
     TalentModule,
+    EsignModule,
+    PublicApiModule,
+    AssistantModule,
     CompensationCyclesModule,
     CareersModule,
     AssetsModule,

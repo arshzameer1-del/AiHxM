@@ -11086,3 +11086,58 @@ export interface SaveCompCycleRequest {
 export interface SaveCompCycleItemsRequest {
   items: Array<{ employeeId: string; proposedBasic: number; reason?: string | null }>;
 }
+
+// ---------------------------------------------------------------------------
+// Documents to sign, API keys, resume text reading, assistant (GAPC5)
+// ---------------------------------------------------------------------------
+export type EsignStatus = "pending" | "signed" | "declined" | "cancelled";
+export interface EsignRequestView {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  title: string;
+  body: string;
+  status: EsignStatus;
+  dueOn: string | null;
+  signedName: string | null;
+  signedAt: string | null;
+  /** hash of the text, who signed and when; changes if any of them is altered */
+  receipt: string | null;
+  bodySha256: string;
+  declineReason: string | null;
+  createdAt: string;
+}
+export interface CreateEsignRequest {
+  title: string;
+  body: string;
+  employeeIds: string[];
+  dueOn?: string | null;
+}
+export type ApiKeyScope = "employees.read" | "org.read";
+export interface ApiKeyView {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  scopes: ApiKeyScope[];
+  createdAt: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+}
+export interface CreatedApiKey extends ApiKeyView {
+  /** shown once, never again */
+  secret: string;
+}
+export interface ParsedResume {
+  firstName: string | null;
+  lastName: string | null;
+  email: string | null;
+  phone: string | null;
+  yearsExperience: number | null;
+  matchedSkills: string[];
+}
+export interface AssistantAnswer {
+  intent: string | null;
+  answer: string;
+  link: string | null;
+  linkLabel: string | null;
+}

@@ -1,6 +1,7 @@
+import { careersFeedXml, parseResumeText } from "./resume-parser";
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Inject } from "@nestjs/common";
 import type { PoolClient } from "pg";
-import type { CareersEmploymentType, CareersJobView, CareersPageView, RequisitionCareersView, SaveRequisitionCareersRequest } from "@aihxm/shared-types";
+import type { CareersEmploymentType, CareersJobView, CareersPageView, ParsedResume, RequisitionCareersView, SaveRequisitionCareersRequest } from "@aihxm/shared-types";
 import { AuditService } from "../audit/audit.service";
 import { localToday } from "../common/local-date";
 import { DatabaseService } from "../database/database.service";
@@ -97,6 +98,18 @@ export class CareersService {
       );
       return this.toView(out.rows[0]);
     });
+  }
+
+  /** Suggests candidate details from pasted resume text. Nothing is saved; HR checks the values before using them. */
+  async parseResume(claims: RequestClaims, text: string): Promise<ParsedResume> {
+    if (!(await this.rbac.can(claims, "recruitment.manage.all"))) throw new ForbiddenException("Not permitted");
+    if (!text || !text.trim()) throw new BadRequestException("Paste the resume text");
+    const names = await this.db.withClaims(claims, async (c) => (await c.query("SELECT name FROM skills WHERE company_id = $1 AND is_active", [claims.company_id])).rows.map((r) => r.name as string));
+    return parseResumeText(text, names);
+  }
+
+  async feedXml(slug: string, baseUrl: string): Promise<string> {
+    return careersFeedXml(await this.page(slug), baseUrl);
   }
 
   // ------------------------------------------------------------------ public side

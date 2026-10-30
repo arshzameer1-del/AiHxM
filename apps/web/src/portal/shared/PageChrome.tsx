@@ -1,13 +1,15 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
+import { useT } from "../../i18n/i18n";
 
 export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: string; actions?: ReactNode }) {
+  const t = useT();
   return (
     <div className="flex items-start justify-between gap-4 flex-wrap mb-4">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
-        {subtitle && <p className="text-label-tertiary text-sm mt-1">{subtitle}</p>}
+        <h1 className="text-2xl font-bold tracking-tight">{t(title)}</h1>
+        {subtitle && <p className="text-label-tertiary text-sm mt-1">{t(subtitle)}</p>}
       </div>
       {actions && <div className="flex items-center gap-2">{actions}</div>}
     </div>
