@@ -42,5 +42,81 @@
  "leave": [
   1800,
   800
+ ],
+ "shifts": [
+  1800,
+  1125
+ ],
+ "onboarding": [
+  1800,
+  1125
+ ],
+ "workflows": [
+  1800,
+  1125
+ ],
+ "managerapprovals": [
+  1800,
+  1125
+ ],
+ "talent": [
+  1800,
+  1125
+ ],
+ "learning": [
+  1800,
+  1125
+ ],
+ "expenses": [
+  1800,
+  1125
+ ],
+ "travel": [
+  1800,
+  1125
+ ],
+ "surveys": [
+  1800,
+  1125
+ ],
+ "recognition": [
+  1800,
+  1125
+ ],
+ "helpdesk": [
+  1800,
+  1125
+ ],
+ "esign": [
+  1800,
+  1125
+ ],
+ "assets": [
+  1800,
+  1125
+ ],
+ "wfanalytics": [
+  1800,
+  1125
+ ],
+ "assistant": [
+  1800,
+  1125
+ ],
+ "announcements": [
+  1800,
+  1125
+ ],
+ "compensation": [
+  1800,
+  1125
+ ],
+ "benefits": [
+  1800,
+  1125
+ ],
+ "shifts2": [
+  1800,
+  1125
  ]
 }

@@ -1,7 +1,7 @@
 // Product catalogue, part 2.
 export default [
   {
-    slug: "expenses-travel", name: "Expenses & Travel", group: "Pay", icon: "expenses", interest: "approvals", shot: null,
+    slug: "expenses-travel", name: "Expenses & Travel", group: "Pay", icon: "expenses", interest: "approvals", shot: "expenses",
     short: "Claims with receipts, approvals and payroll reimbursement.",
     benefit: "Spending submitted, approved and reimbursed without paper.",
     h1: "From receipt to reimbursement without the paperwork",
@@ -21,7 +21,7 @@ export default [
     faqs: [["Can expenses be reimbursed through payroll?", "Yes. An approved claim can be marked to reimburse in payroll."], ["Are receipts required?", "Receipts can be uploaded with each claim."]],
   },
   {
-    slug: "onboarding-offboarding", name: "Onboarding & Offboarding", group: "People", icon: "onboarding", interest: "other", shot: null,
+    slug: "onboarding-offboarding", name: "Onboarding & Offboarding", group: "People", icon: "onboarding", interest: "other", shot: "onboarding",
     short: "Checklists for joining and leaving.",
     benefit: "A smooth first day and a clean last day.",
     h1: "A smooth first day and a clean last day",
@@ -41,7 +41,7 @@ export default [
     faqs: [["Can we have different checklists for different roles?", "Yes, with separate templates."], ["Does offboarding track assets?", "Assigned assets appear in the asset register so they can be recovered."]],
   },
   {
-    slug: "surveys-engagement", name: "Surveys & Engagement", group: "Experience", icon: "surveys", interest: "other", shot: null,
+    slug: "surveys-engagement", name: "Surveys & Engagement", group: "Experience", icon: "surveys", interest: "other", shot: "surveys",
     short: "Pulse and engagement surveys with anonymity rules.",
     benefit: "Hear from your people without exposing them.",
     h1: "Listen to your people, protect their anonymity",
@@ -60,7 +60,7 @@ export default [
     faqs: [["Are responses anonymous?", "Results for small groups are hidden under a minimum number of answers."], ["Can we run short surveys often?", "Yes, pulse surveys are designed for that."], ["Can HR see who answered?", "Anonymity rules protect individuals from being identified in results."]],
   },
   {
-    slug: "recognition-announcements", name: "Recognition & Announcements", group: "Experience", icon: "recognition", interest: "other", shot: null,
+    slug: "recognition-announcements", name: "Recognition & Announcements", group: "Experience", icon: "recognition", interest: "other", shot: "recognition",
     short: "A thank-you feed and company-wide announcements.",
     benefit: "Appreciation and news in one place.",
     h1: "Say thank you, share the news",
@@ -79,7 +79,7 @@ export default [
     faqs: [["Can HR remove a post?", "Yes, HR can hide recognition posts."], ["Who sees announcements?", "Employees in the audience you choose."], ["Are notifications sent?", "In-app notifications are available. Email depends on your mail setup."]],
   },
   {
-    slug: "hr-help-desk", name: "HR Help Desk", group: "Experience", icon: "helpdesk", interest: "other", shot: null,
+    slug: "hr-help-desk", name: "HR Help Desk", group: "Experience", icon: "helpdesk", interest: "other", shot: "helpdesk",
     short: "Employee requests to HR, with first-reply clocks.",
     benefit: "Every question answered and visible in an ageing queue.",
     h1: "Every employee question, answered and on the clock",
@@ -99,7 +99,7 @@ export default [
     faqs: [["Are there response-time targets?", "You set a first-reply target per category. The product tracks it; it is your own target."], ["Can requests be categorised?", "Yes."]],
   },
   {
-    slug: "documents-agreements", name: "Documents & Agreements", group: "Platform", icon: "documents", interest: "other", shot: null,
+    slug: "documents-agreements", name: "Documents & Agreements", group: "Platform", icon: "documents", interest: "other", shot: "esign",
     short: "Templates, HR letters, policies and typed-name agreements.",
     benefit: "Letters and policy acknowledgements without paper.",
     h1: "Letters, policies and acknowledgements, tracked",
@@ -119,7 +119,7 @@ export default [
     faqs: [["Is this a legally certified e-signature?", "No. It records a typed-name agreement with a receipt. Ask your legal adviser whether that suits each document."], ["Can we see who has not agreed?", "Yes."], ["Can we generate letters?", "Yes, from document templates."]],
   },
   {
-    slug: "asset-management", name: "Asset Management", group: "People", icon: "assets", interest: "other", shot: null,
+    slug: "asset-management", name: "Asset Management", group: "People", icon: "assets", interest: "other", shot: "assets",
     short: "Register company assets and who holds them.",
     benefit: "Know what you own and who has it.",
     h1: "Know what you own and who has it",
@@ -195,7 +195,7 @@ export default [
     faqs: [["Can employees view payslips?", "Yes, once payslips are published."], ["Is there a mobile app?", "Yes. AiHxM installs on Android and iPhone from the browser and works like an app."], ["Is Urdu supported?", "The interface includes an English and Urdu switcher on main screens."]],
   },
   {
-    slug: "manager-self-service", name: "Manager Self-Service", group: "Experience", icon: "manager", interest: "self-service", shot: null,
+    slug: "manager-self-service", name: "Manager Self-Service", group: "Experience", icon: "manager", interest: "self-service", shot: "managerapprovals",
     short: "Approvals, team calendar and team data for managers.",
     benefit: "Managers act in minutes, not days.",
     h1: "Managers decide faster with the context in front of them",

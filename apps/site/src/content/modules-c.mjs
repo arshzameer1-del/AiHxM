@@ -3,7 +3,7 @@
 // intended product; it never names a customer, certification, partner integration or result.
 export default [
   {
-    slug: "benefits-management", name: "Benefits Management", group: "Pay", icon: "compensation", interest: "other", shot: null,
+    slug: "benefits-management", name: "Benefits Management", group: "Pay", icon: "compensation", interest: "other", shot: "benefits",
     short: "Benefit plans, eligibility, enrolment and payroll deductions.",
     benefit: "One place for what you offer, who is eligible and what it costs.",
     h1: "Run employee benefits without spreadsheets",
@@ -23,7 +23,7 @@ export default [
     faqs: [["Can benefits depend on grade or service length?", "Yes. Eligibility rules use employee groups, grades and service."], ["Do contributions reach payroll?", "Yes. Enrolled benefits feed payroll contributions and deductions."], ["Can employees see their benefits?", "Yes, in self-service."]],
   },
   {
-    slug: "shift-management", name: "Shift Management", group: "Time", icon: "attendance", interest: "attendance", shot: null,
+    slug: "shift-management", name: "Shift Management", group: "Time", icon: "attendance", interest: "attendance", shot: "shifts2",
     short: "Shifts, rotations and rosters for office, field and plant teams.",
     benefit: "The right people on the right shift, and attendance measured against it.",
     h1: "Plan shifts once, apply them to the right people",
@@ -43,7 +43,7 @@ export default [
     faqs: [["Are night shifts supported?", "Yes. Shifts that cross midnight are handled."], ["Can different locations work different shifts?", "Yes, by location, group or person."], ["Does overtime follow the shift?", "Yes, overtime is measured against the assigned shift."]],
   },
   {
-    slug: "workforce-analytics", name: "Advanced Workforce Analytics", group: "Insight", icon: "analytics", interest: "reporting", shot: null,
+    slug: "workforce-analytics", name: "Advanced Workforce Analytics", group: "Insight", icon: "analytics", interest: "reporting", shot: "wfanalytics",
     short: "Trends, headcount planning and workforce insight beyond standard reports.",
     benefit: "See the shape of your workforce and where it is heading.",
     h1: "Workforce analytics for leaders, not just reports for HR",
@@ -63,7 +63,7 @@ export default [
     faqs: [["Does analytics respect permissions?", "Yes. Viewers see only data within their access."], ["Can leaders get their own dashboards?", "Yes, dashboards are shaped by role."], ["Is it built on the standard reports?", "It builds on the same data as the report catalogue."]],
   },
   {
-    slug: "intelligent-hr", name: "Intelligent HR", group: "Insight", icon: "talent", interest: "other", shot: null,
+    slug: "intelligent-hr", name: "Intelligent HR", group: "Insight", icon: "talent", interest: "other", shot: "assistant",
     short: "Assistance built on your own HR data: answers, nudges and insight.",
     benefit: "Less searching, fewer manual checks, better-informed decisions.",
     h1: "Where AiHxM is heading: intelligence built on your HR data",
@@ -83,7 +83,7 @@ export default [
     faqs: [["Will assistance act without approval?", "No. It suggests; a person decides."], ["Does it see everyone's data?", "No. It follows the same roles and data access as the person using it."], ["Can we switch it off?", "Yes. It is controlled per company."]],
   },
   {
-    slug: "business-travel", name: "Business Travel", group: "Pay", icon: "expenses", interest: "approvals", shot: null,
+    slug: "business-travel", name: "Business Travel", group: "Pay", icon: "expenses", interest: "approvals", shot: "travel",
     short: "Travel requests, approvals, itineraries and trip expenses.",
     benefit: "Trips approved before they happen and settled when they end.",
     h1: "Business travel from request to reimbursement",
@@ -103,7 +103,7 @@ export default [
     faqs: [["Do travel requests need approval?", "Yes, along the approval path you configure."], ["Are trip expenses linked to the trip?", "Yes. Claims and receipts attach to the same trip."], ["Can reimbursement go through payroll?", "Yes, an approved claim can be reimbursed in payroll."]],
   },
   {
-    slug: "announcements", name: "Announcements", group: "Experience", icon: "recognition", interest: "other", shot: null,
+    slug: "announcements", name: "Announcements", group: "Experience", icon: "recognition", interest: "other", shot: "announcements",
     short: "Company news to the right audience, with read tracking.",
     benefit: "Important news reaches the people it is for.",
     h1: "Company announcements that reach the right people",

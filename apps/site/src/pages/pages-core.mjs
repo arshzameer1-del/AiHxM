@@ -52,11 +52,21 @@ ${groups}${ctaBand()}`,
   };
 }
 
+// Real screens from the demonstration company, chosen for what each audience cares about.
+const AUDIENCE_SHOT = {
+  "small-businesses": "employees", "medium-businesses": "workflows", "large-enterprises": "configuration", "hr-departments": "helpdesk",
+  "finance-departments": "payroll", "payroll-teams": "payroll-dashboard", "growing-organizations": "recruitment", "multi-location-businesses": "organization",
+  manufacturing: "shifts", healthcare: "esign", retail: "shifts2", "information-technology": "talent", construction: "assets",
+  "professional-services": "performance", education: "learning", hospitality: "recognition",
+};
+
 function audiencePage({ item, kind, path, parent, parentPath, A }) {
   const trail = [["Home", "/"], [parent, parentPath], [item.name, path]];
   const isInd = kind === "industry";
+  const shotName = AUDIENCE_SHOT[item.slug];
+  const audVisual = shotName ? `<div class="hero-visual">${frame({ ...A.shot(shotName), alt: `An AiHxM screen from a demonstration company, relevant to ${item.name.toLowerCase()}`, eager: true })}</div>` : `<div class="hero-visual solo"><div class="big-ico" aria-hidden="true">${icon(item.icon)}</div></div>`;
   const body = `
-<section class="phero ${isInd ? "t-teal" : "t-indigo"} v-a"><div class="bg-grid" aria-hidden="true"></div><div class="wrap phero-grid"><div class="phero-copy">${breadcrumbs(trail)}<p class="eyebrow">${isInd ? "Industry" : "Solution"} · ${esc(item.name)}</p><h1>${esc(item.h1)}</h1><p class="lead">${esc(item.lede)}</p><div class="btn-row">${demoCta()}</div></div><div class="hero-visual solo"><div class="big-ico" aria-hidden="true">${icon(item.icon)}</div></div></div></section>
+<section class="phero ${isInd ? "t-teal" : "t-indigo"} v-a"><div class="bg-grid" aria-hidden="true"></div><div class="wrap phero-grid"><div class="phero-copy">${breadcrumbs(trail)}<p class="eyebrow">${isInd ? "Industry" : "Solution"} · ${esc(item.name)}</p><h1>${esc(item.h1)}</h1><p class="lead">${esc(item.lede)}</p><div class="btn-row">${demoCta()}</div></div>${audVisual}</div></section>
 ${section({ eyebrow: isInd ? "Typical challenges" : "The challenge", title: isInd ? `What ${item.name.toLowerCase()} teams deal with` : "What gets in the way", body: isInd ? ticks(item.problems) : pairCards(item.challenges) })}
 ${section({ cls: "alt", eyebrow: "How AiHxM helps", title: "Capabilities that apply", body: isInd ? ticks(item.help) : pairCards(item.how) })}
 ${section({ eyebrow: "Modules to start with", title: "Where to begin", body: cardGrid(item.modules, item.modules.length > 3 ? 4 : 3) })}
@@ -103,7 +113,8 @@ ${ctaBand({ title: "Talk to us about this service", text: "Tell us about your or
 export function pakistanPageFor(p, A) {
   const hub = p.slug === "pakistan-hrms";
   const trail = hub ? [["Home", "/"], [p.name, p.path]] : [["Home", "/"], ["HRMS for Pakistan", "/pakistan-hrms/"], [p.name, p.path]];
-  const shot = p.slug === "pakistan-payroll" ? A.shot("payroll") : hub ? A.shot("employees") : null;
+  const PK_SHOT = { "pakistan-payroll": "payroll", "pakistan-attendance-holidays": "shifts", "pakistan-banking-payments": "payroll-dashboard", "pakistan-payroll-implementation": "payroll-hero" };
+  const shot = PK_SHOT[p.slug] ? A.shot(PK_SHOT[p.slug]) : hub ? A.shot("employees") : null;
   const body = `
 <section class="phero t-plum v-a pk-hero"><div class="bg-grid" aria-hidden="true"></div><div class="wrap phero-grid"><div class="phero-copy">${breadcrumbs(trail)}<p class="eyebrow">Pakistan · ${esc(p.name)}</p><h1>${esc(p.h1)}</h1><p class="lead">${esc(p.lede)}</p><div class="btn-row">${demoCta("Book a Personalized Demo", "pakistan-payroll")}${p.module ? btn(`/platform/${p.module}/`, `${modules.find((m) => m.slug === p.module).name} module`, "ghost") : ""}</div></div>${shot ? `<div class="hero-visual">${frame({ ...shot, alt: "A demonstration-company screen from AiHxM", eager: true })}</div>` : `<div class="hero-visual solo"><div class="big-ico" aria-hidden="true">${icon(p.icon)}</div></div>`}</div></section>
 ${p.blocks.map((b, i) => section({ cls: i % 2 ? "alt" : "", eyebrow: "In the product", title: b.t, body: ticks(b.items) })).join("")}

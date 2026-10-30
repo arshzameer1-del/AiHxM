@@ -42,7 +42,7 @@ export default [
     faqs: [["Can managers approve leave?", "Yes. Requests route through the approval engine to the manager or whoever your workflow names."], ["Can different locations have different holidays?", "Yes, with holiday calendars by location. Moon-dependent dates can be added as tentative and confirmed later."], ["Does leave affect payroll?", "Unpaid leave and attendance deductions can feed payroll as inputs."]],
   },
   {
-    slug: "attendance", name: "Attendance & Time", group: "Time", icon: "attendance", interest: "attendance", shot: null,
+    slug: "attendance", name: "Attendance & Time", group: "Time", icon: "attendance", interest: "attendance", shot: "shifts",
     short: "Clock in and out, shifts, overtime and timesheets.",
     benefit: "Accurate hours for payroll with less chasing.",
     h1: "Know who worked, when and for how long",
@@ -85,7 +85,7 @@ export default [
     faqs: [["How does payroll processing work?", "Six steps from preparation to payment, with variance checks before approval and a stored calculation on every payslip."], ["Does AiHxM support Pakistan income tax?", "Yes. It calculates salary tax by tax year using the slabs your company enters, with a cumulative method from July to June."], ["Can we get payslips and tax certificates?", "Yes. Payslips, year-end tax certificates, salary certificates and an annual salary statement are available."]],
   },
   {
-    slug: "workflows", name: "Approvals & Workflow", group: "Platform", icon: "workflow", interest: "approvals", shot: null,
+    slug: "workflows", name: "Approvals & Workflow", group: "Platform", icon: "workflow", interest: "approvals", shot: "workflows",
     short: "One approval engine behind every request.",
     benefit: "Every decision recorded, routed and never lost.",
     h1: "One inbox, one engine, every decision on record",
@@ -165,7 +165,7 @@ export default [
     faqs: [["What do reviews cover?", "Self and manager assessments, calibration and feedback."], ["Can ratings feed pay?", "Compensation cycles can use approved outcomes, applied only by an explicit action."], ["Is there a record of past reviews?", "Yes. Cycles and results are kept per employee."]],
   },
   {
-    slug: "talent", name: "Talent Management", group: "Talent", icon: "talent", interest: "other", shot: null,
+    slug: "talent", name: "Talent Management", group: "Talent", icon: "talent", interest: "other", shot: "talent",
     short: "Skills, nine-box, succession lists and talent pools.",
     benefit: "See who you have, where the gaps are and who could step up.",
     h1: "Know the skills you have and the gaps you need to close",
@@ -185,7 +185,7 @@ export default [
     faqs: [["Who can see succession lists?", "Only roles with the relevant permission."], ["Is the nine-box automatic?", "No. People are placed by authorised users."], ["Does it use AI?", "No. These are structured records and reports."]],
   },
   {
-    slug: "compensation", name: "Compensation Planning", group: "Pay", icon: "compensation", interest: "payroll", shot: null,
+    slug: "compensation", name: "Compensation Planning", group: "Pay", icon: "compensation", interest: "payroll", shot: "compensation",
     short: "Increment cycles that reach payroll only when you say so.",
     benefit: "Salary revisions planned, approved and applied deliberately.",
     h1: "Plan increments, approve them, then apply them on purpose",
@@ -205,7 +205,7 @@ export default [
     faqs: [["Does it update salaries by itself?", "No. Approved revisions are applied only through an explicit action."], ["Are arrears calculated?", "Not automatically at apply time. Retroactive payroll handles back-dated changes separately."], ["Who sees compensation data?", "Only authorised roles."]],
   },
   {
-    slug: "learning", name: "Learning Management", group: "Talent", icon: "learning", interest: "other", shot: null,
+    slug: "learning", name: "Learning Management", group: "Talent", icon: "learning", interest: "other", shot: "learning",
     short: "Courses, enrolments and mandatory training reminders.",
     benefit: "Training that is assigned, tracked and chased for you.",
     h1: "Training that is assigned, tracked and followed up",
