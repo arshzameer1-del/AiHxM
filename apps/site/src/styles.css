@@ -717,6 +717,8 @@ html:not(.js) .pay-panel[hidden]{display:block;margin-bottom:10px}
 .ab-eco li h3{margin:0 0 4px;font-size:1.02rem}.ab-eco li p{margin:0;font-size:.9rem;color:var(--ink-2)}
 .ab-eco .card-ico{flex:none;width:44px;height:44px}
 .ab-founder{display:grid;grid-template-columns:minmax(0,.62fr) minmax(0,1.38fr);gap:clamp(28px,5vw,64px);align-items:start}
+.ab-fq{margin:6px 0 18px;padding:4px 0 4px 20px;border-left:4px solid var(--plum);font:700 clamp(1.1rem,2.2vw,1.45rem)/1.35 var(--display);color:var(--plum-d);text-wrap:balance}
+.ab-goal{margin-top:6px;font:700 1.15rem/1.45 var(--display);color:var(--plum-d)}
 .ab-photo{margin:0;position:sticky;top:150px}
 .ab-photo img,.ab-photo .mono{display:block;width:100%;aspect-ratio:4/5;object-fit:cover;border-radius:var(--r-lg);box-shadow:var(--shadow-lg)}
 .ab-photo .mono{display:grid;place-items:center;background:linear-gradient(145deg,var(--indigo),var(--plum));color:#fff;font:800 4.5rem/1 var(--display);letter-spacing:.05em}

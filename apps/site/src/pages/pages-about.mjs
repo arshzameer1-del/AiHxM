@@ -77,13 +77,18 @@ ${tabs.map(([s, t, d, slug], i) => `<div class="ab-panel" role="tabpanel" id="ab
 
   // 08 founder
   const photo = founderPhoto ? `<img src="${A.founderImg}" width="800" height="1000" alt="Portrait of Kumail Sherazi, founder of AIHXM" loading="lazy" decoding="async">` : `<div class="mono" role="img" aria-label="Kumail Sherazi">KS</div>`;
-  const areas = ["SAP Personnel Administration", "SAP Organizational Management", "SAP Time Management and workforce processes", "Employee and Manager Self-Service", "HR forms, workflows and business processes", "Enterprise HR system support and transformation", "SAP ECC to S/4HANA HR-related project environments", "SAP SuccessFactors Employee Central"];
   const founder = `<section class="section ab-light" id="founder"><div class="wrap wide ab-founder"><figure class="ab-photo reveal">${photo}<figcaption><b>Kumail Sherazi</b><span>Founder, AIHXM</span></figcaption></figure>
-<div>${head("The story behind AIHXM", "Built on enterprise HR experience. Driven by a different vision.", "AIHXM is a founder-led technology initiative shaped by practical experience with enterprise HR systems and business processes.")}
-<p class="reveal"><strong>Kumail Sherazi</strong> is an SAP HCM and SAP SuccessFactors professional with more than five years of experience on enterprise HR technology projects and business requirements across Qatar, Saudi Arabia and Pakistan. That work gave him practical exposure to workforce management, organizational structures, employee services, time management, HR workflows and enterprise system transformations.</p>
-<div class="ab-markets reveal" aria-label="Markets of professional experience">${["Qatar", "Saudi Arabia", "Pakistan"].map((m) => `<span>${m}</span>`).join("")}</div>
-<h3 class="reveal">Professional experience</h3><ul class="ab-areas reveal">${areas.map((a) => `<li>${icon("check")}<span>${esc(a)}</span></li>`).join("")}</ul>
-<p class="reveal">Working in these environments showed a recurring challenge: requirements keep evolving, but adapting traditional software can mean long development cycles, unnecessary code changes and technical complexity. A simple requirement should not always become a development project. That realization shaped the central idea behind AIHXM: a platform where configurability is part of the foundation, not an expensive addition.</p>
+<div>${head("The Story Behind AIHXM", "A Vision Inspired by Real Business Challenges", "AIHXM was founded by Kumail Sherazi, an SAP HCM and SAP SuccessFactors professional with more than five years of experience working with enterprise HR technology and business processes across Pakistan, Qatar and Saudi Arabia.")}
+<div class="ab-markets reveal" aria-label="Markets of professional experience">${["Pakistan", "Qatar", "Saudi Arabia"].map((m) => `<span>${m}</span>`).join("")}</div>
+<p class="reveal">Throughout his professional journey, he gained practical exposure to complex HR operations, workforce management, organizational structures, employee services, time management, HR workflows and enterprise system transformations.</p>
+<p class="reveal">Working with enterprise technology provided valuable insight into how well-designed software can transform business operations. At the same time, it raised an important question:</p>
+<blockquote class="ab-fq reveal">Why should small and medium-sized businesses have to compromise on technology simply because they are not large enterprises?</blockquote>
+<p class="reveal">Across Pakistan, many growing businesses still depend on spreadsheets, disconnected applications and manual processes. Others struggle to find software that fits their unique requirements without lengthy implementation cycles, expensive customization or unnecessary complexity.</p>
+<p class="reveal">This inspired a bigger vision: to build business software that combines enterprise-level thinking with the practical needs of growing organizations.</p>
+<p class="reveal"><strong>That vision became AIHXM.</strong></p>
+<p class="reveal">At its foundation is a simple philosophy: business software should adapt to business requirements. Through a configuration-first approach, AIHXM aims to make system changes more efficient, reduce unnecessary code modifications and help organizations evolve their processes without repeatedly starting development projects.</p>
+<p class="reveal">AIHXM is the beginning of a broader technology journey &mdash; one focused on adaptable business solutions, intelligent automation and the practical application of AI.</p>
+<p class="ab-goal reveal">The goal is simple: make powerful, intelligent and adaptable technology accessible to businesses of every size.</p>
 <p class="fine reveal">AIHXM is an independent product. It is not affiliated with, endorsed by or sponsored by SAP or any other software vendor.</p></div></div></section>`;
 
   // 09 mission, vision, values
