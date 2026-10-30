@@ -36,6 +36,27 @@ Working rules: module by module, additive migrations only, nothing removed, ever
 - 390 of 995 foreign keys have no supporting index. NOT changed: blindly adding ~390 indexes slows writes; most are small tables. Needs a per-table decision once there is production data volume.
 - Lists: `employees` uses `pageOf()`, which loads the whole list and then slices it. Fine for SMB sizes (hundreds), not for tens of thousands. Real database paging (LIMIT/OFFSET in SQL) is a follow-up.
 
+## Module reports (each rating states what was actually measured)
+
+### Module 1: Employees (core HR, hiring, profile, documents) - audited 2026-10-30
+Size: 27 controllers, 132 routes, 31 API spec files, 36 screens/panels, 9 browser specs.
+
+Measured and verified:
+- Authorization (live probe of all 34 parameterless GET routes as anonymous, employee and HR): anonymous 401 everywhere; employee gets 403 on every HR-only list and sees only their own record on `/employees`. No leaks found. `field-sensitivity` (the list of which fields are sensitive) is readable by employees: names only, no values; left as is.
+- Input validation: global `ValidationPipe` with `whitelist` and `forbidNonWhitelisted`; every Employees DTO has validators; no untyped bodies.
+- Accessibility (axe-core, WCAG 2.0 A and AA): found colour-contrast failures on every screen (muted text token too light in all three themes; purple top bar; accent purple and pink ink on tinted backgrounds) and one unlabeled file input on bulk import. Fixed in `index.css` (tokens darkened, same hue) and `EmployeeBulkImportPage.tsx`. Result: 0 violations on 36 screens (30 HR, 6 employee), now a permanent test `a11y.e2e.spec.ts` (new dev-only dependency `axe-core`).
+- Phone width (390 px): no page-level horizontal scroll on 10 Employees/hiring/config screens.
+- Destructive actions: removing a language, a nine-box placement, a succession candidate and a minimum-wage entry removed the record on one click. Now ask first (shared `useConfirm`); Cancel changes nothing; covered by browser tests.
+- Performance: `data-consistency` report took 1.1 s with only 3 employees (it runs every check on demand); fine for now, to be watched with real volume. Employee list loads everything then pages in memory.
+
+Found, not fixed (belongs to later modules or needs a decision):
+- Other one-click removals still exist in Attendance rules (remove group), Attendance devices (revoke), Payroll accounting rows, levy worksheet draft delete, Shift/leave rule builders. Will be handled in their own module audit.
+- Employee profile edit and hire forms are only partly configurable (hiring cards and custom fields yes; most profile fields no). Form settings catalog does not cover them yet.
+- The unit tests in `apps/web/src/**/*.test.ts` (53 tests, Node's test runner) could not be run in this sandbox because they need a TypeScript loader that is not installed here. They were not run and no claim is made about them.
+- Business-logic correctness of each of the 26 Employees sub-areas (loans, statutory IDs, payment accounts, compensation, cost allocation...) was NOT re-verified beyond the existing 31 API spec files that pass.
+
+Rating (evidence-based, not a certification): Security B+ to A- (verified); Validation A- (verified); Accessibility A- on contrast/labels (verified by axe, keyboard and screen-reader behaviour not tested); Configurability C (hiring cards and custom fields only); Mobile B (overflow checked only); Performance B- (in-memory paging, on-demand heavy report); Business-logic depth: not rated (not re-audited).
+
 ## Known issues / limits
 - Form settings cover 7 forms (about 25 fields). Dozens of forms are still hardcoded.
 - Form settings have history and undo but no draft/publish step and no effective dates yet (the older config change-request engine has those; not yet joined).
@@ -57,4 +78,4 @@ Working rules: module by module, additive migrations only, nothing removed, ever
 8. One clean serial full-suite run and the production migration.
 
 ## Exact next step
-Check the result of the clean full-suite run (see Tests below), then continue item 1 with job requisition and candidate.
+Module 2: Leave. Same procedure as Module 1 (live authorization probe, axe is already global, destructive-action check, validation, business-rule review of the leave pipeline, configurability, then rating). Then Module 3 Attendance and so on in the order in the module list: Employees, Leave, Attendance/shifts/timesheets/overtime, Payroll, Workflow/Approvals, Organization, Recruitment, Performance/Talent, Learning, Expenses/Travel, Reports, Onboarding, Surveys/Recognition/Help desk/Announcements, Configuration Center/Admin, System admin/security.

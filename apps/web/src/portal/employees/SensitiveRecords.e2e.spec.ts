@@ -70,6 +70,14 @@ test.describe("Languages, medical information and disciplinary records", () => {
     await expect(mine).toBeVisible();
     await expect(mine.getByRole("button", { name: "Remove" })).toHaveCount(0);
 
+    // HR is asked before a language is removed; Cancel keeps it, confirming removes it
+    await hr.getByTestId("language-row").filter({ hasText: lang }).getByRole("button", { name: "Remove" }).click();
+    await hr.getByRole("alertdialog").getByRole("button", { name: "Cancel" }).click();
+    await expect(hr.getByTestId("language-row").filter({ hasText: lang })).toHaveCount(1);
+    await hr.getByTestId("language-row").filter({ hasText: lang }).getByRole("button", { name: "Remove" }).click();
+    await hr.getByRole("alertdialog").getByRole("button", { name: "Remove" }).click();
+    await expect(hr.getByTestId("language-row").filter({ hasText: lang })).toHaveCount(0);
+
     // a line manager is refused outright
     expect((await api(managerToken, `/employees/medical?employeeId=${me.employeeId}`)).status).toBe(403);
     expect((await api(managerToken, `/employees/disciplinary?employeeId=${me.employeeId}`)).status).toBe(403);

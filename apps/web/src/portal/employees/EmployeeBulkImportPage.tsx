@@ -137,6 +137,7 @@ export function EmployeeBulkImportPage() {
         <h2 className="font-semibold text-sm uppercase tracking-wide text-label-tertiary">2. Choose your file</h2>
         <input
           type="file"
+          aria-label="Choose the CSV file to import"
           accept=".csv,text/csv"
           onChange={handleFile}
           className="block w-full text-sm text-label-secondary file:mr-3 file:rounded-lg file:border-0 file:bg-accent/10 file:text-accent file:px-3 file:py-2 file:text-sm file:font-semibold"

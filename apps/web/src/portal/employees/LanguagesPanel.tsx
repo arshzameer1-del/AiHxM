@@ -2,6 +2,7 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import type { EmployeeLanguageView, LanguageLevel } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { LoadingNote } from "../shared/PageChrome";
+import { useConfirm } from "../shared/useConfirm";
 import { LANGUAGE_LEVELS, levelLabel } from "./sensitiveRecords";
 
 const field = "rounded-lg border border-black/10 px-3 py-2 text-sm";
@@ -14,6 +15,7 @@ export function LanguagesPanel({ employeeId, canManage }: { employeeId: string; 
   const [spoken, setSpoken] = useState<LanguageLevel>("conversational");
   const [written, setWritten] = useState<LanguageLevel>("conversational");
   const [busy, setBusy] = useState(false);
+  const { dialog, ask } = useConfirm();
 
   const load = useCallback(() => {
     api.listEmployeeLanguages(employeeId).then(setRows).catch(() => setError("Could not load the languages."));
@@ -48,6 +50,7 @@ export function LanguagesPanel({ employeeId, canManage }: { employeeId: string; 
 
   return (
     <section className="bg-card rounded-card p-5 shadow-sm mb-6" aria-label="Languages" data-testid="languages-panel">
+      {dialog}
       <h2 className="font-semibold text-sm uppercase tracking-wide text-label-tertiary mb-3">Languages</h2>
       {error && <div className="text-danger text-xs mb-2" role="alert">{error}</div>}
       {!rows && !error && <LoadingNote />}
@@ -57,7 +60,7 @@ export function LanguagesPanel({ employeeId, canManage }: { employeeId: string; 
           {rows.map((l) => (
             <li key={l.id} className="py-2 flex items-center justify-between gap-3 text-sm" data-testid="language-row">
               <span><span className="font-medium">{l.language}</span> <span className="text-label-tertiary">· speaks {levelLabel(l.spokenLevel).toLowerCase()}, writes {levelLabel(l.writtenLevel).toLowerCase()}</span></span>
-              {canManage && <button type="button" onClick={() => remove(l.id)} className="text-xs font-medium text-danger hover:underline">Remove</button>}
+              {canManage && <button type="button" onClick={() => ask(`Remove ${l.language} from this person's languages?`, () => void remove(l.id))} className="text-xs font-medium text-danger hover:underline">Remove</button>}
             </li>
           ))}
         </ul>

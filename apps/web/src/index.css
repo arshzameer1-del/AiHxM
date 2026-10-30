@@ -28,7 +28,7 @@
   --c-ai: 124 58 237;
   --c-label-primary: 15 23 42;
   --c-label-secondary: 71 85 105;
-  --c-label-tertiary: 148 163 184;
+  --c-label-tertiary: 100 116 139;
 
   /* sidebar */
   --c-sidebar: 15 23 42;
@@ -61,7 +61,7 @@
   --c-ai: 137 68 171;
   --c-label-primary: 28 28 30;
   --c-label-secondary: 99 99 102;
-  --c-label-tertiary: 142 142 147;
+  --c-label-tertiary: 110 110 115;
 
   --c-sidebar: 255 255 255;
   --c-sidebar-fg: 28 28 30;
@@ -83,7 +83,7 @@
   --c-surface: 246 243 244;
   --c-card: 255 255 255;
   --c-border: 230 223 227;
-  --c-accent: 113 99 158;
+  --c-accent: 108 94 152;
   --c-accent-dark: 93 80 133;
   --c-brand-secondary: 113 75 103;
   --c-brand-dark: 43 29 39;
@@ -94,7 +94,7 @@
   --c-ai: 99 102 241;
   --c-label-primary: 44 32 33;
   --c-label-secondary: 98 86 90;
-  --c-label-tertiary: 140 128 133;
+  --c-label-tertiary: 115 104 109;
 
   --c-sidebar: 253 252 253;
   --c-sidebar-fg: 44 32 33;
@@ -113,8 +113,8 @@
 
 /* Top bar: the purple bar of One exD, with white text. Its drop-down keeps the light tokens. */
 :root[data-theme="onexd"] .app-topbar {
-  --c-card: 113 99 158;
-  --c-surface: 134 121 176;
+  --c-card: 96 84 138;
+  --c-surface: 104 92 148;
   --c-border: 150 138 188;
   --c-accent: 255 255 255;
   --c-label-primary: 255 255 255;
@@ -126,10 +126,10 @@
   --c-card: 255 255 255;
   --c-surface: 246 243 244;
   --c-border: 230 223 227;
-  --c-accent: 113 99 158;
+  --c-accent: 108 94 152;
   --c-label-primary: 44 32 33;
   --c-label-secondary: 98 86 90;
-  --c-label-tertiary: 140 128 133;
+  --c-label-tertiary: 115 104 109;
 }
 
 /* Softer, rounder shapes. */
@@ -570,7 +570,7 @@ button.ui-card:focus-visible {
 .hue-chip { display: inline-flex; align-items: center; justify-content: center; }
 :root[data-theme="onexd"] [data-hue="0"] { --hue: 142 43 92; --hue-ink: 142 43 92; }
 :root[data-theme="onexd"] [data-hue="1"] { --hue: 6 182 212; --hue-ink: 15 140 163; }
-:root[data-theme="onexd"] [data-hue="2"] { --hue: 236 72 153; --hue-ink: 190 62 124; }
+:root[data-theme="onexd"] [data-hue="2"] { --hue: 236 72 153; --hue-ink: 168 52 107; }
 :root[data-theme="onexd"] [data-hue="3"] { --hue: 99 102 241; --hue-ink: 86 85 191; }
 :root[data-theme="onexd"] [data-hue="4"] { --hue: 20 184 166; --hue-ink: 24 143 129; }
 :root[data-theme="onexd"] [data-hue="5"] { --hue: 249 115 22; --hue-ink: 194 92 20; }
@@ -617,7 +617,7 @@ button.ui-card:focus-visible {
   background: #ec4899;
   transform-origin: center;
 }
-:root[data-theme="onexd"] .rail-child[aria-current="page"] { color: #be3e7c; background: #fdf4f8; }
+:root[data-theme="onexd"] .rail-child[aria-current="page"] { color: #a8346b; background: #fdf4f8; }
 
 /* Fields: soft border, warm fill, a clear purple glow on focus. */
 :root[data-theme="onexd"] :is(input, select, textarea):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]) {
@@ -661,11 +661,11 @@ button.ui-card:focus-visible {
   transform-origin: top;
 }
 :root[data-theme="onexd"] .app-main h2.uppercase,
-:root[data-theme="onexd"] .app-main h3.uppercase { color: #be3e7c; font-weight: 700; }
+:root[data-theme="onexd"] .app-main h3.uppercase { color: #a8346b; font-weight: 700; }
 
 /* Tabs: rose text and an underline under the open one. */
 :root[data-theme="onexd"] [role="tablist"] [role="tab"] { transition: color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease; }
-:root[data-theme="onexd"] [role="tablist"] [role="tab"][aria-selected="true"] { color: #be3e7c; }
+:root[data-theme="onexd"] [role="tablist"] [role="tab"][aria-selected="true"] { color: #a8346b; }
 :root[data-theme="onexd"] [role="tablist"] [role="tab"]:hover:not([aria-selected="true"]) { background-color: rgb(113 99 158 / 0.07); }
 
 /* Buttons: plum gradient, lift on hover, press on click. */
@@ -684,7 +684,7 @@ button.ui-card:focus-visible {
 /* Tables: row hover tint and small-caps column heads. */
 :root[data-theme="onexd"] .app-main tbody tr { transition: background-color 0.15s ease; }
 :root[data-theme="onexd"] .app-main tbody tr:hover { background-color: rgb(113 99 158 / 0.05); }
-:root[data-theme="onexd"] .app-main thead th { font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; color: #be3e7c; }
+:root[data-theme="onexd"] .app-main thead th { font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; color: #a8346b; }
 
 /* Header status dot with a ping. */
 .ws-dot { display: inline-block; width: 8px; height: 8px; margin-right: 7px; border-radius: 50%; position: relative; }
@@ -977,10 +977,10 @@ html[dir="rtl"] input[type="date"] {
   --c-card: 255 255 255;
   --c-surface: 246 243 244;
   --c-border: 230 223 227;
-  --c-accent: 113 99 158;
+  --c-accent: 108 94 152;
   --c-label-primary: 44 32 33;
   --c-label-secondary: 98 86 90;
-  --c-label-tertiary: 140 128 133;
+  --c-label-tertiary: 115 104 109;
   border-color: rgb(230 223 227);
   box-shadow: 0 1px 0 rgb(230 223 227);
 }

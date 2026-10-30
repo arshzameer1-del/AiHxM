@@ -1,5 +1,6 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import type { AnnualSalaryStatementView, LevyKind, LevyWorksheetView, MinimumWageRateView } from "@aihxm/shared-types";
+import { useConfirm } from "../shared/useConfirm";
 import { api } from "../../api/client";
 import { LoadingNote } from "../shared/PageChrome";
 import { formatDay } from "../shared/dates";
@@ -8,6 +9,7 @@ import { pkr } from "./payrollLabels";
 
 /** Minimum wage the company has recorded, per province and date. The smart checks compare salaries with it. Nothing ships pre-filled. */
 export function MinimumWagePanel() {
+  const { dialog, ask } = useConfirm();
   const [rows, setRows] = useState<MinimumWageRateView[] | null>(null);
   const [form, setForm] = useState({ province: "", monthlyAmount: "", effectiveFrom: "", sourceNote: "" });
   const [error, setError] = useState<string | null>(null);
@@ -32,6 +34,7 @@ export function MinimumWagePanel() {
 
   return (
     <div className="space-y-4" data-testid="minimum-wage-panel">
+      {dialog}
       <p className="text-sm text-label-secondary">
         Type in the minimum monthly wage from the latest notification for each province. Nothing is pre-filled: the figure and its date are yours, and the Smart checks screen lists active employees paid less than it.
         Use a locations province key (for example sindh) or <strong>All</strong> to cover every location.
@@ -50,7 +53,7 @@ export function MinimumWagePanel() {
           <tbody>{rows.map((r) => (
             <tr key={r.id} className="border-t border-black/5">
               <td className="py-1.5 pr-3">{r.province}</td><td className="pr-3 tabular-nums">{pkr.format(r.monthlyAmount)}</td><td className="pr-3">{formatDay(r.effectiveFrom)}</td><td className="pr-3 text-label-secondary">{r.sourceNote ?? ""}</td>
-              <td><button type="button" className={quietButtonClass} onClick={() => api.deleteMinimumWage(r.id).then(setRows).catch((e) => setError(errorMessage(e, "Could not delete.")))}>Delete</button></td>
+              <td><button type="button" className={quietButtonClass} onClick={() => ask(`Delete the ${r.province} minimum wage entry that starts on ${formatDay(r.effectiveFrom)}?`, () => void api.deleteMinimumWage(r.id).then(setRows).catch((e) => setError(errorMessage(e, "Could not delete."))), "Delete")}>Delete</button></td>
             </tr>))}</tbody>
         </table></div>
       )}

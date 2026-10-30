@@ -2,6 +2,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import type { JobSkillRequirementView, JobView, NineBoxPerson, NineBoxView, PositionView, SkillGapReport, SkillView, SuccessionPositionView, SuccessionReadiness, TalentBand, TalentPoolView } from "@aihxm/shared-types";
 import { api, ApiError } from "../../api/client";
 import { LoadingNote, PageHeader } from "../shared/PageChrome";
+import { useConfirm } from "../shared/useConfirm";
 
 const field = "w-full rounded-lg border border-black/10 px-3 py-2 text-sm";
 const btn = "px-3 py-1.5 rounded-lg bg-accent text-white text-sm font-medium disabled:opacity-50";
@@ -35,6 +36,7 @@ export function TalentPage() {
 }
 
 function NineBoxTab({ onError }: { onError: (m: string | null) => void }) {
+  const { dialog, ask } = useConfirm();
   const [box, setBox] = useState<NineBoxView | null>(null);
   const [pick, setPick] = useState<NineBoxPerson | null>(null);
   const [potential, setPotential] = useState<TalentBand>("medium");
@@ -55,6 +57,7 @@ function NineBoxTab({ onError }: { onError: (m: string | null) => void }) {
   if (!box) return <LoadingNote what="the nine-box" />;
   return (
     <div className="space-y-5">
+      {dialog}
       <p className="text-xs text-label-tertiary">Performance is read from each person's latest released review rating ({box.ratingBands.low} is low, {box.ratingBands.medium} medium, {box.ratingBands.high} high) unless you set it yourself. Potential is always your judgement.</p>
       <div className="overflow-x-auto"><div className="grid grid-cols-[auto_repeat(3,minmax(9rem,1fr))] gap-2 min-w-[34rem]" data-testid="ninebox-grid">
         {rows.map((p) => (
@@ -77,7 +80,7 @@ function NineBoxTab({ onError }: { onError: (m: string | null) => void }) {
             <option value="">{pick.finalRating ? `From latest review (rating ${pick.finalRating})` : "No review rating yet"}</option>{(["low", "medium", "high"] as TalentBand[]).map((b) => <option key={b} value={b}>Set myself: {BAND_LABEL[b]}</option>)}</select></div>
           <div><label htmlFor="nb-note" className="block text-xs font-medium text-label-secondary mb-1">Note</label><input id="nb-note" className={field} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} /></div>
           <div className="flex gap-2"><button type="submit" className={btn}>Save placement</button><button type="button" className={quiet} onClick={() => setPick(null)}>Cancel</button>
-            {pick.potential && <button type="button" className={quiet} onClick={() => api.removeTalentAssessment(pick.employeeId).then((b) => { setBox(b); setPick(null); }).catch((e) => onError(msg(e, "Could not remove.")))}>Remove</button>}</div>
+            {pick.potential && <button type="button" className={quiet} onClick={() => ask("Remove this person from the nine-box?", () => void api.removeTalentAssessment(pick.employeeId).then((b) => { setBox(b); setPick(null); }).catch((e) => onError(msg(e, "Could not remove."))))}>Remove</button>}</div>
         </form>
       )}
       <div>
@@ -150,6 +153,7 @@ function SkillsTab({ onError }: { onError: (m: string | null) => void }) {
 }
 
 function SuccessionTab({ onError }: { onError: (m: string | null) => void }) {
+  const { dialog, ask } = useConfirm();
   const [list, setList] = useState<SuccessionPositionView[] | null>(null);
   const [positions, setPositions] = useState<PositionView[]>([]);
   const [people, setPeople] = useState<NineBoxPerson[]>([]);
@@ -162,6 +166,7 @@ function SuccessionTab({ onError }: { onError: (m: string | null) => void }) {
   async function add(e: FormEvent) { e.preventDefault(); try { setList(await api.addSuccessionCandidate(form.positionId, form.employeeId, form.readiness, form.note)); setForm({ ...form, employeeId: "", note: "" }); onError(null); } catch (err) { onError(msg(err, "Could not add.")); } }
   return (
     <div className="space-y-5">
+      {dialog}
       <form onSubmit={add} className="bg-card rounded-card p-4 shadow-sm grid gap-3 sm:grid-cols-2 max-w-3xl">
         <div><label htmlFor="su-pos" className="block text-xs font-medium text-label-secondary mb-1">Key position</label><select id="su-pos" className={field} value={form.positionId} onChange={(e) => setForm({ ...form, positionId: e.target.value })} required><option value="">Choose</option>{positions.map((p) => <option key={p.id} value={p.id}>{p.positionTitle}</option>)}</select></div>
         <div><label htmlFor="su-emp" className="block text-xs font-medium text-label-secondary mb-1">Possible successor</label><select id="su-emp" className={field} value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })} required><option value="">Choose</option>{people.map((p) => <option key={p.employeeId} value={p.employeeId}>{p.employeeName} ({p.employeeNumber})</option>)}</select></div>
@@ -175,7 +180,7 @@ function SuccessionTab({ onError }: { onError: (m: string | null) => void }) {
             <div className="font-semibold">{p.positionTitle} <span className="text-label-tertiary font-normal">· {p.orgUnitName}</span></div>
             <div className="text-xs text-label-tertiary mb-2">Today: {p.incumbentName ?? "vacant"}</div>
             <ul className="space-y-1">{p.candidates.map((c) => (<li key={c.employeeId} className="text-sm flex items-center gap-2"><span className="flex-1">{c.employeeName} <span className="text-label-tertiary">· {READY[c.readiness]}{c.note ? ` · ${c.note}` : ""}</span></span>
-              <button type="button" className="text-xs text-danger" onClick={() => api.removeSuccessionCandidate(p.positionId, c.employeeId).then(setList).catch((e) => onError(msg(e, "Could not remove.")))}>Remove</button></li>))}</ul>
+              <button type="button" className="text-xs text-danger" onClick={() => ask(`Remove ${c.employeeName} from this succession list?`, () => void api.removeSuccessionCandidate(p.positionId, c.employeeId).then(setList).catch((e) => onError(msg(e, "Could not remove."))))}>Remove</button></li>))}</ul>
           </div>))}</div>
       )}
     </div>

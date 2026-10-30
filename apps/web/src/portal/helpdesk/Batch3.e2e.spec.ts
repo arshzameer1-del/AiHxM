@@ -82,7 +82,12 @@ test.describe("Recognition, help desk and compliance", () => {
     await page.getByRole("button", { name: "Add", exact: true }).click();
     const wage = page.getByTestId("minimum-wage-panel").getByRole("row").filter({ hasText: "E2EProvince" });
     await expect(wage).toContainText("12,345");
+    // asks first; Cancel changes nothing
     await wage.getByRole("button", { name: "Delete" }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Cancel" }).click();
+    await expect(wage).toContainText("12,345");
+    await wage.getByRole("button", { name: "Delete" }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Delete" }).click();
     await expect(page.getByTestId("minimum-wage-panel").getByText("E2EProvince")).toHaveCount(0);
   });
 });
