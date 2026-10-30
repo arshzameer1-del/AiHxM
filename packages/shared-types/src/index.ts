@@ -10977,3 +10977,112 @@ export interface SaveHeadcountPlanRequest {
   note?: string | null;
   lines: Array<{ orgUnitId: string; plannedCount: number; note?: string | null }>;
 }
+
+// ---------------------------------------------------------------------------
+// Talent (skills, nine-box, succession, pools) and compensation planning (GAPC4)
+// ---------------------------------------------------------------------------
+export type TalentBand = "low" | "medium" | "high";
+export type SuccessionReadiness = "ready_now" | "one_to_two_years" | "three_plus_years";
+export interface SkillView {
+  id: string;
+  name: string;
+  category: string | null;
+  isActive: boolean;
+}
+export interface JobSkillRequirementView {
+  jobId: string;
+  jobTitle: string;
+  skillId: string;
+  skillName: string;
+  requiredLevel: number;
+}
+export interface MySkillView {
+  skillId: string;
+  name: string;
+  category: string | null;
+  level: number | null;
+  requiredLevel: number | null;
+  source: "self" | "hr" | null;
+  assessedOn: string | null;
+}
+export interface SkillGapPerson {
+  employeeId: string;
+  employeeName: string;
+  employeeNumber: string;
+  gaps: Array<{ skillId: string; skillName: string; requiredLevel: number; level: number | null }>;
+}
+export interface SkillGapReport {
+  jobId: string;
+  jobTitle: string;
+  peopleInJob: number;
+  requirements: Array<{ skillId: string; skillName: string; requiredLevel: number }>;
+  people: SkillGapPerson[];
+}
+export interface NineBoxPerson {
+  employeeId: string;
+  employeeName: string;
+  employeeNumber: string;
+  potential: TalentBand | null;
+  performance: TalentBand | null;
+  performanceSource: "review" | "hr" | null;
+  finalRating: number | null;
+  note: string | null;
+}
+export interface NineBoxView {
+  people: NineBoxPerson[];
+  /** how a review rating is read when HR has not set the performance band by hand */
+  ratingBands: { low: string; medium: string; high: string };
+}
+export interface SaveTalentAssessmentRequest {
+  employeeId: string;
+  potential: TalentBand;
+  performanceBand?: TalentBand | null;
+  note?: string | null;
+}
+export interface SuccessionPositionView {
+  positionId: string;
+  positionTitle: string;
+  orgUnitName: string;
+  incumbentName: string | null;
+  candidates: Array<{ employeeId: string; employeeName: string; readiness: SuccessionReadiness; note: string | null }>;
+}
+export interface TalentPoolView {
+  id: string;
+  name: string;
+  description: string | null;
+  members: Array<{ employeeId: string; employeeName: string }>;
+}
+
+export type CompCycleStatus = "draft" | "submitted" | "approved" | "applied" | "cancelled";
+export interface CompCycleItemView {
+  employeeId: string;
+  employeeName: string;
+  employeeNumber: string;
+  currentBasic: number;
+  proposedBasic: number;
+  changePercent: number;
+  reason: string | null;
+}
+export interface CompCycleView {
+  id: string;
+  name: string;
+  effectiveFrom: string;
+  budgetAmount: number | null;
+  status: CompCycleStatus;
+  totalMonthlyIncrease: number;
+  changedCount: number;
+  items: CompCycleItemView[];
+  submittedByName: string | null;
+  approvedByName: string | null;
+  approvedAt: string | null;
+  appliedAt: string | null;
+  createdAt: string;
+}
+export interface SaveCompCycleRequest {
+  name: string;
+  effectiveFrom: string;
+  budgetAmount?: number | null;
+}
+export interface SaveCompCycleItemsRequest {
+  items: Array<{ employeeId: string; proposedBasic: number; reason?: string | null }>;
+}

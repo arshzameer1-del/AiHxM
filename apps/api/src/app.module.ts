@@ -34,6 +34,8 @@ import { ComplianceModule } from "./compliance/compliance.module";
 import { RecognitionModule } from "./recognition/recognition.module";
 import { HelpdeskModule } from "./helpdesk/helpdesk.module";
 import { HeadcountModule } from "./headcount/headcount.module";
+import { TalentModule } from "./talent/talent.module";
+import { CompensationCyclesModule } from "./compensation-cycles/compensation-cycles.module";
 import { MessagingModule } from "./messaging/messaging.module";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { RemindersModule } from "./reminders/reminders.module";
@@ -128,6 +130,8 @@ import { HrAdministrationModule } from "./hr-administration/hr-administration.mo
     RecognitionModule,
     HelpdeskModule,
     HeadcountModule,
+    TalentModule,
+    CompensationCyclesModule,
     CareersModule,
     AssetsModule,
     TravelModule,

@@ -1,3 +1,4 @@
+import { CompensationPlanningPanel } from "./CompensationPlanningPanel";
 import { AnnualSalaryStatementPanel, LevyWorksheetsPanel, MinimumWagePanel } from "./PayrollCompliancePanels";
 import { LoadingNote } from "../shared/PageChrome";
 import { useEffect, useRef, useState } from "react";
@@ -839,6 +840,7 @@ const SECTION_TAB: Record<string, string> = {
   "payroll-documents": "run",
   "input-imports": "inputs",
   benefits: "inputs",
+  "compensation-planning": "inputs",
   "final-settlements": "settlements",
   schemes: "settlements",
   accounting: "payments",
@@ -982,6 +984,11 @@ export function PayrollPage() {
                 {isHrAdmin && (
                   <CollapsibleSection title="Bulk Pay Inputs" defaultOpen forceOpen={focusSection === "input-imports"} sectionId="input-imports">
                     <PayrollInputImportPanel />
+                  </CollapsibleSection>
+                )}
+                {isHrAdmin && (
+                  <CollapsibleSection title="Compensation planning" forceOpen={focusSection === "compensation-planning"} sectionId="compensation-planning">
+                    <CompensationPlanningPanel />
                   </CollapsibleSection>
                 )}
                 <CollapsibleSection title="Benefits" defaultOpen={!isHrAdmin} forceOpen={focusSection === "benefits"} sectionId="benefits">

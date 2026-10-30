@@ -595,6 +595,18 @@ import type {
   MySurveyView,
   SaveSurveyRequest,
   SubmitSurveyRequest,
+  CompCycleView,
+  JobSkillRequirementView,
+  MySkillView,
+  NineBoxView,
+  SaveCompCycleItemsRequest,
+  SaveCompCycleRequest,
+  SaveTalentAssessmentRequest,
+  SkillGapReport,
+  SkillView,
+  SuccessionPositionView,
+  SuccessionReadiness,
+  TalentPoolView,
   ColleagueView,
   GiveRecognitionRequest,
   HeadcountPlanView,
@@ -3210,6 +3222,37 @@ export const api = {
   listHeadcountPlans: () => request<HeadcountPlanView[]>("/headcount-plans"),
   createHeadcountPlan: (input: SaveHeadcountPlanRequest) => request<HeadcountPlanView>("/headcount-plans", { method: "POST", body: JSON.stringify(input) }),
   deleteHeadcountPlan: (id: string) => request<void>(`/headcount-plans/${id}`, { method: "DELETE" }),
+
+  // Talent
+  listSkills: (all = false) => request<SkillView[]>(`/talent/skills${all ? "?all=true" : ""}`),
+  saveSkill: (input: { id?: string; name: string; category?: string | null; isActive?: boolean }) => request<SkillView[]>("/talent/skills", { method: "POST", body: JSON.stringify(input) }),
+  listSkillRequirements: () => request<JobSkillRequirementView[]>("/talent/skills/requirements"),
+  setSkillRequirement: (jobId: string, skillId: string, requiredLevel: number | null) =>
+    request<JobSkillRequirementView[]>("/talent/skills/requirements", { method: "POST", body: JSON.stringify({ jobId, skillId, requiredLevel }) }),
+  listMySkills: () => request<MySkillView[]>("/talent/skills/mine"),
+  setMySkill: (skillId: string, level: number) => request<MySkillView[]>(`/talent/skills/mine/${skillId}`, { method: "PUT", body: JSON.stringify({ level }) }),
+  setEmployeeSkill: (employeeId: string, skillId: string, level: number) => request<{ ok: true }>(`/talent/skills/employee/${employeeId}/${skillId}`, { method: "PUT", body: JSON.stringify({ level }) }),
+  getSkillGaps: (jobId: string) => request<SkillGapReport>(`/talent/skills/gaps/${jobId}`),
+  getNineBox: () => request<NineBoxView>("/talent/nine-box"),
+  saveTalentAssessment: (input: SaveTalentAssessmentRequest) => request<NineBoxView>("/talent/nine-box", { method: "POST", body: JSON.stringify(input) }),
+  removeTalentAssessment: (employeeId: string) => request<NineBoxView>(`/talent/nine-box/${employeeId}`, { method: "DELETE" }),
+  getSuccession: () => request<SuccessionPositionView[]>("/talent/succession"),
+  addSuccessionCandidate: (positionId: string, employeeId: string, readiness: SuccessionReadiness, note?: string) =>
+    request<SuccessionPositionView[]>(`/talent/succession/${positionId}`, { method: "PUT", body: JSON.stringify({ employeeId, readiness, note: note || null }) }),
+  removeSuccessionCandidate: (positionId: string, employeeId: string) => request<SuccessionPositionView[]>(`/talent/succession/${positionId}/${employeeId}`, { method: "DELETE" }),
+  listTalentPools: () => request<TalentPoolView[]>("/talent/pools"),
+  createTalentPool: (name: string, description?: string) => request<TalentPoolView[]>("/talent/pools", { method: "POST", body: JSON.stringify({ name, description: description || null }) }),
+  deleteTalentPool: (id: string) => request<TalentPoolView[]>(`/talent/pools/${id}`, { method: "DELETE" }),
+  setTalentPoolMember: (poolId: string, employeeId: string, member: boolean) =>
+    request<TalentPoolView[]>(`/talent/pools/${poolId}/members/${employeeId}`, { method: member ? "PUT" : "DELETE" }),
+
+  // Compensation planning cycles
+  listCompCycles: () => request<CompCycleView[]>("/compensation-cycles"),
+  createCompCycle: (input: SaveCompCycleRequest) => request<CompCycleView>("/compensation-cycles", { method: "POST", body: JSON.stringify(input) }),
+  loadCompCyclePeople: (id: string) => request<{ cycle: CompCycleView; withoutBasic: number }>(`/compensation-cycles/${id}/load-people`, { method: "POST" }),
+  saveCompCycleItems: (id: string, input: SaveCompCycleItemsRequest) => request<CompCycleView>(`/compensation-cycles/${id}/items`, { method: "PUT", body: JSON.stringify(input) }),
+  compCycleAction: (id: string, action: "submit" | "withdraw" | "approve" | "apply" | "cancel", body?: { samePersonConfirmed?: boolean }) =>
+    request<CompCycleView>(`/compensation-cycles/${id}/${action}`, { method: "POST", body: JSON.stringify(body ?? {}) }),
 
   // Pulse surveys (anonymous)
   listMySurveys: () => request<MySurveyView[]>("/surveys/mine"),

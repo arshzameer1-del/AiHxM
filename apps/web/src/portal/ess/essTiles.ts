@@ -3,6 +3,7 @@ import {
   ClipboardList,
   Heart,
   LifeBuoy,
+  Sparkles,
   Clock,
   FileText,
   FolderOpen,
@@ -78,6 +79,7 @@ export function buildEssTileGroups(enabledModules: readonly ModuleKey[]): EssTil
   if (has("employee")) hcm.push({ to: "/app/ess/surveys", title: "Surveys", description: "Answer short, anonymous surveys from HR", icon: ClipboardList });
   if (has("employee")) hcm.push({ to: "/app/ess/recognition", title: "Recognition", description: "Thank a colleague and see who has been thanked", icon: Heart });
   if (has("employee")) hcm.push({ to: "/app/ess/helpdesk", title: "Ask HR", description: "Ask HR a question and follow the answer", icon: LifeBuoy });
+  if (has("employee")) hcm.push({ to: "/app/ess/skills", title: "My skills", description: "Rate your own skills and see what your job needs", icon: Sparkles });
   if (has("employee")) {
     hcm.push({ to: "/app/ess/requests?new=loan", title: "Request a Loan or Advance", description: "Ask HR for a loan or a salary advance", icon: Wallet });
     hcm.push({ to: "/app/ess/requests?new=letter", title: "Request a Letter", description: "Salary certificate, employment letter, NOC", icon: FileText });

@@ -187,6 +187,8 @@ const RecognitionPage = lazy(() => import("./portal/recognition/RecognitionPage"
 const HelpdeskPage = lazy(() => import("./portal/helpdesk/HelpdeskPage").then((m) => ({ default: m.HelpdeskPage })));
 const HelpdeskAdminPage = lazy(() => import("./portal/helpdesk/HelpdeskAdminPage").then((m) => ({ default: m.HelpdeskAdminPage })));
 const HeadcountPlansPage = lazy(() => import("./portal/headcount/HeadcountPlansPage").then((m) => ({ default: m.HeadcountPlansPage })));
+const TalentPage = lazy(() => import("./portal/talent/TalentPage").then((m) => ({ default: m.TalentPage })));
+const MySkillsPage = lazy(() => import("./portal/talent/MySkillsPage").then((m) => ({ default: m.MySkillsPage })));
 const SurveysAdminPage = lazy(() => import("./portal/surveys/SurveysAdminPage").then((m) => ({ default: m.SurveysAdminPage })));
 const MyHrRequestsPage = lazy(() =>
   import("./portal/requests/MyHrRequestsPage").then((m) => ({
@@ -474,6 +476,7 @@ export default function App() {
                   <Route path="ess/announcements" element={<AnnouncementsPage />} />
                   <Route path="ess/surveys" element={<SurveysPage />} />
                   <Route path="ess/recognition" element={<RecognitionPage />} />
+                  <Route path="ess/skills" element={<MySkillsPage />} />
                   <Route path="ess/helpdesk" element={<HelpdeskPage />} />
                   <Route path="ess/assets" element={<MyAssetsPage />} />
                   <Route path="assets" element={<AssetRegisterPage />} />
@@ -508,6 +511,7 @@ export default function App() {
                   <Route path="employees/surveys" element={<SurveysAdminPage />} />
                   <Route path="employees/helpdesk" element={<HelpdeskAdminPage />} />
                   <Route path="employees/headcount" element={<HeadcountPlansPage />} />
+                  <Route path="employees/talent" element={<TalentPage />} />
                   <Route path="reports" element={<ReportsShell />}>
                     <Route index element={<ReportsOverviewPage />} />
                     <Route path="library" element={<ReportsLibraryPage />} />
