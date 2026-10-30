@@ -17,6 +17,8 @@ statistics, certifications, uptime figures, prices, support commitments, partner
 - Public playground (/playground/): browser-only simulation on fictional data (profile, attendance, leave, approval, payroll, payslip, analytics). No network, no storage, invented tax bands labelled as not Pakistan's.
 - Forms: new "quote" type, scope prefill, `from` context added to every demo link and sent with the request. Case-study architecture (empty; publishes only entries with a recorded customer approval). Company facts and founder block render only from env vars (MARKETING_LEGAL_NAME, _REG_NO, _ADDRESS, _FOUNDER_NAME, _FOUNDER_ROLE, _FOUNDER_BIO).
 
+- About page rebuilt from the owner's About Us document: 11 storytelling sections with sticky in-page navigation, real product screenshots (demonstration company), animated challenge and configuration comparisons, module explorer, AI direction map labelled as direction, Beyond HR ecosystem, founder section (Kumail Sherazi; monogram until a photo is added at `apps/site/src/assets/brand/founder.jpg`), mission/vision/values and a five-step timeline. AI, ERP, agents and automation are labelled as direction; no affiliation with any software vendor is implied.
+
 ## Verification
 Build and check: 98 pages, all checks pass. axe (WCAG 2.1 AA): 0 violations on 14 pages at desktop and 390px. Lighthouse mobile: performance 96 to 99, accessibility 100, best practices 100. Playground and estimator exercised in a browser (math checked by hand); form payload checked with a mocked API (the real API was not called).
 

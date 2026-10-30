@@ -9,7 +9,7 @@ export const site = {
   legalName: clean(env.MARKETING_LEGAL_NAME) || "AiHxM", // set MARKETING_LEGAL_NAME to the registered company name once confirmed
   regNo: clean(env.MARKETING_REG_NO),
   address: clean(env.MARKETING_ADDRESS),
-  founder: { name: clean(env.MARKETING_FOUNDER_NAME), role: clean(env.MARKETING_FOUNDER_ROLE), bio: clean(env.MARKETING_FOUNDER_BIO) },
+  founder: { name: clean(env.MARKETING_FOUNDER_NAME) || "Kumail Sherazi", role: clean(env.MARKETING_FOUNDER_ROLE) || "Founder", bio: clean(env.MARKETING_FOUNDER_BIO) || "Enterprise HR technology professional with more than five years of experience across Qatar, Saudi Arabia and Pakistan." },
   url: (env.MARKETING_SITE_URL || "https://aihxm.com").replace(/\/+$/, ""),
   appUrl: (env.MARKETING_APP_URL || "https://app.aihxm.com").replace(/\/+$/, ""),
   apiUrl: (env.MARKETING_API_URL || "https://api.aihxm.com").replace(/\/+$/, ""),

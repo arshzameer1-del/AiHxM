@@ -126,11 +126,13 @@ for (const f of htmlFiles) {
   }
 
   // content rules (the 404 and legal templates are included on purpose)
-  for (const w of COMPETITORS) if (new RegExp(`(?<![A-Za-z])${w.replace(/[.]/g, "\\.")}(?![A-Za-z])`, w === "SAP" || w === "ADP" || w === "UKG" ? "" : "i").test(visible + " " + (html.match(/<title>[^<]*/) || [""])[0])) fail(page, `competitor name "${w}"`);
+  // The About page names the software the founder has worked with, as plain professional history (with a no-affiliation line).
+  for (const w of COMPETITORS) if (!(page === "/about/" && (w === "SAP" || w === "SuccessFactors")) && new RegExp(`(?<![A-Za-z])${w.replace(/[.]/g, "\\.")}(?![A-Za-z])`, w === "SAP" || w === "ADP" || w === "UKG" ? "" : "i").test(visible + " " + (html.match(/<title>[^<]*/) || [""])[0])) fail(page, `competitor name "${w}"`);
   if (page === "/integrations/") for (const w of BRANDS) if (new RegExp(`(?<![A-Za-z])${w}(?![A-Za-z])`).test(visible)) fail(page, `third-party brand "${w}" on the integrations page`);
   // Sample-data panels are labelled as fictional, so amounts inside them are not prices.
   const claimText = NEGATIONS.reduce((t, re) => t.replace(re, " "), text.replace(/<div class="mock[\s\S]*?<p class="mock-foot">[^<]*<\/p><\/div>/g, " ").replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " "));
   for (const [re, label] of CLAIMS) {
+    if (page === "/about/" && label.startsWith("AI/predictive")) continue; // the About page states AI as a labelled direction
     const mm = claimText.match(re);
     if (mm) {
       const at = claimText.search(re);

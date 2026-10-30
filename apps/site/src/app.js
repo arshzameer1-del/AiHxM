@@ -285,6 +285,22 @@
     $$(".prose h2[id]").forEach(function (h) { so.observe(h); });
   }
 
+  /* ---------- About page: reveal for track/timeline hosts and in-page navigation highlight ---------- */
+  var abNav = $$(".ab-nav a");
+  if (abNav.length && "IntersectionObserver" in window) {
+    var abMap = {};
+    abNav.forEach(function (a) { abMap[a.getAttribute("href").slice(1)] = a; });
+    var abSpy = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (!en.isIntersecting) return;
+        abNav.forEach(function (a) { a.removeAttribute("aria-current"); });
+        var a = abMap[en.target.id];
+        if (a) { a.setAttribute("aria-current", "true"); if (a.scrollIntoView && a.parentNode.parentNode.scrollWidth > a.parentNode.parentNode.clientWidth) { var ul = a.parentNode.parentNode; ul.scrollLeft = a.offsetLeft - 24; } }
+      });
+    }, { rootMargin: "-30% 0px -60% 0px" });
+    Object.keys(abMap).forEach(function (id) { var sec = doc.getElementById(id); if (sec) abSpy.observe(sec); });
+  }
+
   /* ---------- contextual calls to action: tell the form which page the visitor came from ---------- */
   $$('a[href^="/book-a-demo/"]').forEach(function (a) {
     if (location.pathname.indexOf("/book-a-demo/") === 0 || location.pathname === "/contact/") return;

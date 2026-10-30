@@ -11,6 +11,7 @@ import home from "../src/pages/home.mjs";
 import * as core from "../src/pages/pages-core.mjs";
 import * as ps from "../src/pages/pages-site.mjs";
 import * as tr from "../src/pages/pages-trust.mjs";
+import * as ab from "../src/pages/pages-about.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const src = join(root, "src");
@@ -56,6 +57,7 @@ function addScript(name) {
   return `/assets/${base}.${hash}.js`;
 }
 const shared = {
+  founderImg: ab.founderPhoto ? addAsset(ab.founderPhoto, "founder") : "",
   estimatorJs: addScript("estimator.js"),
   playgroundJs: addScript("playground.js"),
   css: `/assets/site.${cssHash}.css`,
@@ -101,7 +103,7 @@ const pages = [
   tr.playgroundPage(A),
   ...(tr.publishedCaseStudies().length ? [tr.caseStudiesIndex(), ...tr.publishedCaseStudies().map(tr.caseStudyPage)] : []),
   ps.integrationsPage(),
-  ps.aboutPage(),
+  ab.aboutPage(A),
   ps.contactPage(),
   ps.demoPage(),
   tr.securityPage(),
