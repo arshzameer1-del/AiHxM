@@ -2161,6 +2161,8 @@ export type UpdateEmployeeRequest = Partial<
   terminationReason?: string;
   /** Fields to empty. `department` and `location` can only be emptied while they are typed text, not linked to an organization unit or location. */
   clearFields?: EmployeeClearableField[];
+  /** Values of the company's own custom fields placed on the form, by field key. */
+  customFields?: Record<string, unknown>;
 };
 
 /**
@@ -11177,3 +11179,45 @@ export type FormSettingHistoryView = {
   changedAt: string;
   changedBy: string | null;
 };
+
+// ---------------------------------------------------------------- FORMDESIGN1: form designer (layout of a form)
+export type FormLayoutConditionOp = "equals" | "notEquals" | "filled" | "empty";
+/** "Show / require this field when <field> <op> <value>". `value` is ignored for filled / empty. */
+export type FormLayoutCondition = { field: string; op: FormLayoutConditionOp; value?: string };
+export type FormLayoutField = {
+  /** A built-in field's key (from the form's catalog) or, with `custom`, the key of one of the company's custom fields. */
+  key: string;
+  custom?: boolean;
+  /** Shown but not editable. */
+  readOnly?: boolean;
+  showWhen?: FormLayoutCondition;
+  /** Required only while this is true (on top of the field's own required setting). */
+  requiredWhen?: FormLayoutCondition;
+};
+export type FormLayoutSection = { key: string; title: string; description?: string; fields: FormLayoutField[] };
+export type FormLayout = { sections: FormLayoutSection[] };
+export type FormCustomFieldInfo = { key: string; label: string; fieldType: CustomFieldType; options?: string[]; isRequired: boolean };
+/** What a screen needs to draw a form: the published layout (null = the form's own default) and the company's custom fields. */
+export type FormLayoutView = { formKey: string; layout: FormLayout | null; version: number; customFields: FormCustomFieldInfo[] };
+/** What the designer screen needs. */
+export type FormDesignerView = {
+  formKey: string;
+  title: string;
+  /** The layout being edited (the draft if there is one, otherwise the live layout, otherwise a suggested start). */
+  layout: FormLayout;
+  hasDraft: boolean;
+  livePublished: boolean;
+  version: number;
+  publishedAt: string | null;
+  /** Layout the form has with nothing configured: every built-in field in one untitled section. */
+  defaultLayout: FormLayout;
+  /** A grouping the designer can offer as a starting point. */
+  suggestedLayout: FormLayout | null;
+  settings: FormSettingsView;
+  customFields: FormCustomFieldInfo[];
+  /** Custom fields of this form's record type can be added from the designer. */
+  customObjectKey: string | null;
+  /** False for a form whose screen is not drawn from a layout yet: only its field settings apply. */
+  designable: boolean;
+};
+export type FormLayoutHistoryView = { id: string; formKey: string; action: "publish" | "reset" | "restore"; version: number; changedAt: string; changedBy: string | null };

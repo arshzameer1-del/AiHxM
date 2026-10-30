@@ -1,4 +1,4 @@
-import { IsArray, IsDateString, IsIn, IsOptional, IsString, IsUUID, MaxLength } from "class-validator";
+import { IsArray, IsDateString, IsIn, IsObject, IsOptional, IsString, IsUUID, MaxLength } from "class-validator";
 import { EMPLOYEE_CLEARABLE_FIELDS } from "@aihxm/shared-types";
 import type { EmployeeClearableField, EmploymentStatus, EmploymentType } from "@aihxm/shared-types";
 
@@ -99,4 +99,9 @@ export class UpdateEmployeeDto {
   @IsArray()
   @IsIn(EMPLOYEE_CLEARABLE_FIELDS, { each: true })
   clearFields?: EmployeeClearableField[];
+
+  /** Values of the company's own custom fields placed on the form, by field key. */
+  @IsOptional()
+  @IsObject()
+  customFields?: Record<string, unknown>;
 }

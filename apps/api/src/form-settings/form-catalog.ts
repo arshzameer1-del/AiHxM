@@ -24,6 +24,12 @@ export type CatalogForm = {
    * (a blank value or an explicit clear is refused); a field the request does not mention stays as it was.
    */
   partial?: boolean;
+  /** The screen draws this form from a designed layout (sections, order, extra fields, conditions). Only such forms can be designed. */
+  designable?: boolean;
+  /** The custom-field object this form's record uses, when the company may add its own fields to it from the designer. */
+  customObjectKey?: string;
+  /** A grouping the designer can offer as a starting point (field keys by section title). */
+  suggestedSections?: Array<{ title: string; fields: string[] }>;
 };
 
 const fixed = (key: string, label: string, extra: Partial<CatalogField> = {}): CatalogField => ({
@@ -111,6 +117,14 @@ export const FORM_CATALOG: CatalogForm[] = [
     key: "employee_profile",
     title: "Employee record: edit details (HR)",
     partial: true,
+    designable: true,
+    customObjectKey: "employee",
+    suggestedSections: [
+      { title: "Personal information", fields: ["firstName", "lastName", "gender", "maritalStatus", "dateOfBirth", "cnic"] },
+      { title: "Contact", fields: ["email", "phone"] },
+      { title: "Employment", fields: ["department", "designation", "location", "employmentType", "employmentStatus", "dateOfJoining"] },
+      { title: "Pay and bank", fields: ["salaryBand", "bankAccountNumber"] },
+    ],
     fields: [
       fixed("firstName", "First name"),
       fixed("lastName", "Last name"),

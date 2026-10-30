@@ -9,7 +9,7 @@ const input = "w-full rounded-lg border border-black/10 px-3 py-2 text-sm";
 const btn = "px-3 py-1.5 rounded-lg bg-accent text-white text-sm font-medium disabled:opacity-50";
 const quiet = "px-3 py-1.5 rounded-lg bg-black/5 text-sm font-medium disabled:opacity-50";
 
-function FieldEditor({ formKey, field, onSaved, onError }: { formKey: string; field: FormFieldSettingView; onSaved: (f: FormSettingsView) => void; onError: (m: string | null) => void }) {
+export function FieldEditor({ formKey, field, onSaved, onError }: { formKey: string; field: FormFieldSettingView; onSaved: (f: FormSettingsView) => void; onError: (m: string | null) => void }) {
   const [label, setLabel] = useState(field.label);
   const [help, setHelp] = useState(field.helpText ?? "");
   const [ph, setPh] = useState(field.placeholder ?? "");

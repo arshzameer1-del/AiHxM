@@ -16,7 +16,7 @@ const SCREENS: Array<{ role: "hr_admin" | "employee_self_service"; paths: string
       "/app", "/app/employees", "/app/employees/analytics", "/app/employees/data-consistency", "/app/employees/smart-checks", "/app/employees/change-requests",
       "/app/hire", "/app/hire/quick", "/app/hire/bulk", "/app/leave/my-requests", "/app/attendance", "/app/payroll", "/app/organization", "/app/performance",
       "/app/recruitment", "/app/learning", "/app/expenses", "/app/travel", "/app/approvals", "/app/reports", "/app/configuration-center",
-      "/app/configuration-center/form-settings", "/app/employees/helpdesk", "/app/employees/talent", "/app/employees/esign", "/app/employees/developer",
+      "/app/configuration-center/form-settings", "/app/configuration-center/form-designer", "/app/employees/helpdesk", "/app/employees/talent", "/app/employees/esign", "/app/employees/developer",
       "/app/employees/surveys", "/app/employees/headcount", "/app/employees/announcements", "/app/system-admin",
     ],
   },

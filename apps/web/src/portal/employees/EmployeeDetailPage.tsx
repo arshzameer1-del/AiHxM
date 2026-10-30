@@ -1,4 +1,7 @@
 import { useFormSettings } from "../shared/useFormSettings";
+import { useFormLayout } from "../shared/useFormLayout";
+import { DesignedFields } from "../shared/DesignedFields";
+import { requiredKeys } from "../shared/formLayoutRules";
 import { LoadingNote } from "../shared/PageChrome";
 import { FormEvent, ReactNode, useEffect, useId, useState } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -15,6 +18,7 @@ import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { ResetPasswordControl } from "../shared/ResetPasswordControl";
 import { EmployeeFields } from "./EmployeeFields";
+import { EmployeeCustomFields } from "./EmployeeCustomFields";
 import { PersonDetailsPanel } from "./PersonDetailsPanel";
 import { emptiedFields } from "./employeeEditDiff";
 import { OnboardingOffboardingSection } from "../onboarding-offboarding/OnboardingOffboardingSection";
@@ -112,6 +116,7 @@ export function EmployeeDetailPage() {
   const [qualificationTypes, setQualificationTypes] = useState<HrReferenceCatalogItemView[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [savedTick, setSavedTick] = useState(0);
   const [tab, setTab] = useState<Tab>("Overview");
 
   const canManage = identity?.roleKeys.includes("hr_admin") ?? false;
@@ -241,6 +246,7 @@ export function EmployeeDetailPage() {
               employee={employee}
               onSaved={(updated) => {
                 setEmployee(updated);
+                setSavedTick((n) => n + 1);
                 setEditing(false);
               }}
               onCancel={() => setEditing(false)}
@@ -252,6 +258,7 @@ export function EmployeeDetailPage() {
             </section>
           )}
 
+          {!editing && <EmployeeCustomFields key={`custom-${employee.id}-${savedTick}`} employeeId={employee.id} />}
           {!editing && <ProfileCompletenessCard key={`completeness-${employee.id}`} employeeId={employee.id} hr />}
           {!editing && <WorkProfilePanel key={`work-profile-${employee.id}`} employeeId={employee.id} canManage={canManage} />}
 
@@ -424,6 +431,8 @@ function ReportsTo({ employee, canManage, onChangeManager }: { employee: Employe
   );
 }
 
+const DEFAULT_ORDER = ["firstName", "lastName", "email", "phone", "department", "designation", "location", "employmentType", "employmentStatus", "gender", "maritalStatus", "dateOfBirth", "dateOfJoining", "cnic", "salaryBand", "bankAccountNumber"];
+
 function EditForm({
   employee,
   onSaved,
@@ -475,6 +484,20 @@ function EditForm({
   const s_cnic = S("cnic", "CNIC");
   const s_salaryBand = S("salaryBand", "Salary band");
   const s_bankAccountNumber = S("bankAccountNumber", "Bank account");
+  // The company's designed layout (sections, order, extra fields, conditions); null means the form's own default arrangement.
+  const layoutView = useFormLayout("employee_profile");
+  const layout = layoutView?.layout ?? null;
+  const placedCustom = layout ? layout.sections.flatMap((sec) => sec.fields.filter((f) => f.custom).map((f) => f.key)) : [];
+  const [customValues, setCustomValues] = useState<Record<string, unknown>>({});
+  const [savedCustom, setSavedCustom] = useState<Record<string, unknown> | null>(null);
+  useEffect(() => {
+    if (placedCustom.length === 0) return;
+    api.getCustomFieldValues("employee", employee.id).then((v) => { setSavedCustom(v); setCustomValues(v); }).catch(() => setSavedCustom({}));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employee.id, placedCustom.join("|")]);
+  const customReady = placedCustom.length === 0 || savedCustom !== null;
+  const condValues: Record<string, unknown> = { firstName, lastName, email, phone, department, designation, location, employmentType, employmentStatus, gender, maritalStatus, dateOfBirth, dateOfJoining, cnic, salaryBand, bankAccountNumber, ...customValues };
+  const reqKeys = layout ? requiredKeys(layout, condValues) : new Set<string>();
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   // Date of birth is hidden by field rules from some callers: when the API did not send it, it is not offered either.
@@ -492,6 +515,8 @@ function EditForm({
     e.preventDefault();
     setError(null);
     setSaving(true);
+    // Only custom values the person changed are sent, so an untouched old value is never re-checked.
+    const changedCustom = layout ? Object.fromEntries(placedCustom.filter((k) => (customValues[k] ?? null) !== (savedCustom?.[k] ?? null)).map((k) => [k, customValues[k] ?? null])) : undefined;
     const clearFields = emptiedFields(employee, { phone, department, designation, location, salaryBand, maritalStatus });
     try {
       const updated = await api.updateEmployee(employee.id, {
@@ -515,6 +540,7 @@ function EditForm({
         ...(maritalStatus && maritalStatus !== (employee.maritalStatus ?? "") ? { maritalStatus } : {}),
         ...(canEditBirth && dateOfBirth && dateOfBirth !== (employee.dateOfBirth ?? "") ? { dateOfBirth } : {}),
         ...(dateOfJoining && dateOfJoining !== (employee.dateOfJoining ?? "") ? { dateOfJoining } : {}),
+        ...(changedCustom && Object.keys(changedCustom).length > 0 ? { customFields: changedCustom } : {}),
       });
       onSaved(updated);
     } catch (err) {
@@ -524,9 +550,8 @@ function EditForm({
     }
   }
 
-  return (
-    <form onSubmit={handleSubmit} className="bg-card rounded-card p-5 shadow-sm space-y-4 mb-6">
-      <div className="grid grid-cols-2 gap-4">
+  const nodes: Record<string, ReactNode> = {
+    firstName: (
         <Field label={s_firstName.label} hint={s_firstName.helpText ?? undefined}>
           <input
             required
@@ -535,6 +560,8 @@ function EditForm({
             className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
           />
         </Field>
+    ),
+    lastName: (
         <Field label={s_lastName.label} hint={s_lastName.helpText ?? undefined}>
           <input
             required
@@ -543,25 +570,27 @@ function EditForm({
             className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
           />
         </Field>
-        {!s_email.hidden && (
+    ),
+    email: !s_email.hidden && (
         <Field label={s_email.label} hint={s_email.helpText ?? undefined}>
-          <input required={s_email.required} maxLength={s_email.maxLength ?? undefined}
+          <input required={s_email.required || reqKeys.has("email")} maxLength={s_email.maxLength ?? undefined}
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
           />
         </Field>
-        )}
-        {!s_phone.hidden && (
+        ),
+    phone: !s_phone.hidden && (
         <Field label={s_phone.label} hint={s_phone.helpText ?? undefined}>
-          <input required={s_phone.required} maxLength={s_phone.maxLength ?? undefined}
+          <input required={s_phone.required || reqKeys.has("phone")} maxLength={s_phone.maxLength ?? undefined}
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
             className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
           />
         </Field>
-        )}
+        ),
+    department: (
         <Field label={s_department.label} hint={s_department.helpText ?? (employee.orgUnitId ? "Comes from the organization unit. Move the employee to change it." : undefined)}>
           <input
             disabled={!!employee.orgUnitId}
@@ -571,6 +600,8 @@ function EditForm({
             className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
           />
         </Field>
+    ),
+    designation: (
         <Field label={s_designation.label} hint={s_designation.helpText ?? (employee.positionId ? "Comes from the position's title. Change the position to change it." : undefined)}>
           <input
             disabled={!!employee.positionId}
@@ -580,16 +611,18 @@ function EditForm({
             className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
           />
         </Field>
-        {!s_location.hidden && (
+    ),
+    location: !s_location.hidden && (
         <Field label={s_location.label} hint={s_location.helpText ?? (employee.locationId ? "Comes from the linked location." : undefined)}>
-          <input required={s_location.required} maxLength={s_location.maxLength ?? undefined}
+          <input required={s_location.required || reqKeys.has("location")} maxLength={s_location.maxLength ?? undefined}
             disabled={!!employee.locationId}
             value={location}
             onChange={(e) => setLocation(e.target.value)}
             className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
           />
         </Field>
-        )}
+        ),
+    employmentType: (
         <Field label={s_employmentType.label} hint={s_employmentType.helpText ?? undefined}>
           <select
             value={employmentType}
@@ -613,6 +646,9 @@ function EditForm({
                 ))}
           </select>
         </Field>
+    ),
+    employmentStatus: (
+          <>
         <Field label={s_employmentStatus.label} hint={s_employmentStatus.helpText ?? undefined}>
           <select
             value={employmentStatus}
@@ -626,7 +662,7 @@ function EditForm({
             ))}
           </select>
         </Field>
-        {employmentStatus === "terminated" && (
+          {employmentStatus === "terminated" && (
           <Field label="Termination reason">
             <input
               value={terminationReason}
@@ -635,19 +671,11 @@ function EditForm({
             />
           </Field>
         )}
-        <datalist id={`${listId}-dept`}>
-          {unitNames.map((n) => (
-            <option key={n} value={n} />
-          ))}
-        </datalist>
-        <datalist id={`${listId}-job`}>
-          {jobTitles.map((n) => (
-            <option key={n} value={n} />
-          ))}
-        </datalist>
-        {!s_gender.hidden && (
+          </>
+        ),
+    gender: !s_gender.hidden && (
         <Field label={s_gender.label} hint={s_gender.helpText ?? undefined}>
-          <select required={s_gender.required} value={gender} onChange={(e) => setGender(e.target.value)} className="w-full rounded-lg border border-black/10 px-3 py-2 capitalize focus:outline-none focus:ring-2 focus:ring-accent">
+          <select required={s_gender.required || reqKeys.has("gender")} value={gender} onChange={(e) => setGender(e.target.value)} className="w-full rounded-lg border border-black/10 px-3 py-2 capitalize focus:outline-none focus:ring-2 focus:ring-accent">
             <option value="">—</option>
             {["male", "female", "other"].map((g) => (
               <option key={g} value={g}>
@@ -656,10 +684,10 @@ function EditForm({
             ))}
           </select>
         </Field>
-        )}
-        {!s_maritalStatus.hidden && (
+        ),
+    maritalStatus: !s_maritalStatus.hidden && (
         <Field label={s_maritalStatus.label} hint={s_maritalStatus.helpText ?? undefined}>
-          <select required={s_maritalStatus.required} value={maritalStatus} onChange={(e) => setMaritalStatus(e.target.value)} className="w-full rounded-lg border border-black/10 px-3 py-2 capitalize focus:outline-none focus:ring-2 focus:ring-accent">
+          <select required={s_maritalStatus.required || reqKeys.has("maritalStatus")} value={maritalStatus} onChange={(e) => setMaritalStatus(e.target.value)} className="w-full rounded-lg border border-black/10 px-3 py-2 capitalize focus:outline-none focus:ring-2 focus:ring-accent">
             <option value="">—</option>
             {(maritalOptions.length > 0
               ? maritalOptions.map((m) => ({ value: m.code, label: m.label }))
@@ -672,50 +700,74 @@ function EditForm({
             {maritalStatus && maritalOptions.length > 0 && !maritalOptions.some((m) => m.code === maritalStatus) && <option value={maritalStatus}>{maritalStatus}</option>}
           </select>
         </Field>
-        )}
-        {canEditBirth && !s_dateOfBirth.hidden && (
+        ),
+    dateOfBirth: canEditBirth && !s_dateOfBirth.hidden && (
           <Field label={s_dateOfBirth.label} hint={s_dateOfBirth.helpText ?? undefined}>
-            <input required={s_dateOfBirth.required} type="date" value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent" />
+            <input required={s_dateOfBirth.required || reqKeys.has("dateOfBirth")} type="date" value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent" />
           </Field>
-        )}
+        ),
+    dateOfJoining: (
         <Field label={s_dateOfJoining.label} hint={s_dateOfJoining.helpText ?? undefined}>
           <input type="date" value={dateOfJoining} onChange={(e) => setDateOfJoining(e.target.value)} className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent" />
         </Field>
-        {!s_cnic.hidden && (
+    ),
+    cnic: !s_cnic.hidden && (
         <Field label={s_cnic.label} hint={s_cnic.helpText ?? undefined}>
-          <input required={s_cnic.required} maxLength={s_cnic.maxLength ?? undefined}
+          <input required={s_cnic.required || reqKeys.has("cnic")} maxLength={s_cnic.maxLength ?? undefined}
             value={cnic}
             onChange={(e) => setCnic(e.target.value)}
             className="w-full rounded-lg border border-black/10 px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-accent"
           />
         </Field>
-        )}
-        {!s_salaryBand.hidden && (
+        ),
+    salaryBand: !s_salaryBand.hidden && (
         <Field label={s_salaryBand.label} hint={s_salaryBand.helpText ?? undefined}>
-          <input required={s_salaryBand.required} maxLength={s_salaryBand.maxLength ?? undefined}
+          <input required={s_salaryBand.required || reqKeys.has("salaryBand")} maxLength={s_salaryBand.maxLength ?? undefined}
             value={salaryBand}
             onChange={(e) => setSalaryBand(e.target.value)}
             className="w-full rounded-lg border border-black/10 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
           />
         </Field>
-        )}
-        {!s_bankAccountNumber.hidden && (
+        ),
+    bankAccountNumber: !s_bankAccountNumber.hidden && (
         <Field label={s_bankAccountNumber.label} hint={s_bankAccountNumber.helpText ?? undefined}>
-          <input required={s_bankAccountNumber.required} maxLength={s_bankAccountNumber.maxLength ?? undefined}
+          <input required={s_bankAccountNumber.required || reqKeys.has("bankAccountNumber")} maxLength={s_bankAccountNumber.maxLength ?? undefined}
             value={bankAccountNumber}
             onChange={(e) => setBankAccountNumber(e.target.value)}
             className="w-full rounded-lg border border-black/10 px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-accent"
           />
         </Field>
-        )}
-      </div>
+        ),
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="bg-card rounded-card p-5 shadow-sm space-y-4 mb-6">
+        <datalist id={`${listId}-dept`}>
+          {unitNames.map((n) => (
+            <option key={n} value={n} />
+          ))}
+        </datalist>
+        <datalist id={`${listId}-job`}>
+          {jobTitles.map((n) => (
+            <option key={n} value={n} />
+          ))}
+        </datalist>
+      <DesignedFields
+        layout={layout}
+        defaultOrder={DEFAULT_ORDER}
+        nodes={nodes}
+        customFields={layoutView?.customFields ?? []}
+        values={condValues}
+        onCustomChange={(k, v) => setCustomValues((p) => ({ ...p, [k]: v }))}
+        requiredKeys={reqKeys}
+      />
 
       {error && <div className="text-danger text-sm">{error}</div>}
 
       <div className="flex gap-3">
         <button
           type="submit"
-          disabled={saving}
+          disabled={saving || !customReady}
           className="bg-accent text-white rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-50"
         >
           {saving ? "Saving…" : "Save"}

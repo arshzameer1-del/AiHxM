@@ -5,12 +5,12 @@ import { getSharedSession, loginToApp } from "../../e2e-support/real-session";
 const TOUCHED = ["helpdesk_ticket/body", "leave_request/reason", "travel_request/destination", "travel_request/estOtherCost", "employee_profile/phone", "employee_profile/salaryBand", "employee_profile/cnic"];
 
 test.describe("Form settings", () => {
-  test("HR Admin finds Form settings as a card in the Configuration Center and opens it", async ({ page }) => {
+  test("HR Admin finds the Form designer as a card in the Configuration Center and opens it", async ({ page }) => {
     await loginToApp(page, getSharedSession("hr_admin"));
     await page.goto("/app/configuration-center");
-    await page.getByRole("button", { name: /Form settings/ }).click();
-    await expect(page).toHaveURL(/configuration-center\/form-settings/);
-    await expect(page.getByTestId("form-settings")).toBeVisible();
+    await page.getByRole("button", { name: /Form designer/ }).click();
+    await expect(page).toHaveURL(/configuration-center\/form-designer/);
+    await expect(page.getByTestId("form-designer")).toBeVisible();
   });
 
   // These settings live on the shared test company, so put them back even when a test fails half way.

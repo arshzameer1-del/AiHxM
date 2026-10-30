@@ -203,7 +203,7 @@ describe("ConfigurationCenterService", () => {
       expect(byKey.leave_policy).toBeDefined();
       expect(byKey.leave_policy.count).toBeGreaterThanOrEqual(1);
       expect(byKey.form_settings).toBeDefined();
-      expect(byKey.form_settings.adminRoute).toBe("/app/configuration-center/form-settings");
+      expect(byKey.form_settings.adminRoute).toBe("/app/configuration-center/form-designer");
       expect(byKey.holiday).toBeDefined();
       expect(byKey.holiday.count).toBeGreaterThanOrEqual(1);
       expect(byKey.employee_group).toBeDefined();

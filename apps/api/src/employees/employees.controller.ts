@@ -16,6 +16,8 @@ import { FileInterceptor } from "@nestjs/platform-express";
 import type { Response } from "express";
 import { pageParams, setTotalCount } from "../common/paging";
 import { FormSettingsService } from "../form-settings/form-settings.service";
+import { FormLayoutService } from "../form-settings/form-layout.service";
+import { CustomFieldsService } from "../custom-fields/custom-fields.service";
 import { SessionGuard } from "../auth/session.guard";
 import { MyOrgChartService } from "./my-org-chart.service";
 import { MyPersonalDataService } from "./my-personal-data.service";
@@ -45,7 +47,9 @@ export class EmployeesController {
     private readonly employees: EmployeesService,
     private readonly myOrgChartService: MyOrgChartService,
     private readonly myPersonalData: MyPersonalDataService,
-    private readonly formSettings: FormSettingsService
+    private readonly formSettings: FormSettingsService,
+    private readonly formLayouts: FormLayoutService,
+    private readonly customFields: CustomFieldsService
   ) {}
 
   @Post()
@@ -105,7 +109,15 @@ export class EmployeesController {
   @Patch(`${EMPLOYEE_ID}`)
   async update(@CurrentClaims() claims: RequestClaims, @Param("id") id: string, @Body() dto: UpdateEmployeeDto) {
     await this.formSettings.enforce(claims, "employee_profile", dto as unknown as Record<string, unknown>, { clear: dto.clearFields });
-    return this.employees.update(claims, id, dto);
+    const customValues = dto.customFields ?? {};
+    // The form designer's rules (read-only fields, required-when) and the custom field values are checked before anything is saved.
+    await this.customFields.validateValues(claims, "employee", customValues);
+    const current = await this.employees.get(claims, id);
+    const savedCustom = await this.customFields.getValues(claims, "employee", id);
+    await this.formLayouts.enforce(claims, "employee_profile", dto as unknown as Record<string, unknown>, { ...(current as unknown as Record<string, unknown>), customFields: savedCustom }, { clear: dto.clearFields });
+    const updated = await this.employees.update(claims, id, dto);
+    await this.customFields.setValues(claims, "employee", id, customValues);
+    return updated;
   }
 
   /** Decision #12 — see EmployeesService.createLogin()'s doc comment. */

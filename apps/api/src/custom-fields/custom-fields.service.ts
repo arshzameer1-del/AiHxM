@@ -215,6 +215,44 @@ export class CustomFieldsService {
     });
   }
 
+  /** Checks a set of values against the company's active definitions without writing anything (a 400 names the field). */
+  async validateValues(claims: RequestClaims, objectKey: string, values: Record<string, unknown>): Promise<void> {
+    if (!claims.company_id) throw new ForbiddenException();
+    const keys = Object.keys(values);
+    if (keys.length === 0) return;
+    await this.db.withClaims(claims, async (client) => {
+      const defs = await client.query<{ field_key: string; label: string; field_type: CustomFieldType; options: string[] | null; is_required: boolean }>(
+        "SELECT field_key, label, field_type, options, is_required FROM custom_field_definitions WHERE company_id = $1 AND object_key = $2 AND is_active = true",
+        [claims.company_id, objectKey]
+      );
+      const byKey = new Map(defs.rows.map((d) => [d.field_key, d]));
+      for (const k of keys) {
+        const d = byKey.get(k);
+        if (!d) throw new BadRequestException({ message: `No custom field '${k}' defined for ${objectKey}`, field: k });
+        const v = values[k];
+        if (d.is_required && (v === null || v === undefined || v === "")) throw new BadRequestException({ message: `${d.label} is required`, field: k });
+        try {
+          validateValueAgainstType(d.field_type, v === "" ? null : v, d.options ?? undefined);
+        } catch (e) {
+          throw new BadRequestException({ message: `${d.label}: ${(e as Error).message}`, field: k });
+        }
+      }
+    });
+  }
+
+  /** Writes several values for one record in a single transaction. Call `validateValues` first so a bad value is refused before anything else is saved. */
+  async setValues(claims: RequestClaims, objectKey: string, recordId: string, values: Record<string, unknown>): Promise<void> {
+    if (!claims.company_id) throw new ForbiddenException();
+    const keys = Object.keys(values);
+    if (keys.length === 0) return;
+    await this.db.withClaims(claims, async (client) => {
+      for (const k of keys) {
+        const v = values[k];
+        await this.setValueWithinTransaction(client, claims, { objectKey, recordId, fieldKey: k, value: v === "" ? null : v });
+      }
+    });
+  }
+
   /** Every custom field value set on one record, keyed by fieldKey — the shape a module merges into its own record view. */
   async getValues(claims: RequestClaims, objectKey: string, recordId: string): Promise<Record<string, unknown>> {
     if (!claims.company_id) return {};
