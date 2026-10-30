@@ -81,6 +81,16 @@ export class EmployeeCostAllocationsService {
       throw new BadRequestException("Allocation percentage must be between 0 and 100");
     }
 
+    if (Math.abs(input.allocationPercentage * 100 - Math.round(input.allocationPercentage * 100)) > 1e-6) {
+      throw new BadRequestException("Allocation percentage can have at most two decimal places.");
+    }
+    const sameCentre = await client.query(
+      "SELECT allocation_percentage FROM employee_cost_allocations WHERE employee_id = $1 AND cost_center_id = $2 AND status = 'active'",
+      [input.employeeId, input.costCenterId]
+    );
+    if (sameCentre.rowCount) {
+      throw new BadRequestException(`This employee already has ${Number(sameCentre.rows[0].allocation_percentage)}% allocated to that cost center. Change that allocation instead of adding another.`);
+    }
     const existingTotal = await client.query(
       "SELECT COALESCE(SUM(allocation_percentage), 0) AS total FROM employee_cost_allocations WHERE employee_id = $1 AND status = 'active'",
       [input.employeeId]
@@ -133,6 +143,9 @@ export class EmployeeCostAllocationsService {
       const before = await this.mustExist(client, id);
 
       if (patch.allocationPercentage !== undefined) {
+        if (Math.abs(patch.allocationPercentage * 100 - Math.round(patch.allocationPercentage * 100)) > 1e-6) {
+          throw new BadRequestException("Allocation percentage can have at most two decimal places.");
+        }
         const othersTotal = await client.query(
           "SELECT COALESCE(SUM(allocation_percentage), 0) AS total FROM employee_cost_allocations WHERE employee_id = $1 AND status = 'active' AND id <> $2",
           [before.employee_id, id]

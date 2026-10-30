@@ -90,7 +90,11 @@ describe("Profile completeness", () => {
   });
 
   it("an emergency contact only counts once it says who the person is", async () => {
-    await contacts.create(hr, { employeeId: me, contactType: "emergency_contact", value: "0300-1112223", label: "Sana Khan" });
+    // new records must say the relationship; an older record saved without one is still not counted
+    await expect(contacts.create(hr, { employeeId: me, contactType: "emergency_contact", value: "0300-1112223", label: "Sana Khan" })).rejects.toThrow(/relationship/);
+    await fx((c) =>
+      c.query("INSERT INTO employee_contacts (company_id, employee_id, contact_type, value, label) VALUES ($1,$2,'emergency_contact','0300-1112223','Sana Khan')", [a, me])
+    );
     expect((await state(ess)).emergency_contact).toBe(false);
     await contacts.create(hr, { employeeId: me, contactType: "emergency_contact", value: "0300-9998887", label: "Imran Khan", relationship: "Brother" });
     expect((await state(ess)).emergency_contact).toBe(true);

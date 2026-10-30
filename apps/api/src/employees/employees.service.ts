@@ -1,6 +1,7 @@
 import { assertRealImage } from "../common/image-signature";
 import { assertValidCnic } from "../crypto/identifier-validation";
 import { assertValidEmail, assertValidEmploymentDates, assertValidPersonName, assertValidPhone } from "./employee-input-rules";
+import { assertValidGender, fileMatchesDeclaredType } from "./employee-record-rules";
 import { sensitive } from "../crypto/sensitive-fields";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { isOwnEmployee } from "./employee-self-read";
@@ -568,6 +569,7 @@ export class EmployeesService {
       assertValidPersonName(input.lastName, "lastName", "Last name");
       assertValidEmail(input.email);
       assertValidPhone(input.phone);
+      assertValidGender(input.gender);
       assertValidEmploymentDates({ dateOfBirth: input.dateOfBirth, dateOfJoining: input.dateOfJoining }, { birth: true, joining: true });
       const personId = await this.persons.findOrCreateForHire(client, claims.company_id!, {
         firstName: input.firstName,
@@ -1033,6 +1035,7 @@ export class EmployeesService {
       assertValidPersonName(patch.lastName, "lastName", "Last name");
       assertValidEmail(patch.email);
       assertValidPhone(patch.phone);
+      assertValidGender(patch.gender);
       assertValidEmploymentDates(
         { dateOfBirth: patch.dateOfBirth ?? beforeDateOfBirth, dateOfJoining: patch.dateOfJoining ?? toIsoDate(before.date_of_joining) },
         { birth: patch.dateOfBirth !== undefined, joining: patch.dateOfJoining !== undefined }
@@ -1291,6 +1294,7 @@ export class EmployeesService {
       if (!["image/jpeg", "image/png", "image/webp"].includes(file.mimetype)) throw new BadRequestException("A profile photo must be a JPEG, PNG or WEBP image");
       assertRealImage(file, ["image/png", "image/jpeg", "image/webp"], "profile photo");
     }
+    if (file.size === 0 || file.buffer?.length === 0) throw new BadRequestException("The file is empty. Choose the file again.");
     if (file.size > MAX_DOCUMENT_BYTES) {
       throw new BadRequestException(`File exceeds the ${MAX_DOCUMENT_BYTES / (1024 * 1024)}MB limit`);
     }
@@ -1299,6 +1303,9 @@ export class EmployeesService {
       throw new BadRequestException(
         `"${file.mimetype}" isn't an allowed file type for employee documents. Allowed types: PDF, JPEG, PNG, WEBP, Word, and Excel files.`
       );
+    }
+    if (file.buffer && !fileMatchesDeclaredType(file.buffer, file.mimetype)) {
+      throw new BadRequestException(`This file is not really a ${file.mimetype.split("/")[1].toUpperCase()}: its contents do not match its type. Choose the right file.`);
     }
     const expiry = opts.expiryDate ? String(opts.expiryDate).slice(0, 10) : null;
     if (expiry && !/^\d{4}-\d{2}-\d{2}$/.test(expiry)) throw new BadRequestException("Expiry date must be a valid date");

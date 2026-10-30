@@ -94,6 +94,10 @@ export class EmployeeNumberingService {
       } catch {
         throw new BadRequestException("manualPattern is not a valid regular expression");
       }
+      // A repeat inside a repeat, like (a+)+ , can make the server spin for minutes on a short input. Refuse that shape.
+      if (/\([^)]*[+*][^)]*\)\s*[+*{]/.test(patch.manualPattern)) {
+        throw new BadRequestException("manualPattern repeats a repeated group, which can hang the server. Use a simpler pattern like ^EMP-\\d{4}$.");
+      }
     }
     return this.db.withClaims(claims, async (client) => {
       const companyId = claims.company_id!;
@@ -223,6 +227,7 @@ export class EmployeeNumberingService {
       const exists = await client.query("SELECT 1 FROM employees WHERE company_id = $1 AND employee_number = $2", [companyId, number]);
       if ((exists.rowCount ?? 0) > 0) throw new ConflictException(`Employee number ${number} is already in use`);
       if (!policy.allowManual) throw new BadRequestException("This company does not accept manually supplied employee numbers");
+      if (number.length > 40) throw new BadRequestException("Employee number can be at most 40 characters");
       if (!new RegExp(policy.manualPattern).test(number)) throw new BadRequestException(`Employee number "${number}" does not match the allowed pattern`);
       const parsed = parseEmployeeNumberSequence(number, format);
       if (parsed !== null && seriesKey === "" && parsed >= current) await setCounter(parsed + 1);

@@ -9,6 +9,7 @@ import { WorkflowService } from "../workflow/workflow.service";
 import { submitToEngineIfConfigured } from "../workflow/engine-routing";
 import { applyAdjustmentOutcome, assertAdjustmentReason, resolveAdjustmentComponent } from "./payroll-adjustment-support";
 import type { CreateEmployeeOffCyclePaymentRequest, EmployeeOffCyclePaymentView } from "@aihxm/shared-types";
+import { assertSaneMoney } from "./employee-record-rules";
 
 const WORKFLOW_OBJECT_KEY = "off_cycle_payment";
 
@@ -117,6 +118,7 @@ export class EmployeeOffCyclePaymentsService {
   }
 
   async create(claims: RequestClaims, input: CreateEmployeeOffCyclePaymentRequest): Promise<EmployeeOffCyclePaymentView> {
+    assertSaneMoney(input.amount, "amount", "Amount");
     await this.requireManage(claims);
     if (input.amount <= 0) throw new BadRequestException("amount must be greater than zero");
     return this.db.withClaims(claims, async (client) => {

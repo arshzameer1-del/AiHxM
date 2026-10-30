@@ -12,6 +12,7 @@ import type {
   UpdateEmployeeQualificationRequest,
 } from "@aihxm/shared-types";
 import { requireViewOrSelf } from "./employee-self-read";
+import { assertSaneMoney, assertValidGender, orderedDays, requireText, saneDay } from "./employee-record-rules";
 
 const MODULE_KEY = "employee" as const;
 const MANAGE_PERMISSION = "employee.manage.all";
@@ -74,6 +75,10 @@ export class EmployeeQualificationsService {
     input: CreateEmployeeQualificationRequest
   ): Promise<EmployeeQualificationView> {
     await this.mustExistEmployee(client, claims.company_id!, input.employeeId);
+    requireText(input.title, "title", "Title");
+    saneDay(input.issueDate, "issueDate", "Issue date");
+    saneDay(input.expiryDate, "expiryDate", "Expiry date", { allowFuture: true });
+    orderedDays(input.issueDate, input.expiryDate, "expiryDate", "The expiry date cannot be before the issue date.");
     // HR Administration v2 "then 2" Phase 1 (2026-10-01) — `qualificationType`
     // used to be a hardcoded CHECK constraint (certificate/license/skill);
     // this tenant's own `qualification_type` catalog is now the source of
@@ -122,6 +127,10 @@ export class EmployeeQualificationsService {
     await this.requireManage(claims);
     return this.db.withClaims(claims, async (client) => {
       const before = await this.mustExist(client, id);
+      requireText(patch.title, "title", "Title");
+      saneDay(patch.issueDate, "issueDate", "Issue date");
+      saneDay(patch.expiryDate, "expiryDate", "Expiry date", { allowFuture: true });
+      orderedDays(patch.issueDate ?? before.issue_date, patch.expiryDate ?? before.expiry_date, "expiryDate", "The expiry date cannot be before the issue date.");
       if (patch.qualificationType) {
         await this.hrCatalog.validateActiveCode(client, claims.company_id!, "qualification_type", patch.qualificationType);
       }

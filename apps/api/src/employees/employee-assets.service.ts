@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
@@ -7,6 +7,7 @@ import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
 import type { CreateEmployeeAssetRequest, EmployeeAssetView, UpdateEmployeeAssetRequest } from "@aihxm/shared-types";
 import { requireViewOrSelf } from "./employee-self-read";
+import { assertSaneMoney, assertValidGender, orderedDays, requireText, saneDay } from "./employee-record-rules";
 
 const MODULE_KEY = "employee" as const;
 const MANAGE_PERMISSION = "employee.manage.all";
@@ -67,6 +68,15 @@ export class EmployeeAssetsService {
 
   async createWithinTransaction(client: PoolClient, claims: RequestClaims, input: CreateEmployeeAssetRequest): Promise<EmployeeAssetView> {
     await this.mustExistEmployee(client, claims.company_id!, input.employeeId);
+    requireText(input.assetType, "assetType", "Asset type");
+    saneDay(input.assignedDate, "assignedDate", "Assigned date");
+    if (input.assetTag?.trim()) {
+      const dup = await client.query(
+        "SELECT 1 FROM employee_assets WHERE company_id = $1 AND lower(asset_tag) = lower($2) AND status <> 'returned' LIMIT 1",
+        [claims.company_id, input.assetTag.trim()]
+      );
+      if (dup.rowCount) throw new BadRequestException({ message: `An asset with the tag ${input.assetTag.trim()} is already issued and not yet returned.`, field: "assetTag" });
+    }
 
     const inserted = await client.query(
       `INSERT INTO employee_assets (company_id, employee_id, asset_type, asset_tag, description, assigned_date)
@@ -121,6 +131,8 @@ export class EmployeeAssetsService {
     return this.db.withClaims(claims, async (client) => {
       const before = await this.mustExist(client, id);
       if (before.status === "returned") return rowToView(before);
+      saneDay(returnedDate, "returnedDate", "Returned date");
+      orderedDays(before.assigned_date, returnedDate, "returnedDate", "The asset cannot be returned before it was assigned.");
       const result = await client.query(
         "UPDATE employee_assets SET status = 'returned', returned_date = COALESCE($2, CURRENT_DATE), updated_at = now() WHERE id = $1 RETURNING *",
         [id, returnedDate ?? null]

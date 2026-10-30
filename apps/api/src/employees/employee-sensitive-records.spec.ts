@@ -33,7 +33,7 @@ describe("Languages, medical information and disciplinary records", () => {
     const p = await c.query("INSERT INTO persons (company_id, full_name) VALUES ($1, $2) RETURNING id", [a, `P ${n}`]);
     return (
       await c.query(
-        "INSERT INTO employees (company_id, employee_number, first_name, last_name, person_id, user_account_id) VALUES ($1,$2,'K',$3,$4,$5) RETURNING id",
+        "INSERT INTO employees (company_id, employee_number, first_name, last_name, person_id, user_account_id, date_of_joining) VALUES ($1,$2,'K',$3,$4,$5,'2020-01-01') RETURNING id",
         [a, `SR-${n}-${stamp}`.slice(0, 30), `E${n}`, p.rows[0].id, userId]
       )
     ).rows[0].id as string;

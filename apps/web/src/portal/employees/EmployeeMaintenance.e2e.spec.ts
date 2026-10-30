@@ -181,7 +181,7 @@ test.describe("Employee maintenance - lists, details and sub-sections", () => {
     await expect(page.getByText(/could not load/i)).toHaveCount(0);
     await expect(page.getByRole("button", { name: /add contact/i })).toBeVisible();
     await page.getByRole("button", { name: /add contact/i }).click();
-    await page.getByLabel("Type", { exact: true }).selectOption({ index: 1 });
+    await page.getByLabel("Type", { exact: true }).selectOption({ label: "Personal phone" });
     await page.getByLabel("Value", { exact: true }).fill("+92 300 1112223");
     await page.getByRole("button", { name: /^(save|add)/i }).first().click();
     await expect(page.getByText("+92 300 1112223")).toBeVisible();

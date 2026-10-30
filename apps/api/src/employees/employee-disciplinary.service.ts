@@ -7,6 +7,7 @@ import { EntitlementsService } from "../entitlements/entitlements.service";
 import { UserNotificationsService } from "../notifications/user-notifications.service";
 import { RbacService } from "../rbac/rbac.service";
 import { isOwnEmployee } from "./employee-self-read";
+import { orderedDays, saneDay } from "./employee-record-rules";
 
 const MODULE_KEY = "employee" as const;
 const VIEW = "employee.disciplinary.view";
@@ -76,6 +77,7 @@ export class EmployeeDisciplinaryService {
     const subject = input.subject.trim();
     const description = input.description.trim();
     if (!subject || !description) throw new BadRequestException("Enter a subject and what happened");
+    saneDay(input.incidentDate, "incidentDate", "Incident date");
     if (input.incidentDate && input.issuedDate && input.incidentDate > input.issuedDate) {
       throw new BadRequestException("The incident cannot be after the date the notice is issued");
     }
@@ -83,6 +85,10 @@ export class EmployeeDisciplinaryService {
     const created = await this.db.withClaims(claims, async (client) => {
       const emp = await client.query("SELECT user_account_id FROM employees WHERE id = $1 AND company_id = $2", [input.employeeId, claims.company_id]);
       if (emp.rowCount === 0) throw new NotFoundException("Employee not found");
+      if (input.incidentDate) {
+        const joined = await client.query("SELECT date_of_joining::text AS d FROM employees WHERE id = $1", [input.employeeId]);
+        orderedDays(joined.rows[0]?.d, input.incidentDate, "incidentDate", "The incident is dated before the employee joined.");
+      }
       const ins = await client.query(
         `INSERT INTO employee_disciplinary_records
            (company_id, employee_id, record_type, subject, description, incident_date, issued_date, action_taken, issued_by_user_account_id)

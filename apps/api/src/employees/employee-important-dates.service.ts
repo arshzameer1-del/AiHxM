@@ -11,6 +11,7 @@ import type {
   UpdateEmployeeImportantDateRequest,
 } from "@aihxm/shared-types";
 import { requireViewOrSelf } from "./employee-self-read";
+import { assertSaneMoney, assertValidGender, orderedDays, requireText, saneDay } from "./employee-record-rules";
 
 const MODULE_KEY = "employee" as const;
 const MANAGE_PERMISSION = "employee.manage.all";
@@ -69,6 +70,11 @@ export class EmployeeImportantDatesService {
     input: CreateEmployeeImportantDateRequest
   ): Promise<EmployeeImportantDateView> {
     await this.mustExistEmployee(client, claims.company_id!, input.employeeId);
+    saneDay(input.dateValue, "dateValue", "Date", { allowFuture: true });
+    if (input.dateType === "confirmation" || input.dateType === "probation_end") {
+      const joined = await client.query("SELECT date_of_joining::text AS d FROM employees WHERE id = $1", [input.employeeId]);
+      orderedDays(joined.rows[0]?.d, input.dateValue, "dateValue", "This date cannot be before the employee joined.");
+    }
 
     if (input.dateType !== "document_expiry") {
       await client.query(
@@ -109,6 +115,7 @@ export class EmployeeImportantDatesService {
     await this.requireManage(claims);
     return this.db.withClaims(claims, async (client) => {
       const before = await this.mustExist(client, id);
+      saneDay(patch.dateValue, "dateValue", "Date", { allowFuture: true });
       const result = await client.query(
         `UPDATE employee_important_dates SET date_value = COALESCE($2, date_value), label = COALESCE($3, label), updated_at = now()
          WHERE id = $1 RETURNING *`,

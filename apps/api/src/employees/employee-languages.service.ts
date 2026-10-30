@@ -46,6 +46,7 @@ export class EmployeeLanguagesService {
     await this.requireManage(claims);
     const language = input.language.trim();
     if (!language) throw new BadRequestException("Enter the language");
+    if (!/\p{L}/u.test(language)) throw new BadRequestException("A language name has to contain letters.");
     return this.db.withClaims(claims, async (client) => {
       const emp = await client.query("SELECT 1 FROM employees WHERE id = $1 AND company_id = $2", [input.employeeId, claims.company_id]);
       if (emp.rowCount === 0) throw new NotFoundException("Employee not found");
@@ -73,6 +74,7 @@ export class EmployeeLanguagesService {
     await this.requireManage(claims);
     const language = patch.language === undefined ? null : patch.language.trim();
     if (patch.language !== undefined && !language) throw new BadRequestException("Enter the language");
+    if (language && !/\p{L}/u.test(language)) throw new BadRequestException("A language name has to contain letters.");
     return this.db.withClaims(claims, async (client) => {
       const r = await client
         .query(

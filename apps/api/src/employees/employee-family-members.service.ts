@@ -14,6 +14,7 @@ import type {
   UpdateEmployeeFamilyMemberRequest,
 } from "@aihxm/shared-types";
 import { requireViewOrSelf } from "./employee-self-read";
+import { assertSaneMoney, assertValidGender, orderedDays, requireText, saneDay } from "./employee-record-rules";
 
 const MODULE_KEY = "employee" as const;
 const MANAGE_PERMISSION = "employee.manage.all";
@@ -73,6 +74,8 @@ export class EmployeeFamilyMembersService {
     input: CreateEmployeeFamilyMemberRequest
   ): Promise<EmployeeFamilyMemberView> {
     await this.mustExistEmployee(client, claims.company_id!, input.employeeId);
+    requireText(input.fullName, "fullName", "Full name");
+    saneDay(input.dateOfBirth, "dateOfBirth", "Date of birth");
     // HR Administration v2 "then 2" Phase 1 (2026-10-01) — `relationship`
     // used to be a hardcoded CHECK constraint (spouse/child/parent/sibling/
     // other); this tenant's own `family_relationship_type` catalog is now
@@ -127,6 +130,8 @@ export class EmployeeFamilyMembersService {
     await this.requireManage(claims);
     return this.db.withClaims(claims, async (client) => {
       const before = await this.mustExist(client, id);
+      requireText(patch.fullName, "fullName", "Full name");
+      saneDay(patch.dateOfBirth, "dateOfBirth", "Date of birth");
       if (patch.relationship) {
         await this.hrCatalog.validateActiveCode(client, claims.company_id!, "family_relationship_type", patch.relationship);
       }

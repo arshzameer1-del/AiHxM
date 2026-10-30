@@ -266,10 +266,15 @@ export class EmployeeChangeRequestsService {
     const claimed = await this.db.withClaims(claims, async (client) => {
       const r = await client.query(
         `UPDATE employee_change_requests SET status = 'approved', decided_by_user_account_id = $2, decided_at = now(), decision_note = $3, updated_at = now()
-          WHERE id = $1 AND status = 'pending' RETURNING *`,
+          WHERE id = $1 AND status = 'pending' AND submitted_by_user_account_id IS DISTINCT FROM $2::uuid RETURNING *`,
         [id, claims.sub, note?.trim() || null]
       );
-      if (r.rowCount === 0) throw new BadRequestException("This request is not open any more");
+      if (r.rowCount === 0) {
+        // Maker-checker, the same rule payment accounts already follow: nobody approves a change they asked for themselves.
+        const own = await client.query("SELECT 1 FROM employee_change_requests WHERE id = $1 AND status = 'pending' AND submitted_by_user_account_id = $2::uuid", [id, claims.sub]);
+        if (own.rowCount) throw new ForbiddenException("You cannot approve a change you asked for yourself. Another HR person has to approve it.");
+        throw new BadRequestException("This request is not open any more");
+      }
       return r.rows[0];
     });
     try {

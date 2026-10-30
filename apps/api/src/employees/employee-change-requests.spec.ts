@@ -212,4 +212,23 @@ describe("Employee change requests", () => {
     expect((await svc.approve(hr, req.id)).status).toBe("approved");
     expect((await row("SELECT value FROM employee_contacts WHERE id = $1", [c[0].id]))[0].value).toBe("new@example.com");
   });
+
+  it("nobody approves a change they asked for themselves; another HR person can", async () => {
+    // an HR person who is also an employee asks to change their own bank details
+    const hr2 = await fx(async (c) => {
+      const u = await c.query("INSERT INTO user_accounts (email, password_hash) VALUES ($1, 'x') RETURNING id", [`cr-hr2-${stamp}@example.com`]);
+      for (const key of ["hr_admin", "employee_self_service"]) {
+        const role = await c.query("SELECT id FROM roles WHERE key = $1", [key]);
+        await c.query("INSERT INTO user_role_assignments (user_account_id, company_id, role_id) VALUES ($1, $2, $3)", [u.rows[0].id, a, role.rows[0].id]);
+      }
+      await makeEmployee(c, u.rows[0].id as string);
+      return { is_platform_admin: false, company_id: a, sub: u.rows[0].id as string } as RequestClaims;
+    });
+    const req = await svc.submit(hr2, { requestType: "contact", action: "add", payload: { contactType: "personal_email", value: "hr2@example.com" } });
+    await expect(svc.approve(hr2, req.id)).rejects.toBeInstanceOf(ForbiddenException);
+    // still open, nothing applied
+    expect((await row("SELECT status FROM employee_change_requests WHERE id = $1", [req.id]))[0].status).toBe("pending");
+    const done = await svc.approve(hr, req.id);
+    expect(done.status).toBe("approved");
+  });
 });

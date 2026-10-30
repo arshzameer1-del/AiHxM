@@ -8,6 +8,8 @@ import { AuditService } from "../audit/audit.service";
 import { HrReferenceCatalogService } from "../hr-administration/hr-reference-catalog.service";
 import type { CreateEmployeeAddressRequest, EmployeeAddressView, UpdateEmployeeAddressRequest } from "@aihxm/shared-types";
 import { requireViewOrSelf } from "./employee-self-read";
+import { requireText } from "./employee-record-rules";
+import { assertValidPostalCode } from "./employee-input-rules";
 
 const MODULE_KEY = "employee" as const;
 const MANAGE_PERMISSION = "employee.manage.all";
@@ -74,6 +76,8 @@ export class EmployeeAddressesService {
     input: CreateEmployeeAddressRequest
   ): Promise<EmployeeAddressView> {
     await this.mustExistEmployee(client, claims.company_id!, input.employeeId);
+    requireText(input.line1, "line1", "Address line 1");
+    assertValidPostalCode(input.postalCode);
     // HR Administration v2 "then 2" Phase 1 (2026-10-01) — `addressType`
     // used to be a hardcoded CHECK constraint (permanent/current/mailing);
     // this tenant's own `address_type` catalog is now the source of
@@ -128,6 +132,8 @@ export class EmployeeAddressesService {
     await this.requireManage(claims);
     return this.db.withClaims(claims, async (client) => {
       const before = await this.mustExist(client, id);
+      requireText(patch.line1, "line1", "Address line 1");
+      assertValidPostalCode(patch.postalCode);
       const result = await client.query(
         `UPDATE employee_addresses SET
            line1 = COALESCE($2, line1),

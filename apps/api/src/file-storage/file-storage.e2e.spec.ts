@@ -124,7 +124,7 @@ describe("File storage HTTP surface (e2e) — employee document vault", () => {
   });
 
   it("uploads a document via POST /employees/:id/documents (multipart) and returns its metadata", async () => {
-    const fileContents = Buffer.from("fake CNIC scan bytes for the e2e flow");
+    const fileContents = Buffer.from("%PDF-1.4 fake CNIC scan bytes for the e2e flow");
 
     const res = await request(app.getHttpServer())
       .post(`/employees/${employeeId}/documents`)
@@ -166,7 +166,7 @@ describe("File storage HTTP surface (e2e) — employee document vault", () => {
   });
 
   it("downloads a document's exact bytes via GET /employees/:id/documents/:documentId", async () => {
-    const fileContents = Buffer.from("bytes that must round-trip exactly through the vault");
+    const fileContents = Buffer.from("%PDF-1.4 bytes that must round-trip exactly through the vault");
 
     const uploadRes = await request(app.getHttpServer())
       .post(`/employees/${employeeId}/documents`)

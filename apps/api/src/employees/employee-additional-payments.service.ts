@@ -9,6 +9,7 @@ import { WorkflowService } from "../workflow/workflow.service";
 import { submitToEngineIfConfigured } from "../workflow/engine-routing";
 import { applyAdjustmentOutcome, assertAdjustmentReason, resolveAdjustmentComponent } from "./payroll-adjustment-support";
 import type { CreateEmployeeAdditionalPaymentRequest, EmployeeAdditionalPaymentView } from "@aihxm/shared-types";
+import { assertSaneMoney, assertValidGender, orderedDays, requireText, saneDay } from "./employee-record-rules";
 
 const WORKFLOW_OBJECT_KEY = "additional_payment";
 
@@ -122,6 +123,8 @@ export class EmployeeAdditionalPaymentsService {
   async create(claims: RequestClaims, input: CreateEmployeeAdditionalPaymentRequest): Promise<EmployeeAdditionalPaymentView> {
     await this.requireManage(claims);
     if (input.amount <= 0) throw new BadRequestException("amount must be greater than zero");
+    assertSaneMoney(input.amount, "amount", "Amount");
+    saneDay(input.effectiveDate, "effectiveDate", "Effective date", { allowFuture: true });
     // A deduction is never taxable — same forced invariant
     // EmployeeCompensationService applies to deduction-type recurring
     // components, for the same reason (there is nothing to tax-exempt on

@@ -84,6 +84,19 @@ Deliberately not changed / still open:
 - Gender is still free text on the API (the screen offers male / female / other).
 - Only 6 of the 26 Employees sub-areas were probed adversarially (hire, edit, compensation, loans, payment accounts, statutory IDs, lifecycle). Medical, disciplinary, documents upload limits, cost allocations, assets, family/education and the import path have their existing specs but were not probed with hostile input.
 
+### Module 1 records pass (MOD1C-RECORDS, 2026-10-30): the remaining Employees sub-areas probed and closed
+Hostile input was sent to the smaller records through the live API; about 25 defects found and fixed, each with a test (`employees-record-checks.e2e.spec.ts`, 26 tests; `employee-record-rules.spec.ts`, 6 tests).
+- Education, qualifications, family, contacts, addresses, languages, disciplinary notices, assets, important dates, extra and off-cycle payments: blank titles, dates in the year 1800 or in the future, end before start, bad email/phone format, emergency contact without relationship, postal code of letters, fractions of a paisa, incident before joining, confirmation/probation end before joining are refused with a 400 that says why (several were a 500 or were silently saved).
+- Assets: the same tag cannot be issued twice while active; return cannot be before the issue date.
+- Gender must be male / female / other / transgender on hire, edit and import (import maps M/F).
+- Documents: empty files and files that are not what their name says (fake PDF/PNG/JPEG) are refused.
+- Employee change requests: the person who asked for a change cannot approve it themselves (another HR person must).
+- Cost allocation: same cost center twice and more than two decimals are refused (was a 500 / accepted 33.333%).
+- Employee numbering: a manual-number pattern with a repeat inside a repeat (like `(a+)+`) is refused so it cannot hang the server; manual numbers are capped at 40 characters.
+- Existing tests that used fake data (text posing as PDF, an incident before the joining date, an emergency contact with no relationship, a phone number saved as an email) were corrected; no rule was loosened to make them pass.
+Verification: full API suite run serially, 285 suites / 3230 tests; the first run had 8 failures in 4 old specs (listed above, fixed) and those 4 files were re-run and pass (the rest passed in the full run). Browser run of employees, a11y keyboard and form settings: 54 tests, 1 test data fix, re-run passes. Web type-check and lint clean. No web screen code changed in this pass.
+Still not covered: real screen-reader software; the employee list screen still loads the whole list in one call; medical records and the persons directory were not probed beyond the ordinary tests; a loan without a loan type has no policy limit; two active records with the same CNIC remain allowed on purpose (reported in the data-consistency check); pay "before joining" is allowed.
+
 ## Known issues / limits
 - Form settings cover 7 forms (about 25 fields). Dozens of forms are still hardcoded.
 - Form settings have history and undo but no draft/publish step and no effective dates yet (the older config change-request engine has those; not yet joined).
@@ -105,4 +118,4 @@ Deliberately not changed / still open:
 8. One clean serial full-suite run and the production migration.
 
 ## Exact next step
-Module 1 follow-up is closed (see above). Module 2: Leave. Same procedure as Module 1 (live authorization probe, axe is already global, destructive-action check, validation, business-rule review of the leave pipeline, configurability, then rating). Then Module 3 Attendance and so on in the order in the module list: Employees, Leave, Attendance/shifts/timesheets/overtime, Payroll, Workflow/Approvals, Organization, Recruitment, Performance/Talent, Learning, Expenses/Travel, Reports, Onboarding, Surveys/Recognition/Help desk/Announcements, Configuration Center/Admin, System admin/security.
+Module 1 (including the records pass) is closed. Module 2: Leave (wait for the user's go-ahead). Same procedure as Module 1 (live authorization probe, axe is already global, destructive-action check, validation, business-rule review of the leave pipeline, configurability, then rating). Then Module 3 Attendance and so on in the order in the module list: Employees, Leave, Attendance/shifts/timesheets/overtime, Payroll, Workflow/Approvals, Organization, Recruitment, Performance/Talent, Learning, Expenses/Travel, Reports, Onboarding, Surveys/Recognition/Help desk/Announcements, Configuration Center/Admin, System admin/security.

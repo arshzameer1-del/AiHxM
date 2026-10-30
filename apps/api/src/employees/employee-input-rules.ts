@@ -82,3 +82,9 @@ export function assertValidEmploymentDates(
     }
   }
 }
+
+/** Postal codes are short and made of letters, digits, spaces or a dash (Pakistan uses five digits; overseas addresses vary). */
+export function assertValidPostalCode(value: string | null | undefined, field = "postalCode"): void {
+  if (value === undefined || value === null || value === "") return;
+  if (!/^[A-Za-z0-9][A-Za-z0-9 -]{1,18}$/.test(value.trim()) || !/\d/.test(value)) fail("Postal code does not look right (for example 54000).", field);
+}

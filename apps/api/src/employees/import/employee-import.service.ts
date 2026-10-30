@@ -253,7 +253,7 @@ export class EmployeeImportService {
         phone: rec.phone || undefined,
         cnic: rec.cnic || undefined,
         dateOfBirth: rec.dateOfBirth || undefined,
-        gender: rec.gender || undefined,
+        gender: rec.gender ? ({ m: "male", f: "female" } as Record<string, string>)[rec.gender.trim().toLowerCase()] ?? rec.gender.trim() : undefined,
         maritalStatus: rec.maritalStatus || undefined,
         department: rec.department || undefined,
         orgUnitId: rec.orgUnitId || undefined,

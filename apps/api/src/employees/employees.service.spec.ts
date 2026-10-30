@@ -648,7 +648,7 @@ describe("EmployeesService", () => {
     });
 
     it("attaches a document to the vault and reads the exact bytes back", async () => {
-      const fileBuffer = Buffer.from("fake CNIC scan bytes");
+      const fileBuffer = Buffer.from("%PDF-1.4 fake CNIC scan bytes");
       const doc = await employees.addDocument(hrAdminClaims, aliceEmployeeId, "cnic_copy", {
         originalname: "alice-cnic.pdf",
         mimetype: "application/pdf",
@@ -696,7 +696,7 @@ describe("EmployeesService", () => {
         client.query("UPDATE companies SET storage_quota_mb = 0 WHERE id = $1", [companyId])
       );
 
-      const fileBuffer = Buffer.from("this tenant has zero MB of quota left");
+      const fileBuffer = Buffer.from("%PDF-1.4 this tenant has zero MB of quota left");
       await expect(
         employees.addDocument(hrAdminClaims, aliceEmployeeId, "cnic_copy", {
           originalname: "over-quota.pdf",
@@ -713,7 +713,7 @@ describe("EmployeesService", () => {
     });
 
     it("allows an upload that fits within the tenant's quota", async () => {
-      const fileBuffer = Buffer.from("small file, plenty of quota");
+      const fileBuffer = Buffer.from("%PDF-1.4 small file, plenty of quota");
       await db.withClaims(FIXTURE_CLAIMS, (client) =>
         client.query("UPDATE companies SET storage_quota_mb = 5120 WHERE id = $1", [companyId])
       );

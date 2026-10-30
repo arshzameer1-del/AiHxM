@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { DatabaseService } from "../database/database.service";
 import type { RequestClaims } from "../database/tenant-context";
@@ -8,6 +8,8 @@ import { AuditService } from "../audit/audit.service";
 import { HrReferenceCatalogService } from "../hr-administration/hr-reference-catalog.service";
 import type { CreateEmployeeContactRequest, EmployeeContactView, UpdateEmployeeContactRequest } from "@aihxm/shared-types";
 import { requireViewOrSelf } from "./employee-self-read";
+import { assertValidEmail, assertValidPhone } from "./employee-input-rules";
+import { requireText } from "./employee-record-rules";
 
 // Reuses the employee record's own permission keys rather than inventing
 // new ones — a contact method is a sub-fact of the employee record, the
@@ -76,6 +78,13 @@ export class EmployeeContactsService {
     input: CreateEmployeeContactRequest
   ): Promise<EmployeeContactView> {
     await this.mustExistEmployee(client, claims.company_id!, input.employeeId);
+    requireText(input.value, "value", "Contact");
+    if (input.contactType === "business_email" || input.contactType === "personal_email") assertValidEmail(input.value, "value");
+    if (input.contactType === "business_phone" || input.contactType === "personal_phone") assertValidPhone(input.value, "value");
+    if (input.contactType === "emergency_contact") {
+      assertValidPhone(input.value, "value");
+      if (!input.relationship?.trim()) throw new BadRequestException({ message: "Say who this emergency contact is (their relationship to the employee).", field: "relationship" });
+    }
     // HR Administration v2 "then 2" Phase 1 (2026-10-01) — `contactType`
     // used to be a hardcoded CHECK constraint; this tenant's own
     // `contact_type` catalog is now the source of truth. Only checked on
@@ -143,6 +152,11 @@ export class EmployeeContactsService {
     await this.requireManage(claims);
     return this.db.withClaims(claims, async (client) => {
       const before = await this.mustExist(client, id);
+      requireText(patch.value, "value", "Contact");
+      if (patch.value !== undefined) {
+        if (before.contact_type === "business_email" || before.contact_type === "personal_email") assertValidEmail(patch.value, "value");
+        else assertValidPhone(patch.value, "value");
+      }
 
       if (patch.isPrimary) {
         await client.query(

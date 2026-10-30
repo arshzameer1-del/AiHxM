@@ -7,6 +7,7 @@ import { RbacService } from "../rbac/rbac.service";
 import { AuditService } from "../audit/audit.service";
 import type { CreateEmployeeEducationRequest, EmployeeEducationView, UpdateEmployeeEducationRequest } from "@aihxm/shared-types";
 import { requireViewOrSelf } from "./employee-self-read";
+import { assertSaneMoney, assertValidGender, orderedDays, requireText, saneDay } from "./employee-record-rules";
 
 const MODULE_KEY = "employee" as const;
 const MANAGE_PERMISSION = "employee.manage.all";
@@ -68,6 +69,10 @@ export class EmployeeEducationService {
     input: CreateEmployeeEducationRequest
   ): Promise<EmployeeEducationView> {
     await this.mustExistEmployee(client, claims.company_id!, input.employeeId);
+    requireText(input.degreeTitle, "degreeTitle", "Degree title");
+    saneDay(input.startDate, "startDate", "Start date", { allowFuture: true, maxYearsAhead: 10 });
+    saneDay(input.endDate, "endDate", "End date", { allowFuture: true, maxYearsAhead: 10 });
+    orderedDays(input.startDate, input.endDate, "endDate", "The end date cannot be before the start date.");
 
     const inserted = await client.query(
       `INSERT INTO employee_education (company_id, employee_id, degree_title, institution, field_of_study, start_date, end_date, grade)
@@ -110,6 +115,10 @@ export class EmployeeEducationService {
     await this.requireManage(claims);
     return this.db.withClaims(claims, async (client) => {
       const before = await this.mustExist(client, id);
+      requireText(patch.degreeTitle, "degreeTitle", "Degree title");
+      saneDay(patch.startDate, "startDate", "Start date", { allowFuture: true, maxYearsAhead: 10 });
+      saneDay(patch.endDate, "endDate", "End date", { allowFuture: true, maxYearsAhead: 10 });
+      orderedDays(patch.startDate ?? before.start_date, patch.endDate ?? before.end_date, "endDate", "The end date cannot be before the start date.");
       const result = await client.query(
         `UPDATE employee_education SET
            degree_title = COALESCE($2, degree_title),
