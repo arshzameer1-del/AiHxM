@@ -464,6 +464,46 @@ describe("LeaveRequestsService + AttendanceService", () => {
     });
   });
 
+  describe("decision outcome is atomic and self-healing", () => {
+    it("an approval made through the workflow engine itself (as an escalation would) approves the leave and deducts the balance, also for a second leave of the same type in the year", async () => {
+      const submitted = await leaveRequests.submit(staffClaims, {
+        employeeId: staffEmployeeId,
+        leaveType: "casual",
+        startDate: "2026-12-07",
+        endDate: "2026-12-07",
+      });
+      const before = (await leaveRequests.getBalances(hrAdminClaims, staffEmployeeId)).find((b) => b.leaveType === "casual")!;
+      const row = await db.withClaims(FIXTURE_CLAIMS, async (c) => (await c.query("SELECT workflow_instance_id FROM leave_requests WHERE id = $1", [submitted.request.id])).rows[0]);
+      const instance = await workflow.getInstance(managerClaims, row.workflow_instance_id);
+      const step = instance.steps.find((st) => st.status === "pending")!;
+      await workflow.decide(managerClaims, step.id, { decision: "approved", comment: "engine" });
+
+      expect((await leaveRequests.getRequest(hrAdminClaims, submitted.request.id)).status).toBe("approved");
+      const after = (await leaveRequests.getBalances(hrAdminClaims, staffEmployeeId)).find((b) => b.leaveType === "casual")!;
+      expect(after.usedDays).toBe(before.usedDays + 1);
+    });
+
+    it("a request left pending after its workflow was approved is brought in line when someone decides it again, with no double deduction", async () => {
+      const submitted = await leaveRequests.submit(staffClaims, {
+        employeeId: staffEmployeeId,
+        leaveType: "casual",
+        startDate: "2026-12-08",
+        endDate: "2026-12-08",
+      });
+      await leaveRequests.decide(managerClaims, submitted.request.id, { decision: "approved" });
+      const approved = (await leaveRequests.getBalances(hrAdminClaims, staffEmployeeId)).find((b) => b.leaveType === "casual")!;
+      // the old failure: the workflow finished but the request itself still said "pending"
+      await db.withClaims(FIXTURE_CLAIMS, async (c) => {
+        await c.query("UPDATE leave_requests SET status = 'pending' WHERE id = $1", [submitted.request.id]);
+      });
+
+      const healed = await leaveRequests.decide(managerClaims, submitted.request.id, { decision: "approved" });
+      expect(healed.status).toBe("approved");
+      const after = (await leaveRequests.getBalances(hrAdminClaims, staffEmployeeId)).find((b) => b.leaveType === "casual")!;
+      expect(after.usedDays).toBe(approved.usedDays);
+    });
+  });
+
   describe("an employee record with no user account", () => {
     it("cannot have a leave request submitted for it at all — safe-deny, not a silent skip of approval routing", async () => {
       const ghostEmployee = await employees.create(hrAdminClaims, {

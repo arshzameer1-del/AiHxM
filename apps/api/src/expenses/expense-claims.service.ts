@@ -134,6 +134,11 @@ export class ExpenseClaimsService {
       objectKey: WORKFLOW_OBJECT_KEY,
       label: "Expense claim",
       legacyDecide: (c, id, dto) => this.decide(c, id, dto),
+      // Commits with the workflow decision (also an automatic one after an escalation): no claim stays "pending" with a finished workflow.
+      onOutcome: async (ctx) => {
+        if (ctx.event !== "approved" && ctx.event !== "rejected") return;
+        await this.applyOutcome(ctx.client, ctx.recordId, ctx.event);
+      },
     });
   }
 
@@ -258,24 +263,23 @@ export class ExpenseClaimsService {
     // expense-specific "may approve" permission on top of that.
     const instance = await this.workflow.getInstance(claims, claimRow.workflow_instance_id);
     const pendingStep = instance.steps.find((s) => s.status === "pending");
-    if (!pendingStep) {
+    let workflowStatus: string = instance.status;
+    if (pendingStep) {
+      workflowStatus = (await this.workflow.decide(claims, pendingStep.id, dto)).status; // onOutcome applies the effect in the same transaction
+    } else if (instance.status !== "approved" && instance.status !== "rejected") {
       throw new BadRequestException("No pending approval step found on this expense claim");
     }
-    const decidedInstance = await this.workflow.decide(claims, pendingStep.id, dto);
+    // else: the workflow had already finished but the claim never followed (an older decision whose second step did not run): bring it in line.
 
     const updatedRow = await this.db.withClaims(claims, async (client) => {
-      if (decidedInstance.status === "approved") {
-        await client.query(`UPDATE expense_claims SET status = 'approved', updated_at = now() WHERE id = $1`, [claimId]);
-      } else if (decidedInstance.status === "rejected") {
-        await client.query(`UPDATE expense_claims SET status = 'rejected', updated_at = now() WHERE id = $1`, [claimId]);
-      }
+      if (workflowStatus === "approved" || workflowStatus === "rejected") await this.applyOutcome(client, claimId, workflowStatus);
       const result = await client.query(`SELECT * FROM expense_claims WHERE id = $1`, [claimId]);
 
       await this.audit.record(client, claims, {
         companyId: employee.company_id,
-        action: "expense_claim.decide",
+        action: pendingStep ? "expense_claim.decide" : "expense_claim.reconcile",
         target: claimId,
-        metadata: { decision: dto.decision, workflowStatus: decidedInstance.status },
+        metadata: { decision: dto.decision, workflowStatus },
       });
 
       return result.rows[0];
@@ -283,6 +287,11 @@ export class ExpenseClaimsService {
 
     const receipts = await this.listReceiptRows(claims, claimId);
     return rowToClaim(updatedRow, employee.user_account_id, receipts.map(rowToReceipt));
+  }
+
+  /** Final status of a claim whose workflow ended. Idempotent: only a claim still waiting for the decision changes. */
+  private async applyOutcome(client: PoolClient, claimId: string, outcome: "approved" | "rejected"): Promise<void> {
+    await client.query(`UPDATE expense_claims SET status = $2, updated_at = now() WHERE id = $1 AND status = 'pending'`, [claimId, outcome]);
   }
 
   /**

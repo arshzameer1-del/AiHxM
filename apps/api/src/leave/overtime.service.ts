@@ -862,7 +862,7 @@ export class OvertimeService {
         days,
         sourceType: "overtime",
         sourceId: row.id,
-        sourceKey: "comp_off",
+        sourceKey: `comp_off:${row.id}`,
         reason: `Compensatory leave for overtime on ${toIsoDate(row.work_date)}`,
         createdBy: decidedBy,
       });

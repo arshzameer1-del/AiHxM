@@ -205,7 +205,7 @@ export class LeaveLedgerService {
   async deduct(client: PoolClient, p: { companyId: string; employeeId: string; leaveType: string; year: number; days: number; leaveRequestId: string; createdBy?: string | null }): Promise<void> {
     await this.post(client, {
       companyId: p.companyId, employeeId: p.employeeId, leaveType: p.leaveType, year: p.year, entryType: "deduction",
-      days: -p.days, sourceType: "leave_request", sourceId: p.leaveRequestId, sourceKey: "approved",
+      days: -p.days, sourceType: "leave_request", sourceId: p.leaveRequestId, sourceKey: `approved:${p.leaveRequestId}`,
       reason: "Approved leave", createdBy: p.createdBy,
     });
   }

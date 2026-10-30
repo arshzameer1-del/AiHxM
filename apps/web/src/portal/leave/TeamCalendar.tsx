@@ -25,7 +25,13 @@ export function TeamCalendar({
   initialDate: string;
 }) {
   const [mode, setMode] = useState<"week" | "month">("week");
+  // A date typed into the form passes through partial years ("0002-11-09") on the way to "2026-11-09"; only a plausible
+  // date moves the window, and the window follows the date when it changes.
+  const plausible = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d) && Number(d.slice(0, 4)) >= 2000;
   const [anchor, setAnchor] = useState(initialDate);
+  useEffect(() => {
+    if (plausible(initialDate)) setAnchor(initialDate);
+  }, [initialDate]);
   const [entries, setEntries] = useState<TeamLeaveEntryView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");

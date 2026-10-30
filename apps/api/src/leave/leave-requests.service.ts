@@ -226,7 +226,40 @@ export class LeaveRequestsService {
       objectKey: WORKFLOW_OBJECT_KEY,
       label: "Leave request",
       legacyDecide: (c, id, dto) => this.decide(c, id, dto),
+      // The effect commits in the SAME transaction as the workflow decision (also for an automatic decision after an
+      // escalation), so a request can never be left "pending" with a finished workflow.
+      onOutcome: async (ctx) => {
+        if (ctx.event !== "approved" && ctx.event !== "rejected") return;
+        const row = (await ctx.client.query(`SELECT * FROM leave_requests WHERE id = $1 FOR UPDATE`, [ctx.recordId])).rows[0];
+        if (!row) return;
+        await this.applyOutcome(ctx.client, ctx.claims, row, ctx.event, ctx.comment);
+      },
     });
+  }
+
+  /** Writes the final status (and, for an approval, the balance deduction). Idempotent: only a pending request changes. */
+  private async applyOutcome(client: PoolClient, claims: RequestClaims, row: Record<string, any>, outcome: "approved" | "rejected", comment: string | null): Promise<void> {
+    if (row.status !== "pending") return;
+    if (outcome === "approved") {
+      await client.query(`UPDATE leave_requests SET status = 'approved', updated_at = now() WHERE id = $1`, [row.id]);
+      const year = new Date(row.start_date).getUTCFullYear();
+      // TLM-02: the deduction is a ledger entry (idempotent per request); the
+      // balance row is derived from it. A type that keeps no balance (unpaid) is skipped.
+      const type = await this.leaveTypes.getByCode(client, row.company_id, row.leave_type);
+      if (type?.tracksBalance) {
+        await this.ledger.deduct(client, {
+          companyId: row.company_id,
+          employeeId: row.employee_id,
+          leaveType: row.leave_type,
+          year,
+          days: Number(row.balance_units ?? row.days_requested),
+          leaveRequestId: row.id,
+          createdBy: claims.sub,
+        });
+      }
+    } else {
+      await client.query(`UPDATE leave_requests SET status = 'rejected', rejection_reason = $2, updated_at = now() WHERE id = $1`, [row.id, comment]);
+    }
   }
 
   async submit(claims: RequestClaims, input: SubmitLeaveRequestRequest): Promise<SubmitLeaveRequestResponse> {
@@ -489,46 +522,29 @@ export class LeaveRequestsService {
     // object routed through it.
     const instance = await this.workflow.getInstance(claims, leaveRequestRow.workflow_instance_id);
     const pendingStep = instance.steps.find((s) => s.status === "pending");
-    if (!pendingStep) {
+    let workflowStatus: string = instance.status;
+    if (pendingStep) {
+      // The engine fires onOutcome inside its own transaction, so the leave effect is already written when this returns.
+      const decidedInstance = await this.workflow.decide(claims, pendingStep.id, dto);
+      workflowStatus = decidedInstance.status;
+    } else if (instance.status !== "approved" && instance.status !== "rejected") {
       throw new BadRequestException("No pending approval step found on this leave request");
     }
-    const decidedInstance = await this.workflow.decide(claims, pendingStep.id, dto);
+    // else: the workflow already finished but the request still says "pending" (an older decision whose second step never
+    // ran). The reconcile below brings the request in line with that decision instead of leaving it stuck.
 
     const updatedRow = await this.db.withClaims(claims, async (client) => {
-      if (decidedInstance.status === "approved") {
-        await client.query(`UPDATE leave_requests SET status = 'approved', updated_at = now() WHERE id = $1`, [
-          leaveRequestId,
-        ]);
-        const year = new Date(leaveRequestRow.start_date).getUTCFullYear();
-        // TLM-02: the deduction is a ledger entry (idempotent per request); the
-        // balance row is derived from it. A type that keeps no balance (unpaid) is skipped.
-        const type = await this.leaveTypes.getByCode(client, leaveRequestRow.company_id, leaveRequestRow.leave_type);
-        if (type?.tracksBalance) {
-          await this.ledger.deduct(client, {
-            companyId: leaveRequestRow.company_id,
-            employeeId: leaveRequestRow.employee_id,
-            leaveType: leaveRequestRow.leave_type,
-            year,
-            days: Number(leaveRequestRow.balance_units ?? leaveRequestRow.days_requested),
-            leaveRequestId,
-            createdBy: claims.sub,
-          });
-        }
-      } else if (decidedInstance.status === "rejected") {
-        await client.query(`UPDATE leave_requests SET status = 'rejected', rejection_reason = $2, updated_at = now() WHERE id = $1`, [
-          leaveRequestId,
-          dto.comment ?? null,
-        ]);
+      const locked = (await client.query(`SELECT * FROM leave_requests WHERE id = $1 FOR UPDATE`, [leaveRequestId])).rows[0];
+      if (locked.status === "pending" && (workflowStatus === "approved" || workflowStatus === "rejected")) {
+        await this.applyOutcome(client, claims, locked, workflowStatus, pendingStep ? dto.comment ?? null : null);
       }
-      // else: still in_progress (a later step remains) — leave_requests
-      // stays 'pending', nothing to write here yet.
       const result = await client.query(`SELECT * FROM leave_requests WHERE id = $1`, [leaveRequestId]);
 
       await this.audit.record(client, claims, {
         companyId: employee.company_id,
-        action: "leave_request.decide",
+        action: pendingStep ? "leave_request.decide" : "leave_request.reconcile",
         target: leaveRequestId,
-        metadata: { decision: dto.decision, workflowStatus: decidedInstance.status },
+        metadata: { decision: dto.decision, workflowStatus },
       });
 
       return result.rows[0];
