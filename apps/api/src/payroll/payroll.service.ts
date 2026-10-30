@@ -1243,6 +1243,16 @@ export class PayrollService {
 
   /** Writes one calculated row to `payslips` and returns what persistPayslipDetail() needs for it. */
   private async insertPayslipRow(client: PoolClient, claims: RequestClaims, runId: string, row: Record<string, unknown>): Promise<InsertedPayslip> {
+    // The payslip shows the account the salary goes to. Employees whose account lives in Payment / Bank accounts (not the old flat
+    // column) used to show "—": fall back to their primary active account.
+    if (!row.bankAccountNumber) {
+      const pa = await client.query<{ account_number: string | null; iban: string | null }>(
+        "SELECT account_number, iban FROM employee_payment_accounts WHERE employee_id = $1 AND is_primary = true AND status = 'active' LIMIT 1",
+        [row.employeeId]
+      );
+      const found = sensitive.decrypt(claims.company_id!, pa.rows[0]?.account_number ?? null) ?? sensitive.decrypt(claims.company_id!, pa.rows[0]?.iban ?? null);
+      if (found) row = { ...row, bankAccountNumber: found };
+    }
     const insertedRow = await client.query<{ id: string }>(
       `INSERT INTO payslips (
          company_id, payroll_run_id, employee_id, employee_number, bank_account_number,

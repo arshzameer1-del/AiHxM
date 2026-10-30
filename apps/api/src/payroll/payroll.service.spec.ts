@@ -2123,6 +2123,9 @@ describe("PayrollService", () => {
       // no bank details at all) — only that THIS employee specifically is
       // included, not excluded.
       expect(csv).toContain(`${employee.employeeNumber},01234567890123,`);
+      // and the payslip itself shows that account too (it used to be "—" for anyone whose account is not in the old flat column)
+      const slips = await payroll.listPayslips(hrAdminClaims, { payrollRunId: runId });
+      expect(slips.find((p) => p.employeeId === employee.id)!.bankAccountNumber).toBe("01234567890123");
       expect(excluded.find((e) => e.employeeNumber === employee.employeeNumber)).toBeUndefined();
       expect(batch.rowCount).toBeGreaterThanOrEqual(1);
       expect(batch.batchReference).toMatch(new RegExp(`^PB-${runId.slice(0, 8).toUpperCase()}-1$`));
