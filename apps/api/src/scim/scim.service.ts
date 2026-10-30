@@ -71,7 +71,7 @@ type ExtractedUserFields = {
  * Deliberate scope boundary, worth stating plainly: SCIM here manages
  * LOGIN/ACCESS, never HR employee records. Creating a SCIM user never
  * fabricates an `employees` row (headcount, compensation, personal data) —
- * that stays a deliberate HR action inside AIHXM itself, the same
+ * that stays a deliberate HR action inside AiHxM itself, the same
  * "record the human action, don't automate a legally sensitive operation"
  * principle migration 0057_data_subject_requests.sql already established.
  * When the SCIM-supplied email matches an EXISTING tenant member (an
@@ -205,7 +205,7 @@ export class ScimService {
         {
           type: "oauthbearertoken",
           name: "OAuth Bearer Token",
-          description: "Authenticate using the bearer token generated for this tenant in AIHXM's Integrations tab.",
+          description: "Authenticate using the bearer token generated for this tenant in AiHxM's Integrations tab.",
           specUri: "https://tools.ietf.org/html/rfc6750",
           primary: true,
         },
@@ -223,7 +223,7 @@ export class ScimService {
           id: "User",
           name: "User",
           endpoint: "/Users",
-          description: "AIHXM user account (portal login + role, not an HR employee record)",
+          description: "AiHxM user account (portal login + role, not an HR employee record)",
           schema: SCIM_USER_SCHEMA,
         },
       ],
@@ -242,7 +242,7 @@ export class ScimService {
         {
           id: SCIM_USER_SCHEMA,
           name: "User",
-          description: "AIHXM user account",
+          description: "AiHxM user account",
           attributes: [
             { name: "userName", type: "string", required: true, uniqueness: "server" },
             { name: "externalId", type: "string", required: false },
@@ -374,7 +374,7 @@ export class ScimService {
         );
         if ((isMember.rowCount ?? 0) === 0) {
           throw new ConflictException(
-            `The email "${email}" is already associated with a different AIHXM account. Contact your administrator.`
+            `The email "${email}" is already associated with a different AiHxM account. Contact your administrator.`
           );
         }
 

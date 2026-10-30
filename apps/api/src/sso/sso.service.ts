@@ -72,7 +72,7 @@ function frontendOrigin(): string {
 // from `apiBaseUrl()` (which WOULD change if this API ever moves off its
 // current Render URL, silently invalidating every tenant's Audience
 // Restriction check until they re-typed it). `SAML_SP_ENTITY_ID` exists
-// only for the rare case of running more than one AIHXM environment
+// only for the rare case of running more than one AiHxM environment
 // against the same tenant's IdP (e.g. a staging deploy) and needing them
 // to look like distinct SPs.
 function samlSpEntityId(): string {
@@ -478,7 +478,7 @@ export class SsoService {
    * directly in the NameID (the library's own `DEFAULT_IDENTIFIER_FORMAT`
    * even requests exactly that format) — `config.emailAttribute` exists
    * only for the admin to point at a specific attribute URI when their
-   * IdP's config doesn't, without AIHXM ever having to guess which of an
+   * IdP's config doesn't, without AiHxM ever having to guess which of an
    * assertion's many possible attribute names to try.
    */
   private extractSamlEmail(profile: Profile, config: SamlSsoConfig): string | undefined {
@@ -574,7 +574,7 @@ export class SsoService {
           // rather than silently attaching a stranger's SSO identity to
           // it.
           throw new BadRequestException(
-            "This email is already associated with a different AIHXM account. Contact your administrator."
+            "This email is already associated with a different AiHxM account. Contact your administrator."
           );
         }
         const created = await client.query<{ id: string }>(

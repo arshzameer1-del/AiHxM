@@ -12,16 +12,16 @@ export function useInstallMode(): InstallMode {
 export function IosInstallHelp({ mode, onClose }: { mode: InstallMode; onClose: () => void }) {
   return (
     <div role="presentation" className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-4" onClick={onClose}>
-      <div role="dialog" aria-modal="true" aria-label="Install AI HXM" data-testid="ios-install-help" className="w-full max-w-sm bg-card rounded-2xl p-5 shadow-2xl pwa-sheet" onClick={(e) => e.stopPropagation()}>
+      <div role="dialog" aria-modal="true" aria-label="Install AiHxM" data-testid="ios-install-help" className="w-full max-w-sm bg-card rounded-2xl p-5 shadow-2xl pwa-sheet" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-3">
-          <h2 className="text-base font-semibold">Install AI HXM on your iPhone</h2>
+          <h2 className="text-base font-semibold">Install AiHxM on your iPhone</h2>
           <button type="button" onClick={onClose} aria-label="Close" className="text-label-tertiary"><X size={18} aria-hidden /></button>
         </div>
         {mode === "ios-other-browser" && <p className="mt-2 text-sm text-danger">Open this page in Safari first. Other iPhone browsers cannot always add apps to the Home Screen.</p>}
         <ol className="mt-3 space-y-2 text-sm list-decimal pl-5">
           <li>Tap the <Share size={14} className="inline -mt-0.5" aria-hidden /> <b>Share</b> button at the bottom of Safari.</li>
           <li>Scroll down and tap <b>Add to Home Screen</b>.</li>
-          <li>Tap <b>Add</b>. AI HXM now opens from your Home Screen like an app.</li>
+          <li>Tap <b>Add</b>. AiHxM now opens from your Home Screen like an app.</li>
         </ol>
         <button type="button" onClick={onClose} className="mt-4 w-full bg-accent text-white rounded-lg py-2.5 text-sm font-semibold">Got it</button>
       </div>
@@ -106,7 +106,7 @@ export function PwaChrome() {
         {offerInstall && (
           <div role="region" aria-label="Install the app" data-testid="install-banner" className="pointer-events-auto flex items-center gap-3 rounded-xl bg-card border border-border px-4 py-3 text-sm shadow-lg">
             <Download size={18} className="text-accent shrink-0" aria-hidden />
-            <span className="flex-1 min-w-0">Install AI HXM on this phone. It opens like an app.</span>
+            <span className="flex-1 min-w-0">Install AiHxM on this phone. It opens like an app.</span>
             <button
               type="button"
               data-testid="install-now"

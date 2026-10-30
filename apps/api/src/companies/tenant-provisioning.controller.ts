@@ -80,7 +80,7 @@ export class TenantProvisioningController {
     try {
       await this.mailer.sendMail({
         to: dto.email,
-        subject: `You're invited to ${dto.companyName ?? "your new AIHXM workspace"}`,
+        subject: `You're invited to ${dto.companyName ?? "your new AiHxM workspace"}`,
         text: [
           `Hi ${dto.fullName},`,
           "",

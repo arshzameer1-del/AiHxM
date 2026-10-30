@@ -73,7 +73,7 @@ describe("Demo requests (e2e)", () => {
     const res = await request(app.getHttpServer()).post("/public/demo-requests").send(valid("a"));
     expect(res.status).toBe(201);
     expect(res.body.ok).toBe(true);
-    expect(res.body.reference).toMatch(/^AIHXM-[0-9A-F]{8}$/);
+    expect(res.body.reference).toMatch(/^AiHxM-[0-9A-F]{8}$/);
     const rows = await db.withClaims(FIXTURE_CLAIMS, (c) =>
       c.query("SELECT * FROM demo_requests WHERE work_email = $1", [`${TAG}-a@example.com`])
     );

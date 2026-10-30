@@ -52,7 +52,7 @@ export function SsoCompletePage() {
         navigate(identity.isPlatformAdmin ? "/" : "/app", { replace: true });
       })
       .catch(() => {
-        setError("Your identity provider signed you in, but AIHXM couldn't complete the session. Please try again.");
+        setError("Your identity provider signed you in, but AiHxM couldn't complete the session. Please try again.");
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

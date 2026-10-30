@@ -225,7 +225,7 @@ export class AuthService {
       return {
         status: "mfa_setup_required",
         mfaTicket: signMfaTicket("mfa_enroll", account.id),
-        otpauthUrl: generateURI({ issuer: "AIHXM", label: opts.otpLabel, secret }),
+        otpauthUrl: generateURI({ issuer: "AiHxM", label: opts.otpLabel, secret }),
         secretForManualEntry: secret,
       };
     }
@@ -611,8 +611,8 @@ export class AuthService {
       try {
         await this.mailer.sendMail({
           to: email,
-          subject: "Reset your AIHXM password",
-          text: `We received a request to reset your AIHXM password.\n\nReset it here: ${resetLink}\n\nThis link expires in ${RESET_TOKEN_TTL_MINUTES} minutes. If you didn't request this, you can safely ignore this email — your password hasn't been changed.`,
+          subject: "Reset your AiHxM password",
+          text: `We received a request to reset your AiHxM password.\n\nReset it here: ${resetLink}\n\nThis link expires in ${RESET_TOKEN_TTL_MINUTES} minutes. If you didn't request this, you can safely ignore this email — your password hasn't been changed.`,
         });
       } catch {
         // Already logged inside MailerService; swallow here so a

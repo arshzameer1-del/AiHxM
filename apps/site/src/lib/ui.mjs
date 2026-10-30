@@ -4,9 +4,11 @@ import { STATUS, STATUS_ORDER, flags } from "../content/flags.mjs";
 import { resolve, parseItem } from "../content/catalog.mjs";
 
 export const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+/** Like esc, but keeps the product name written "AiHxM" inside text that the stylesheet sets in capitals (labels, table headings). */
+export const escBrand = (s) => esc(s).replace(/AiHxM/g, '<span class="bn">AiHxM</span>');
 
 export const logoMark = (id = "m") => `<svg viewBox="0 0 32 32" fill="none" aria-hidden="true" focusable="false"><defs><linearGradient id="g-${id}" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#71639e"/><stop offset="1" stop-color="#714b67"/></linearGradient></defs><rect width="32" height="32" rx="8" fill="url(#g-${id})"/><g stroke="#fff" stroke-width="1.6" stroke-linecap="round"><line x1="10" y1="21" x2="16" y2="11"/><line x1="16" y1="11" x2="22" y2="21"/><line x1="10" y1="21" x2="22" y2="21"/></g><circle cx="16" cy="11" r="2.6" fill="#fff"/><circle cx="10" cy="21" r="2.6" fill="#fff"/><circle cx="22" cy="21" r="2.6" fill="#fff"/></svg>`;
-export const brandLink = (id, cls = "") => `<a class="brand ${cls}" href="/" aria-label="AI HXM home">${logoMark(id)}<span>AI HXM</span></a>`;
+export const brandLink = (id, cls = "") => `<a class="brand ${cls}" href="/" aria-label="AiHxM home">${logoMark(id)}<span>AiHxM</span></a>`;
 
 export const chip = (status) => {
   if (!flags.showStatusLabels) return "";
@@ -74,9 +76,9 @@ export const steps = (list, title) =>
 export const ticks = (items) => `<ul class="ticks">${items.map((i) => `<li>${icon("check")}<span>${esc(i)}</span></li>`).join("")}</ul>`;
 
 export const section = ({ id, cls = "", eyebrow, title, srTitle, intro, body, wide = false }) =>
-  `<section class="section ${cls}"${id ? ` id="${id}"` : ""}><div class="wrap${wide ? " wide" : ""}">${eyebrow ? `<p class="eyebrow">${esc(eyebrow)}</p>` : ""}${title ? `<h2 class="reveal">${esc(title)}</h2>` : srTitle ? `<h2 class="sr">${esc(srTitle)}</h2>` : ""}${intro ? `<p class="lead reveal">${esc(intro)}</p>` : ""}${body || ""}</div></section>`;
+  `<section class="section ${cls}"${id ? ` id="${id}"` : ""}><div class="wrap${wide ? " wide" : ""}">${eyebrow ? `<p class="eyebrow">${escBrand(eyebrow)}</p>` : ""}${title ? `<h2 class="reveal">${esc(title)}</h2>` : srTitle ? `<h2 class="sr">${esc(srTitle)}</h2>` : ""}${intro ? `<p class="lead reveal">${esc(intro)}</p>` : ""}${body || ""}</div></section>`;
 
-export const ctaBand = ({ title = "Ready to Transform Your HR Operations?", text = "Book a personalised demo and see AiHxM set up around the way your business works.", interest = "", primary = "Book Your AIHXM Demo", primaryHref = "", second = ["/platform/", "Explore the Platform"] } = {}) =>
+export const ctaBand = ({ title = "Ready to Transform Your HR Operations?", text = "Book a personalised demo and see AiHxM set up around the way your business works.", interest = "", primary = "Book Your AiHxM Demo", primaryHref = "", second = ["/platform/", "Explore the Platform"] } = {}) =>
   `<section class="section"><div class="wrap"><div class="cta-band reveal"><div class="orb o1" aria-hidden="true"></div><div class="orb o2" aria-hidden="true"></div><div class="cta-copy"><h2>${esc(title)}</h2><p>${esc(text)}</p></div><div class="btn-row">${btn(primaryHref || `/book-a-demo/${interest ? `?interest=${interest}` : ""}`, primary, "light")}${btn(second[0], second[1], "outline-light")}</div></div></div></section>`;
 
 export const notice = (html, tone = "info") => `<aside class="notice ${tone}" role="note">${html}</aside>`;

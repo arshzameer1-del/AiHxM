@@ -31,11 +31,11 @@ function fetchPlatformBrandingOnce(): Promise<PlatformBranding> {
 }
 
 /**
- * The AIHXM platform's own mark — shown wherever there's no tenant to
+ * The AiHxM platform's own mark — shown wherever there's no tenant to
  * brand the page instead (the Platform Admin console's own sidebar, and
  * the shared "/login" page nobody's company slug claims — see
  * LoginPage.tsx's ":companySlug" route param), PLUS
- * the small "Powered by AIHXM" credit LoginPage shows on every tenant's
+ * the small "Powered by AiHxM" credit LoginPage shows on every tenant's
  * OWN branded subdomain (see that component's badge).
  *
  * Checks once per page load whether the Platform Admin has uploaded a
@@ -96,7 +96,7 @@ export function AihxmLogo({
     return (
       <img
         src={uploadedLogoUrl}
-        alt="AIHXM"
+        alt="AiHxM"
         style={{ height: size }}
         className={`max-w-full object-contain ${className ?? ""}`}
       />
@@ -114,7 +114,7 @@ export function AihxmLogo({
         aria-hidden={withWordmark}
         role={withWordmark ? undefined : "img"}
       >
-        {!withWordmark && <title>AIHXM</title>}
+        {!withWordmark && <title>AiHxM</title>}
         <defs>
           {/* UI Re-skin Phase 1 — brand-primary to brand-secondary (AI
               accent), matching tailwind.config.js's new enterprise
@@ -136,7 +136,7 @@ export function AihxmLogo({
       </svg>
       {withWordmark && (
         <span className="font-bold tracking-tight" style={{ fontSize: size * 0.6 }}>
-          AI HXM
+          AiHxM
         </span>
       )}
     </span>

@@ -1227,7 +1227,7 @@ export const api = {
   // No auth token needed (and none may exist yet — this loads before
   // anyone has signed in) — public/public-branding.controller.ts. A 404
   // just means this slug has no custom branding (or isn't a real tenant),
-  // which the login page treats as "use the default AIHXM look," not an
+  // which the login page treats as "use the default AiHxM look," not an
   // error to surface.
   getPublicTenantBranding: (companySlug: string) =>
     request<PublicTenantBranding>(`/public/tenants/${companySlug}/branding`),
@@ -1316,7 +1316,7 @@ export const api = {
   // --- Platform Branding (the platform's own logo, migration 0046) --------
   // No auth needed for the read — same public/no-guard posture as
   // getPublicTenantBranding above, since the default /login page and every
-  // tenant subdomain's "Powered by AIHXM" credit need this before (or
+  // tenant subdomain's "Powered by AiHxM" credit need this before (or
   // without) any session existing.
   getPlatformBranding: () => request<PlatformBranding>("/public/platform-branding"),
 

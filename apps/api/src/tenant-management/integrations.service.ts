@@ -24,7 +24,7 @@ const SECRET_FIELDS: Record<IntegrationProviderKey, string[]> = {
 };
 
 // Tenant Management gap-fill Phase 1 item #12 — only these two providers'
-// secrets are ISSUED BY AIHXM (a biometric device's apiKey, a webhook's
+// secrets are ISSUED BY AiHxM (a biometric device's apiKey, a webhook's
 // signingSecret — values we hand to something else and can freely
 // regenerate). smtp's password and sso's clientSecret are issued by the
 // external system instead; "rotating" those isn't something this side can
@@ -194,7 +194,7 @@ export class IntegrationsService {
    * `ROTATION_GRACE_DAYS` (stored in `previous_secret_value` /
    * `previous_secret_expires_at`) so a device or endpoint that hasn't yet
    * picked up the new value doesn't immediately break. Only offered for
-   * providers AIHXM itself issues the secret for — see
+   * providers AiHxM itself issues the secret for — see
    * `ROTATABLE_PROVIDER_KEYS`'s doc comment. The new value is returned
    * exactly once, the same "show plaintext once" pattern used elsewhere
    * (impersonation tokens, initial admin passwords, recovery codes) — it

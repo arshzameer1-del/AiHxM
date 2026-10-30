@@ -274,13 +274,13 @@ function buildNavItems(roleKeys: TenantRoleKey[], enabledModules: ModuleKey[], p
 
 /**
  * The tenant's own uploaded mark in the authenticated app shell — this used
- * to be a hardcoded "AI HXM" text label no matter what a company uploaded
+ * to be a hardcoded "AiHxM" text label no matter what a company uploaded
  * under Branding (TM-015), because this shell never fetched tenant branding
  * at all; only the pre-login /:slug/login page (LoginPage.tsx) did. Fetched
  * from the same public, no-auth /public/tenants/:slug/branding endpoint the
  * login page already uses — a session/token isn't needed for it, and reusing
  * it means one branding pipeline for both surfaces instead of two. Falls
- * back to the plain "AI HXM" text below (never the platform's own AihxmLogo
+ * back to the plain "AiHxM" text below (never the platform's own AihxmLogo
  * mark) when the company hasn't uploaded a logo, or the slug/fetch isn't
  * available yet, so there's no visible flash from placeholder to real mark.
  */
@@ -323,7 +323,7 @@ function PortalMark({ companySlug, companyName }: { companySlug: string | null; 
     );
   }
 
-  return <div className="text-lg font-bold tracking-tight text-sidebar-strong">AI HXM</div>;
+  return <div className="text-lg font-bold tracking-tight text-sidebar-strong">AiHxM</div>;
 }
 
 /**

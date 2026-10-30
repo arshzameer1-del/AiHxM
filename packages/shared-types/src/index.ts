@@ -129,7 +129,7 @@ export type PublicTenantBranding = {
 /**
  * The platform's OWN logo (migration 0046) — what Layout.tsx's sidebar and
  * the default (non-tenant) login page show instead of a hardcoded mark,
- * and what the small "Powered by AIHXM" credit on a tenant's own
+ * and what the small "Powered by AiHxM" credit on a tenant's own
  * subdomain login page renders when present. One row, ever — there is
  * exactly one platform. `GET /public/platform-branding` (no auth) returns
  * this same shape for the public, pre-auth read.
@@ -275,7 +275,7 @@ export type CompanyAdmin = {
   lastAccessReviewedBy: string | null;
   /**
    * Tenant Management gap-fill Phase 1 item #8 — Login/invitation
-   * lifecycle visibility. AIHXM hands a Platform-Admin-chosen password
+   * lifecycle visibility. AiHxM hands a Platform-Admin-chosen password
    * straight to the admin rather than emailing an accept-link, so there's
    * no separate invitation record — this is computed from whether/when the
    * login has ever actually been used:
@@ -609,7 +609,7 @@ export type TenantIntegration = {
   /**
    * Tenant Management gap-fill Phase 1 item #12 — API key/webhook secret
    * rotation. Only ever set for `biometric_device`/`webhook` (the two
-   * providers whose secret AIHXM itself issues — see
+   * providers whose secret AiHxM itself issues — see
    * ROTATABLE_PROVIDER_KEYS in integrations.service.ts). Non-null between
    * a Rotate action and the grace period's end: the previous secret value
    * is never exposed here (same write-only discipline as the current
@@ -706,11 +706,11 @@ export type OidcSsoConfig = SsoRoleResolutionConfig & {
 
 /**
  * The shape of `tenant_integrations.config` for `providerKey: "sso"` once
- * `protocol` is `"saml"` (Phase 3 item #1, slice 2) — AIHXM as a SAML 2.0
+ * `protocol` is `"saml"` (Phase 3 item #1, slice 2) — AiHxM as a SAML 2.0
  * Service Provider. No client secret exists in this protocol the way OIDC
  * has one: what proves the IdP's identity here is `idpCertificate`, the
  * IdP's own public signing certificate, checked against every assertion's
- * XML-DSig signature — not a value AIHXM has to keep confidential, so it
+ * XML-DSig signature — not a value AiHxM has to keep confidential, so it
  * is deliberately NOT one of `SECRET_FIELDS.sso` (a wrong/expired cert
  * just needs replacing, never rotating like a leaked secret would).
  *
@@ -1106,7 +1106,7 @@ export type MeResponse = {
    * authenticated portal shell fetch this tenant's own uploaded branding
    * (logo/colors) from the same public, no-auth /public/tenants/:slug/branding
    * endpoint the tenant login page already uses, instead of hardcoding the
-   * plain "AI HXM" wordmark once a session exists. */
+   * plain "AiHxM" wordmark once a session exists. */
   companySlug: string | null;
   email: string;
   fullName: string;
@@ -8155,7 +8155,7 @@ export type OrgRelationshipStatus = "active" | "ended";
  * organizational relationship with a short, stable code so it can be
  * referenced unambiguously in exports, support conversations, and
  * integration mappings, rather than only by a longer display label that
- * could be reworded later. This is AIHXM's OWN numbering — deliberately
+ * could be reworded later. This is AiHxM's OWN numbering — deliberately
  * NOT SAP's single-letter-direction + three-digit Infotype 1001 scheme
  * (A012/B012, A008/B008, ...): no `A`/`B` direction letters (this product
  * doesn't model a relationship as a bidirectional pair of rows the way

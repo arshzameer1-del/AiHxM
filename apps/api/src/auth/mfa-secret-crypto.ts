@@ -20,7 +20,7 @@ function deriveKey(): Buffer {
   // static secret, not a per-user password hash — the passphrase's own
   // entropy is what matters.
   //
-  // DO NOT rename this string during the BoostFactor -> AIHXM rebrand (or
+  // DO NOT rename this string during the BoostFactor -> AiHxM rebrand (or
   // any future rebrand). It is a key-derivation input, not user-facing
   // branding text — every MFA secret already encrypted in a real database
   // was sealed with the key this exact string produces. Changing it changes

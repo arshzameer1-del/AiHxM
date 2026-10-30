@@ -23,7 +23,7 @@ function Shell({ title, children }: { title: string; children: React.ReactNode }
   return (
     <div className="min-h-screen px-4 py-10">
       <div className="w-full max-w-2xl mx-auto">{children}</div>
-      <p className="text-center text-[11px] text-label-tertiary mt-10">Careers page powered by AIHXM</p>
+      <p className="text-center text-[11px] text-label-tertiary mt-10">Careers page powered by AiHxM</p>
     </div>
   );
 }

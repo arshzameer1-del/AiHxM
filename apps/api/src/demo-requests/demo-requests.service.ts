@@ -57,7 +57,7 @@ export class DemoRequestsService {
     // Honeypot: bots fill the hidden field. Pretend success so they learn nothing; store nothing.
     if (dto.website && dto.website.trim() !== "") {
       this.logger.warn("Demo request dropped by honeypot");
-      return { ok: true, reference: "AIHXM-0000" };
+      return { ok: true, reference: "AiHxM-0000" };
     }
 
     const email = dto.workEmail.trim().toLowerCase();
@@ -110,7 +110,7 @@ export class DemoRequestsService {
 
     if (result.isNew) await this.notify(result.id, dto, email);
 
-    return { ok: true, reference: `AIHXM-${result.id.slice(0, 8).toUpperCase()}` };
+    return { ok: true, reference: `AiHxM-${result.id.slice(0, 8).toUpperCase()}` };
   }
 
   /**

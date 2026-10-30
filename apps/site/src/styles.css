@@ -49,6 +49,7 @@ a:hover{color:var(--plum)}
 .wrap.narrow{max-width:860px}
 .section{padding-block:var(--sec)}
 .section.alt{background:var(--soft)}
+.bn{text-transform:none;letter-spacing:normal}
 .eyebrow{font:600 .78rem/1.3 var(--body);letter-spacing:.14em;text-transform:uppercase;color:var(--tone);margin:0 0 .9rem}
 .eyebrow a{color:inherit;text-decoration:none}
 .lead{font-size:clamp(1.05rem,1.4vw,1.2rem);line-height:1.6;color:var(--ink-2);max-width:62ch}
@@ -623,7 +624,7 @@ html:not(.js) .pay-panel[hidden]{display:block;margin-bottom:10px}
   .tbl-stack tr{padding:12px 0;border-bottom:1px solid var(--line)}
   .tbl-stack tr:last-child{border-bottom:0}
   .tbl-stack th,.tbl-stack td{border:0;padding:4px 16px;min-width:0!important}
-  .tbl-stack td::before{content:attr(data-label);display:block;margin-bottom:2px;font:700 .7rem/1.3 var(--body);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+  .tbl-stack td::before{content:attr(data-label);display:block;margin-bottom:2px;font:700 .7rem/1.3 var(--body);letter-spacing:.05em;color:var(--muted)}
   .tbl-stack td:empty{display:none}
 }
 

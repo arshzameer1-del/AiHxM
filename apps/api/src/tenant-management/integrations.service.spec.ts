@@ -144,7 +144,7 @@ describe("IntegrationsService — rotateSecret", () => {
     await pool.end();
   });
 
-  it("rejects rotation for a provider AIHXM doesn't issue the secret for", async () => {
+  it("rejects rotation for a provider AiHxM doesn't issue the secret for", async () => {
     await service.configure(FIXTURE_CLAIMS, companyId, "smtp", { enabled: true, config: { password: "smtp-pw" } });
     await expect(service.rotateSecret(FIXTURE_CLAIMS, companyId, "smtp")).rejects.toThrow(BadRequestException);
   });

@@ -3,13 +3,13 @@ import type { PlatformBranding } from "@aihxm/shared-types";
 import { api, ApiError, platformBrandingAssetUrl } from "../api/client";
 
 /**
- * Platform Admin's own settings screen for the AIHXM platform's own logo
+ * Platform Admin's own settings screen for the AiHxM platform's own logo
  * (migration 0046_platform_branding.sql) — distinct from a tenant's
  * per-company branding (CompanyDetailPage's Branding tab, TM-015). This is
  * the one requested directly: "there should be option in platform admin
  * to change platform self logo." The uploaded mark shows up in three
  * places once saved here: this console's own sidebar (Layout.tsx), the
- * default (no-tenant) /login page, and the small "Powered by AIHXM"
+ * default (no-tenant) /login page, and the small "Powered by AiHxM"
  * credit on every tenant's own subdomain login page — all three read it
  * through AihxmLogo, which polls the same public endpoint this page
  * writes to.
@@ -59,7 +59,7 @@ export function PlatformBrandingPage() {
     try {
       const updated = await api.removePlatformLogo();
       setBranding(updated);
-      setInfo("Platform logo removed — the default AIHXM mark will show again.");
+      setInfo("Platform logo removed — the default AiHxM mark will show again.");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not remove this logo.");
     } finally {
@@ -71,7 +71,7 @@ export function PlatformBrandingPage() {
     <div className="max-w-2xl">
       <h1 className="text-2xl font-bold tracking-tight mb-1">Platform Branding</h1>
       <p className="text-label-tertiary text-sm mb-6">
-        The AIHXM platform's own logo — shown in this console's sidebar, on the default sign-in page,
+        The AiHxM platform's own logo — shown in this console's sidebar, on the default sign-in page,
         and as a small credit on every company's own branded sign-in page. This is separate from a
         company's own branding, which each Tenant Profile's Branding tab controls.
       </p>

@@ -356,7 +356,7 @@ export class WebhookDispatchService {
         `INSERT INTO webhook_events (company_id, event_type, payload)
          VALUES ($1, 'test', $2::jsonb)
          RETURNING *`,
-        [companyId, JSON.stringify({ message: "This is a test event from AIHXM.", sentAt: new Date().toISOString() })]
+        [companyId, JSON.stringify({ message: "This is a test event from AiHxM.", sentAt: new Date().toISOString() })]
       );
       return toWebhookEvent(inserted.rows[0]);
     });

@@ -304,7 +304,7 @@ describe("SCIM 2.0 provisioning (e2e)", () => {
         .send({
           schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
           userName: email,
-          displayName: "Not Used By AIHXM",
+          displayName: "Not Used By AiHxM",
           locale: "en-US",
           groups: [],
           "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User": { department: "Engineering" },

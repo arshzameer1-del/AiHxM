@@ -1,7 +1,7 @@
 // Trust, security, pricing structure, implementation, support, Pakistan payroll service and the public playground.
 import { site } from "../site.config.mjs";
 import { icon } from "../lib/icons.mjs";
-import { esc, btn, breadcrumbs, breadcrumbLd, section, ctaBand, notice, chip, steps, ticks, statusLegend, pairCards } from "../lib/ui.mjs";
+import { esc, escBrand, btn, breadcrumbs, breadcrumbLd, section, ctaBand, notice, chip, steps, ticks, statusLegend, pairCards } from "../lib/ui.mjs";
 import { modules, modulePath, moduleItems, parseItem } from "../content/catalog.mjs";
 import { STATUS, STATUS_ORDER, flags } from "../content/flags.mjs";
 import { integrationGroups } from "../content/misc.mjs";
@@ -12,7 +12,7 @@ import { pkWorkstreams, pkLimits } from "../content/pkimpl.mjs";
 const hero = (trail, eyebrow, h1, lede, tone = "t-purple", extra = "") =>
   `<section class="phero ${tone} v-a"><div class="bg-grid" aria-hidden="true"></div><div class="wrap narrow">${breadcrumbs(trail)}<p class="eyebrow">${esc(eyebrow)}</p><h1>${esc(h1)}</h1><p class="lead">${esc(lede)}</p>${extra}</div></section>`;
 const table = ({ caption, head, rows, cls = "" }) =>
-  `<div class="tbl-wrap reveal" tabindex="0" role="region" aria-label="${esc(caption)}"><table class="tbl ${cls}${cls.includes("tbl-num") ? "" : " tbl-stack"}"><caption class="sr">${esc(caption)}</caption><thead><tr>${head.map((h) => `<th scope="col">${esc(h)}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c, i) => (i === 0 ? `<th scope="row">${c}</th>` : `<td data-label="${esc(head[i])}">${c}</td>`)).join("")}</tr>`).join("")}</tbody></table></div>`;
+  `<div class="tbl-wrap reveal" tabindex="0" role="region" aria-label="${esc(caption)}"><table class="tbl ${cls}${cls.includes("tbl-num") ? "" : " tbl-stack"}"><caption class="sr">${esc(caption)}</caption><thead><tr>${head.map((h) => `<th scope="col">${escBrand(h)}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c, i) => (i === 0 ? `<th scope="row">${c}</th>` : `<td data-label="${esc(head[i])}">${c}</td>`)).join("")}</tr>`).join("")}</tbody></table></div>`;
 const secChip = (k) => `<span class="chip ${SEC_STATE[k].tone}">${SEC_STATE[k].label}</span>`;
 
 // ---------- Trust Center ----------

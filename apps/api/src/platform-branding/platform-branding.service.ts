@@ -26,7 +26,7 @@ function rowToBranding(row: any | undefined): PlatformBranding {
  * a real logo image isn't sensitive, and this is what lets the same data
  * serve three completely different pages: the Platform Admin's own
  * settings screen, the default (non-tenant) /login, and the small "Powered
- * by AIHXM" credit on every tenant's own subdomain login page. Only the
+ * by AiHxM" credit on every tenant's own subdomain login page. Only the
  * WRITE methods take the caller's real claims, so PlatformAdminGuard is
  * what actually gates who can change it.
  */

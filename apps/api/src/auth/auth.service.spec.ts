@@ -628,7 +628,7 @@ describe("AuthService", () => {
         const received = catcher.all();
         const match = received.find((m) => m.to.includes(email));
         expect(match).toBeDefined();
-        expect(match?.subject).toBe("Reset your AIHXM password");
+        expect(match?.subject).toBe("Reset your AiHxM password");
         expect(match?.text).toContain("/reset-password?token=");
       });
 

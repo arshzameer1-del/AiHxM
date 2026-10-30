@@ -29,7 +29,7 @@ const resourcesMenu = () => `<div class="mega" id="menu-resources" role="group" 
   <div class="mega-col">${menuLink("/platform/", "Product Guides", "What each module does", "config")}${menuLink("/resources/faqs/", "FAQs", "Answers to common questions", "helpdesk")}${flags.caseStudies ? menuLink("/resources/case-studies/", "Case Studies", "", "recognition") : ""}${flags.webinars ? menuLink("/resources/webinars/", "Webinars", "", "surveys") : ""}</div></div></div>`;
 
 const companyMenu = () => `<div class="mega" id="menu-company" role="group" aria-label="Company"><div class="mega-cols two">
-  <div class="mega-col">${menuLink("/about/", "About AIHXM", "Who we are and why", "core-hr")}${menuLink("/trust/", "Trust Center", "What you can verify", "shield")}${menuLink("/security/", "Security & Privacy", "How data is protected", "organization")}${menuLink("/implementation/", "Implementation", "Eight phases, who does what", "config")}</div>
+  <div class="mega-col">${menuLink("/about/", "About AiHxM", "Who we are and why", "core-hr")}${menuLink("/trust/", "Trust Center", "What you can verify", "shield")}${menuLink("/security/", "Security & Privacy", "How data is protected", "organization")}${menuLink("/implementation/", "Implementation", "Eight phases, who does what", "config")}</div>
   <div class="mega-col">${menuLink("/pricing/", "Pricing", "How a quote is built", "compensation")}${menuLink("/playground/", "Playground", "Try it on sample data", "analytics")}${menuLink("/contact/", "Contact", "Talk to the team", "helpdesk")}</div></div></div>`;
 
 const topItems = [
@@ -54,7 +54,7 @@ function header(path) {
       if (label === "Solutions") links = [...solutions.map((s) => `<a href="${solutionPath(s)}">${esc(s.name)}</a>`), ...industries.map((s) => `<a href="${industryPath(s)}">${esc(s.name)}</a>`)].join("");
       if (label === "Services") links = services.map((s) => `<a href="${servicePath(s)}">${esc(s.name)}</a>`).join("");
       if (label === "Resources") links = `<a href="/resources/blog/">Blog</a><a href="/resources/knowledge-center/">HR Knowledge Center</a><a href="/resources/category/pakistan-payroll-guides/">Pakistan Payroll & Compliance Guides</a><a href="/resources/faqs/">FAQs</a>`;
-      if (label === "Company") links = `<a href="/about/">About AIHXM</a><a href="/trust/">Trust Center</a><a href="/security/">Security & Privacy</a><a href="/pricing/">Pricing</a><a href="/implementation/">Implementation</a><a href="/playground/">Playground</a><a href="/contact/">Contact</a>`;
+      if (label === "Company") links = `<a href="/about/">About AiHxM</a><a href="/trust/">Trust Center</a><a href="/security/">Security & Privacy</a><a href="/pricing/">Pricing</a><a href="/implementation/">Implementation</a><a href="/playground/">Playground</a><a href="/contact/">Contact</a>`;
       return `<details class="m-group"><summary>${label}</summary><div>${links}</div></details>`;
     })
     .join("");
@@ -76,7 +76,7 @@ const footerCols = () => [
   { title: "Solutions", links: [...solutions.slice(0, 6).map((s) => [s.name, solutionPath(s)]), ["Industries", "/industries/"], ["HRMS for Pakistan", "/pakistan-hrms/"]] },
   { title: "Services", links: [...services.map((s) => [s.name, servicePath(s)])] },
   { title: "Resources", links: [["Blog", "/resources/blog/"], ["HR Knowledge Center", "/resources/knowledge-center/"], ["Pakistan Payroll Guides", "/resources/category/pakistan-payroll-guides/"], ["FAQs", "/resources/faqs/"], ["Integrations", "/integrations/"], ["Pricing", "/pricing/"], ["Implementation", "/implementation/"]] },
-  { title: "Company", links: [["About AIHXM", "/about/"], ["Trust Center", "/trust/"], ["Playground", "/playground/"], ["Contact", "/contact/"], ["Security", "/security/"], ["Privacy Policy", "/privacy/"], ["Terms of Service", "/terms/"], ["Login", `${site.appUrl}/login`], ["Book a Demo", "/book-a-demo/"]] },
+  { title: "Company", links: [["About AiHxM", "/about/"], ["Trust Center", "/trust/"], ["Playground", "/playground/"], ["Contact", "/contact/"], ["Security", "/security/"], ["Privacy Policy", "/privacy/"], ["Terms of Service", "/terms/"], ["Login", `${site.appUrl}/login`], ["Book a Demo", "/book-a-demo/"]] },
 ];
 
 function footer() {
@@ -91,7 +91,7 @@ function footer() {
 export function renderPage(p, shared) {
   const url = site.url + p.path;
   const robots = p.noindex || !site.indexable ? '<meta name="robots" content="noindex, nofollow">' : "";
-  const title = p.title.includes("AiHxM") || p.title.includes("AIHXM") ? p.title : `${p.title} | AiHxM`;
+  const title = p.title.includes("AiHxM") || p.title.includes("AiHxM") ? p.title : `${p.title} | AiHxM`;
   const ogImg = site.url + shared.og;
   const ld = [{ "@context": "https://schema.org", "@type": "Organization", name: site.name, url: site.url, logo: site.url + shared.logo, description: site.description }, ...(p.jsonld || [])];
   return `<!doctype html>

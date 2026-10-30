@@ -399,7 +399,7 @@ export function LoginPage() {
           <AihxmLogo size={28} className="mx-auto mb-4" />
           <h1 className="text-lg font-semibold mb-2">This company page doesn't exist</h1>
           <p className="text-sm text-label-tertiary">
-            &ldquo;{tenantSlug}&rdquo; isn&apos;t a company set up on AIHXM. Check the link your employer gave you,
+            &ldquo;{tenantSlug}&rdquo; isn&apos;t a company set up on AiHxM. Check the link your employer gave you,
             or ask your HR team for the correct sign-in address.
           </p>
         </div>
@@ -487,7 +487,7 @@ export function LoginPage() {
             )}
             {!tenantSlug && (
               <p className="text-center text-xs text-label-tertiary mt-3">
-                New to AIHXM?{" "}
+                New to AiHxM?{" "}
                 <Link to="/signup" className="text-accent font-medium hover:underline">
                   Create your company
                 </Link>
@@ -718,17 +718,17 @@ export function LoginPage() {
 
       {/* Per the platform's "SAP strategy" branding direction: on a
         tenant's own subdomain (where the card above shows THEIR logo/
-        colors), still surface AIHXM as the platform underneath — but as a
+        colors), still surface AiHxM as the platform underneath — but as a
         small, unobtrusive credit, not co-branding. Never shown on the
         default /login (no tenantSlug), since that page already IS the
-        AIHXM mark. Also withheld while "checking"/"not-found" — this credit
+        AiHxM mark. Also withheld while "checking"/"not-found" — this credit
         belongs to a real sign-in page, not a loading placeholder or an
         error card. */}
       {showForm && tenantSlug && (
         <div className="mt-5 flex items-center gap-2 text-sm text-label-tertiary">
           <span>Powered by</span>
           <AihxmLogo size={22} withWordmark={false} />
-          <span className="font-semibold tracking-tight">AIHXM</span>
+          <span className="font-semibold tracking-tight">AiHxM</span>
         </div>
       )}
     </div>

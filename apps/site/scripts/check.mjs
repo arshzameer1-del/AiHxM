@@ -50,6 +50,13 @@ let linkCount = 0;
 
 for (const f of htmlFiles) {
   const html = readFileSync(f, "utf8");
+  // The product name is written "AiHxM" everywhere (domains such as aihxm.com are not the name). Capital-letter labels must wrap it in span.bn.
+  {
+    const rel = f.replace(dist, "") || f;
+    const wrong = html.match(/(?<![A-Za-z0-9.@\/_-])(?:AIHXM|AI HXM|Aihxm|AiHXM|AIHxM|aiHxM)(?![A-Za-z0-9_])/);
+    if (wrong) fail(rel, `the product name is spelled "${wrong[0]}": write AiHxM`);
+    if (/class="[^"]*\b(?:eyebrow|mega-h|art-cat|pg-badge|ab-track-t|vs-k)\b[^"]*"[^>]*>[^<]*AiHxM/.test(html) || /<(?:th|dt)\b[^>]*>[^<]*AiHxM/.test(html)) fail(rel, "AiHxM inside a capital-letter label must be wrapped in <span class=\"bn\">");
+  }
   const page = pagePath(f);
   const is404 = page === "/404.html";
   const text = html.replace(/<script[\s\S]*?<\/script>/g, " ").replace(/<style[\s\S]*?<\/style>/g, " ");

@@ -1903,7 +1903,7 @@ const SSO_PROTOCOL_FIELDS: Record<SsoProtocol, IntegrationField[]> = {
 };
 
 // Tenant Management gap-fill Phase 1 item #12 — only these providers'
-// secrets are issued BY AIHXM, so only these offer Rotate. Mirrors
+// secrets are issued BY AiHxM, so only these offer Rotate. Mirrors
 // ROTATABLE_PROVIDER_KEYS in integrations.service.ts.
 const ROTATABLE_INTEGRATION_KEYS: TenantIntegration["providerKey"][] = ["biometric_device", "webhook"];
 
@@ -3603,7 +3603,7 @@ function DataExportsTab({ companyId }: { companyId: string }) {
       {passwordProtect && (
         <p className="text-xs text-label-tertiary -mt-2">
           This password is never stored — write it down. Without it, this export can't be decrypted by
-          anyone, including AIHXM.
+          anyone, including AiHxM.
         </p>
       )}
 

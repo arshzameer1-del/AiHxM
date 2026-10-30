@@ -63,7 +63,7 @@ describe("MailerService", () => {
 
         await mailer.sendMail({
           to: "recipient@example.com",
-          subject: "Reset your AIHXM password",
+          subject: "Reset your AiHxM password",
           text: "Reset it here: https://example.com/reset?token=abc123",
         });
 
@@ -71,7 +71,7 @@ describe("MailerService", () => {
         expect(received).toHaveLength(1);
         expect(received[0].from).toBe("no-reply@aihxm.local");
         expect(received[0].to).toEqual(["recipient@example.com"]);
-        expect(received[0].subject).toBe("Reset your AIHXM password");
+        expect(received[0].subject).toBe("Reset your AiHxM password");
         expect(received[0].text).toContain("https://example.com/reset?token=abc123");
       } finally {
         await catcher.stop();

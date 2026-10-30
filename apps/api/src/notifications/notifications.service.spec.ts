@@ -219,7 +219,7 @@ describe("NotificationsService", () => {
       const received = catcher.all();
       const match = received.find((m) => m.to.includes("reset-target@example.com"));
       expect(match).toBeDefined();
-      expect(match?.subject).toBe("Reset your AIHXM password");
+      expect(match?.subject).toBe("Reset your AiHxM password");
       expect(match?.text).toContain("https://app.aihxm.local/reset-password?token=xyz");
 
       // The final status persisted, not just the returned object — a
@@ -241,7 +241,7 @@ describe("NotificationsService", () => {
 
       expect(entry.status).toBe("sent");
       const match = catcher.all().find((m) => m.to.includes("generic-target@example.com"));
-      expect(match?.subject).toBe("AIHXM notification: some.future.template");
+      expect(match?.subject).toBe("AiHxM notification: some.future.template");
       expect(match?.text).toContain("foo: bar");
     });
 

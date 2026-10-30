@@ -7,7 +7,7 @@ import { PlatformBrandingService } from "./platform-branding.service";
  * No `@UseGuards` — deliberately, same reasoning as
  * public-branding.controller.ts. This has to load on the default (no
  * tenant) /login page before anyone has a session, AND on every tenant's
- * own subdomain login page for the "Powered by AIHXM" credit, so it can
+ * own subdomain login page for the "Powered by AiHxM" credit, so it can
  * never be behind auth. `@Throttle` for the same reason every other public
  * route in this codebase has one — no session-based rate limiting is
  * possible pre-auth.

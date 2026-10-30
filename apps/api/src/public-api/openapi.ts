@@ -2,7 +2,7 @@
 export const OPENAPI = {
   openapi: "3.0.3",
   info: {
-    title: "AI HXM public API",
+    title: "AiHxM public API",
     version: "1.0.0",
     description:
       "Read-only. Create a key under Admin > Developer and send it as `Authorization: Bearer <key>`. A key only reads what its scopes allow. " +

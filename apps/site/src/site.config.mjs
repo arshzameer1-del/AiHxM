@@ -5,7 +5,7 @@ const clean = (v) => (v || "").trim();
 
 export const site = {
   name: "AiHxM",
-  display: "AI HXM",
+  display: "AiHxM",
   legalName: clean(env.MARKETING_LEGAL_NAME) || "AiHxM", // set MARKETING_LEGAL_NAME to the registered company name once confirmed
   regNo: clean(env.MARKETING_REG_NO),
   address: clean(env.MARKETING_ADDRESS),

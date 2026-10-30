@@ -1,4 +1,4 @@
-/* AI HXM service worker.
+/* AiHxM service worker.
  * Purpose: make the installed app open instantly and show a friendly page when there is no connection.
  * It never touches the API or any other site: only requests to this same origin are handled, and only static files are stored.
  * Company data is never cached here. Bump VERSION to drop old caches. */

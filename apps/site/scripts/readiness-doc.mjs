@@ -58,7 +58,7 @@ const rows = [];
 const lines = [];
 const L = (s = "") => lines.push(s);
 
-L("# AIHXM Product Launch Readiness");
+L("# AiHxM Product Launch Readiness");
 L();
 L("**PRIVATE. INTERNAL PLANNING ONLY.** This file is not part of the website build, is never copied into `apps/site/dist`, and must not be published. The public site presents the intended product; this file records what is actually true.");
 L();

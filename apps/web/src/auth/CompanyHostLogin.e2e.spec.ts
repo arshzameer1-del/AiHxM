@@ -14,7 +14,7 @@ test("a company host opens that company's sign-in page", async ({ page }) => {
 
 test("a host that is not a company shows the not-found card", async ({ page }) => {
   await page.goto("http://no-such-company-zz.localhost:5173/login");
-  await expect(page.getByText(/isn.t a company set up on AIHXM/)).toBeVisible();
+  await expect(page.getByText(/isn.t a company set up on AiHxM/)).toBeVisible();
   await expect(page.getByPlaceholder(/EMP-0001/)).toHaveCount(0);
 });
 

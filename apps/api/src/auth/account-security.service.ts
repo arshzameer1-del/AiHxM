@@ -80,7 +80,7 @@ export class AccountSecurityService {
     await this.db.withClaims(SERVICE_CLAIMS, (c) =>
       c.query("UPDATE user_accounts SET mfa_pending_secret_encrypted = $2, updated_at = now() WHERE id = $1", [account.id, encryptMfaSecret(secret)])
     );
-    return { otpauthUrl: generateURI({ issuer: "AIHXM", label: account.email, secret }), secretForManualEntry: secret };
+    return { otpauthUrl: generateURI({ issuer: "AiHxM", label: account.email, secret }), secretForManualEntry: secret };
   }
 
   /** Confirms the new authenticator with a code it produced: it replaces the old one, fresh recovery codes are issued, other sessions end. */
