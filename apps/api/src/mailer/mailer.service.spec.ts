@@ -35,6 +35,22 @@ describe("MailerService", () => {
       await expect(mailer.sendMail({ to: "a@example.com", subject: "x", text: "y" })).rejects.toThrow();
     });
 
+    it("an unreachable mail server is not retried for a minute, so a blocked SMTP port cannot hold every request", async () => {
+      const net = await import("net");
+      const probe = net.createServer();
+      await new Promise<void>((r) => probe.listen(0, "127.0.0.1", r));
+      const closedPort = (probe.address() as { port: number }).port;
+      await new Promise<void>((r) => probe.close(() => r()));
+      process.env.SMTP_HOST = "127.0.0.1";
+      process.env.SMTP_PORT = String(closedPort);
+      delete process.env.SMTP_USER;
+      const mailer = new MailerService();
+      await expect(mailer.sendMail({ to: "a@example.com", subject: "x", text: "y" })).rejects.toThrow();
+      const started = Date.now();
+      await expect(mailer.sendMail({ to: "b@example.com", subject: "x", text: "y" })).rejects.toThrow(/not retrying yet/);
+      expect(Date.now() - started).toBeLessThan(200);
+    });
+
     it("really delivers a message over SMTP to a live local server", async () => {
       const catcher = await TestSmtpCatcher.start();
       try {

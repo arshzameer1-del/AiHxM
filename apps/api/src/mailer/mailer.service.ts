@@ -31,6 +31,12 @@ import * as nodemailer from "nodemailer";
  * real notification provider" entry, now closed by this module plus its
  * two call sites.
  */
+/** How long a mail server that could not be reached is left alone before the next attempt. */
+const UNREACHABLE_PAUSE_MS = 60_000;
+const CONNECTION_ERRORS = new Set(["ETIMEDOUT", "ECONNECTION", "ECONNREFUSED", "ESOCKET", "EDNS", "ENOTFOUND", "EHOSTUNREACH", "ENETUNREACH"]);
+// host:port -> time until which sending is skipped; shared by every instance because the problem is the network, not the caller.
+const pausedUntil = new Map<string, number>();
+
 @Injectable()
 export class MailerService {
   private readonly logger = new Logger(MailerService.name);
@@ -45,16 +51,28 @@ export class MailerService {
     }
     const port = process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : 587;
     const secure = process.env.SMTP_SECURE === "true";
+    const target = `${process.env.SMTP_HOST}:${port}`;
+    const paused = pausedUntil.get(target) ?? 0;
+    if (paused > Date.now()) {
+      // A host that just timed out would make every action wait for the full timeout again (an e-mail goes out after nearly every
+      // request). Fail at once for a minute, then try again.
+      throw new Error(`Mail server ${target} could not be reached a moment ago; not retrying yet`);
+    }
     const transport = nodemailer.createTransport({
       host: process.env.SMTP_HOST,
       port,
       secure,
       auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
+      // nodemailer waits two minutes for a connection by default; a blocked SMTP port (common on shared hosting) must not hold a request that long.
+      connectionTimeout: 8_000,
+      greetingTimeout: 8_000,
+      socketTimeout: 20_000,
     });
     const from = process.env.SMTP_FROM ?? "no-reply@aihxm.local";
     try {
       await transport.sendMail({ from, to: input.to, subject: input.subject, text: input.text, html: input.html, ...(input.attachments ? { attachments: input.attachments } : {}) });
     } catch (err) {
+      if (CONNECTION_ERRORS.has((err as { code?: string }).code ?? "")) pausedUntil.set(target, Date.now() + UNREACHABLE_PAUSE_MS);
       this.logger.warn(`Failed to send email to ${input.to}: ${(err as Error).message}`);
       throw err;
     }

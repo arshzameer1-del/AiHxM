@@ -78,9 +78,13 @@ export class UserNotificationsService {
       if (emails.length > 0 && this.mailer.isConfigured()) {
         const base = process.env.APP_BASE_URL ?? "http://localhost:5173";
         const text = [input.title, input.body ?? "", input.link ? `${base}${input.link}` : ""].filter(Boolean).join("\n\n");
-        for (const e of emails) {
-          await this.mailer.sendMail({ to: e.to, subject: input.title, text }).catch((err) => this.logger.warn(`Notification email failed: ${(err as Error).message}`));
-        }
+        // The e-mail is sent in the background: the person who pressed Approve / Submit must not wait for a mail server
+        // (the in-app notice above is already saved). A failure is logged, never raised.
+        void (async () => {
+          for (const e of emails) {
+            await this.mailer.sendMail({ to: e.to, subject: input.title, text }).catch((err) => this.logger.warn(`Notification email failed: ${(err as Error).message}`));
+          }
+        })();
       }
     } catch (err) {
       this.logger.warn(`Could not notify: ${(err as Error).message}`);
